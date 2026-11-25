@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 
@@ -23,7 +24,8 @@ func TestSubagentLinkProjection(t *testing.T) {
 	}
 	link := SubagentLinkRow{
 		TenantID: tenant, SessionID: child, ParentSessionID: root,
-		ModeID: "subagent", Depth: 1,
+		ModeID: "subagent", Depth: 1, MaxDepth: 3, MaxChildren: 8,
+		Budget: json.RawMessage(`{"maxTurns":7,"maxTokens":11,"timeoutMs":9000}`),
 	}
 	if err := st.RecordSubagentLink(ctx, link); err != nil {
 		t.Fatalf("record link: %v", err)
@@ -36,20 +38,27 @@ func TestSubagentLinkProjection(t *testing.T) {
 	if err != nil || !found {
 		t.Fatalf("read link: found=%v err=%v", found, err)
 	}
-	if got.ParentSessionID != root || got.Depth != 1 || got.ModeID != "subagent" {
+	if got.ParentSessionID != root || got.Depth != 1 || got.ModeID != "subagent" ||
+		got.MaxDepth != 3 || got.MaxChildren != 8 || len(got.Budget) == 0 {
 		t.Fatalf("link = %+v", got)
 	}
 	// A deterministic child id cannot be re-pointed at another origin.
 	if err := st.RecordSubagentLink(ctx, SubagentLinkRow{
-		TenantID: tenant, SessionID: child, ParentSessionID: sibling, ModeID: "subagent", Depth: 2,
+		TenantID: tenant, SessionID: child, ParentSessionID: sibling, ModeID: "subagent", Depth: 2, MaxDepth: 3,
 	}); err == nil {
 		t.Fatal("re-pointing a sub-agent child must fail")
 	}
 	// A missing depth and mode are refused before SQL.
 	if err := st.RecordSubagentLink(ctx, SubagentLinkRow{
-		TenantID: tenant, SessionID: sibling, ParentSessionID: root, ModeID: "subagent",
+		TenantID: tenant, SessionID: sibling, ParentSessionID: root, ModeID: "subagent", MaxDepth: 3,
 	}); err == nil {
 		t.Fatal("depth 0 link must be refused")
+	}
+	// A link without a maxDepth is refused (the subtree cap cannot be guessed).
+	if err := st.RecordSubagentLink(ctx, SubagentLinkRow{
+		TenantID: tenant, SessionID: sibling, ParentSessionID: root, ModeID: "subagent", Depth: 1,
+	}); err == nil {
+		t.Fatal("link without maxDepth must be refused")
 	}
 	// A plain session and a fork are not delegation links.
 	plain := uuid.New()
@@ -72,7 +81,7 @@ func TestSubagentLinkProjection(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := st.RecordSubagentLink(ctx, SubagentLinkRow{
-		TenantID: tenant, SessionID: sibling, ParentSessionID: root, ModeID: "subagent", Depth: 1,
+		TenantID: tenant, SessionID: sibling, ParentSessionID: root, ModeID: "subagent", Depth: 1, MaxDepth: 3,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -136,5 +145,62 @@ func TestSubagentLinkProjection(t *testing.T) {
 	}
 	if children, err := st.SubagentChildren(ctx, uuid.New(), root); err != nil || len(children) != 0 {
 		t.Fatalf("cross-tenant children = %+v, err=%v", children, err)
+	}
+}
+
+// TestSubagentLinkCapsBudgetAndCancel covers the P1/P2 projection additions:
+// maxDepth/maxChildren/budget survive the round trip, the tree carries the run
+// status, a ghost link can be cleared, and a queued run is durably cancelled.
+func TestSubagentLinkCapsBudgetAndCancel(t *testing.T) {
+	st := readyTestStore(t)
+	ctx := context.Background()
+	tenant, root := runTestSession(t, st)
+	child := uuid.New()
+	if err := st.CreateSession(ctx, tenant, child); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.RecordSubagentLink(ctx, SubagentLinkRow{
+		TenantID: tenant, SessionID: child, ParentSessionID: root, ModeID: "subagent",
+		Depth: 1, MaxDepth: 1, MaxChildren: 4, Budget: json.RawMessage(`{"maxTurns":7}`),
+	}); err != nil {
+		t.Fatalf("record link: %v", err)
+	}
+	got, found, err := st.SubagentLink(ctx, tenant, child)
+	if err != nil || !found {
+		t.Fatalf("read link: found=%v err=%v", found, err)
+	}
+	if got.MaxDepth != 1 || got.MaxChildren != 4 || len(got.Budget) == 0 {
+		t.Fatalf("link caps/budget = %+v", got)
+	}
+	tree, err := st.SubagentTree(ctx, tenant, root)
+	if err != nil || len(tree) != 1 {
+		t.Fatalf("tree = %+v err=%v", tree, err)
+	}
+	if tree[0].MaxDepth != 1 || tree[0].MaxChildren != 4 || len(tree[0].Budget) == 0 {
+		t.Fatalf("tree caps/budget = %+v", tree[0])
+	}
+	// A queued run is durably cancelled.
+	if err := st.EnqueueRun(ctx, tenant, child); err != nil {
+		t.Fatal(err)
+	}
+	cancelled, status, err := st.CancelQueuedRun(ctx, tenant, child, "operator stop")
+	if err != nil || !cancelled || status != "failed" {
+		t.Fatalf("cancel queued = cancelled=%v status=%q err=%v", cancelled, status, err)
+	}
+	run, err := st.GetRun(ctx, tenant, child)
+	if err != nil || run.Status != "failed" || run.LastError != "operator stop" {
+		t.Fatalf("cancelled run = %+v err=%v", run, err)
+	}
+	// A terminal row is settled, not cancelled again.
+	cancelled, status, err = st.CancelQueuedRun(ctx, tenant, child, "again")
+	if err != nil || cancelled || status != "failed" {
+		t.Fatalf("repeat cancel = cancelled=%v status=%q err=%v", cancelled, status, err)
+	}
+	// A ghost link can be cleared.
+	if err := st.DeleteSubagentLink(ctx, tenant, child); err != nil {
+		t.Fatalf("delete link: %v", err)
+	}
+	if _, found, err := st.SubagentLink(ctx, tenant, child); err != nil || found {
+		t.Fatalf("deleted link = found=%v err=%v", found, err)
 	}
 }

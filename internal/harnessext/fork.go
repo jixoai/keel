@@ -1,6 +1,7 @@
 package harnessext
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -528,7 +529,9 @@ func (r *SubagentRunner) Resume(ctx context.Context, req ResumeRequest) (ResumeR
 	return result, nil
 }
 
-// Cancel stops a child run in place. It never creates a card or a new run.
+// Cancel stops one child run after proving the parent relation. It answers the
+// root's CancelResult only; CancelSubtree is the entry every product surface
+// uses so a child's own descendants stop too.
 func (r *SubagentRunner) Cancel(ctx context.Context, req CancelRequest) (CancelResult, error) {
 	if req.TenantID == uuid.Nil || req.ParentSessionID == uuid.Nil || req.SessionID == uuid.Nil {
 		return CancelResult{}, errors.New("harnessext: tenant, parent session and child session are required")
@@ -536,21 +539,142 @@ func (r *SubagentRunner) Cancel(ctx context.Context, req CancelRequest) (CancelR
 	if _, err := r.requireChild(ctx, req.TenantID, req.ParentSessionID, req.SessionID); err != nil {
 		return CancelResult{}, err
 	}
-	if r.control == nil {
-		return CancelResult{}, ErrCancelUnavailable
+	return r.cancelOne(ctx, req.TenantID, req.SessionID, req.Reason)
+}
+
+// VerifyChild proves durably that child is a sub-agent of parent without
+// cancelling anything. The HTTP cancel route authorizes the parent relation and
+// then calls CancelSubtree on the child; this is the relation check in between.
+func (r *SubagentRunner) VerifyChild(ctx context.Context, tenantID, parentID, childID uuid.UUID) error {
+	if tenantID == uuid.Nil || parentID == uuid.Nil || childID == uuid.Nil {
+		return errors.New("harnessext: tenant, parent session and child session are required")
 	}
-	result, err := r.control.Cancel(ctx, kernel.Scope{TenantID: req.TenantID, SessionID: req.SessionID})
+	if _, err := r.requireChild(ctx, tenantID, parentID, childID); err != nil {
+		return err
+	}
+	return nil
+}
+
+// cancelOne stops one session's run without requiring a parent link (the
+// subtree root may be an ordinary session) and persists/audits the outcome. A
+// queued run is durably cancelled through the RunControl's canceller; an
+// already-terminal run is "settled" and never reported as cancelled.
+func (r *SubagentRunner) cancelOne(ctx context.Context, tenantID, sessionID uuid.UUID, reason string) (CancelResult, error) {
+	if r.control == nil {
+		result := CancelResult{Status: "not_wired", Detail: "the cancel seam is not wired"}
+		r.auditCancel(ctx, tenantID, sessionID, result, reason)
+		return result, ErrCancelUnavailable
+	}
+	result, err := r.control.CancelWithReason(ctx, kernel.Scope{TenantID: tenantID, SessionID: sessionID}, reason)
 	if err != nil {
+		r.auditCancel(ctx, tenantID, sessionID, result, reason)
 		return result, err
 	}
 	if result.Cancelled {
-		r.update(req.SessionID, func(record *SubagentRecord) {
+		r.update(sessionID, func(record *SubagentRecord) {
 			record.Status = "cancelled"
-			record.Error = strings.TrimSpace(req.Reason)
+			record.Error = strings.TrimSpace(reason)
 		})
+		if writer := r.stateWriter(); writer != nil {
+			if stateErr := writer.SetSubagentState(context.WithoutCancel(ctx), tenantID, sessionID, "cancelled"); stateErr != nil {
+				r.log.Warn("sub-agent cancel state persist failed", "session_id", sessionID, "err", stateErr)
+			}
+		}
+	}
+	r.auditCancel(ctx, tenantID, sessionID, result, reason)
+	return result, nil
+}
+
+// CancelSubtree stops a session and every descendant. Every product entry
+// (session cancel, sub-agent cancel, the agent tool, Wait's budget/timeout and
+// plugins) goes through it, so no path leaves a live child behind. The root is
+// stopped even when it has no parent link; descendants are discovered from the
+// durable spawn projection (restart-safe) and each child's CancelResult is
+// checked: only Cancelled:true counts as cancelled, terminal children are
+// settled, and anything else is a failure.
+func (r *SubagentRunner) CancelSubtree(ctx context.Context, tenantID, sessionID uuid.UUID, reason string) (CancelResult, error) {
+	if tenantID == uuid.Nil || sessionID == uuid.Nil {
+		return CancelResult{}, errors.New("harnessext: tenant and session are required")
+	}
+	result := CancelResult{CancelledIDs: []string{}, SettledIDs: []string{}, FailedIDs: []string{}}
+	addFailure := func(id uuid.UUID, detail string) {
+		result.FailedIDs = append(result.FailedIDs, id.String())
+		if result.Failures == nil {
+			result.Failures = make(map[string]string)
+		}
+		result.Failures[id.String()] = strings.TrimSpace(detail)
+	}
+	root, err := r.cancelOne(ctx, tenantID, sessionID, reason)
+	if err != nil {
+		addFailure(sessionID, err.Error())
+	} else {
+		result.Status = root.Status
+		result.RunStatus = root.RunStatus
+		result.Cancelled = root.Cancelled
+		result.Detail = root.Detail
+		switch {
+		case root.Cancelled:
+			result.CancelledIDs = append(result.CancelledIDs, sessionID.String())
+		case root.Status == "settled":
+			result.SettledIDs = append(result.SettledIDs, sessionID.String())
+		default:
+			// idle/not_wired/cancelling without Cancelled is not a stop.
+			addFailure(sessionID, root.Detail)
+		}
+	}
+	seen := map[uuid.UUID]bool{sessionID: true}
+	var walk func(parent uuid.UUID, depth int) error
+	walk = func(parent uuid.UUID, depth int) error {
+		// The guard is a corruption/cycle bound, not a depth policy: the mode may
+		// be unlimited (-1), and a legitimate tree is bounded by the width caps.
+		if depth > maxSubagentTreeWalk {
+			return fmt.Errorf("%w: sub-agent tree walk exceeded %d levels", ErrSubagentLinkInvalid, maxSubagentTreeWalk)
+		}
+		children, err := r.SubagentChildren(ctx, tenantID, parent)
+		if err != nil {
+			return err
+		}
+		for _, child := range children {
+			if seen[child.SessionID] {
+				continue
+			}
+			seen[child.SessionID] = true
+			childResult, cancelErr := r.cancelOne(ctx, tenantID, child.SessionID, reason)
+			switch {
+			case cancelErr != nil:
+				addFailure(child.SessionID, cancelErr.Error())
+			case childResult.Cancelled:
+				result.CancelledIDs = append(result.CancelledIDs, child.SessionID.String())
+			case childResult.Status == "settled":
+				result.SettledIDs = append(result.SettledIDs, child.SessionID.String())
+			default:
+				addFailure(child.SessionID, childResult.Detail)
+			}
+			if err := walk(child.SessionID, depth+1); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	if err := walk(sessionID, 0); err != nil {
+		result.FailedIDs = append(result.FailedIDs, sessionID.String())
+		if result.Failures == nil {
+			result.Failures = make(map[string]string)
+		}
+		result.Failures[sessionID.String()] = err.Error()
+		return result, err
 	}
 	return result, nil
 }
+
+// maxSubagentTreeWalk bounds a CancelSubtree walk against cycles/corruption. It
+// is deliberately far above any width-capped real tree: unlimited depth (-1) is
+// not capped by this value, only protected from a malformed graph.
+const maxSubagentTreeWalk = 1024
+
+// SubagentChildren lists the direct children of a session. The durable
+// projection is preferred (it survives a restart); the in-process registry is
+// the fallback for tests and deployments without the store seam.
 
 // Edge exposes the kernel commit seam the resume path needs (the runner keeps
 // it private for the starter).
@@ -851,12 +975,13 @@ func parseDurableSubagentLink(events []kernel.Event, tenantID, childID uuid.UUID
 		}
 		var payload struct {
 			Subagent struct {
-				Mode            string `json:"mode"`
-				ParentSessionID string `json:"parentSessionId"`
-				Depth           *int   `json:"depth"`
-				MaxDepth        int    `json:"maxDepth"`
-				MaxChildren     int    `json:"maxChildren"`
-				Origin          string `json:"origin"`
+				Mode            string          `json:"mode"`
+				ParentSessionID string          `json:"parentSessionId"`
+				Depth           *int            `json:"depth"`
+				MaxDepth        int             `json:"maxDepth"`
+				MaxChildren     int             `json:"maxChildren"`
+				Budget          json.RawMessage `json:"budget"`
+				Origin          string          `json:"origin"`
 			} `json:"subagent"`
 			Fork struct {
 				ParentSessionID string `json:"parentSessionId"`
@@ -887,8 +1012,17 @@ func parseDurableSubagentLink(events []kernel.Event, tenantID, childID uuid.UUID
 		if modeID == "" {
 			modeID = collab.ModeSubagent
 		}
-		if modeID != collab.ModeSubagent {
-			return SubagentLink{}, false, fmt.Errorf("%w: spawn link of %s names mode %q", ErrSubagentLinkInvalid, childID, modeID)
+		// The mode is informational for the depth guard: a tree mode's worker
+		// (for example a super-agent worker) that delegates through this runner
+		// still carries a real depth/subtree cap. The link must not be rejected
+		// merely because the owning mode differs.
+		var budget *Budget
+		if raw := bytes.TrimSpace(link.Budget); len(raw) > 0 && !bytes.Equal(raw, []byte("null")) {
+			var decoded Budget
+			if err := json.Unmarshal(raw, &decoded); err != nil {
+				return SubagentLink{}, false, fmt.Errorf("%w: spawn link of %s has an invalid budget", ErrSubagentLinkInvalid, childID)
+			}
+			budget = &decoded
 		}
 		return SubagentLink{
 			TenantID:        tenantID,
@@ -898,6 +1032,7 @@ func parseDurableSubagentLink(events []kernel.Event, tenantID, childID uuid.UUID
 			Depth:           depth,
 			MaxDepth:        link.MaxDepth,
 			MaxChildren:     link.MaxChildren,
+			Budget:          budget,
 		}, true, nil
 	}
 	return SubagentLink{}, false, nil
@@ -926,56 +1061,6 @@ func (r *SubagentRunner) SubagentChildren(ctx context.Context, tenantID, parentS
 		})
 	}
 	return out, nil
-}
-
-// CancelTree stops every non-terminal direct child under parentSessionID and
-// recurses into their subtrees. The host cancel policy is "cancel every open
-// child"; a failure is returned per session so a partial stop is visible, and
-// the recursion continues (a failed branch must not hide its siblings).
-func (r *SubagentRunner) CancelTree(ctx context.Context, tenantID, parentSessionID uuid.UUID, reason string) (CancelTreeResult, error) {
-	result := CancelTreeResult{Cancelled: []string{}, Failed: []string{}}
-	seen := map[uuid.UUID]bool{parentSessionID: true}
-	var walk func(parent uuid.UUID, depth int) error
-	walk = func(parent uuid.UUID, depth int) error {
-		if depth > 64 {
-			return fmt.Errorf("%w: sub-agent tree is deeper than 64 levels", ErrSubagentLinkInvalid)
-		}
-		children, err := r.SubagentChildren(ctx, tenantID, parent)
-		if err != nil {
-			return err
-		}
-		for _, child := range children {
-			if seen[child.SessionID] {
-				continue
-			}
-			seen[child.SessionID] = true
-			cancel := CancelRequest{
-				TenantID:        tenantID,
-				ParentSessionID: parent,
-				SessionID:       child.SessionID,
-				Reason:          reason,
-			}
-			if _, cancelErr := r.Cancel(ctx, cancel); cancelErr != nil {
-				result.Failed = append(result.Failed, child.SessionID.String())
-			} else {
-				result.Cancelled = append(result.Cancelled, child.SessionID.String())
-			}
-			if err := walk(child.SessionID, depth+1); err != nil {
-				return err
-			}
-		}
-		return nil
-	}
-	if err := walk(parentSessionID, 0); err != nil {
-		return result, err
-	}
-	return result, nil
-}
-
-// CancelTreeResult is the observable outcome of a subtree stop.
-type CancelTreeResult struct {
-	Cancelled []string `json:"cancelled"`
-	Failed    []string `json:"failed"`
 }
 
 // currentConfig reports the configuration identity the next attempt resolves.
@@ -1148,10 +1233,8 @@ func CancelFromTool(ctx context.Context, runner *SubagentRunner, args json.RawMe
 	if err != nil {
 		return CancelResult{}, fmt.Errorf("%w: cancel requires a child sessionId", ErrInvalidSpawn)
 	}
-	return runner.Cancel(ctx, CancelRequest{
-		TenantID:        scope.TenantID,
-		ParentSessionID: scope.SessionID,
-		SessionID:       sessionID,
-		Reason:          input.Reason,
-	})
+	if _, err := runner.requireChild(ctx, scope.TenantID, scope.SessionID, sessionID); err != nil {
+		return CancelResult{}, err
+	}
+	return runner.CancelSubtree(ctx, scope.TenantID, sessionID, input.Reason)
 }

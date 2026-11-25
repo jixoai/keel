@@ -17,6 +17,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -66,7 +67,9 @@ func newCollabHost(
 	if err != nil {
 		return nil, fmt.Errorf("collaboration host: %w", err)
 	}
-	subagents.SetHost(host)
+	if err := subagents.SetHost(host); err != nil {
+		return nil, fmt.Errorf("collaboration host: %w", err)
+	}
 	return host, nil
 }
 
@@ -190,12 +193,23 @@ type collabSubagentLinks struct {
 var _ harnessext.SubagentLinkStore = collabSubagentLinks{}
 
 func (l collabSubagentLinks) RecordSubagentLink(ctx context.Context, link harnessext.SubagentLink) error {
+	var budget []byte
+	if link.Budget != nil {
+		encoded, err := json.Marshal(link.Budget)
+		if err != nil {
+			return fmt.Errorf("collab: encode sub-agent budget: %w", err)
+		}
+		budget = encoded
+	}
 	return l.store.RecordSubagentLink(ctx, store.SubagentLinkRow{
 		TenantID:        link.TenantID,
 		SessionID:       link.SessionID,
 		ParentSessionID: link.ParentSessionID,
 		ModeID:          link.ModeID,
 		Depth:           link.Depth,
+		MaxDepth:        link.MaxDepth,
+		MaxChildren:     link.MaxChildren,
+		Budget:          budget,
 	})
 }
 
@@ -204,10 +218,7 @@ func (l collabSubagentLinks) SubagentLink(ctx context.Context, tenantID, childID
 	if err != nil || !ok {
 		return harnessext.SubagentLink{}, ok, err
 	}
-	return harnessext.SubagentLink{
-		TenantID: row.TenantID, SessionID: row.SessionID, ParentSessionID: row.ParentSessionID,
-		ModeID: row.ModeID, Depth: row.Depth,
-	}, true, nil
+	return subagentLinkFromRow(row), true, nil
 }
 
 func (l collabSubagentLinks) SubagentChildren(ctx context.Context, tenantID, parentID uuid.UUID) ([]harnessext.SubagentLink, error) {
@@ -217,12 +228,40 @@ func (l collabSubagentLinks) SubagentChildren(ctx context.Context, tenantID, par
 	}
 	out := make([]harnessext.SubagentLink, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, harnessext.SubagentLink{
-			TenantID: row.TenantID, SessionID: row.SessionID, ParentSessionID: row.ParentSessionID,
-			ModeID: row.ModeID, Depth: row.Depth,
-		})
+		out = append(out, subagentLinkFromRow(row))
 	}
 	return out, nil
+}
+
+// SetSubagentState persists a cancelled/done lifecycle mark on the session row.
+func (l collabSubagentLinks) SetSubagentState(ctx context.Context, tenantID, childID uuid.UUID, state string) error {
+	return l.store.SetSessionState(ctx, tenantID, childID, state)
+}
+
+// DeleteSubagentLink clears a ghost link whose input never committed.
+func (l collabSubagentLinks) DeleteSubagentLink(ctx context.Context, tenantID, childID uuid.UUID) error {
+	return l.store.DeleteSubagentLink(ctx, tenantID, childID)
+}
+
+// ActiveSubagentChildren counts live direct children for the runner's defensive
+// width check.
+func (l collabSubagentLinks) ActiveSubagentChildren(ctx context.Context, tenantID, parentID uuid.UUID) (int, error) {
+	return l.store.CountActiveSubagentChildren(ctx, tenantID, parentID)
+}
+
+func subagentLinkFromRow(row store.SubagentLinkRow) harnessext.SubagentLink {
+	link := harnessext.SubagentLink{
+		TenantID: row.TenantID, SessionID: row.SessionID, ParentSessionID: row.ParentSessionID,
+		ModeID: row.ModeID, Depth: row.Depth, MaxDepth: row.MaxDepth, MaxChildren: row.MaxChildren,
+		RunStatus: row.RunStatus,
+	}
+	if len(row.Budget) > 0 {
+		var budget harnessext.Budget
+		if json.Unmarshal(row.Budget, &budget) == nil {
+			link.Budget = &budget
+		}
+	}
+	return link
 }
 
 // ListSubagentTree implements harnessapi.SubagentLinkReader: the durable
@@ -234,10 +273,18 @@ func (l collabSubagentLinks) ListSubagentTree(ctx context.Context, tenantID, roo
 	}
 	out := make([]harnessext.SubagentLink, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, harnessext.SubagentLink{
+		link := harnessext.SubagentLink{
 			TenantID: tenantID, SessionID: row.SessionID, ParentSessionID: row.ParentSessionID,
-			ModeID: row.ModeID, Depth: row.Depth,
-		})
+			ModeID: row.ModeID, Depth: row.Depth, MaxDepth: row.MaxDepth, MaxChildren: row.MaxChildren,
+			RunStatus: row.RunStatus,
+		}
+		if len(row.Budget) > 0 {
+			var budget harnessext.Budget
+			if json.Unmarshal(row.Budget, &budget) == nil {
+				link.Budget = &budget
+			}
+		}
+		out = append(out, link)
 	}
 	return out, nil
 }
@@ -352,6 +399,18 @@ func (c collabPermissionChecker) CheckBotInvoke(ctx context.Context, tenantID uu
 		TenantID:  tenantID,
 		AccountID: accountID,
 		BotID:     ownership.BotID,
+	}
+	// A Bot's effective authority is Account grants ∩ its own Harness. The
+	// super-agent orchestrator's bot.invoke can be a harness permission rather
+	// than an account grant; loading the same harness set the runs use keeps the
+	// Host's check and the runner's defensive check aligned with the product
+	// policy.
+	if ownership.BotID != "" {
+		permissions, permErr := c.access.BotHarnessPermissions(ctx, tenantID, ownership.BotID, accountID)
+		if permErr != nil {
+			return permErr
+		}
+		principal.HarnessPermissions = permissions
 	}
 	decision, err := c.access.Authorize(ctx, principal, access.KeyBotInvoke, access.Resource{
 		TenantID: tenantID,

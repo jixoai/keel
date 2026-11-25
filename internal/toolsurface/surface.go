@@ -94,6 +94,8 @@ const (
 	CodeSubagentDepthExceeded    = "subagent_depth_exceeded"
 	CodeSubagentChildrenExceeded = "subagent_children_exceeded"
 	CodeSubagentLinkInvalid      = "subagent_link_invalid"
+	CodeSubagentMaxDepthWidened  = "subagent_max_depth_widened"
+	CodePermissionDenied         = "permission_denied"
 )
 
 // actionInput is the envelope every aggregate tool parses.

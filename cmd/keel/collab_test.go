@@ -9,7 +9,7 @@ import (
 
 func TestNewCollabModesRegistersBuiltins(t *testing.T) {
 	tenant := uuid.New()
-	registry, err := newCollabModes(tenant, 3)
+	registry, err := newCollabModes(tenant, 3, 8)
 	if err != nil {
 		t.Fatalf("newCollabModes: %v", err)
 	}
@@ -32,7 +32,7 @@ func TestNewCollabModesRegistersBuiltins(t *testing.T) {
 	}
 	// The assembly is deterministic: calling it twice produces the same
 	// catalogue (duplicate registration would fail).
-	second, err := newCollabModes(tenant, 3)
+	second, err := newCollabModes(tenant, 3, 8)
 	if err != nil {
 		t.Fatalf("second newCollabModes: %v", err)
 	}
@@ -53,7 +53,7 @@ func TestNewCollabModesMapsDepthSettings(t *testing.T) {
 		{setting: -1, want: collab.UnlimitedDepth()},
 	}
 	for _, tc := range cases {
-		registry, err := newCollabModes(tenant, tc.setting)
+		registry, err := newCollabModes(tenant, tc.setting, 8)
 		if err != nil {
 			t.Fatalf("setting %d: %v", tc.setting, err)
 		}
@@ -81,5 +81,20 @@ func TestParseSubagentMaxDepth(t *testing.T) {
 		if _, err := parseSubagentMaxDepth(raw); err == nil {
 			t.Fatalf("%q should be rejected", raw)
 		}
+	}
+}
+
+func TestNewCollabModesPassesMaxChildren(t *testing.T) {
+	tenant := uuid.New()
+	registry, err := newCollabModes(tenant, 3, 5)
+	if err != nil {
+		t.Fatalf("newCollabModes: %v", err)
+	}
+	view, ok := registry.Get(collab.ModeSubagent)
+	if !ok {
+		t.Fatal("subagent mode missing")
+	}
+	if view.Limits.MaxChildren != 5 {
+		t.Fatalf("descriptor maxChildren = %d, want the configured 5", view.Limits.MaxChildren)
 	}
 }

@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"strconv"
@@ -14,6 +13,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jixoai/keel/internal/access"
+	"github.com/jixoai/keel/internal/collab"
 	"github.com/jixoai/keel/internal/harnessext"
 	"github.com/jixoai/keel/internal/kernel"
 	"github.com/jixoai/keel/internal/logsafe"
@@ -206,6 +206,16 @@ type SubagentLinkReader interface {
 // an unknown status instead of inventing them.
 func subagentRecordFromLink(link harnessext.SubagentLink) harnessext.SubagentRecord {
 	status := "unknown"
+	switch link.RunStatus {
+	case "running", "pending", "queued":
+		status = "running"
+	case "done":
+		status = "done"
+	case "failed":
+		status = "failed"
+	case "cancelled":
+		status = "cancelled"
+	}
 	return harnessext.SubagentRecord{
 		ID:              link.SessionID.String(),
 		TenantID:        link.TenantID.String(),
@@ -217,6 +227,7 @@ func subagentRecordFromLink(link harnessext.SubagentLink) harnessext.SubagentRec
 		ModeID:          link.ModeID,
 		MaxDepth:        link.MaxDepth,
 		MaxChildren:     link.MaxChildren,
+		Budget:          link.Budget,
 	}
 }
 
@@ -282,6 +293,24 @@ func (s *Server) listSubagents(w http.ResponseWriter, r *http.Request) {
 		parent = &parsed
 	}
 	records := s.cfg.Subagents.List(tenantID, parent)
+	// Merge the durable projection: the registry is a warm index, so a restart
+	// (or a partial registry) must not hide children that still exist. The
+	// registry record wins because it carries task/agent/usage.
+	if parent != nil && s.cfg.SubagentLinks != nil {
+		if links, err := s.cfg.SubagentLinks.ListSubagentTree(r.Context(), tenantID, *parent); err == nil {
+			known := make(map[string]bool, len(records))
+			for _, record := range records {
+				known[record.SessionID] = true
+			}
+			for _, link := range links {
+				if link.ParentSessionID != *parent || known[link.SessionID.String()] {
+					continue
+				}
+				known[link.SessionID.String()] = true
+				records = append(records, subagentRecordFromLink(link))
+			}
+		}
+	}
 	if len(records) > limit {
 		records = records[:limit]
 	}
@@ -469,6 +498,7 @@ func (s *Server) spawnSubagent(w http.ResponseWriter, r *http.Request) {
 		Agent:           body.Agent,
 		BotID:           body.BotID,
 		Selection:       body.Selection,
+		IdempotencyKey:  body.IdempotencyKey,
 		Budget:          body.Budget,
 		MaxDepth:        body.MaxDepth,
 	})
@@ -526,10 +556,23 @@ func writeSubagentError(w http.ResponseWriter, err error) {
 		writeRefusal(w, http.StatusConflict, "subagent_depth_exceeded", err)
 	case errors.Is(err, harnessext.ErrSubagentChildrenExceeded):
 		writeRefusal(w, http.StatusConflict, "subagent_children_exceeded", err)
+	case errors.Is(err, harnessext.ErrSubagentMaxDepthWidened):
+		writeRefusal(w, http.StatusBadRequest, "subagent_max_depth_widened", err)
 	case errors.Is(err, harnessext.ErrSubagentLinkInvalid):
 		writeRefusal(w, http.StatusConflict, "subagent_link_invalid", err)
-	case errors.Is(err, harnessext.ErrParentSessionNotFound), errors.Is(err, harnessext.ErrSubagentNotFound):
+	case errors.Is(err, collab.ErrPermissionDenied), collab.IsCode(err, collab.CodePermissionDenied):
+		writeRefusal(w, http.StatusForbidden, "permission_denied", err)
+	case collab.IsCode(err, collab.CodeConcurrencyExceeded):
+		w.Header().Set("Retry-After", "1")
+		writeRefusal(w, http.StatusTooManyRequests, "concurrency_exceeded", err)
+	case collab.IsCode(err, collab.CodeBudgetExceeded):
+		w.Header().Set("Retry-After", "1")
+		writeRefusal(w, http.StatusTooManyRequests, "budget_exceeded", err)
+	case collab.IsCode(err, collab.CodeParentNotFound), collab.IsCode(err, collab.CodeParentInactive),
+		errors.Is(err, harnessext.ErrParentSessionNotFound), errors.Is(err, harnessext.ErrSubagentNotFound):
 		writeErr(w, http.StatusNotFound, err)
+	case errors.Is(err, collab.ErrAuditUnavailable):
+		writeErr(w, http.StatusServiceUnavailable, err)
 	case errors.Is(err, kernel.ErrQuota):
 		w.Header().Set("Retry-After", "1")
 		writeErr(w, http.StatusTooManyRequests, err)
@@ -606,6 +649,7 @@ func (s *Server) forkSubagent(w http.ResponseWriter, r *http.Request) {
 		Agent:           body.Agent,
 		BotID:           body.BotID,
 		Selection:       body.Selection,
+		IdempotencyKey:  body.IdempotencyKey,
 		Budget:          body.Budget,
 	})
 	if err != nil {
@@ -741,42 +785,18 @@ func (s *Server) cancelSubagent(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	result, err := s.cfg.Subagents.Cancel(r.Context(), harnessext.CancelRequest{
-		TenantID:        tenantID,
-		ParentSessionID: parentID,
-		SessionID:       childID,
-		Reason:          body.Reason,
-	})
+	// The parent relation is checked without side effects: the query parameter
+	// authorized the *parent*, and the child must actually belong to it.
+	if err := s.cfg.Subagents.VerifyChild(r.Context(), tenantID, parentID, childID); err != nil {
+		writeSubagentError(w, err)
+		return
+	}
+	// One subtree entry: it cancels the child and every descendant, checks each
+	// CancelResult, persists cancelled state and audits.
+	result, err := s.cfg.Subagents.CancelSubtree(r.Context(), tenantID, childID, body.Reason)
 	if err != nil {
 		writeSubagentError(w, err)
 		return
 	}
-	// Cancel propagation: a stopped child must not leave its own sub-tree
-	// running. The tree read is durable, so this also reaches descendants
-	// created before a restart; a failed branch is reported, not hidden.
-	tree, treeErr := s.cfg.Subagents.CancelTree(r.Context(), tenantID, childID, body.Reason)
-	switch {
-	case treeErr != nil:
-		result.Detail = joinSubagentDetail(result.Detail, "sub-agent tree cancel failed: "+treeErr.Error())
-	case len(tree.Failed) > 0:
-		result.Detail = joinSubagentDetail(result.Detail,
-			fmt.Sprintf("sub-agent tree cancel: %d cancelled, %d failed", len(tree.Cancelled), len(tree.Failed)))
-	case len(tree.Cancelled) > 0:
-		result.Detail = joinSubagentDetail(result.Detail,
-			fmt.Sprintf("sub-agent tree cancel: %d cancelled", len(tree.Cancelled)))
-	}
 	writeJSON(w, http.StatusOK, map[string]any{"cancel": result})
-}
-
-func joinSubagentDetail(existing, added string) string {
-	existing = strings.TrimSpace(existing)
-	added = strings.TrimSpace(added)
-	switch {
-	case existing == "":
-		return added
-	case added == "":
-		return existing
-	default:
-		return existing + "; " + added
-	}
 }

@@ -99,6 +99,12 @@ CREATE INDEX IF NOT EXISTS sessions_fork_parent
 ALTER TABLE sessions ADD COLUMN IF NOT EXISTS subagent_parent_session_id uuid;
 ALTER TABLE sessions ADD COLUMN IF NOT EXISTS subagent_depth int;
 ALTER TABLE sessions ADD COLUMN IF NOT EXISTS subagent_mode text;
+-- The caps and budget in force at spawn time are part of the link: a subtree
+-- maxDepth is inherited by every descendant, and a cold idempotent retry must
+-- recover the effective budget it originally ran under.
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS subagent_max_depth int;
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS subagent_max_children int;
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS subagent_budget jsonb;
 
 CREATE INDEX IF NOT EXISTS sessions_subagent_parent
     ON sessions (tenant_id, subagent_parent_session_id)

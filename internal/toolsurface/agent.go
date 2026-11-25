@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jixoai/keel/internal/agentcore"
+	"github.com/jixoai/keel/internal/collab"
 	"github.com/jixoai/keel/internal/harnessext"
 	"github.com/jixoai/keel/internal/kernel"
 	"github.com/jixoai/keel/internal/placement"
@@ -128,6 +129,12 @@ func agentFailure(action string, err error) (agentcore.AgentToolResult, error) {
 		})
 	case errors.Is(err, harnessext.ErrSubagentLinkInvalid):
 		return ErrorResult(CodeSubagentLinkInvalid, Agent, err.Error(), map[string]any{"action": action})
+	case errors.Is(err, harnessext.ErrSubagentMaxDepthWidened):
+		return ErrorResult(CodeSubagentMaxDepthWidened, Agent, err.Error(), map[string]any{"action": action})
+	case errors.Is(err, collab.ErrPermissionDenied), collab.IsCode(err, collab.CodePermissionDenied):
+		return ErrorResult(CodePermissionDenied, Agent, err.Error(), map[string]any{"action": action})
+	case collab.IsCode(err, collab.CodeConcurrencyExceeded):
+		return ErrorResult(CodeCapacity, Agent, err.Error(), map[string]any{"action": action})
 	case errors.Is(err, harnessext.ErrSubagentDepthExceeded):
 		return ErrorResult(CodeSubagentDepthExceeded, Agent, err.Error(), map[string]any{"action": action})
 	case errors.Is(err, harnessext.ErrSubagentChildrenExceeded):

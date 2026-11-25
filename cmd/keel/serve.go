@@ -144,6 +144,11 @@ type serveOptions struct {
 	// (KEEL_SUBAGENT_MAX_DEPTH): -1 unlimited, 0 forbidden, positive a cap.
 	// Nil keeps the mode's three-level default.
 	SubagentMaxDepth *int
+	// SubagentMaxChildren is the direct-children cap
+	// (KEEL_SUBAGENT_MAX_CHILDREN). Nil keeps the mode default (8). The same
+	// value reaches the runner's defensive check and the mode descriptor the
+	// Host enforces.
+	SubagentMaxChildren *int
 }
 
 const (
@@ -458,7 +463,7 @@ func runServe(parent context.Context, opts serveOptions) error {
 	// The run-control seam is created before the service graph so the worker
 	// registers every attempt: the cancel endpoint can then stop an in-process
 	// run instead of answering 501.
-	runControl := harnessext.NewRunControl(storeSessions{Store: st}, log)
+	runControl := harnessext.NewRunControlWithCanceller(storeSessions{Store: st}, storeSessions{Store: st}, log)
 	// Partials are created before the service graph: the provider-stream tee
 	// publishes the run's text deltas into this hub, and the SSE endpoint reads
 	// them for clients that ask (?partials=1).
@@ -1353,6 +1358,11 @@ func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, 
 		forkAdmissionOpt = forkAdmission{gate: admissionGate}
 	}
 	subagentMaxDepth := resolveSubagentMaxDepth(opts.SubagentMaxDepth)
+	subagentMaxChildren := resolveSubagentMaxChildren(opts.SubagentMaxChildren)
+	// The same bot.invoke checker serves the Host and the runner's defensive
+	// spawnChild check, so a direct launcher call cannot authorize one policy
+	// while the Host enforces another.
+	subagentPermissions := collabPermissionChecker{store: st, access: accessBridge}
 	subagents := harnessext.NewSubagentRunner(harnessext.SubagentOptions{
 		Gate:    sessions,
 		Edge:    admission,
@@ -1362,12 +1372,22 @@ func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, 
 		Hooks:   hooks,
 		Logger:  log,
 		// The mode's depth setting lives in the request layer: -1/0 are
-		// interpreted there, and the Host only enforces the positive cap.
+		// interpreted there, and the Host only enforces the explicit DepthPolicy.
 		MaxDepth: &subagentMaxDepth,
-		// The spawn link projection (parent/depth/mode) makes width counting
-		// and restart recovery queryable; the first user.message stays the
-		// semantic truth.
+		// The same direct-children cap reaches the descriptor (the Host's guard)
+		// and the runner's defensive check.
+		MaxChildren: subagentMaxChildren,
+		// The spawn link projection (parent/depth/caps/budget) makes width
+		// counting, restart recovery and a cold idempotent retry queryable; the
+		// first user.message stays the semantic truth.
 		Links: collabSubagentLinks{store: st},
+		// Runner-side refusals and cancellations land in the same auth_events
+		// stream as the Host's rows (ids/codes/numbers, no task text).
+		Audit: collabAuditSink{store: st, log: log},
+		BotInvoker: func(ctx context.Context, tenantID, parentSessionID uuid.UUID, botID string) error {
+			return subagentPermissions.CheckBotInvoke(ctx, tenantID,
+				collab.SessionRef{TenantID: tenantID, SessionID: parentSessionID}, botID)
+		},
 		// A spawned child's input carries a selection fact exactly like a
 		// session input; the spawn must refuse an unexecutable one at the call,
 		// before the child session or its user.message exists. Bind the same
@@ -1406,7 +1426,7 @@ func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, 
 	// and the read-only catalogue is served from this same object. The guarded
 	// collab.Host is then built over the same runner, so the `agent` tool and
 	// the HTTP sub-agent routes share one enforced creation gate.
-	collabModes, err := newCollabModes(opts.TenantID, subagentMaxDepth)
+	collabModes, err := newCollabModes(opts.TenantID, subagentMaxDepth, subagentMaxChildren)
 	if err != nil {
 		return nil, fmt.Errorf("collaboration modes: %w", err)
 	}
@@ -1458,22 +1478,18 @@ func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, 
 			return harnessext.CancelResult{Status: "idle", RunStatus: "external",
 				Detail: "external sessions have no native run to cancel"}, harnessapi.ErrExternalSession
 		}
-		result, err := runControl.Cancel(cancelCtx, kernel.Scope{TenantID: tenantID, SessionID: sessionID})
+		// One subtree entry for the whole stop: it cancels this session (a local
+		// attempt or a durable queued row) and every descendant, persists the
+		// cancelled state and audits each outcome. A child failure is reported,
+		// never hidden.
+		result, err := subagents.CancelSubtree(cancelCtx, tenantID, sessionID, "parent session cancelled")
 		if err != nil {
 			return result, err
 		}
-		// Cancel propagation: a stopped parent must not leave a live sub-agent
-		// subtree behind. The tree is read from the durable spawn projection, so
-		// this also reaches children created before a restart. A child failure is
-		// reported in the detail, never hidden (the parent itself did stop).
-		tree, treeErr := subagents.CancelTree(cancelCtx, tenantID, sessionID, "parent session cancelled")
-		switch {
-		case treeErr != nil:
-			result.Detail = joinDetail(result.Detail, "sub-agent tree cancel failed: "+treeErr.Error())
-		case len(tree.Failed) > 0:
-			result.Detail = joinDetail(result.Detail, fmt.Sprintf("sub-agent tree cancel: %d cancelled, %d failed", len(tree.Cancelled), len(tree.Failed)))
-		case len(tree.Cancelled) > 0:
-			result.Detail = joinDetail(result.Detail, fmt.Sprintf("sub-agent tree cancel: %d cancelled", len(tree.Cancelled)))
+		if len(result.FailedIDs) > 0 {
+			result.Detail = joinDetail(result.Detail, fmt.Sprintf("sub-agent tree cancel: %d cancelled, %d failed", len(result.CancelledIDs), len(result.FailedIDs)))
+		} else if len(result.CancelledIDs) > 0 {
+			result.Detail = joinDetail(result.Detail, fmt.Sprintf("sub-agent tree cancel: %d cancelled", len(result.CancelledIDs)))
 		}
 		return result, nil
 	}
@@ -2147,6 +2163,13 @@ func tenantSecretLookup(st *store.Store, box *store.SecretBox, tenantID uuid.UUI
 }
 
 // RunState implements harnessext.RunStatusReader.
+// CancelQueuedRun durably stops a queued/pending run for RunControl (the
+// session cancel path uses CancelSubtree, which reaches this through the
+// control seam).
+func (s storeSessions) CancelQueuedRun(ctx context.Context, tenantID, sessionID uuid.UUID, reason string) (bool, string, error) {
+	return s.Store.CancelQueuedRun(ctx, tenantID, sessionID, reason)
+}
+
 func (s storeSessions) RunState(ctx context.Context, tenantID, sessionID uuid.UUID) (harnessext.RunState, error) {
 	run, err := s.Store.GetRun(ctx, tenantID, sessionID)
 	if err != nil {

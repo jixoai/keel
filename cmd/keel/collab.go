@@ -35,7 +35,7 @@ var collabTenantCeiling = collab.Limits{
 // forbidden, positive a concrete cap. It is already resolved from serveOptions
 // (nil -> the 3-level default). The core Host receives the explicit three-state
 // DepthPolicy; it never overloads zero as "default" or "unlimited".
-func newCollabModes(tenantID uuid.UUID, subagentMaxDepth int) (*collab.ModeRegistry, error) {
+func newCollabModes(tenantID uuid.UUID, subagentMaxDepth int, subagentMaxChildren int) (*collab.ModeRegistry, error) {
 	registry, err := collab.NewModeRegistry(tenantID, collabTenantCeiling)
 	if err != nil {
 		return nil, fmt.Errorf("collaboration registry: %w", err)
@@ -48,6 +48,9 @@ func newCollabModes(tenantID uuid.UUID, subagentMaxDepth int) (*collab.ModeRegis
 		subagent.Limits.Depth = collab.ForbiddenDepth()
 	default:
 		subagent.Limits.Depth = collab.LimitedDepth(subagentMaxDepth)
+	}
+	if subagentMaxChildren > 0 {
+		subagent.Limits.MaxChildren = subagentMaxChildren
 	}
 	if err := registry.Register(subagent); err != nil {
 		return nil, fmt.Errorf("register %q mode: %w", collab.ModeSubagent, err)
@@ -71,6 +74,16 @@ func newCollabModes(tenantID uuid.UUID, subagentMaxDepth int) (*collab.ModeRegis
 func resolveSubagentMaxDepth(configured *int) int {
 	if configured == nil {
 		return harnessext.DefaultSubagentMaxDepth
+	}
+	return *configured
+}
+
+// resolveSubagentMaxChildren resolves the direct-children setting. nil keeps
+// the mode default (8); the value is passed to both the runner (defensive
+// check) and the mode descriptor (the Host's guard), so they cannot drift.
+func resolveSubagentMaxChildren(configured *int) int {
+	if configured == nil || *configured <= 0 {
+		return harnessext.DefaultSubagentMaxChildren
 	}
 	return *configured
 }

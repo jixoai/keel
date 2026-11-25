@@ -77,10 +77,12 @@ func (l CollabSubagentLauncher) Launch(ctx context.Context, req collab.LaunchReq
 			MaxTokens: req.Budget.MaxTokens,
 			TimeoutMs: req.Budget.TimeoutMs,
 		},
-		MaxDepth:    input.MaxDepth,
-		MaxChildren: input.MaxChildren,
-		Depth:       req.Depth,
-		ModeID:      l.modeID(),
+		MaxDepth:          input.MaxDepth,
+		MaxChildren:       input.MaxChildren,
+		Depth:             req.Depth,
+		EffectiveMaxDepth: input.EffectiveMaxDepth,
+		selectionChecked:  input.SelectionChecked,
+		ModeID:            l.modeID(),
 	})
 	if err != nil {
 		return collab.SessionRef{}, err
@@ -96,7 +98,7 @@ func (l CollabSubagentLauncher) Launch(ctx context.Context, req collab.LaunchReq
 		BotID:           req.BotID,
 		ModeID:          l.modeID(),
 		WorkItemID:      req.WorkItemID,
-		Depth:           req.Depth,
+		Depth:           record.Depth,
 		State:           collab.SessionActive,
 	}, nil
 }

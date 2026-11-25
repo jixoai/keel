@@ -80,7 +80,7 @@ type PluginEnv struct {
 	Hooks     *HookBus
 	Decisions *DecisionBroker
 	Triggers  *TriggerEngine
-	Subagents *SubagentRunner
+	Subagents SubagentAPI
 	Partials  *PartialHub
 	Logger    *slog.Logger
 }
@@ -125,7 +125,7 @@ type RuntimeOptions struct {
 	Hooks     *HookBus
 	Triggers  *TriggerEngine
 	Decisions *DecisionBroker
-	Subagents *SubagentRunner
+	Subagents SubagentAPI
 	Partials  *PartialHub
 	Tools     ToolSink
 	// Prompt publishes the active prompt sections (nil keeps them snapshot-only).
@@ -169,7 +169,7 @@ type Runtime struct {
 	hooks      *HookBus
 	triggers   *TriggerEngine
 	decisions  *DecisionBroker
-	subagents  *SubagentRunner
+	subagents  SubagentAPI
 	partials   *PartialHub
 	sink       ToolSink
 	promptSink func(sections []PromptSection) error

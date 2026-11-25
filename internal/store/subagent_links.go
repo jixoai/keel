@@ -12,8 +12,10 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -27,6 +29,14 @@ type SubagentLinkRow struct {
 	ParentSessionID uuid.UUID
 	ModeID          string
 	Depth           int
+	// MaxDepth is the subtree depth cap in force at spawn time (-1 unlimited,
+	// otherwise a positive cap). MaxChildren is the direct-children cap.
+	MaxDepth    int
+	MaxChildren int
+	// Budget is the effective per-child budget the Host resolved.
+	Budget json.RawMessage
+	// RunStatus is filled by the tree/read projections ("" when not asked).
+	RunStatus string
 }
 
 // MaxSubagentChildren bounds one listing of a session's direct children. The
@@ -47,17 +57,35 @@ func (s *Store) RecordSubagentLink(ctx context.Context, link SubagentLinkRow) er
 	if link.ModeID == "" {
 		return errors.New("store: subagent link needs a mode")
 	}
+	if link.MaxDepth == 0 || link.MaxDepth < -1 {
+		return errors.New("store: subagent link needs maxDepth -1 or a positive cap")
+	}
+	if link.MaxChildren < 0 {
+		return errors.New("store: subagent link maxChildren must be non-negative")
+	}
+	var budget []byte
+	if len(link.Budget) > 0 {
+		budget = link.Budget
+		if !json.Valid(budget) {
+			return errors.New("store: subagent link budget is not JSON")
+		}
+	}
 	tag, err := s.pool.Exec(ctx, `
-		INSERT INTO sessions (tenant_id, session_id, subagent_parent_session_id, subagent_depth, subagent_mode)
-		VALUES ($1, $2, $3, $4, $5)
+		INSERT INTO sessions (tenant_id, session_id, subagent_parent_session_id, subagent_depth,
+		                      subagent_mode, subagent_max_depth, subagent_max_children, subagent_budget)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 		ON CONFLICT (tenant_id, session_id) DO UPDATE
 		   SET subagent_parent_session_id = EXCLUDED.subagent_parent_session_id,
 		       subagent_depth = EXCLUDED.subagent_depth,
 		       subagent_mode = EXCLUDED.subagent_mode,
+		       subagent_max_depth = EXCLUDED.subagent_max_depth,
+		       subagent_max_children = EXCLUDED.subagent_max_children,
+		       subagent_budget = EXCLUDED.subagent_budget,
 		       updated_at = now()
 		 WHERE sessions.subagent_parent_session_id IS NULL
 		    OR sessions.subagent_parent_session_id = EXCLUDED.subagent_parent_session_id`,
-		link.TenantID, link.SessionID, link.ParentSessionID, link.Depth, link.ModeID)
+		link.TenantID, link.SessionID, link.ParentSessionID, link.Depth, link.ModeID,
+		link.MaxDepth, link.MaxChildren, budget)
 	if err != nil {
 		return fmt.Errorf("store: record subagent link: %w", err)
 	}
@@ -82,16 +110,21 @@ func (s *Store) SubagentLink(ctx context.Context, tenantID, childID uuid.UUID) (
 		return SubagentLinkRow{}, false, nil
 	}
 	var (
-		parent uuid.UUID
-		depth  int
-		mode   string
+		parent      uuid.UUID
+		depth       int
+		mode        string
+		maxDepth    int
+		maxChildren int
+		budget      []byte
 	)
 	err := s.pool.QueryRow(ctx, `
-		SELECT subagent_parent_session_id, subagent_depth, subagent_mode
+		SELECT subagent_parent_session_id, subagent_depth, subagent_mode,
+		       COALESCE(subagent_max_depth, 0), COALESCE(subagent_max_children, 0),
+		       subagent_budget
 		  FROM sessions
 		 WHERE tenant_id = $1 AND session_id = $2
 		   AND subagent_parent_session_id IS NOT NULL`,
-		tenantID, childID).Scan(&parent, &depth, &mode)
+		tenantID, childID).Scan(&parent, &depth, &mode, &maxDepth, &maxChildren, &budget)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return SubagentLinkRow{}, false, nil
 	}
@@ -100,7 +133,8 @@ func (s *Store) SubagentLink(ctx context.Context, tenantID, childID uuid.UUID) (
 	}
 	return SubagentLinkRow{
 		TenantID: tenantID, SessionID: childID, ParentSessionID: parent,
-		ModeID: mode, Depth: depth,
+		ModeID: mode, Depth: depth, MaxDepth: maxDepth, MaxChildren: maxChildren,
+		Budget: append(json.RawMessage(nil), budget...),
 	}, true, nil
 }
 
@@ -112,7 +146,8 @@ func (s *Store) SubagentChildren(ctx context.Context, tenantID, parentSessionID 
 		return nil, nil
 	}
 	rows, err := s.pool.Query(ctx, `
-		SELECT session_id, subagent_depth, subagent_mode
+		SELECT session_id, subagent_depth, subagent_mode,
+		       COALESCE(subagent_max_depth, 0), COALESCE(subagent_max_children, 0), subagent_budget
 		  FROM sessions
 		 WHERE tenant_id = $1 AND subagent_parent_session_id = $2
 		   AND archived_at IS NULL
@@ -126,19 +161,47 @@ func (s *Store) SubagentChildren(ctx context.Context, tenantID, parentSessionID 
 	out := make([]SubagentLinkRow, 0)
 	for rows.Next() {
 		var (
-			childID uuid.UUID
-			depth   int
-			mode    string
+			childID     uuid.UUID
+			depth       int
+			mode        string
+			maxDepth    int
+			maxChildren int
+			budget      []byte
 		)
-		if err := rows.Scan(&childID, &depth, &mode); err != nil {
+		if err := rows.Scan(&childID, &depth, &mode, &maxDepth, &maxChildren, &budget); err != nil {
 			return nil, fmt.Errorf("store: scan subagent child: %w", err)
 		}
 		out = append(out, SubagentLinkRow{
 			TenantID: tenantID, SessionID: childID, ParentSessionID: parentSessionID,
-			ModeID: mode, Depth: depth,
+			ModeID: mode, Depth: depth, MaxDepth: maxDepth, MaxChildren: maxChildren,
+			Budget: append(json.RawMessage(nil), budget...),
 		})
 	}
 	return out, rows.Err()
+}
+
+// DeleteSubagentLink clears the projection of a spawn that never committed its
+// first input (a ghost link). The ledger fact does not exist, so no delegation
+// exists; leaving the row would make a retry answer a session that never ran.
+func (s *Store) DeleteSubagentLink(ctx context.Context, tenantID, childID uuid.UUID) error {
+	if tenantID == uuid.Nil || childID == uuid.Nil {
+		return nil
+	}
+	_, err := s.pool.Exec(ctx, `
+		UPDATE sessions
+		   SET subagent_parent_session_id = NULL,
+		       subagent_depth = NULL,
+		       subagent_mode = NULL,
+		       subagent_max_depth = NULL,
+		       subagent_max_children = NULL,
+		       subagent_budget = NULL,
+		       updated_at = now()
+		 WHERE tenant_id = $1 AND session_id = $2`,
+		tenantID, childID)
+	if err != nil {
+		return fmt.Errorf("store: delete subagent link: %w", err)
+	}
+	return nil
 }
 
 // CountActiveSubagentChildren counts the direct children of one session whose
@@ -212,14 +275,15 @@ func (s *Store) GetSessionInfo(ctx context.Context, tenantID, sessionID uuid.UUI
 }
 
 // SetSessionState records the collaboration lifecycle on the session row
-// (active/done/cancelled). It is the durable counterpart of the Host's
-// SessionIndex.SetState: a cancelled session is no longer an active parent.
+// (active/done/failed/cancelled). It is the durable counterpart of the Host's
+// SessionIndex.SetState: a cancelled/failed session is no longer an active
+// parent.
 func (s *Store) SetSessionState(ctx context.Context, tenantID, sessionID uuid.UUID, state string) error {
 	if tenantID == uuid.Nil || sessionID == uuid.Nil {
 		return ErrNoSession
 	}
 	switch state {
-	case "active", "done", "cancelled":
+	case "active", "done", "failed", "cancelled":
 	default:
 		return fmt.Errorf("store: session state %q is not in the closed vocabulary", state)
 	}
@@ -242,6 +306,9 @@ type SubagentTreeRow struct {
 	ParentSessionID uuid.UUID
 	ModeID          string
 	Depth           int
+	MaxDepth        int
+	MaxChildren     int
+	Budget          json.RawMessage
 	BotID           string
 	RunStatus       string
 	CreatedAt       time.Time
@@ -259,18 +326,23 @@ func (s *Store) SubagentTree(ctx context.Context, tenantID, rootSessionID uuid.U
 	rows, err := s.pool.Query(ctx, `
 		WITH RECURSIVE tree AS (
 		    SELECT session_id, subagent_parent_session_id, subagent_depth, subagent_mode,
-		           COALESCE(bot_id, '') AS bot_id, archived_at, created_at, 0 AS level
+		           COALESCE(subagent_max_depth, 0) AS subagent_max_depth,
+		           COALESCE(subagent_max_children, 0) AS subagent_max_children,
+		           subagent_budget, COALESCE(bot_id, '') AS bot_id, archived_at, created_at, 0 AS level
 		      FROM sessions
 		     WHERE tenant_id = $1 AND session_id = $2
 		    UNION ALL
 		    SELECT c.session_id, c.subagent_parent_session_id, c.subagent_depth, c.subagent_mode,
-		           COALESCE(c.bot_id, '') AS bot_id, c.archived_at, c.created_at, t.level + 1
+		           COALESCE(c.subagent_max_depth, 0) AS subagent_max_depth,
+		           COALESCE(c.subagent_max_children, 0) AS subagent_max_children,
+		           c.subagent_budget, COALESCE(c.bot_id, '') AS bot_id, c.archived_at, c.created_at, t.level + 1
 		      FROM sessions c
 		      JOIN tree t ON c.tenant_id = $1 AND c.subagent_parent_session_id = t.session_id
-		     WHERE t.level < 64
+		     WHERE t.level < 1024
 		)
 		SELECT t.session_id, t.subagent_parent_session_id, COALESCE(t.subagent_depth, 0),
-		       COALESCE(t.subagent_mode, ''), t.bot_id, COALESCE(r.status, ''), t.created_at
+		       COALESCE(t.subagent_mode, ''), t.subagent_max_depth, t.subagent_max_children,
+		       t.subagent_budget, t.bot_id, COALESCE(r.status, ''), t.created_at
 		  FROM tree t
 		  LEFT JOIN runs r ON r.tenant_id = $1 AND r.session_id = t.session_id
 		 WHERE t.level > 0 AND t.archived_at IS NULL
@@ -284,14 +356,18 @@ func (s *Store) SubagentTree(ctx context.Context, tenantID, rootSessionID uuid.U
 	out := make([]SubagentTreeRow, 0)
 	for rows.Next() {
 		var (
-			row      SubagentTreeRow
-			parent   *uuid.UUID
-			depth    int
-			mode     string
-			botID    string
-			runState string
+			row         SubagentTreeRow
+			parent      *uuid.UUID
+			depth       int
+			mode        string
+			maxDepth    int
+			maxChildren int
+			budget      []byte
+			botID       string
+			runState    string
 		)
-		if err := rows.Scan(&row.SessionID, &parent, &depth, &mode, &botID, &runState, &row.CreatedAt); err != nil {
+		if err := rows.Scan(&row.SessionID, &parent, &depth, &mode, &maxDepth, &maxChildren,
+			&budget, &botID, &runState, &row.CreatedAt); err != nil {
 			return nil, fmt.Errorf("store: scan subagent tree: %w", err)
 		}
 		if parent != nil {
@@ -299,9 +375,46 @@ func (s *Store) SubagentTree(ctx context.Context, tenantID, rootSessionID uuid.U
 		}
 		row.Depth = depth
 		row.ModeID = mode
+		row.MaxDepth = maxDepth
+		row.MaxChildren = maxChildren
+		row.Budget = append(json.RawMessage(nil), budget...)
 		row.BotID = botID
 		row.RunStatus = runState
 		out = append(out, row)
 	}
 	return out, rows.Err()
+}
+
+// CancelQueuedRun stops a run that has not started executing yet. Only a queued
+// or pending row is cancelled; a running attempt is the RunControl's job (a
+// process that does not own it must not pretend it stopped). The row becomes
+// failed with the cancellation reason, so no worker will claim it. A newer
+// input can enqueue a new turn, which is a new request, not the cancelled one.
+func (s *Store) CancelQueuedRun(ctx context.Context, tenantID, sessionID uuid.UUID, reason string) (bool, string, error) {
+	if tenantID == uuid.Nil || sessionID == uuid.Nil {
+		return false, "", ErrNoSession
+	}
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		reason = "cancelled"
+	}
+	tag, err := s.pool.Exec(ctx, `
+		UPDATE runs
+		   SET status = 'failed', last_error = $3, lease_until = NULL, updated_at = now()
+		 WHERE tenant_id = $1 AND session_id = $2 AND status IN ('queued', 'pending')`,
+		tenantID, sessionID, reason)
+	if err != nil {
+		return false, "", fmt.Errorf("store: cancel queued run: %w", err)
+	}
+	if tag.RowsAffected() > 0 {
+		return true, "failed", nil
+	}
+	run, err := s.GetRun(ctx, tenantID, sessionID)
+	if errors.Is(err, ErrNoRun) {
+		return false, "", nil
+	}
+	if err != nil {
+		return false, "", err
+	}
+	return false, run.Status, nil
 }

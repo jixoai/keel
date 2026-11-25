@@ -148,7 +148,7 @@ func TestCollabLinkProjectionAndAuditSink(t *testing.T) {
 	links := collabSubagentLinks{store: st}
 	if err := links.RecordSubagentLink(ctx, harnessext.SubagentLink{
 		TenantID: tenant, SessionID: child, ParentSessionID: root,
-		ModeID: collab.ModeSubagent, Depth: 1,
+		ModeID: collab.ModeSubagent, Depth: 1, MaxDepth: 3, MaxChildren: 8,
 	}); err != nil {
 		t.Fatalf("record link: %v", err)
 	}

@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/jixoai/keel/internal/collab"
 	"github.com/jixoai/keel/internal/harnessext"
 	"github.com/jixoai/keel/internal/toolsurface"
 )
@@ -58,6 +59,26 @@ func TestAgentSpawnDepthRefusalsAreTyped(t *testing.T) {
 	}
 	if !numberEqual(problem["maxChildren"], 8) {
 		t.Fatalf("width refusal details = %+v", problem)
+	}
+
+	backend.err = &harnessext.SubagentDepthPolicyError{Requested: 4, Effective: 3}
+	result, err = registry[toolsurface.Agent].Execute(ctx, "call-3",
+		json.RawMessage(`{"action":"spawn","task":"wider","maxDepth":4}`), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if problem = errorDocument(t, result); problem["code"] != toolsurface.CodeSubagentMaxDepthWidened {
+		t.Fatalf("widening code = %v", problem["code"])
+	}
+
+	backend.err = collab.ErrPermissionDenied
+	result, err = registry[toolsurface.Agent].Execute(ctx, "call-4",
+		json.RawMessage(`{"action":"spawn","task":"denied"}`), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if problem = errorDocument(t, result); problem["code"] != toolsurface.CodePermissionDenied {
+		t.Fatalf("permission code = %v", problem["code"])
 	}
 }
 

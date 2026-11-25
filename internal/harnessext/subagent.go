@@ -39,6 +39,29 @@ var (
 	// fail-closed answer: without a depth the runner refuses to treat the
 	// session as a spawn parent.
 	ErrSubagentLinkInvalid = errors.New("harnessext: subagent durable link is invalid")
+	// ErrSpawnHostAlreadyBound reports a second attempt to install the guarded
+	// creation gate. The Host seam is binding for the runner's lifetime: a
+	// runtime replacement (especially nil) would silently reopen the bypass the
+	// Host exists to close.
+	ErrSpawnHostAlreadyBound = errors.New("harnessext: the spawn host is already bound")
+)
+
+// Sub-agent audit kinds. They land in the same append-only auth_events stream
+// as the core Host rows; detail carries ids, codes and numbers, never the task.
+const (
+	AuditSubagentSpawnRefused = "collab.subagent.spawn_refused"
+	AuditSubagentCancelled    = "collab.subagent.cancelled"
+	AuditSubagentCancelFailed = "collab.subagent.cancel_failed"
+)
+
+// Sub-agent refusal codes carried in audit rows and API errors.
+const (
+	CodeSubagentDepthExceeded    = "subagent_depth_exceeded"
+	CodeSubagentChildrenExceeded = "subagent_children_exceeded"
+	CodeSubagentLinkInvalid      = "subagent_link_invalid"
+	CodeSubagentMaxDepthWidened  = "subagent_max_depth_widened"
+	CodeSubagentParentNotFound   = "parent_session_not_found"
+	CodeSubagentSpawnHostUnbound = "subagent_spawn_host_unbound"
 )
 
 // Sub-agent depth encodings. The core collab.Limits.MaxDepth is a positive
@@ -75,6 +98,28 @@ func (e *SubagentDepthError) Error() string {
 }
 
 func (e *SubagentDepthError) Unwrap() error { return ErrSubagentDepthExceeded }
+
+// SubagentDepthPolicyError is a request that asks for a wider depth policy
+// than the effective one. It is an invalid request, not an exceeded depth:
+// nothing was attempted at that depth. It unwraps both ErrInvalidSpawn (the
+// tool maps it to invalid_arguments) and a stable widening sentinel for audit.
+type SubagentDepthPolicyError struct {
+	ParentSessionID uuid.UUID
+	Requested       int
+	Effective       int
+}
+
+// ErrSubagentMaxDepthWidened is the stable audit reason of a widening request.
+var ErrSubagentMaxDepthWidened = errors.New("harnessext: subagent_max_depth_widened")
+
+func (e *SubagentDepthPolicyError) Error() string {
+	return fmt.Sprintf("%s: requested maxDepth %d is wider than the effective cap %d (parent %s)",
+		ErrSubagentMaxDepthWidened, e.Requested, e.Effective, e.ParentSessionID)
+}
+
+func (e *SubagentDepthPolicyError) Unwrap() []error {
+	return []error{ErrInvalidSpawn, ErrSubagentMaxDepthWidened}
+}
 
 // SubagentChildrenError is the structured width refusal from the guarded Host.
 type SubagentChildrenError struct {
@@ -139,11 +184,20 @@ type SpawnRequest struct {
 	// CollabSubagentLauncher sets it; a direct caller leaves it 0 and the
 	// runner derives it before creating anything.
 	Depth int `json:"-"`
+	// EffectiveMaxDepth is the resolved subtree cap (the Host/runner resolved
+	// min(deployment, parent cap, request)). A direct launcher claim is verified
+	// against the durable parent link; a wider claim is refused.
+	EffectiveMaxDepth int `json:"-"`
 	// MaxChildren is the effective direct-children cap projected into the
 	// durable link (the Host enforces it; the record is the UI/read view).
 	MaxChildren int `json:"-"`
 	// ModeID labels the created session (empty uses the runner's mode).
 	ModeID string `json:"-"`
+	// selectionChecked marks a selection SpawnAsync already validated, so the
+	// Host/launcher path does not validate the same fact twice. The launcher
+	// protocol carries it only for a Host-authorized spawn; a direct caller
+	// leaves it false and is validated defensively.
+	selectionChecked bool
 }
 
 // childSelection derives the child input's selection fact from the request. It
@@ -302,8 +356,16 @@ type SubagentLink struct {
 	ParentSessionID uuid.UUID `json:"parentSessionId"`
 	ModeID          string    `json:"modeId,omitempty"`
 	Depth           int       `json:"depth"`
-	MaxDepth        int       `json:"maxDepth,omitempty"`
-	MaxChildren     int       `json:"maxChildren,omitempty"`
+	// MaxDepth is the subtree depth cap in force at spawn time (-1 unlimited,
+	// otherwise positive). A child inherits it; a descendant may only narrow it.
+	MaxDepth int `json:"maxDepth,omitempty"`
+	// MaxChildren is the direct-children cap projected at spawn time.
+	MaxChildren int `json:"maxChildren,omitempty"`
+	// Budget is the effective per-child budget the guarded Host resolved.
+	Budget *Budget `json:"budget,omitempty"`
+	// RunStatus is the run-row status for the durable tree/read projections
+	// ("" when the read did not ask for it).
+	RunStatus string `json:"runStatus,omitempty"`
 }
 
 // SubagentLinkStore is the durable projection of spawn links. The ledger's
@@ -315,6 +377,40 @@ type SubagentLinkStore interface {
 	SubagentLink(ctx context.Context, tenantID, childID uuid.UUID) (SubagentLink, bool, error)
 	SubagentChildren(ctx context.Context, tenantID, parentID uuid.UUID) ([]SubagentLink, error)
 }
+
+// SubagentStateWriter persists a session's collaboration lifecycle. It is a
+// narrow optional seam (the store implements it); a deployment without it keeps
+// the in-process registry state only.
+type SubagentStateWriter interface {
+	SetSubagentState(ctx context.Context, tenantID, childID uuid.UUID, state string) error
+}
+
+// SubagentLinkCleaner removes a ghost link written before an input that never
+// committed, so an idempotent retry is not answered with a session that never
+// ran.
+type SubagentLinkCleaner interface {
+	DeleteSubagentLink(ctx context.Context, tenantID, childID uuid.UUID) error
+}
+
+// SubagentActiveCounter counts a parent's live direct children (queued,
+// pending or running runs).
+type SubagentActiveCounter interface {
+	ActiveSubagentChildren(ctx context.Context, tenantID, parentID uuid.UUID) (int, error)
+}
+
+// SubagentAPI is the plugin-facing slice: plugins may delegate, wait, observe
+// and stop a subtree. They never receive the runner, the Host setter or the
+// unguarded child creation.
+type SubagentAPI interface {
+	Spawn(ctx context.Context, req SpawnRequest) (SubagentResult, error)
+	SpawnAsync(ctx context.Context, req SpawnRequest) (SubagentRecord, error)
+	Wait(ctx context.Context, tenantID, sessionID uuid.UUID, budget Budget, agent string) (SubagentResult, error)
+	List(tenantID uuid.UUID, parent *uuid.UUID) []SubagentRecord
+	Get(sessionID uuid.UUID) (SubagentRecord, bool)
+	CancelSubtree(ctx context.Context, tenantID, sessionID uuid.UUID, reason string) (CancelResult, error)
+}
+
+var _ SubagentAPI = (*SubagentRunner)(nil)
 
 // SubagentOptions configures the runner.
 type SubagentOptions struct {
@@ -398,6 +494,17 @@ type SubagentOptions struct {
 	MaxChildren int
 	// ModeID labels the created sessions. Empty defaults to collab.ModeSubagent.
 	ModeID string
+	// Audit records runner-side refusals and cancellations (the Host audits its
+	// own path). It is optional; a nil sink keeps the refusal behavior with a
+	// log line instead of an auth_events row.
+	Audit collab.AuditSink
+	// BotInvoker is the defensive bot.invoke check spawnChild runs before it
+	// creates a child. The Host has already authorized the normal path; this
+	// seam makes a direct Launch/unguarded call obey the same rule. Nil skips
+	// the check (a deployment without the identity surface).
+	BotInvoker func(ctx context.Context, tenantID, parentSessionID uuid.UUID, botID string) error
+	// BudgetPoll bounds the detached budget supervisor's poll (default 1s).
+	BudgetPoll time.Duration
 }
 
 const (
@@ -437,10 +544,17 @@ type SubagentRunner struct {
 	// assembly; every read takes the lock only to copy the interface.
 	optsMu      sync.RWMutex
 	host        SubagentSpawnHost
+	hostBound   bool
 	links       SubagentLinkStore
 	maxDepth    int
 	maxChildren int
 	modeID      string
+	audit       collab.AuditSink
+	botInvoker  func(ctx context.Context, tenantID, parentSessionID uuid.UUID, botID string) error
+	budgetPoll  time.Duration
+	// budgetWatches dedupes detached budget supervisors (one per running child).
+	budgetMu      sync.Mutex
+	budgetWatches map[string]bool
 	// spawnMu serializes the guarded creation section (idempotency lookup,
 	// depth/width checks and the Host/launcher call). The core width guard is a
 	// check-then-act; one process serializing its own spawns is what keeps a
@@ -478,6 +592,10 @@ func NewSubagentRunner(opts SubagentOptions) *SubagentRunner {
 	if modeID == "" {
 		modeID = collab.ModeSubagent
 	}
+	budgetPoll := opts.BudgetPoll
+	if budgetPoll <= 0 {
+		budgetPoll = time.Second
+	}
 	r := &SubagentRunner{
 		gate:              opts.Gate,
 		events:            opts.Events,
@@ -501,10 +619,15 @@ func NewSubagentRunner(opts SubagentOptions) *SubagentRunner {
 		inheritOwnership:  opts.InheritOwnership,
 		ownSpawnedChild:   opts.OwnSpawnedChild,
 		host:              opts.Host,
+		hostBound:         opts.Host != nil,
 		links:             opts.Links,
 		maxDepth:          maxDepth,
 		maxChildren:       maxChildren,
 		modeID:            modeID,
+		audit:             opts.Audit,
+		botInvoker:        opts.BotInvoker,
+		budgetPoll:        budgetPoll,
+		budgetWatches:     make(map[string]bool),
 	}
 	if opts.Gate != nil && opts.Edge != nil {
 		r.starter = NewTurnStarter(opts.Gate, opts.Edge, opts.Hooks, opts.Logger)
@@ -513,13 +636,23 @@ func NewSubagentRunner(opts SubagentOptions) *SubagentRunner {
 	return r
 }
 
-// SetHost installs the guarded creation gate. It is an assembly-time call: the
-// product layer builds the Host after the runner (the Host's launcher resolves
-// the runner lazily), so the seam is filled before any request is served.
-func (r *SubagentRunner) SetHost(host SubagentSpawnHost) {
+// SetHost installs the guarded creation gate exactly once. The product layer
+// builds the Host after the runner (the Host's launcher resolves the runner
+// lazily), so this is the one assembly-time write. A nil host or a replacement
+// is refused: the seam is binding for the runner's lifetime, and reopening it
+// at runtime is the bypass the Host exists to close.
+func (r *SubagentRunner) SetHost(host SubagentSpawnHost) error {
+	if host == nil {
+		return fmt.Errorf("%w: a nil spawn host cannot be installed", ErrSpawnHostAlreadyBound)
+	}
 	r.optsMu.Lock()
 	defer r.optsMu.Unlock()
+	if r.hostBound {
+		return ErrSpawnHostAlreadyBound
+	}
 	r.host = host
+	r.hostBound = true
+	return nil
 }
 
 func (r *SubagentRunner) spawnHost() SubagentSpawnHost {
@@ -534,6 +667,27 @@ func (r *SubagentRunner) linkStore() SubagentLinkStore {
 	return r.links
 }
 
+func (r *SubagentRunner) stateWriter() SubagentStateWriter {
+	if writer, ok := r.linkStore().(SubagentStateWriter); ok {
+		return writer
+	}
+	return nil
+}
+
+func (r *SubagentRunner) linkCleaner() SubagentLinkCleaner {
+	if cleaner, ok := r.linkStore().(SubagentLinkCleaner); ok {
+		return cleaner
+	}
+	return nil
+}
+
+func (r *SubagentRunner) activeCounter() SubagentActiveCounter {
+	if counter, ok := r.linkStore().(SubagentActiveCounter); ok {
+		return counter
+	}
+	return nil
+}
+
 // subagentLaunchInput is the mode-specific part of a Host SessionRequest. The
 // Host guards carry the generic fields (task, bot, budget, depth); this
 // document carries what only the sub-agent mode knows: the free-form agent
@@ -543,6 +697,15 @@ type subagentLaunchInput struct {
 	Selection   json.RawMessage `json:"selection,omitempty"`
 	MaxDepth    *int            `json:"maxDepth,omitempty"`
 	MaxChildren int             `json:"maxChildren,omitempty"`
+	// SelectionChecked marks the selection fact as already validated by the
+	// guarded entry.
+	SelectionChecked bool `json:"selectionChecked,omitempty"`
+	// EffectiveMaxDepth is the runner-resolved subtree cap (including the
+	// parent link). The launcher must not widen it.
+	EffectiveMaxDepth int `json:"effectiveMaxDepth,omitempty"`
+	// Depth is the Host-computed depth; the launcher verifies it against the
+	// durable parent link.
+	Depth int `json:"depth,omitempty"`
 }
 
 // SpawnAsync starts a sub-agent and returns immediately. Every spawn passes the
@@ -552,37 +715,63 @@ type subagentLaunchInput struct {
 func (r *SubagentRunner) SpawnAsync(ctx context.Context, req SpawnRequest) (SubagentRecord, error) {
 	req.Task = strings.TrimSpace(req.Task)
 	if err := r.validateSpawn(ctx, req); err != nil {
+		if errors.Is(err, ErrParentSessionNotFound) {
+			r.auditRefusal(ctx, req, CodeSubagentParentNotFound, "parentSessionId", 0, 0,
+				"the parent session does not exist in this tenant")
+		}
 		return SubagentRecord{}, err
 	}
 
 	// The guarded creation section is serialized: the core width guard is a
-	// check-then-act, and an idempotent retry must observe the first spawn's
-	// child before depth/width/launch run again.
+	// check-then-act (the Host also reserves), and an idempotent retry must
+	// observe the first spawn's child before depth/width/launch run again.
+	req.selectionChecked = len(req.childSelection()) > 0
 	r.spawnMu.Lock()
 	defer r.spawnMu.Unlock()
 	if record, ok, err := r.idempotentSpawn(ctx, req); err != nil {
+		if errors.Is(err, ErrSubagentLinkInvalid) {
+			r.auditRefusal(ctx, req, CodeSubagentLinkInvalid, "parentSessionId", 0, 0, err.Error())
+		}
 		return SubagentRecord{}, err
 	} else if ok {
 		return record, nil
 	}
 
-	// The mode request layer owns the -1/0 depth encodings. The core Host only
-	// sees a positive cap (or 0, which it treats as "no core cap"), so the
-	// special values must be resolved here, before anything is created.
-	effectiveMaxDepth, err := r.effectiveMaxDepth(req.MaxDepth)
+	// Depth is a subtree property: the parent's durable link carries the cap
+	// in force when it was created, and this spawn may only narrow it further
+	// (never the deployment default alone).
+	policy, err := r.parentPolicy(ctx, req.TenantID, req.ParentSessionID)
 	if err != nil {
+		if errors.Is(err, ErrSubagentLinkInvalid) {
+			r.auditRefusal(ctx, req, CodeSubagentLinkInvalid, "parentSessionId", 0, 0, err.Error())
+		}
 		return SubagentRecord{}, err
 	}
-	parentDepth, err := r.parentDepth(ctx, req.TenantID, req.ParentSessionID)
+	depth := policy.ParentDepth + 1
+	effectiveMaxDepth, err := r.effectiveMaxDepth(req.MaxDepth, policy.ParentMaxDepth)
 	if err != nil {
+		code := CodeSubagentMaxDepthWidened
+		var widened *SubagentDepthPolicyError
+		if !errors.As(err, &widened) {
+			code = string(collab.CodeInvalidRequest)
+		}
+		limit := int64(0)
+		if widened != nil {
+			limit = int64(widened.Effective)
+		}
+		actual := int64(0)
+		if req.MaxDepth != nil {
+			actual = int64(*req.MaxDepth)
+		}
+		r.auditRefusal(ctx, req, code, "maxDepth", limit, actual, err.Error())
 		return SubagentRecord{}, err
 	}
-	depth := parentDepth + 1
 	if effectiveMaxDepth == SubagentDepthForbidden || (effectiveMaxDepth > 0 && depth > effectiveMaxDepth) {
 		reason := ""
 		if effectiveMaxDepth == SubagentDepthForbidden {
 			reason = "sub-agent spawning is disabled (maxDepth=0)"
 		}
+		r.auditRefusal(ctx, req, CodeSubagentDepthExceeded, "depth", int64(effectiveMaxDepth), int64(depth), reason)
 		return SubagentRecord{}, &SubagentDepthError{
 			ParentSessionID: req.ParentSessionID,
 			Depth:           depth,
@@ -596,9 +785,15 @@ func (r *SubagentRunner) SpawnAsync(ctx context.Context, req SpawnRequest) (Suba
 	}
 
 	// A deployment without the collaboration Host keeps the local width check:
-	// active children are the running records this process started.
+	// active children are counted from the durable projection when available,
+	// else from the running records this process started.
 	if r.maxChildren > 0 {
-		if active := r.activeChildCount(req.TenantID, req.ParentSessionID); active >= r.maxChildren {
+		active, err := r.activeChildren(ctx, req.TenantID, req.ParentSessionID)
+		if err != nil {
+			return SubagentRecord{}, err
+		}
+		if active >= r.maxChildren {
+			r.auditRefusal(ctx, req, CodeSubagentChildrenExceeded, "maxChildren", int64(r.maxChildren), int64(active), "")
 			return SubagentRecord{}, &SubagentChildrenError{
 				ParentSessionID: req.ParentSessionID,
 				Active:          int64(active),
@@ -607,6 +802,7 @@ func (r *SubagentRunner) SpawnAsync(ctx context.Context, req SpawnRequest) (Suba
 		}
 	}
 	req.Depth = depth
+	req.EffectiveMaxDepth = effectiveMaxDepth
 	req.MaxChildren = r.maxChildren
 	return r.spawnChild(ctx, req)
 }
@@ -640,8 +836,9 @@ func (r *SubagentRunner) idempotentSpawn(ctx context.Context, req SpawnRequest) 
 		return SubagentRecord{}, false, err
 	}
 	if err != nil {
-		// The derived child does not exist: this is the first attempt.
-		return SubagentRecord{}, false, nil
+		// The ledger has no session for the derived child. The projection may
+		// still hold a ghost link; fall through so it can be cleared.
+		ok = false
 	}
 	if !ok {
 		if links := r.linkStore(); links != nil {
@@ -654,10 +851,29 @@ func (r *SubagentRunner) idempotentSpawn(ctx context.Context, req SpawnRequest) 
 	if !ok || link.ParentSessionID != req.ParentSessionID {
 		return SubagentRecord{}, false, nil
 	}
+	if link.MaxDepth == 0 {
+		return SubagentRecord{}, false, fmt.Errorf("%w: spawn link of %s has no maxDepth", ErrSubagentLinkInvalid, childID)
+	}
 	status := "unknown"
 	if r.runs != nil {
 		if state, stateErr := r.runs.RunState(ctx, req.TenantID, childID); stateErr == nil {
 			status = state.Status
+		} else if errors.Is(stateErr, ErrNoRun) {
+			// The projection is the only fact: the input never committed, so
+			// this is a ghost, not an existing child. Clear it and spawn fresh.
+			if cleaner := r.linkCleaner(); cleaner != nil {
+				if cleanupErr := cleaner.DeleteSubagentLink(ctx, req.TenantID, childID); cleanupErr != nil {
+					return SubagentRecord{}, false, cleanupErr
+				}
+			}
+			return SubagentRecord{}, false, nil
+		}
+	}
+	// A cold retry of a still-running child restores its effective budget and
+	// resumes the detached supervisor (the original process may be gone).
+	if status == "running" || status == "pending" || status == "queued" {
+		if link.Budget != nil {
+			r.startBudgetWatch(req.TenantID, childID, *link.Budget)
 		}
 	}
 	return SubagentRecord{
@@ -674,6 +890,7 @@ func (r *SubagentRunner) idempotentSpawn(ctx context.Context, req SpawnRequest) 
 		ModeID:          link.ModeID,
 		MaxDepth:        link.MaxDepth,
 		MaxChildren:     link.MaxChildren,
+		Budget:          link.Budget,
 	}, true, nil
 }
 
@@ -682,10 +899,13 @@ func (r *SubagentRunner) idempotentSpawn(ctx context.Context, req SpawnRequest) 
 // depth, width and concurrency when the launcher runs.
 func (r *SubagentRunner) spawnThroughHost(ctx context.Context, host SubagentSpawnHost, req SpawnRequest, depth, maxDepth int) (SubagentRecord, error) {
 	inputs, err := json.Marshal(subagentLaunchInput{
-		Agent:       req.Agent,
-		Selection:   req.childSelection(),
-		MaxDepth:    req.MaxDepth,
-		MaxChildren: r.maxChildren,
+		Agent:             req.Agent,
+		Selection:         req.childSelection(),
+		MaxDepth:          req.MaxDepth,
+		MaxChildren:       r.maxChildren,
+		SelectionChecked:  req.selectionChecked,
+		EffectiveMaxDepth: maxDepth,
+		Depth:             depth,
 	})
 	if err != nil {
 		return SubagentRecord{}, fmt.Errorf("%w: encode spawn input: %v", ErrInvalidSpawn, err)
@@ -779,11 +999,84 @@ func (r *SubagentRunner) validateSpawn(ctx context.Context, req SpawnRequest) er
 	return nil
 }
 
-// effectiveMaxDepth resolves the request's narrowing against the deployment
-// setting. A request may only narrow: -1 is accepted only when the deployment
-// is unlimited, and 0 always means "refuse this spawn".
-func (r *SubagentRunner) effectiveMaxDepth(requested *int) (int, error) {
-	effective := r.maxDepth
+// spawnPolicy is the resolved depth context of a parent session. ParentMaxDepth
+// is the cap that parent's link carried at spawn time (-1 unlimited, positive
+// finite); a root has no link and inherits the deployment setting.
+type spawnPolicy struct {
+	ParentDepth       int
+	ParentMaxDepth    int
+	ParentMaxChildren int
+	Linked            bool
+}
+
+// parentPolicy resolves the parent's durable link. The ledger is the restart
+// truth; the projection is the fallback. A spawn link with no depth/cap is a
+// pre-contract record and fails closed (Alpha has no compatibility shim).
+func (r *SubagentRunner) parentPolicy(ctx context.Context, tenantID, parentSessionID uuid.UUID) (spawnPolicy, error) {
+	policy := spawnPolicy{ParentMaxDepth: r.maxDepth, ParentMaxChildren: r.maxChildren}
+	var (
+		link SubagentLink
+		ok   bool
+		err  error
+	)
+	if r.events != nil {
+		link, ok, err = r.durableSubagentLink(ctx, tenantID, parentSessionID)
+		if err != nil {
+			return policy, err
+		}
+	}
+	if !ok {
+		if links := r.linkStore(); links != nil {
+			link, ok, err = links.SubagentLink(ctx, tenantID, parentSessionID)
+			if err != nil {
+				return policy, err
+			}
+		}
+	}
+	if !ok {
+		return policy, nil
+	}
+	if link.Depth < 1 {
+		return policy, fmt.Errorf("%w: parent link of %s has depth %d", ErrSubagentLinkInvalid, parentSessionID, link.Depth)
+	}
+	if link.MaxDepth == 0 {
+		// The link was written before the subtree cap existed, or a writer
+		// omitted it. Guessing the deployment default would let the subtree
+		// widen; refuse.
+		return policy, fmt.Errorf("%w: parent link of %s has no maxDepth", ErrSubagentLinkInvalid, parentSessionID)
+	}
+	return spawnPolicy{
+		ParentDepth:       link.Depth,
+		ParentMaxDepth:    link.MaxDepth,
+		ParentMaxChildren: link.MaxChildren,
+		Linked:            true,
+	}, nil
+}
+
+// combineDepth narrows the deployment setting by the parent's persisted cap.
+// -1 is unlimited, 0 is forbidden (never stored), positive is finite.
+func combineDepth(deployment, parent int) int {
+	switch {
+	case deployment == SubagentDepthForbidden, parent == SubagentDepthForbidden:
+		return SubagentDepthForbidden
+	case deployment == SubagentDepthUnlimited:
+		return parent
+	case parent == SubagentDepthUnlimited, parent == 0:
+		return deployment
+	case deployment <= 0:
+		return parent
+	case parent < deployment:
+		return parent
+	default:
+		return deployment
+	}
+}
+
+// effectiveMaxDepth resolves the request's narrowing against the effective
+// subtree cap. A request may only narrow: -1 is accepted only when the
+// effective cap is unlimited, and 0 refuses this spawn.
+func (r *SubagentRunner) effectiveMaxDepth(requested *int, parentCap int) (int, error) {
+	effective := combineDepth(r.maxDepth, parentCap)
 	if requested == nil {
 		return effective, nil
 	}
@@ -793,7 +1086,7 @@ func (r *SubagentRunner) effectiveMaxDepth(requested *int) (int, error) {
 		return 0, fmt.Errorf("%w: maxDepth %d is below the -1 (unlimited) floor", ErrInvalidSpawn, value)
 	case value == SubagentDepthUnlimited:
 		if effective != SubagentDepthUnlimited {
-			return 0, fmt.Errorf("%w: maxDepth=-1 (unlimited) is wider than the deployment cap %d", ErrInvalidSpawn, effective)
+			return 0, &SubagentDepthPolicyError{Requested: value, Effective: effective}
 		}
 		return SubagentDepthUnlimited, nil
 	case value == SubagentDepthForbidden:
@@ -801,40 +1094,23 @@ func (r *SubagentRunner) effectiveMaxDepth(requested *int) (int, error) {
 	case effective == SubagentDepthUnlimited:
 		return value, nil
 	case value > effective:
-		return 0, fmt.Errorf("%w: maxDepth %d is wider than the deployment cap %d", ErrInvalidSpawn, value, effective)
+		return 0, &SubagentDepthPolicyError{Requested: value, Effective: effective}
 	default:
 		return value, nil
 	}
 }
 
-// parentDepth resolves the parent's delegation depth. The ledger link is the
-// restart truth; the durable projection is the fallback for a deployment whose
-// event reader is not wired at this seam. A missing link means a root session
-// (depth 0); a spawn link without a depth is refused (fail closed).
-func (r *SubagentRunner) parentDepth(ctx context.Context, tenantID, parentSessionID uuid.UUID) (int, error) {
-	if r.events != nil {
-		link, ok, err := r.durableSubagentLink(ctx, tenantID, parentSessionID)
-		if err != nil {
-			return 0, err
-		}
-		if ok {
-			return link.Depth, nil
-		}
+// activeChildren counts a parent's live direct children: the durable
+// projection when available, else this process's running records.
+func (r *SubagentRunner) activeChildren(ctx context.Context, tenantID, parentSessionID uuid.UUID) (int, error) {
+	if counter := r.activeCounter(); counter != nil {
+		return counter.ActiveSubagentChildren(ctx, tenantID, parentSessionID)
 	}
-	if links := r.linkStore(); links != nil {
-		link, ok, err := links.SubagentLink(ctx, tenantID, parentSessionID)
-		if err != nil {
-			return 0, err
-		}
-		if ok {
-			return link.Depth, nil
-		}
-	}
-	return 0, nil
+	return r.activeChildCount(tenantID, parentSessionID), nil
 }
 
 // activeChildCount counts the running children this process started under the
-// parent (the no-Host width fallback).
+// parent (the no-projection width fallback).
 func (r *SubagentRunner) activeChildCount(tenantID, parentSessionID uuid.UUID) int {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -850,36 +1126,143 @@ func (r *SubagentRunner) activeChildCount(tenantID, parentSessionID uuid.UUID) i
 	return count
 }
 
-// spawnChild is the unguarded child creation the Host launcher calls after the
-// gate accepted the request. Every entry point reaches it through SpawnAsync
-// (directly when no Host is wired, or through the Host's launcher otherwise),
-// so the depth/link facts are always present.
+// auditRefusal records a runner-side spawn refusal. The Host audits its own
+// path; this covers the checks that happen before the Host is called (and the
+// defensive unguarded callers). Detail never carries the task.
+func (r *SubagentRunner) auditRefusal(ctx context.Context, req SpawnRequest, code, field string, limit, actual int64, detail string) {
+	if r.audit == nil {
+		return
+	}
+	modeID := strings.TrimSpace(req.ModeID)
+	if modeID == "" {
+		modeID = r.modeID
+	}
+	if err := r.audit.Record(ctx, collab.AuditEvent{
+		Kind: AuditSubagentSpawnRefused, Result: "denied", Reason: code, Operation: "spawn",
+		TenantID: req.TenantID, ModeID: modeID, ParentSessionID: req.ParentSessionID,
+		Field: field, Limit: limit, Actual: actual, Detail: strings.TrimSpace(detail),
+	}); err != nil {
+		r.log.Warn("sub-agent refusal audit write failed", "code", code, "err", err)
+	}
+}
+
+// auditCancel records one subtree cancellation outcome.
+func (r *SubagentRunner) auditCancel(ctx context.Context, tenantID, sessionID uuid.UUID, result CancelResult, reason string) {
+	if r.audit == nil {
+		return
+	}
+	kind := AuditSubagentCancelled
+	eventResult := "accepted"
+	detail := strings.TrimSpace(reason)
+	if !result.Cancelled && result.Status != "settled" {
+		kind = AuditSubagentCancelFailed
+		eventResult = "failed"
+	}
+	event := collab.AuditEvent{
+		Kind: kind, Result: eventResult, Reason: result.Status, Operation: "cancel",
+		TenantID: tenantID, ModeID: r.modeID, SessionID: sessionID, Detail: detail,
+	}
+	if err := r.audit.Record(ctx, event); err != nil {
+		r.log.Warn("sub-agent cancel audit write failed", "kind", kind, "err", err)
+	}
+}
+
+// spawnChild creates the child. It is unexported but the exported launcher
+// calls it, so it re-runs the invariants instead of trusting the caller: the
+// durable parent link decides the depth and subtree cap, the width and
+// bot.invoke checks run again, and the claimed Host depth must match.
 func (r *SubagentRunner) spawnChild(ctx context.Context, req SpawnRequest) (SubagentRecord, error) {
+	if r.starter == nil || r.runs == nil || r.gate == nil {
+		return SubagentRecord{}, errors.New("harnessext: sub-agent runner needs the session gate, the kernel edge and the run reader")
+	}
+	if req.TenantID == uuid.Nil || req.ParentSessionID == uuid.Nil {
+		return SubagentRecord{}, errors.New("harnessext: tenant and parent session are required")
+	}
+	req.Task = strings.TrimSpace(req.Task)
+	if req.Task == "" {
+		return SubagentRecord{}, errors.New("harnessext: task is required")
+	}
+	if _, exists, err := r.gate.SessionOwner(ctx, req.TenantID, req.ParentSessionID); err != nil {
+		return SubagentRecord{}, err
+	} else if !exists {
+		r.auditRefusal(ctx, req, CodeSubagentParentNotFound, "parentSessionId", 0, 0,
+			"the parent session does not exist in this tenant")
+		return SubagentRecord{}, ErrParentSessionNotFound
+	}
 	selection := req.childSelection()
+	if len(selection) > 0 && !req.selectionChecked {
+		if r.validateSelection == nil {
+			return SubagentRecord{}, fmt.Errorf("%w: selection is not supported by this sub-agent runner", ErrInvalidSpawn)
+		}
+		if err := r.validateSelection(selection); err != nil {
+			return SubagentRecord{}, fmt.Errorf("%w: selection: %v", ErrInvalidSpawn, err)
+		}
+	}
+	policy, err := r.parentPolicy(ctx, req.TenantID, req.ParentSessionID)
+	if err != nil {
+		if errors.Is(err, ErrSubagentLinkInvalid) {
+			r.auditRefusal(ctx, req, CodeSubagentLinkInvalid, "parentSessionId", 0, 0, err.Error())
+		}
+		return SubagentRecord{}, err
+	}
+	depth := policy.ParentDepth + 1
+	if req.Depth != 0 && req.Depth != depth {
+		r.auditRefusal(ctx, req, CodeSubagentDepthExceeded, "depth", int64(policy.ParentMaxDepth), int64(req.Depth),
+			"the claimed depth does not match the durable parent link")
+		return SubagentRecord{}, &SubagentDepthError{
+			ParentSessionID: req.ParentSessionID,
+			Depth:           req.Depth,
+			MaxDepth:        policy.ParentMaxDepth,
+			Reason:          "the claimed depth does not match the durable parent link",
+		}
+	}
+	maxDepth, err := r.effectiveMaxDepth(req.MaxDepth, policy.ParentMaxDepth)
+	if err != nil {
+		return SubagentRecord{}, err
+	}
+	if req.EffectiveMaxDepth != 0 && req.EffectiveMaxDepth != maxDepth {
+		r.auditRefusal(ctx, req, CodeSubagentMaxDepthWidened, "maxDepth", int64(maxDepth), int64(req.EffectiveMaxDepth),
+			"the claimed effective depth cap is wider than the durable parent allows")
+		return SubagentRecord{}, &SubagentDepthPolicyError{
+			ParentSessionID: req.ParentSessionID, Requested: req.EffectiveMaxDepth, Effective: maxDepth,
+		}
+	}
+	if maxDepth == SubagentDepthForbidden || (maxDepth > 0 && depth > maxDepth) {
+		r.auditRefusal(ctx, req, CodeSubagentDepthExceeded, "depth", int64(maxDepth), int64(depth), "")
+		return SubagentRecord{}, &SubagentDepthError{
+			ParentSessionID: req.ParentSessionID, Depth: depth, MaxDepth: maxDepth,
+		}
+	}
+	maxChildren := req.MaxChildren
+	if maxChildren <= 0 {
+		maxChildren = r.maxChildren
+	}
+	if maxChildren > 0 {
+		active, err := r.activeChildren(ctx, req.TenantID, req.ParentSessionID)
+		if err != nil {
+			return SubagentRecord{}, err
+		}
+		if active >= maxChildren {
+			r.auditRefusal(ctx, req, CodeSubagentChildrenExceeded, "maxChildren", int64(maxChildren), int64(active), "")
+			return SubagentRecord{}, &SubagentChildrenError{
+				ParentSessionID: req.ParentSessionID, Active: int64(active), Limit: int64(maxChildren),
+			}
+		}
+	}
+	if r.botInvoker != nil {
+		for _, target := range uniqueBotTargets(r.spawnedBotID(req), req.BotID) {
+			if err := r.botInvoker(ctx, req.TenantID, req.ParentSessionID, target); err != nil {
+				return SubagentRecord{}, fmt.Errorf("%w: bot.invoke on %q: %v", collab.ErrPermissionDenied, target, err)
+			}
+		}
+	}
+
 	childID := uuid.New()
 	key := strings.TrimSpace(req.IdempotencyKey)
 	requestID := uuid.NewString()
 	if key != "" {
 		childID = subagentChildSessionID(req.TenantID, req.ParentSessionID, key)
 		requestID = "subagent:" + key
-	}
-	depth := req.Depth
-	if depth < 1 {
-		// The unguarded caller (a launcher) always supplies the Host depth; a
-		// direct call without one still gets a truthful parent+1.
-		parentDepth, err := r.parentDepth(ctx, req.TenantID, req.ParentSessionID)
-		if err != nil {
-			return SubagentRecord{}, err
-		}
-		depth = parentDepth + 1
-	}
-	maxDepth, err := r.effectiveMaxDepth(req.MaxDepth)
-	if err != nil {
-		return SubagentRecord{}, err
-	}
-	maxChildren := req.MaxChildren
-	if maxChildren <= 0 {
-		maxChildren = r.maxChildren
 	}
 	modeID := strings.TrimSpace(req.ModeID)
 	if modeID == "" {
@@ -917,8 +1300,8 @@ func (r *SubagentRunner) spawnChild(ctx context.Context, req SpawnRequest) (Suba
 	}
 	// The durable projection is written before the first input (the fork path
 	// records its fact the same way): a crash after the input must still leave
-	// the parent/depth/width facts queryable. The first user.message carries the
-	// same document and remains the semantic truth.
+	// the parent/depth/caps/budget facts queryable. The first user.message
+	// carries the same document and remains the semantic truth.
 	if links := r.linkStore(); links != nil {
 		if err := links.RecordSubagentLink(ctx, SubagentLink{
 			TenantID:        req.TenantID,
@@ -928,6 +1311,7 @@ func (r *SubagentRunner) spawnChild(ctx context.Context, req SpawnRequest) (Suba
 			Depth:           depth,
 			MaxDepth:        maxDepth,
 			MaxChildren:     maxChildren,
+			Budget:          &req.Budget,
 		}); err != nil {
 			return SubagentRecord{}, err
 		}
@@ -940,6 +1324,13 @@ func (r *SubagentRunner) spawnChild(ctx context.Context, req SpawnRequest) (Suba
 		Extras:    extras,
 	})
 	if err != nil {
+		// A spawn whose input never committed leaves no delegation. Clearing the
+		// projection prevents a retry from being answered with a ghost child.
+		if cleaner := r.linkCleaner(); cleaner != nil {
+			if cleanupErr := cleaner.DeleteSubagentLink(context.WithoutCancel(ctx), req.TenantID, childID); cleanupErr != nil {
+				r.log.Warn("sub-agent ghost link cleanup failed", "session_id", childID, "err", cleanupErr)
+			}
+		}
 		return SubagentRecord{}, err
 	}
 	record := SubagentRecord{
@@ -960,11 +1351,118 @@ func (r *SubagentRunner) spawnChild(ctx context.Context, req SpawnRequest) (Suba
 		Budget:          &req.Budget,
 	}
 	r.store(record)
+	// A detached spawn has no Wait to enforce its budget; the supervisor is the
+	// only thing that will stop it. Wait also consumes the same budget.
+	r.startBudgetWatch(req.TenantID, start.SessionID, req.Budget)
 	r.emit(HookSubagentStarted, record, map[string]string{
 		"seq":    fmt.Sprintf("%d", start.Seq),
 		"origin": "spawn",
 	})
 	return record, nil
+}
+
+// uniqueBotTargets is the union of the explicit BotID and the selection's
+// botId, so a direct launch cannot authorize one target and execute another.
+func uniqueBotTargets(values ...string) []string {
+	seen := make(map[string]bool, len(values))
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		out = append(out, value)
+	}
+	return out
+}
+
+// maxBudgetWatchLifetime is the corruption guard of a detached budget
+// supervisor: a child run that never settles must not leave a goroutine alive
+// forever.
+const maxBudgetWatchLifetime = 24 * time.Hour
+
+// startBudgetWatch starts the detached budget supervisor for one child. A
+// SpawnAsync has no Wait call, so without this the turns/tokens/timeout budget
+// would only exist on paper. Wait enforces the same budget when a caller waits;
+// the map dedupes the two paths. The supervisor is process-local: a restart
+// loses it, and the durable budget is resumed by an idempotent retry (or an
+// explicit Wait); the timeout then restarts from the retry.
+func (r *SubagentRunner) startBudgetWatch(tenantID, sessionID uuid.UUID, budget Budget) {
+	if r.control == nil || r.runs == nil {
+		return
+	}
+	if budget.MaxTurns <= 0 && budget.MaxTokens <= 0 && budget.TimeoutMs <= 0 {
+		return
+	}
+	key := sessionID.String()
+	r.budgetMu.Lock()
+	if r.budgetWatches[key] {
+		r.budgetMu.Unlock()
+		return
+	}
+	r.budgetWatches[key] = true
+	r.budgetMu.Unlock()
+	go r.watchBudget(tenantID, sessionID, budget)
+}
+
+func (r *SubagentRunner) watchBudget(tenantID, sessionID uuid.UUID, budget Budget) {
+	defer func() {
+		r.budgetMu.Lock()
+		delete(r.budgetWatches, sessionID.String())
+		r.budgetMu.Unlock()
+	}()
+	ctx := context.Background()
+	started := r.now()
+	deadline := time.Time{}
+	if budget.TimeoutMs > 0 {
+		deadline = started.Add(time.Duration(budget.TimeoutMs) * time.Millisecond)
+	}
+	ticker := time.NewTicker(r.budgetPoll)
+	defer ticker.Stop()
+	for {
+		<-ticker.C
+		if r.now().Sub(started) > maxBudgetWatchLifetime {
+			return
+		}
+		state, err := r.runs.RunState(ctx, tenantID, sessionID)
+		if err == nil && runStateTerminal(state.Status) {
+			return
+		}
+		if !deadline.IsZero() && !r.now().Before(deadline) {
+			r.cancelForBudget(tenantID, sessionID, "timeout budget exhausted")
+			return
+		}
+		if budget.MaxTurns > 0 || budget.MaxTokens > 0 {
+			if reason, exceeded := r.budgetExceeded(ctx, tenantID, sessionID, budget); exceeded {
+				r.cancelForBudget(tenantID, sessionID, reason)
+				return
+			}
+		}
+	}
+}
+
+func (r *SubagentRunner) cancelForBudget(tenantID, sessionID uuid.UUID, reason string) {
+	ctx, cancel := context.WithTimeout(context.Background(), cancelWait)
+	defer cancel()
+	if _, err := r.CancelSubtree(ctx, tenantID, sessionID, "budget_exhausted: "+reason); err != nil {
+		r.log.Info("sub-agent budget cancel is not wired; the child run continues", "session_id", sessionID, "err", err)
+	}
+	// The cancel path marks the record "cancelled"; the budget reason is the
+	// more specific fact and must survive it.
+	r.update(sessionID, func(record *SubagentRecord) {
+		record.Status = "budget_exhausted"
+		record.Error = reason
+	})
+}
+
+func runStateTerminal(status string) bool {
+	switch status {
+	case "done", "failed", "cancelled":
+		return true
+	default:
+		return false
+	}
 }
 
 // Spawn starts a sub-agent and waits (bounded by the budget) for its structured
@@ -1091,8 +1589,8 @@ func (r *SubagentRunner) cancelChild(tenantID, sessionID uuid.UUID) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), cancelWait)
 	defer cancel()
-	if _, err := r.control.Cancel(ctx, kernel.Scope{TenantID: tenantID, SessionID: sessionID}); err != nil {
-		r.log.Info("sub-agent cancel is not wired; the child run continues", "session_id", sessionID, "err", err)
+	if _, err := r.CancelSubtree(ctx, tenantID, sessionID, "budget_exhausted"); err != nil {
+		r.log.Info("sub-agent subtree cancel is not wired; the child run continues", "session_id", sessionID, "err", err)
 	}
 }
 

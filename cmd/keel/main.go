@@ -191,11 +191,18 @@ func runServeCmd(args []string, stdout, stderr io.Writer) int {
 		// subagentMaxDepth is the sub-agent mode's depth setting: -1 unlimited,
 		// 0 forbidden, positive a concrete cap. Empty keeps the 3-level default.
 		subagentDepthRaw = fs.String("subagent-max-depth", os.Getenv("KEEL_SUBAGENT_MAX_DEPTH"), "sub-agent max depth: -1 unlimited, 0 forbidden, positive cap (default 3)")
+		// subagentChildrenRaw is the active direct-children cap per parent.
+		subagentChildrenRaw = fs.String("subagent-max-children", os.Getenv("KEEL_SUBAGENT_MAX_CHILDREN"), "sub-agent max active direct children per parent (default 8)")
 	)
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
 	subagentMaxDepth, err := parseSubagentMaxDepth(*subagentDepthRaw)
+	if err != nil {
+		fmt.Fprintf(stderr, "keel serve: %v\n", err)
+		return 2
+	}
+	subagentMaxChildren, err := parseSubagentMaxChildren(*subagentChildrenRaw)
 	if err != nil {
 		fmt.Fprintf(stderr, "keel serve: %v\n", err)
 		return 2
@@ -226,36 +233,37 @@ func runServeCmd(args []string, stdout, stderr io.Writer) int {
 	}
 	log := slog.New(logsafe.New(slog.NewJSONHandler(stdout, &slog.HandlerOptions{Level: slog.LevelInfo})))
 	opts := serveOptions{
-		Addr:             *addr,
-		DSN:              dsnValue,
-		WebDir:           *webDir,
-		CASDir:           *casDir,
-		OARJournalDir:    *oarJournalDir,
-		TenantID:         tenantID,
-		AuthMode:         mode,
-		Insecure:         *insecure,
-		Runs:             *runs,
-		NoWorker:         *noWorker,
-		Model:            *model,
-		Provider:         *provider,
-		BaseURL:          *baseURL,
-		Protocol:         *protocol,
-		APIKey:           *apiKey,
-		SystemPrompt:     *prompt,
-		SkillsRoots:      splitPaths(*skills),
-		SkillsRoot:       *skillsRoot,
-		SkillsSourceRoot: *skillsSourceRoot,
-		LoadoutID:        *loadoutID,
-		LoadoutRevision:  *loadoutRev,
-		MCPConfig:        *mcpConfig,
-		MCPProject:       *mcpProject,
-		ModelsConfig:     *modelsConfig,
-		ConfigFile:       *configFile,
-		PluginsRoot:      *pluginsRoot,
-		ExampleBotID:     strings.TrimSpace(*exampleBot),
-		ExampleInterval:  *exampleInt,
-		SubagentMaxDepth: subagentMaxDepth,
-		Log:              log,
+		Addr:                *addr,
+		DSN:                 dsnValue,
+		WebDir:              *webDir,
+		CASDir:              *casDir,
+		OARJournalDir:       *oarJournalDir,
+		TenantID:            tenantID,
+		AuthMode:            mode,
+		Insecure:            *insecure,
+		Runs:                *runs,
+		NoWorker:            *noWorker,
+		Model:               *model,
+		Provider:            *provider,
+		BaseURL:             *baseURL,
+		Protocol:            *protocol,
+		APIKey:              *apiKey,
+		SystemPrompt:        *prompt,
+		SkillsRoots:         splitPaths(*skills),
+		SkillsRoot:          *skillsRoot,
+		SkillsSourceRoot:    *skillsSourceRoot,
+		LoadoutID:           *loadoutID,
+		LoadoutRevision:     *loadoutRev,
+		MCPConfig:           *mcpConfig,
+		MCPProject:          *mcpProject,
+		ModelsConfig:        *modelsConfig,
+		ConfigFile:          *configFile,
+		PluginsRoot:         *pluginsRoot,
+		ExampleBotID:        strings.TrimSpace(*exampleBot),
+		ExampleInterval:     *exampleInt,
+		SubagentMaxDepth:    subagentMaxDepth,
+		SubagentMaxChildren: subagentMaxChildren,
+		Log:                 log,
 	}
 	if err := runServe(context.Background(), opts); err != nil {
 		log.Error("keel serve failed", "err", err)
@@ -377,6 +385,20 @@ func parseSubagentMaxDepth(raw string) (*int, error) {
 	}
 	if value < -1 {
 		return nil, fmt.Errorf("subagent-max-depth must be an integer >= -1")
+	}
+	return &value, nil
+}
+
+// parseSubagentMaxChildren parses the direct-children setting. Empty keeps the
+// mode default (nil); a value below 1 is rejected at boot.
+func parseSubagentMaxChildren(raw string) (*int, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, nil
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil || value < 1 {
+		return nil, fmt.Errorf("subagent-max-children must be a positive integer")
 	}
 	return &value, nil
 }

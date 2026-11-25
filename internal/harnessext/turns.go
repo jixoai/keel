@@ -177,8 +177,26 @@ type CancelResult struct {
 	// is running), not_wired (the attempt is not reachable from this process).
 	Status    string `json:"status"`
 	RunStatus string `json:"runStatus,omitempty"`
+	// Cancelled is true only when the run will not execute: a local attempt was
+	// stopped or a queued row was durably cancelled. An already-terminal run is
+	// settled, not cancelled.
 	Cancelled bool   `json:"cancelled"`
 	Detail    string `json:"detail,omitempty"`
+	// Subtree lists are filled by CancelSubtree: one entry per descendant that
+	// was actually stopped, already terminal, or could not be stopped.
+	CancelledIDs []string `json:"cancelledIds,omitempty"`
+	SettledIDs   []string `json:"settledIds,omitempty"`
+	FailedIDs    []string `json:"failedIds,omitempty"`
+	// Failures carries the reason for each id in FailedIDs.
+	Failures map[string]string `json:"failures,omitempty"`
+}
+
+// RunCanceller durably stops a run that has not started executing (queued or
+// pending). The store implements it: the row becomes failed, so no worker will
+// claim it. It reports (cancelled, finalStatus, err); cancelled=false with a
+// terminal finalStatus means the run settled concurrently.
+type RunCanceller interface {
+	CancelQueuedRun(ctx context.Context, tenantID, sessionID uuid.UUID, reason string) (bool, string, error)
 }
 
 type localRun struct {
@@ -219,6 +237,10 @@ type RunControl struct {
 	Runs RunStatusReader
 	Log  *slog.Logger
 	Now  func() time.Time
+	// Canceller durably stops a queued/pending run. Nil keeps the pre-existing
+	// "idle" answer for a run with no active attempt (a deployment that cannot
+	// cancel queued work must say so instead of pretending).
+	Canceller RunCanceller
 
 	mu      sync.Mutex
 	local   map[kernel.Scope]*localRun
@@ -229,15 +251,22 @@ type RunControl struct {
 // NewRunControl builds the seam. Runs may be nil (the cancel endpoint then
 // answers 501 for everything except local runs).
 func NewRunControl(runs RunStatusReader, log *slog.Logger) *RunControl {
+	return NewRunControlWithCanceller(runs, nil, log)
+}
+
+// NewRunControlWithCanceller builds the seam with a durable queued-run
+// canceller. The store's CancelQueuedRun is the production implementation.
+func NewRunControlWithCanceller(runs RunStatusReader, canceller RunCanceller, log *slog.Logger) *RunControl {
 	if log == nil {
 		log = slog.Default()
 	}
 	return &RunControl{
-		Runs:    runs,
-		Log:     log,
-		Now:     func() time.Time { return time.Now().UTC() },
-		local:   make(map[kernel.Scope]*localRun),
-		overlay: make(map[kernel.Scope]overlayEntry),
+		Runs:      runs,
+		Log:       log,
+		Now:       func() time.Time { return time.Now().UTC() },
+		Canceller: canceller,
+		local:     make(map[kernel.Scope]*localRun),
+		overlay:   make(map[kernel.Scope]overlayEntry),
 	}
 }
 
@@ -284,6 +313,17 @@ func (c *RunControl) BeginRun(parent context.Context, scope kernel.Scope, runID 
 // Cancel stops the local attempt if this process owns it, otherwise reports the
 // durable run state.
 func (c *RunControl) Cancel(ctx context.Context, scope kernel.Scope) (CancelResult, error) {
+	return c.CancelWithReason(ctx, scope, "cancelled")
+}
+
+// CancelWithReason is Cancel with the durable queued-run reason. A local
+// attempt is still stopped by its context; the reason is the audit/run-row
+// explanation for a queued row.
+func (c *RunControl) CancelWithReason(ctx context.Context, scope kernel.Scope, reason string) (CancelResult, error) {
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		reason = "cancelled"
+	}
 	c.mu.Lock()
 	entry := c.local[scope]
 	c.mu.Unlock()
@@ -332,8 +372,29 @@ func (c *RunControl) Cancel(ctx context.Context, scope kernel.Scope) (CancelResu
 	case "done", "failed", "cancelled":
 		return CancelResult{Status: "settled", RunStatus: state.Status, Cancelled: false,
 			Detail: "the run already reached a terminal state"}, nil
-	case "pending":
-		return CancelResult{Status: "idle", RunStatus: "pending",
+	case "queued", "pending":
+		// A queued run has no in-process attempt to interrupt, but it can still
+		// be durably stopped. Without the canceller the honest answer stays
+		// "idle" (the queued input will run when a worker claims it).
+		if c.Canceller != nil {
+			cancelled, finalStatus, err := c.Canceller.CancelQueuedRun(ctx, scope.TenantID, scope.SessionID, reason)
+			if err != nil {
+				return CancelResult{}, err
+			}
+			if cancelled {
+				c.mu.Lock()
+				c.setOverlayLocked(scope, "cancelled")
+				c.mu.Unlock()
+				return CancelResult{Status: "cancelled", RunStatus: "failed", Cancelled: true,
+					Detail: "the queued run was durably cancelled; committed events are kept"}, nil
+			}
+			switch finalStatus {
+			case "done", "failed", "cancelled":
+				return CancelResult{Status: "settled", RunStatus: finalStatus, Cancelled: false,
+					Detail: "the run settled before the cancel landed"}, nil
+			}
+		}
+		return CancelResult{Status: "idle", RunStatus: state.Status,
 			Detail: "the run is queued but has no active attempt to stop; the queued input will run when a worker claims it"}, nil
 	case "running":
 		return CancelResult{Status: "not_wired", RunStatus: "running"}, ErrCancelUnavailable

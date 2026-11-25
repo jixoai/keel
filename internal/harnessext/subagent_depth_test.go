@@ -12,6 +12,7 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -71,7 +72,32 @@ type depthHarness struct {
 	runner *harnessext.SubagentRunner
 }
 
-func newDepthHarness(t *testing.T, maxDepth *int) *depthHarness {
+// depthOption overrides one runner seam in the depth harness.
+type depthOption func(*harnessext.SubagentOptions)
+
+func withAudit(audit collab.AuditSink) depthOption {
+	return func(opts *harnessext.SubagentOptions) { opts.Audit = audit }
+}
+func withBotInvoker(invoker func(ctx context.Context, tenantID, parentSessionID uuid.UUID, botID string) error) depthOption {
+	return func(opts *harnessext.SubagentOptions) { opts.BotInvoker = invoker }
+}
+func withLinks(links harnessext.SubagentLinkStore) depthOption {
+	return func(opts *harnessext.SubagentOptions) { opts.Links = links }
+}
+func withControl(control *harnessext.RunControl) depthOption {
+	return func(opts *harnessext.SubagentOptions) { opts.Control = control }
+}
+func withRuns(runs harnessext.RunStatusReader) depthOption {
+	return func(opts *harnessext.SubagentOptions) { opts.Runs = runs }
+}
+func withMaxChildren(limit int) depthOption {
+	return func(opts *harnessext.SubagentOptions) { opts.MaxChildren = limit }
+}
+func withBudgetPoll(poll time.Duration) depthOption {
+	return func(opts *harnessext.SubagentOptions) { opts.BudgetPoll = poll }
+}
+
+func newDepthHarness(t *testing.T, maxDepth *int, options ...depthOption) *depthHarness {
 	t.Helper()
 	mem := kernel.NewMemStore()
 	kern := kernel.New(mem, kernel.Options{})
@@ -80,14 +106,22 @@ func newDepthHarness(t *testing.T, maxDepth *int) *depthHarness {
 	if err := gate.CreateSession(context.Background(), tenant, root); err != nil {
 		t.Fatal(err)
 	}
-	runner := harnessext.NewSubagentRunner(harnessext.SubagentOptions{
+	opts := harnessext.SubagentOptions{
 		Gate:     gate,
 		Edge:     kern,
 		Events:   kern,
 		Runs:     doneRuns{},
 		Logger:   testLogger(),
 		MaxDepth: maxDepth,
-	})
+		// The Host resolves the parent's Bot into an explicit child selection;
+		// this harness accepts any such binding (the selection gate itself is
+		// covered by its own tests).
+		ValidateSelection: func(json.RawMessage) error { return nil },
+	}
+	for _, option := range options {
+		option(&opts)
+	}
+	runner := harnessext.NewSubagentRunner(opts)
 	return &depthHarness{tenant: tenant, root: root, gate: gate, kern: kern, mem: mem, runner: runner}
 }
 
@@ -385,7 +419,9 @@ func newHostBackedHarnessWithAudit(t *testing.T, permissions collab.PermissionCh
 	if err != nil {
 		t.Fatal(err)
 	}
-	h.runner.SetHost(host)
+	if err := h.runner.SetHost(host); err != nil {
+		t.Fatalf("SetHost: %v", err)
+	}
 	return h, host, audit
 }
 
@@ -455,10 +491,47 @@ func TestSubagentHostTenantMismatch(t *testing.T) {
 	}
 }
 
-// TestSubagentCancelTreePropagates walks a two-level tree and stops both
-// children. The run rows are "pending" (no active local attempt), which the
-// cancel semantics answer as an idempotent idle stop.
-func TestSubagentCancelTreePropagates(t *testing.T) {
+// TestSubagentCancelSubtreePropagates walks a two-level tree and stops the
+// root and both descendants. Queued runs are durably cancelled through the
+// RunCanceller; a fake records every stopped session.
+func TestSubagentCancelSubtreePropagates(t *testing.T) {
+	h := newDepthHarness(t, intPtr(3))
+	canceller := &recordingCanceller{}
+	control := harnessext.NewRunControlWithCanceller(pendingRuns{}, canceller, testLogger())
+	h.runner = harnessext.NewSubagentRunner(harnessext.SubagentOptions{
+		Gate: h.gate, Edge: h.kern, Events: h.kern, Runs: doneRuns{}, Control: control,
+		Logger: testLogger(), MaxDepth: intPtr(3),
+	})
+	child := h.spawn(t, h.root, harnessext.SpawnRequest{})
+	grandchild := h.spawn(t, uuid.MustParse(child.SessionID), harnessext.SpawnRequest{})
+	result, err := h.runner.CancelSubtree(context.Background(), h.tenant, h.root, "test")
+	if err != nil {
+		t.Fatalf("cancel subtree: %v", err)
+	}
+	if !result.Cancelled || len(result.FailedIDs) != 0 {
+		t.Fatalf("cancel subtree = %+v, want a cancelled root and no failures", result)
+	}
+	want := map[string]bool{h.root.String(): true, child.SessionID: true, grandchild.SessionID: true}
+	for _, id := range result.CancelledIDs {
+		delete(want, id)
+	}
+	if len(want) != 0 {
+		t.Fatalf("cancel subtree missed %v (result %+v)", want, result)
+	}
+	if len(canceller.cancelled) != 3 {
+		t.Fatalf("durable canceller saw %d sessions, want 3", len(canceller.cancelled))
+	}
+	for _, reason := range canceller.reasons {
+		if reason != "test" {
+			t.Fatalf("queued cancel reason = %q, want the caller's reason", reason)
+		}
+	}
+}
+
+// TestSubagentCancelSubtreeWithoutCancellerIsNotFake: a queued run with no
+// durable canceller answers idle/Cancelled:false, and the subtree result must
+// report it as failed, never as cancelled.
+func TestSubagentCancelSubtreeWithoutCancellerIsNotFake(t *testing.T) {
 	h := newDepthHarness(t, intPtr(3))
 	control := harnessext.NewRunControl(pendingRuns{}, testLogger())
 	h.runner = harnessext.NewSubagentRunner(harnessext.SubagentOptions{
@@ -466,25 +539,36 @@ func TestSubagentCancelTreePropagates(t *testing.T) {
 		Logger: testLogger(), MaxDepth: intPtr(3),
 	})
 	child := h.spawn(t, h.root, harnessext.SpawnRequest{})
-	grandchild := h.spawn(t, uuid.MustParse(child.SessionID), harnessext.SpawnRequest{})
-	result, err := h.runner.CancelTree(context.Background(), h.tenant, h.root, "test")
+	result, err := h.runner.CancelSubtree(context.Background(), h.tenant, h.root, "test")
 	if err != nil {
-		t.Fatalf("cancel tree: %v", err)
+		t.Fatalf("cancel subtree: %v", err)
 	}
-	if len(result.Cancelled) != 2 || len(result.Failed) != 0 {
-		t.Fatalf("cancel tree = %+v, want both descendants cancelled", result)
+	if len(result.CancelledIDs) != 0 || len(result.FailedIDs) != 2 {
+		t.Fatalf("no-canceller subtree = %+v, want root+child reported failed", result)
 	}
-	want := map[string]bool{child.SessionID: true, grandchild.SessionID: true}
-	for _, id := range result.Cancelled {
-		delete(want, id)
-	}
-	if len(want) != 0 {
-		t.Fatalf("cancel tree missed %v", want)
+	if result.FailedIDs[0] != h.root.String() || result.FailedIDs[1] != child.SessionID {
+		t.Fatalf("failed ids = %v", result.FailedIDs)
 	}
 }
 
-// pendingRuns answers "pending" so CancelTree sees a queued run (nothing to
-// interrupt) instead of an unreachable local attempt.
+// recordingCanceller is the durable queued-run canceller: it records the
+// stop and reports success.
+type recordingCanceller struct {
+	mu        sync.Mutex
+	cancelled []uuid.UUID
+	reasons   []string
+}
+
+func (c *recordingCanceller) CancelQueuedRun(_ context.Context, _ uuid.UUID, sessionID uuid.UUID, reason string) (bool, string, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.cancelled = append(c.cancelled, sessionID)
+	c.reasons = append(c.reasons, reason)
+	return true, "failed", nil
+}
+
+// pendingRuns answers "pending" so CancelSubtree sees a queued run (nothing to
+// interrupt locally) instead of an unreachable local attempt.
 type pendingRuns struct{}
 
 func (pendingRuns) RunState(context.Context, uuid.UUID, uuid.UUID) (harnessext.RunState, error) {
