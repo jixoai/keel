@@ -324,12 +324,12 @@ func (c superagentTreeCanceller) CancelTree(ctx context.Context, tenantID, sessi
 	if c.runner == nil {
 		return nil
 	}
-	result, err := c.runner.CancelTree(ctx, tenantID, sessionID, reason)
+	result, err := c.runner.CancelSubtree(ctx, tenantID, sessionID, reason)
 	if err != nil {
 		return err
 	}
-	if len(result.Failed) > 0 {
-		return fmt.Errorf("superagent: %d worker descendants refused cancellation", len(result.Failed))
+	if len(result.FailedIDs) > 0 {
+		return fmt.Errorf("superagent: %d worker descendants refused cancellation", len(result.FailedIDs))
 	}
 	return nil
 }
