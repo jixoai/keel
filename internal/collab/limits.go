@@ -6,19 +6,18 @@ import "fmt"
 // every level, which makes the one direction explicit: a tenant ceiling is the
 // hard upper bound, and a mode, WorkItem or request may only narrow it.
 //
-// Zero semantics are deliberate:
+// Zero semantics for the numeric dimensions are deliberate:
 //   - on a ceiling, 0 means "no cap";
 //   - on a request, 0 means "inherit the effective cap".
 //
-// NarrowedBy resolves both: when either side is 0 the other wins; when both
-// are non-zero the smaller wins.
+// Depth is different: it has a three-state contract (forbidden / unlimited /
+// limited) that a single integer cannot express without overloading zero. It is
+// therefore a DepthPolicy, and a ModeDescriptor must declare one explicitly.
 type Limits struct {
-	// MaxDepth bounds nested mode sessions. A top-level session has depth 0,
-	// so MaxDepth=3 permits children through depth 3. The core zero means
-	// "inherit" on a request and "no core cap" on a ceiling; mode-specific
-	// encodings (the sub-agent contract's -1/unlimited and 0/forbidden
-	// settings) are resolved by the mode change before it calls Host.
-	MaxDepth int `json:"maxDepth,omitempty"`
+	// Depth is the explicit delegation-depth policy. Unlike the numeric
+	// dimensions, depth is never "zero means inherit and unlimited and
+	// forbidden" at the same time.
+	Depth DepthPolicy `json:"depth"`
 	// MaxChildren bounds the concurrently active children of one session.
 	MaxChildren int `json:"maxChildren,omitempty"`
 	// MaxConcurrent bounds concurrently active sessions of one mode in the
@@ -30,6 +29,132 @@ type Limits struct {
 	MaxTokens int `json:"maxTokens,omitempty"`
 	// MaxDurationMs bounds one session's wall-clock duration.
 	MaxDurationMs int64 `json:"maxDurationMs,omitempty"`
+}
+
+// DepthMode is the closed depth-policy state.
+type DepthMode string
+
+const (
+	// DepthUnset is the zero policy. At the request/WorkItem level it inherits
+	// the effective cap; a ModeDescriptor is rejected without an explicit
+	// policy.
+	DepthUnset DepthMode = ""
+	// DepthLimited caps delegation at Max (main is depth 0, children may reach
+	// depth Max).
+	DepthLimited DepthMode = "limited"
+	// DepthUnlimited removes the depth cap (budget, width, concurrency and
+	// permission checks still apply).
+	DepthUnlimited DepthMode = "unlimited"
+	// DepthForbidden rejects every child creation.
+	DepthForbidden DepthMode = "forbidden"
+)
+
+// DepthPolicy is the explicit three-state depth contract. Max is meaningful
+// only for DepthLimited.
+type DepthPolicy struct {
+	Mode DepthMode `json:"mode"`
+	Max  int       `json:"max,omitempty"`
+}
+
+// LimitedDepth builds a finite depth policy. Max must be at least 1 (main is
+// depth 0; 0 as a finite cap would be indistinguishable from "forbidden").
+func LimitedDepth(max int) DepthPolicy { return DepthPolicy{Mode: DepthLimited, Max: max} }
+
+// UnlimitedDepth builds a policy with no depth cap.
+func UnlimitedDepth() DepthPolicy { return DepthPolicy{Mode: DepthUnlimited} }
+
+// ForbiddenDepth builds a policy that rejects every child.
+func ForbiddenDepth() DepthPolicy { return DepthPolicy{Mode: DepthForbidden} }
+
+// IsSet reports whether a policy was declared.
+func (p DepthPolicy) IsSet() bool { return p.Mode != DepthUnset }
+
+// Validate checks the state/field combination.
+func (p DepthPolicy) Validate() error {
+	switch p.Mode {
+	case DepthUnset:
+		if p.Max != 0 {
+			return fmt.Errorf("%w: depth.max is only valid with mode=limited", ErrInvalidRequest)
+		}
+	case DepthLimited:
+		if p.Max < 1 {
+			return fmt.Errorf("%w: limited depth requires max >= 1 (use forbidden for 0)", ErrInvalidRequest)
+		}
+	case DepthUnlimited, DepthForbidden:
+		if p.Max != 0 {
+			return fmt.Errorf("%w: depth.max is only valid with mode=limited", ErrInvalidRequest)
+		}
+	default:
+		return fmt.Errorf("%w: depth mode %q is not in the closed vocabulary", ErrInvalidRequest, p.Mode)
+	}
+	return nil
+}
+
+// Allows reports whether a session at childDepth may be created. A top-level
+// session is depth 0, so a limited policy with Max=3 allows depths 1..3.
+func (p DepthPolicy) Allows(childDepth int) bool {
+	switch p.Mode {
+	case DepthForbidden:
+		return false
+	case DepthLimited:
+		return childDepth <= p.Max
+	default:
+		// Unlimited and unset (no effective policy) allow; a mode descriptor
+		// cannot be unset, so unset only reaches here through a bare request.
+		return true
+	}
+}
+
+// NarrowedBy returns the effective policy under a ceiling. A ceiling narrows a
+// wider request; it never widens one. Unset/unlimited ceilings do not change
+// the request.
+func (p DepthPolicy) NarrowedBy(ceiling DepthPolicy) DepthPolicy {
+	if !ceiling.IsSet() || ceiling.Mode == DepthUnlimited {
+		return p
+	}
+	if ceiling.Mode == DepthForbidden {
+		return ForbiddenDepth()
+	}
+	// A limited ceiling.
+	switch p.Mode {
+	case DepthForbidden:
+		return ForbiddenDepth()
+	case DepthLimited:
+		if p.Max < ceiling.Max {
+			return p
+		}
+		return ceiling
+	default:
+		// Unset/unlimited inherits the finite ceiling.
+		return ceiling
+	}
+}
+
+// Exceeds reports whether the policy asks for more than a ceiling. An unset
+// policy inherits and never exceeds; forbidden never exceeds.
+func (p DepthPolicy) Exceeds(ceiling DepthPolicy) *Violation {
+	if !ceiling.IsSet() || ceiling.Mode == DepthUnlimited {
+		return nil
+	}
+	if ceiling.Mode == DepthForbidden {
+		if !p.IsSet() || p.Mode == DepthForbidden {
+			return nil
+		}
+		return &Violation{Field: "depth", Detail: "the ceiling forbids delegation"}
+	}
+	// A limited ceiling.
+	switch p.Mode {
+	case DepthUnset, DepthForbidden:
+		return nil
+	case DepthUnlimited:
+		return &Violation{Field: "depth", Detail: fmt.Sprintf("unlimited depth exceeds the ceiling of %d", ceiling.Max)}
+	case DepthLimited:
+		if p.Max > ceiling.Max {
+			return &Violation{Field: "depth", Requested: int64(p.Max), Limit: int64(ceiling.Max),
+				Detail: fmt.Sprintf("depth %d exceeds the ceiling of %d", p.Max, ceiling.Max)}
+		}
+	}
+	return nil
 }
 
 // Budget is one session's request-level budget. It is a narrower view of
@@ -58,13 +183,15 @@ func (b Budget) Validate() error {
 	return nil
 }
 
-// Validate rejects negative dimensions. Zero is valid everywhere.
+// Validate rejects negative dimensions and an invalid depth policy.
 func (l Limits) Validate() error {
+	if err := l.Depth.Validate(); err != nil {
+		return err
+	}
 	fields := []struct {
 		name  string
 		value int64
 	}{
-		{"maxDepth", int64(l.MaxDepth)},
 		{"maxChildren", int64(l.MaxChildren)},
 		{"maxConcurrent", int64(l.MaxConcurrent)},
 		{"maxTurns", int64(l.MaxTurns)},
@@ -83,7 +210,7 @@ func (l Limits) Validate() error {
 // exceed either input on any dimension.
 func (l Limits) NarrowedBy(ceiling Limits) Limits {
 	return Limits{
-		MaxDepth:      minNonZero(l.MaxDepth, ceiling.MaxDepth),
+		Depth:         l.Depth.NarrowedBy(ceiling.Depth),
 		MaxChildren:   minNonZero(l.MaxChildren, ceiling.MaxChildren),
 		MaxConcurrent: minNonZero(l.MaxConcurrent, ceiling.MaxConcurrent),
 		MaxTurns:      minNonZero(l.MaxTurns, ceiling.MaxTurns),
@@ -101,21 +228,27 @@ type Violation struct {
 	Field     string `json:"field"`
 	Requested int64  `json:"requested"`
 	Limit     int64  `json:"limit"`
+	Detail    string `json:"detail,omitempty"`
 }
 
 func (v Violation) String() string {
+	if v.Detail != "" {
+		return v.Detail
+	}
 	return fmt.Sprintf("%s: requested %d, limit %d", v.Field, v.Requested, v.Limit)
 }
 
 // Exceeds reports the first dimension on which l asks for more than ceiling.
 // A zero request inherits and never exceeds; a zero ceiling is unlimited.
 func (l Limits) Exceeds(ceiling Limits) *Violation {
+	if violation := l.Depth.Exceeds(ceiling.Depth); violation != nil {
+		return violation
+	}
 	checks := []struct {
 		field     string
 		requested int64
 		limit     int64
 	}{
-		{"maxDepth", int64(l.MaxDepth), int64(ceiling.MaxDepth)},
 		{"maxChildren", int64(l.MaxChildren), int64(ceiling.MaxChildren)},
 		{"maxConcurrent", int64(l.MaxConcurrent), int64(ceiling.MaxConcurrent)},
 		{"maxTurns", int64(l.MaxTurns), int64(ceiling.MaxTurns)},

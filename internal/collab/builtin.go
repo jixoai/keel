@@ -28,11 +28,11 @@ func SubagentMode() ModeDescriptor {
 		Inputs:       []string{"task", "botId", "budget"},
 		Outputs:      []string{"summary", "artifacts", "usage"},
 		Capabilities: []Capability{CapabilityAttention},
-		// These are mode ceilings/defaults. The registry narrows them by the
-		// tenant ceiling; a request narrows them further. MaxDepth is the
-		// default depth cap (3), not an arbitrary wider ceiling.
+		// Depth is an explicit policy, not an overloaded integer: default is
+		// limited to depth 3; -1/unlimited and 0/forbidden are DepthPolicy
+		// states the sub-agent change maps from its user-facing maxDepth.
 		Limits: Limits{
-			MaxDepth:      DefaultSubagentMaxDepth,
+			Depth:         LimitedDepth(DefaultSubagentMaxDepth),
 			MaxChildren:   DefaultSubagentMaxChildren,
 			MaxConcurrent: 16,
 			MaxTurns:      100,
@@ -63,7 +63,7 @@ func SuperagentMode() ModeDescriptor {
 		Outputs:      []string{"ticketResult", "attention", "links"},
 		Capabilities: []Capability{CapabilityAttention, CapabilitySource, CapabilityChannel},
 		Limits: Limits{
-			MaxDepth:      4,
+			Depth:         LimitedDepth(4),
 			MaxChildren:   32,
 			MaxConcurrent: 32,
 			MaxTurns:      200,

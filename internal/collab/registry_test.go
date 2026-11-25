@@ -9,6 +9,9 @@ import (
 )
 
 func testMode(limits collab.Limits) collab.ModeDescriptor {
+	if !limits.Depth.IsSet() {
+		limits.Depth = collab.UnlimitedDepth()
+	}
 	return collab.ModeDescriptor{
 		ID:          "test.mode",
 		Title:       "Test mode",
@@ -43,7 +46,7 @@ func newRegistryFor(t *testing.T, tenantID uuid.UUID, ceiling collab.Limits) *co
 
 func TestRegistryRegistersBuiltinModesAndProjects(t *testing.T) {
 	registry := newRegistry(t, collab.Limits{
-		MaxDepth: 8, MaxChildren: 32, MaxConcurrent: 64,
+		Depth: collab.LimitedDepth(8), MaxChildren: 32, MaxConcurrent: 64,
 		MaxTurns: 500, MaxTokens: 5_000_000, MaxDurationMs: 3_600_000,
 	})
 	for _, descriptor := range collab.BuiltinModes() {
@@ -80,7 +83,7 @@ func TestRegistryRegistersBuiltinModesAndProjects(t *testing.T) {
 	}
 
 	// The tenant ceiling is a hard upper bound, even for a builtin descriptor.
-	narrow := newRegistry(t, collab.Limits{MaxDepth: 2})
+	narrow := newRegistry(t, collab.Limits{Depth: collab.LimitedDepth(2)})
 	if err := narrow.Register(collab.SubagentMode()); err != nil {
 		t.Fatalf("Register(subagent): %v", err)
 	}
@@ -88,8 +91,8 @@ func TestRegistryRegistersBuiltinModesAndProjects(t *testing.T) {
 	if !ok {
 		t.Fatal("Get(subagent) missing")
 	}
-	if view.Limits.MaxDepth != 2 {
-		t.Fatalf("narrowed MaxDepth = %d, want 2", view.Limits.MaxDepth)
+	if view.Limits.Depth != collab.LimitedDepth(2) {
+		t.Fatalf("narrowed depth = %+v, want limited(2)", view.Limits.Depth)
 	}
 }
 
@@ -101,8 +104,8 @@ func TestSubagentModeDefaultDepthIsThree(t *testing.T) {
 		t.Fatalf("DefaultSubagentMaxDepth = %d, want 3", collab.DefaultSubagentMaxDepth)
 	}
 	descriptor := collab.SubagentMode()
-	if descriptor.Limits.MaxDepth != collab.DefaultSubagentMaxDepth {
-		t.Fatalf("SubagentMode MaxDepth = %d, want %d", descriptor.Limits.MaxDepth, collab.DefaultSubagentMaxDepth)
+	if descriptor.Limits.Depth != collab.LimitedDepth(collab.DefaultSubagentMaxDepth) {
+		t.Fatalf("SubagentMode depth = %+v, want limited(%d)", descriptor.Limits.Depth, collab.DefaultSubagentMaxDepth)
 	}
 	if descriptor.Limits.MaxChildren != collab.DefaultSubagentMaxChildren {
 		t.Fatalf("SubagentMode MaxChildren = %d, want %d", descriptor.Limits.MaxChildren, collab.DefaultSubagentMaxChildren)
@@ -167,7 +170,12 @@ func TestRegistryRejectsInvalidDescriptors(t *testing.T) {
 			return descriptor
 		}(),
 		"negative limit": func() collab.ModeDescriptor {
-			descriptor := testMode(collab.Limits{MaxDepth: -1})
+			descriptor := testMode(collab.Limits{MaxChildren: -1})
+			return descriptor
+		}(),
+		"no depth policy": func() collab.ModeDescriptor {
+			descriptor := testMode(collab.Limits{})
+			descriptor.Limits.Depth = collab.DepthPolicy{}
 			return descriptor
 		}(),
 	}
@@ -183,7 +191,7 @@ func TestRegistryRejectsInvalidDescriptors(t *testing.T) {
 
 func TestRegistryDisableKeepsDescriptor(t *testing.T) {
 	registry := newRegistry(t, collab.Limits{})
-	if err := registry.Register(testMode(collab.Limits{MaxDepth: 3})); err != nil {
+	if err := registry.Register(testMode(collab.Limits{Depth: collab.LimitedDepth(3)})); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
 	if err := registry.SetEnabled("test.mode", false); err != nil {
@@ -210,7 +218,7 @@ func TestRegistryDisableKeepsDescriptor(t *testing.T) {
 
 func TestRegistryProjectionIsACopy(t *testing.T) {
 	registry := newRegistry(t, collab.Limits{})
-	if err := registry.Register(testMode(collab.Limits{MaxDepth: 3})); err != nil {
+	if err := registry.Register(testMode(collab.Limits{Depth: collab.LimitedDepth(3)})); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
 	view, _ := registry.Get("test.mode")

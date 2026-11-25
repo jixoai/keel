@@ -12,13 +12,13 @@ import (
 // collaboration mode (change keel-collab-core). A mode descriptor and a
 // per-request budget may only narrow it; nothing can raise it at runtime.
 //
-// MaxDepth is deliberately 0 ("no core cap"): the sub-agent contract encodes
-// -1/unlimited and 0/forbidden, which the mode's request layer resolves before
-// it calls the Host. A numeric ceiling here would silently turn "-1" into
-// "8" and contradict the mode semantics. Width, concurrency, turns, tokens and
-// duration stay hard-capped.
+// Depth is an explicit policy, not a numeric ceiling: the sub-agent contract
+// encodes -1/unlimited and 0/forbidden, which the mode's request layer maps to
+// collab.DepthPolicy before calling the Host. The tenant ceiling therefore
+// allows the mode to choose that policy (unlimited at this level), while
+// width, concurrency, turns, tokens and duration stay hard-capped.
 var collabTenantCeiling = collab.Limits{
-	MaxDepth:      0,
+	Depth:         collab.UnlimitedDepth(),
 	MaxChildren:   32,
 	MaxConcurrent: 64,
 	MaxTurns:      500,
@@ -33,18 +33,21 @@ var collabTenantCeiling = collab.Limits{
 //
 // subagentMaxDepth is the deployment's sub-agent setting: -1 unlimited, 0
 // forbidden, positive a concrete cap. It is already resolved from serveOptions
-// (nil -> the 3-level default). The core Host only understands a positive cap,
-// so the -1/0 settings register 0 (no core cap) and the runner enforces them.
+// (nil -> the 3-level default). The core Host receives the explicit three-state
+// DepthPolicy; it never overloads zero as "default" or "unlimited".
 func newCollabModes(tenantID uuid.UUID, subagentMaxDepth int) (*collab.ModeRegistry, error) {
 	registry, err := collab.NewModeRegistry(tenantID, collabTenantCeiling)
 	if err != nil {
 		return nil, fmt.Errorf("collaboration registry: %w", err)
 	}
 	subagent := collab.SubagentMode()
-	if subagentMaxDepth < 0 {
-		subagent.Limits.MaxDepth = 0
-	} else {
-		subagent.Limits.MaxDepth = subagentMaxDepth
+	switch {
+	case subagentMaxDepth < 0:
+		subagent.Limits.Depth = collab.UnlimitedDepth()
+	case subagentMaxDepth == 0:
+		subagent.Limits.Depth = collab.ForbiddenDepth()
+	default:
+		subagent.Limits.Depth = collab.LimitedDepth(subagentMaxDepth)
 	}
 	if err := registry.Register(subagent); err != nil {
 		return nil, fmt.Errorf("register %q mode: %w", collab.ModeSubagent, err)

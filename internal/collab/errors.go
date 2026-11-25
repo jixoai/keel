@@ -29,6 +29,9 @@ var (
 	ErrWorkItemClosed        = errors.New("collab: work item is closed")
 	ErrAssignmentNotFound    = errors.New("collab: assignment not found")
 	ErrAttentionNotFound     = errors.New("collab: attention not found")
+	ErrAttentionClosed       = errors.New("collab: attention is already terminal")
+	ErrAttentionExpired      = errors.New("collab: attention deadline passed")
+	ErrAttentionConflict     = errors.New("collab: attention was already answered differently")
 	ErrPermissionDenied      = errors.New("collab: permission denied")
 	ErrLimitExceeded         = errors.New("collab: limit exceeded")
 	ErrDepthExceeded         = errors.New("collab: depth limit exceeded")
@@ -61,6 +64,9 @@ const (
 	CodeWorkItemClosed      ErrorCode = "work_item_closed"
 	CodeAssignmentNotFound  ErrorCode = "assignment_not_found"
 	CodeAttentionNotFound   ErrorCode = "attention_not_found"
+	CodeAttentionClosed     ErrorCode = "attention_closed"
+	CodeAttentionExpired    ErrorCode = "attention_expired"
+	CodeAttentionConflict   ErrorCode = "attention_conflict"
 	CodePermissionDenied    ErrorCode = "permission_denied"
 	CodeLimitExceeded       ErrorCode = "limit_exceeded"
 	CodeDepthExceeded       ErrorCode = "depth_exceeded"

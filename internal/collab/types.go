@@ -160,6 +160,9 @@ func (d ModeDescriptor) Validate() error {
 		}
 		seenCapabilities[capability] = true
 	}
+	if !d.Limits.Depth.IsSet() {
+		return invalidMode("an explicit depth policy is required")
+	}
 	if err := d.Limits.Validate(); err != nil {
 		return &Error{Kind: ErrInvalidMode, Code: CodeInvalidMode, Operation: "register_mode", Detail: err.Error()}
 	}
@@ -275,18 +278,23 @@ func (s WorkItemStatus) Closed() bool {
 // Session: a worker session may end or be replaced while the WorkItem and its
 // Assignments stay.
 type WorkItem struct {
-	ID             uuid.UUID       `json:"id"`
-	TenantID       uuid.UUID       `json:"tenantId"`
-	ModeID         string          `json:"modeId"`
-	Title          string          `json:"title"`
-	Input          json.RawMessage `json:"input,omitempty"`
-	Source         SourceRef       `json:"source"`
-	Scope          Scope           `json:"scope,omitempty"`
-	Limits         Limits          `json:"limits"`
-	Status         WorkItemStatus  `json:"status"`
-	IdempotencyKey string          `json:"idempotencyKey,omitempty"`
-	CreatedAt      time.Time       `json:"createdAt"`
-	UpdatedAt      time.Time       `json:"updatedAt"`
+	ID       uuid.UUID       `json:"id"`
+	TenantID uuid.UUID       `json:"tenantId"`
+	ModeID   string          `json:"modeId"`
+	Title    string          `json:"title"`
+	Input    json.RawMessage `json:"input,omitempty"`
+	Source   SourceRef       `json:"source"`
+	Scope    Scope           `json:"scope,omitempty"`
+	Limits   Limits          `json:"limits"`
+	Status   WorkItemStatus  `json:"status"`
+	// OwnerSessionID is the session that opened the work item (the main or
+	// orchestrator). It is the bootstrap member for Assign/Ask; a work item
+	// without an owner would have no session able to start its first
+	// assignment.
+	OwnerSessionID uuid.UUID `json:"ownerSessionId,omitempty"`
+	IdempotencyKey string    `json:"idempotencyKey,omitempty"`
+	CreatedAt      time.Time `json:"createdAt"`
+	UpdatedAt      time.Time `json:"updatedAt"`
 }
 
 // AssignmentStatus is the lifecycle of one WorkItem → Bot/Session binding. It

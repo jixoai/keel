@@ -28,6 +28,7 @@ type WorkStore interface {
 	UpdateAssignment(ctx context.Context, assignment Assignment) (Assignment, error)
 
 	CreateAttention(ctx context.Context, attention Attention) (Attention, error)
+	GetAttention(ctx context.Context, tenantID, attentionID uuid.UUID) (Attention, error)
 	UpdateAttention(ctx context.Context, attention Attention) (Attention, error)
 	ListAttentions(ctx context.Context, tenantID, workItemID uuid.UUID) ([]Attention, error)
 
@@ -49,8 +50,33 @@ type SessionState string
 const (
 	SessionActive    SessionState = "active"
 	SessionDone      SessionState = "done"
+	SessionFailed    SessionState = "failed"
 	SessionCancelled SessionState = "cancelled"
 )
+
+// SessionOutcome is the caller-reported terminal outcome of a Host-created
+// session. It releases the session's concurrency/width slot.
+type SessionOutcome string
+
+const (
+	SessionOutcomeDone      SessionOutcome = "done"
+	SessionOutcomeFailed    SessionOutcome = "failed"
+	SessionOutcomeCancelled SessionOutcome = "cancelled"
+)
+
+// State maps the outcome onto the index state.
+func (o SessionOutcome) State() (SessionState, bool) {
+	switch o {
+	case SessionOutcomeDone:
+		return SessionDone, true
+	case SessionOutcomeFailed:
+		return SessionFailed, true
+	case SessionOutcomeCancelled:
+		return SessionCancelled, true
+	default:
+		return "", false
+	}
+}
 
 // SessionRef is the Host's tracked identity of one created session. Depth is
 // the collaboration depth: a top-level session is 0, a Host-created child is
@@ -74,6 +100,13 @@ type SessionIndex interface {
 	Session(ctx context.Context, tenantID, sessionID uuid.UUID) (SessionRef, error)
 	Put(ctx context.Context, ref SessionRef) error
 	SetState(ctx context.Context, tenantID, sessionID uuid.UUID, state SessionState) error
+	// SetWorkItem binds an existing session to a WorkItem (manual takeover of a
+	// pre-existing worker session). A session already bound elsewhere must be
+	// refused by the caller.
+	SetWorkItem(ctx context.Context, tenantID, sessionID, workItemID uuid.UUID) error
+	// Children returns the direct children of a session in any state; the
+	// Cancel path walks the tree so a bare delegation is not orphaned.
+	Children(ctx context.Context, tenantID, parentSessionID uuid.UUID) ([]SessionRef, error)
 	ActiveChildren(ctx context.Context, tenantID, parentSessionID uuid.UUID) (int, error)
 	ActiveInMode(ctx context.Context, tenantID uuid.UUID, modeID string) (int, error)
 }
@@ -269,6 +302,16 @@ func (m *MemoryWorkStore) CreateAttention(_ context.Context, attention Attention
 	return cloneAttention(attention), nil
 }
 
+func (m *MemoryWorkStore) GetAttention(_ context.Context, tenantID, attentionID uuid.UUID) (Attention, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	attention, ok := m.attentions[attentionID]
+	if !ok || attention.TenantID != tenantID {
+		return Attention{}, newError(ErrAttentionNotFound, CodeAttentionNotFound, "get_attention", "attention not found")
+	}
+	return cloneAttention(attention), nil
+}
+
 func (m *MemoryWorkStore) UpdateAttention(_ context.Context, attention Attention) (Attention, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -374,6 +417,36 @@ func (m *MemorySessionIndex) SetState(_ context.Context, tenantID, sessionID uui
 	ref.State = state
 	m.sessions[sessionID] = ref
 	return nil
+}
+
+func (m *MemorySessionIndex) SetWorkItem(_ context.Context, tenantID, sessionID, workItemID uuid.UUID) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	ref, ok := m.sessions[sessionID]
+	if !ok || ref.TenantID != tenantID {
+		return newError(ErrSessionNotFound, CodeSessionNotFound, "set_session_work_item", "session not found")
+	}
+	ref.WorkItemID = workItemID
+	m.sessions[sessionID] = ref
+	return nil
+}
+
+func (m *MemorySessionIndex) Children(_ context.Context, tenantID, parentSessionID uuid.UUID) ([]SessionRef, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]SessionRef, 0)
+	for _, ref := range m.sessions {
+		if ref.TenantID == tenantID && ref.ParentSessionID == parentSessionID {
+			out = append(out, ref)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if !out[i].CreatedAt.Equal(out[j].CreatedAt) {
+			return out[i].CreatedAt.Before(out[j].CreatedAt)
+		}
+		return out[i].SessionID.String() < out[j].SessionID.String()
+	})
+	return out, nil
 }
 
 func (m *MemorySessionIndex) ActiveChildren(_ context.Context, tenantID, parentSessionID uuid.UUID) (int, error) {
