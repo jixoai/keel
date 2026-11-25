@@ -38,12 +38,14 @@ test("TUI: 模型分区——一个 provider 一张卡片，带已配置/不可�
 
   // ② One card per provider, grouped by provider (not rows in one list).
   expect(app.shows("id:provider-card-a6api")).toBe(true);
+  expect(app.shows("id:provider-card-magpie")).toBe(true);
   expect(app.shows("id:provider-card-anthropic")).toBe(true);
 
-  // Status badges: two credentials resolve; Anthropic's does not.
+  // Status badges: three credentials resolve; Anthropic's does not.
   const texts = app.texts();
-  expect(texts.filter((text) => text === "已配置").length).toBe(2);
+  expect(texts.filter((text) => text === "已配置").length).toBe(3);
   expect(texts.filter((text) => text === "不可用").length).toBe(1);
+  expect(app.shows("id:provider-model-magpie-free")).toBe(true);
 
   // Model chips live on the card, in the reader's words.
   expect(app.shows("id:provider-model-s2api-deepseek-v4.1-flash")).toBe(true);
@@ -93,9 +95,9 @@ test("TUI: 模型分区——保存后回到列表，卡片状态与徽标随之
   await app.waitFor("text:/credential MISSING_KEY is not set in this process/");
 
   const texts = app.texts();
-  // A6API joined Anthropic in the 不可用 state; S2API is still 已配置.
+  // A6API joined Anthropic in the 不可用 state; S2API and Magpie stay 已配置.
   expect(texts.filter((text) => text === "不可用").length).toBe(2);
-  expect(texts.filter((text) => text === "已配置").length).toBe(1);
+  expect(texts.filter((text) => text === "已配置").length).toBe(2);
   expect(app.value("id:provider-config-credential")).toBe(null);
 });
 
@@ -148,7 +150,7 @@ test("TUI: 模型分区——添加 Provider 的三步路径（点添加→填�
   await app.scroll("id:settings-models-scroll", 4000);
   await app.waitFor("id:provider-card-local");
   expect(app.texts()).toContain("Local Gateway");
-  expect(app.texts().filter((text) => text === "已配置").length).toBe(3);
+  expect(app.texts().filter((text) => text === "已配置").length).toBe(4);
 });
 
 // ---- keel-model-catalog A: direct credential entry ------------------------

@@ -236,7 +236,7 @@ func TestDocumentRulesKeepLegacyNormalization(t *testing.T) {
 		},
 	}, LegacyAgent{Model: "deepseek-v4.1-flash"})
 	resolution := resolveFrom(t, cat, overlay)
-	if len(resolution.Providers) != 8 {
+	if len(resolution.Providers) != 9 {
 		t.Fatalf("providers = %d, want the catalog providers plus the legacy provider", len(resolution.Providers))
 	}
 	legacy := mustFindProvider(t, resolution, "legacy")

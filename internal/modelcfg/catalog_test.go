@@ -14,7 +14,7 @@ func TestEmbeddedCatalogResolves(t *testing.T) {
 	cat := EmbeddedBuiltin()
 	resolution := resolveFrom(t, cat, Overlay{})
 
-	wantProviders := []string{"s2api", "a6api", "deepseek", "anthropic", "openai", "openrouter", "ollama"}
+	wantProviders := []string{"s2api", "a6api", "magpie", "deepseek", "anthropic", "openai", "openrouter", "ollama"}
 	if len(resolution.Providers) != len(wantProviders) {
 		t.Fatalf("providers = %d, want %d", len(resolution.Providers), len(wantProviders))
 	}
@@ -59,8 +59,8 @@ func TestEmbeddedCatalogResolves(t *testing.T) {
 	}
 
 	models := resolution.Models()
-	if len(models) != 9 {
-		t.Fatalf("selectable models = %d, want 9", len(models))
+	if len(models) != 11 {
+		t.Fatalf("selectable models = %d, want 11", len(models))
 	}
 	for _, listed := range models {
 		if !listed.Selectable {

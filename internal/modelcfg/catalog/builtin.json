@@ -34,6 +34,23 @@
       "visibility": "visible"
     },
     {
+      "id": "magpie",
+      "name": "Magpie",
+      "api": {
+        "type": "anthropic-messages",
+        "baseUrl": "https://magpie.aiweb.xin"
+      },
+      "access": {
+        "type": "api-key",
+        "env": "MAGPIE_API_KEY"
+      },
+      "modelIds": [
+        "deepseek-v4.1-flash",
+        "free"
+      ],
+      "visibility": "visible"
+    },
+    {
       "id": "deepseek",
       "name": "DeepSeek",
       "api": {
@@ -251,5 +268,19 @@
     }
   ],
   "siteRules": [],
-  "providerModelRules": []
+  "providerModelRules": [
+    {
+      "providerId": "magpie",
+      "modelId": "free",
+      "config": {
+        "pricing": {
+          "currency": "USD",
+          "input": 0,
+          "output": 0,
+          "free": true,
+          "notes": "free tier"
+        }
+      }
+    }
+  ]
 }

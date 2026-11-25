@@ -138,7 +138,7 @@ const asRecord = (value: unknown): Record<string, unknown> =>
 const REASONING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
 
 /** Credentials this demo process can resolve (the analogue of env vars). */
-const DEMO_CREDENTIALS = ["S2API_KEY", "A6API_KEY"];
+const DEMO_CREDENTIALS = ["S2API_KEY", "A6API_KEY", "MAGPIE_API_KEY"];
 
 /** The demo provider's live line-up (what a discovery probe would answer).
  * Two ids are deliberately not declared in the demo document, so the merge
@@ -173,6 +173,14 @@ const demoDeploymentDocument = (): Record<string, unknown> => ({
       api: { type: "openai-chat-completions", baseUrl: "https://api.a6api.com/v1" },
       access: { type: "api-key", env: "A6API_KEY" },
       modelIds: ["deepseek-v4.1-flash"],
+      visibility: "visible",
+    },
+    {
+      id: "magpie",
+      name: "Magpie",
+      api: { type: "anthropic-messages", baseUrl: "https://magpie.aiweb.xin" },
+      access: { type: "api-key", env: "MAGPIE_API_KEY" },
+      modelIds: ["deepseek-v4.1-flash", "free"],
       visibility: "visible",
     },
     {
@@ -226,6 +234,9 @@ const demoPricing = (modelId: string): ModelPricingView | undefined => {
     return { currency: "USD", input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75, notes: "list price" };
   }
   if (modelId === "deepseek-v4.1-pro") {
+    return { currency: "USD", input: 0, output: 0, free: true, notes: "free tier" };
+  }
+  if (modelId === "free") {
     return { currency: "USD", input: 0, output: 0, free: true, notes: "free tier" };
   }
   return undefined;
