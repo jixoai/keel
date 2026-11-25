@@ -49,6 +49,12 @@ var (
 	// ErrCompactDisabled reports that the effective checkpoint policy disables
 	// manual compaction.
 	ErrCompactDisabled = errors.New("harnessapi: manual compaction is disabled")
+	// ErrCompactBusy reports that the session is executing (or another manual
+	// compaction holds the run lease).
+	ErrCompactBusy = errors.New("harnessapi: session is busy")
+	// ErrCompactQuota reports that the tenant's run admission budget refuses
+	// the claim.
+	ErrCompactQuota = errors.New("harnessapi: run quota exceeded")
 )
 
 const compactRequestIDMax = 200
@@ -104,6 +110,16 @@ func (s *Server) compactSession(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusConflict, map[string]any{
 				"error":  "manual compaction is disabled by the checkpoint policy",
 				"status": "disabled",
+			})
+		case errors.Is(err, ErrCompactBusy):
+			writeJSON(w, http.StatusConflict, map[string]any{
+				"error":  "session is busy; retry after the active run settles",
+				"status": "busy",
+			})
+		case errors.Is(err, ErrCompactQuota):
+			writeJSON(w, http.StatusTooManyRequests, map[string]any{
+				"error":  "run admission quota exceeded",
+				"status": "quota",
 			})
 		case errors.Is(err, ErrExternalSession):
 			writeJSON(w, http.StatusConflict, map[string]any{

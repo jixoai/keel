@@ -53,6 +53,25 @@ type CompactionOptions struct {
 	Spill spill.Store
 }
 
+// CheckpointPolicyResolver supplies the effective checkpoint policy of one
+// session (the tenant policy narrowed by the session override). It is consulted
+// per attempt and per manual compaction, so a policy write applies to later
+// decisions without a restart. A read failure is logged and the runner falls
+// back to the tenant/generation policy.
+type CheckpointPolicyResolver interface {
+	CheckpointPolicy(ctx context.Context, tenantID, sessionID uuid.UUID) (compaction.CheckpointPolicy, error)
+}
+
+// CheckpointMetrics observes checkpoint lifecycle facts. Labels are fixed by
+// the implementation; callers pass only bounded reasons (save/summary/load/
+// corrupt/anchor/prune), never message bodies or identifiers.
+type CheckpointMetrics interface {
+	CheckpointCreated(tokensBefore, tokensAfter int)
+	CheckpointRecovered()
+	CheckpointFailed(reason string)
+	CheckpointPruned(n int64)
+}
+
 // Assembly is the host seam: the system prompt and tool registry for a run.
 // host.Host implements it; tests can supply a static assembly.
 type Assembly interface {
@@ -90,6 +109,14 @@ type Runner struct {
 	// the whole log. It is optional: a test double or a deployment without the
 	// seam falls back to the full committed log.
 	Checkpoints kernel.CheckpointStore
+	// CheckpointPolicies resolves the attempt's effective checkpoint policy
+	// (tenant ceiling narrowed by the session override). Nil uses the
+	// generation's CompactionOptions policy. It is consulted per attempt and per
+	// manual compaction, so a policy write affects later decisions.
+	CheckpointPolicies CheckpointPolicyResolver
+	// CheckpointMetrics observes checkpoint lifecycle facts (optional). Nil is a
+	// no-op.
+	CheckpointMetrics CheckpointMetrics
 	// ForkPrefixes, when set, resolves the parent ledger prefix a forked session
 	// inherits. The prefix is read at run time from the parent log (a reference,
 	// never a copy) and prepended to the model transcript; it never participates
@@ -1058,7 +1085,7 @@ func (r *Runner) run(ctx context.Context, lease kernel.Lease, span telemetry.Spa
 		// when the window is unknown: hygiene's own bounds are token-based and
 		// do not need the model's window. Auto-compaction itself still refuses
 		// to run without a window.
-		cfg.Compaction = r.compactionSettings(window)
+		cfg.Compaction = r.compactionSettings(ctx, lease.Scope, window)
 		cfg.Hygiene = r.Compaction.Hygiene
 		cfg.Spill = r.Compaction.Spill
 		if r.Hooks != nil {
@@ -1139,6 +1166,9 @@ func (r *Runner) run(ctx context.Context, lease kernel.Lease, span telemetry.Spa
 						Reason: "threshold", ErrorMessage: e.ErrorMessage, Aborted: ctx.Err() != nil,
 					})
 				}
+				if r.CheckpointMetrics != nil {
+					r.CheckpointMetrics.CheckpointFailed("summary")
+				}
 				continue
 			}
 			if r.Hooks != nil {
@@ -1155,6 +1185,9 @@ func (r *Runner) run(ctx context.Context, lease kernel.Lease, span telemetry.Spa
 			})
 			if err != nil {
 				r.Logger.Warn("persist compaction", "err", err)
+				if r.CheckpointMetrics != nil {
+					r.CheckpointMetrics.CheckpointFailed("save")
+				}
 				continue
 			}
 			seq, err := r.commitEvent(ctx, lease, kernel.CommitRequest{
@@ -1166,6 +1199,9 @@ func (r *Runner) run(ctx context.Context, lease kernel.Lease, span telemetry.Spa
 				// attempt would replay the turn from the uncompacted log. Keep
 				// the run moving and let the next turn try again.
 				r.Logger.Warn("persist compaction", "err", err)
+				if r.CheckpointMetrics != nil {
+					r.CheckpointMetrics.CheckpointFailed("save")
+				}
 				continue
 			}
 			cursor = seq
@@ -1201,10 +1237,16 @@ func (r *Runner) run(ctx context.Context, lease kernel.Lease, span telemetry.Spa
 				Summary:       e.Summary,
 				TokensBefore:  e.TokensBefore,
 				TokensAfter:   e.TokensAfter,
-				PolicyVersion: r.checkpointPolicy().Version(),
+				PolicyVersion: r.checkpointPolicy(ctx, lease.Scope).Version(),
 			}); err != nil {
 				r.Logger.Warn("save checkpoint", "session_id", lease.Scope.SessionID, "seq", seq, "err", err)
+				if r.CheckpointMetrics != nil {
+					r.CheckpointMetrics.CheckpointFailed("save")
+				}
 			} else {
+				if r.CheckpointMetrics != nil {
+					r.CheckpointMetrics.CheckpointCreated(e.TokensBefore, e.TokensAfter)
+				}
 				r.pruneCheckpoints(ctx, lease.Scope)
 			}
 		case agentcore.MessageEndEvent:
@@ -1726,6 +1768,14 @@ func (r *Runner) loadEvents(ctx context.Context, scope kernel.Scope) ([]store.Ev
 // impossible boundary). Recovery fails closed: the corrupt row is ignored and
 // the model sees the full event log, never a silently truncated context.
 func (r *Runner) modelView(ctx context.Context, scope kernel.Scope, events []store.Event) ([]store.Event, *agentcore.CompactionMessage, int64) {
+	return r.loadModelView(ctx, scope, events, true)
+}
+
+// loadModelView is modelView with an explicit metrics switch: the anchor
+// resolution inside an automatic compaction reads the same projection but must
+// not count as a recovery (the context it is rebuilding belongs to a compaction
+// decision, not to a model request).
+func (r *Runner) loadModelView(ctx context.Context, scope kernel.Scope, events []store.Event, observe bool) ([]store.Event, *agentcore.CompactionMessage, int64) {
 	if r.Checkpoints == nil {
 		return events, nil, 0
 	}
@@ -1733,6 +1783,9 @@ func (r *Runner) modelView(ctx context.Context, scope kernel.Scope, events []sto
 	if err != nil {
 		// The checkpoint is a projection: a read failure must not stop the run.
 		r.Logger.Warn("load checkpoint", "session_id", scope.SessionID, "err", err)
+		if observe && r.CheckpointMetrics != nil {
+			r.CheckpointMetrics.CheckpointFailed("load")
+		}
 		return events, nil, 0
 	}
 	if !found {
@@ -1741,7 +1794,13 @@ func (r *Runner) modelView(ctx context.Context, scope kernel.Scope, events []sto
 	if problem := corruptCheckpointReason(cp, events); problem != "" {
 		r.Logger.Warn("checkpoint unusable; rebuilding from the full event log",
 			"session_id", scope.SessionID, "checkpoint_seq", cp.UptoSeq, "reason", problem)
+		if observe && r.CheckpointMetrics != nil {
+			r.CheckpointMetrics.CheckpointFailed("corrupt")
+		}
 		return events, nil, 0
+	}
+	if observe && r.CheckpointMetrics != nil {
+		r.CheckpointMetrics.CheckpointRecovered()
 	}
 	trimmed := make([]store.Event, 0, len(events))
 	for _, ev := range events {
@@ -1851,7 +1910,7 @@ func (r *Runner) checkpointAnchor(ctx context.Context, scope kernel.Scope, first
 		}
 		before = append(before, ev)
 	}
-	view, checkpoint, checkpointSeq := r.modelView(ctx, scope, before)
+	view, checkpoint, checkpointSeq := r.loadModelView(ctx, scope, before, false)
 	_, seqs := DecodeMessages(view, nil)
 	if checkpoint != nil {
 		// The loop's pre-compaction view starts with the previous checkpoint
@@ -1868,13 +1927,35 @@ func (r *Runner) checkpointAnchor(ctx context.Context, scope kernel.Scope, first
 	return anchor
 }
 
-// checkpointPolicy is the effective checkpoint policy of this runner. A host
-// that supplies one is authoritative; otherwise the policy is derived from the
-// loop settings so the historical deployment keeps its behavior (automatic
-// compaction on/off, the same retained budget, unlimited projections, no
-// expiry). The derived policy still allows manual compaction because the loop
-// settings never modeled it.
-func (r *Runner) checkpointPolicy() compaction.CheckpointPolicy {
+// checkpointPolicy is the effective checkpoint policy of this attempt. A
+// resolver (the session policy service) is authoritative when set: it narrows
+// the tenant policy with the session override and can fail; a failure falls
+// back to the generation policy, because a policy read must never stop a run.
+// Without a resolver the generation policy is used directly.
+func (r *Runner) checkpointPolicy(ctx context.Context, scope kernel.Scope) compaction.CheckpointPolicy {
+	fallback := r.generationCheckpointPolicy()
+	if r.CheckpointPolicies == nil {
+		return fallback
+	}
+	policy, err := r.CheckpointPolicies.CheckpointPolicy(ctx, scope.TenantID, scope.SessionID)
+	if err != nil {
+		r.Logger.Warn("resolve checkpoint policy", "session_id", scope.SessionID, "err", err)
+		return fallback
+	}
+	if err := policy.Validate(); err != nil {
+		r.Logger.Warn("invalid checkpoint policy", "session_id", scope.SessionID, "err", err)
+		return fallback
+	}
+	return policy
+}
+
+// generationCheckpointPolicy is the policy frozen into this runner's
+// CompactionOptions. A host that supplies one is authoritative; otherwise the
+// policy is derived from the loop settings so the historical deployment keeps
+// its behavior (automatic compaction on/off, the same retained budget,
+// unlimited projections, no expiry). The derived policy still allows manual
+// compaction because the loop settings never modeled it.
+func (r *Runner) generationCheckpointPolicy() compaction.CheckpointPolicy {
 	if r.Compaction != nil && r.Compaction.Policy != nil {
 		return *r.Compaction.Policy
 	}
@@ -1888,16 +1969,21 @@ func (r *Runner) checkpointPolicy() compaction.CheckpointPolicy {
 }
 
 // compactionSettings derives the loop's settings from the configured ones and
-// the checkpoint policy. An absolute policy threshold is expressed as a reserve
-// against the window the attempt actually runs with, so the loop's existing
-// trigger (tokens > window - reserve) is exactly the policy threshold.
-func (r *Runner) compactionSettings(window int) compaction.CompactionSettings {
+// the effective checkpoint policy. An absolute policy threshold is expressed as
+// a reserve against the window the attempt actually runs with, so the loop's
+// existing trigger (tokens > window - reserve) is exactly the policy threshold.
+func (r *Runner) compactionSettings(ctx context.Context, scope kernel.Scope, window int) compaction.CompactionSettings {
 	if r.Compaction == nil {
 		return compaction.CompactionSettings{}
 	}
 	settings := r.Compaction.Settings
-	policy := r.Compaction.Policy
-	if policy == nil || policy.ThresholdTokens <= 0 || window <= 0 {
+	policy := r.checkpointPolicy(ctx, scope)
+	// The effective policy is authoritative for the loop's on/off and retained
+	// budget too: a session that disables compaction or retains less must change
+	// the automatic trigger, not only the projection it would write.
+	settings.Enabled = policy.Enabled
+	settings.KeepRecentTokens = policy.RetainTokens
+	if policy.ThresholdTokens <= 0 || window <= 0 {
 		return settings
 	}
 	reserve := window - policy.ThresholdTokens
@@ -1917,7 +2003,7 @@ func (r *Runner) pruneCheckpoints(ctx context.Context, scope kernel.Scope) {
 	if !ok {
 		return
 	}
-	policy := r.checkpointPolicy()
+	policy := r.checkpointPolicy(ctx, scope)
 	if policy.MaxCheckpoints <= 0 && policy.TTL <= 0 {
 		return
 	}
@@ -1927,11 +2013,17 @@ func (r *Runner) pruneCheckpoints(ctx context.Context, scope kernel.Scope) {
 	})
 	if err != nil {
 		r.Logger.Warn("prune checkpoints", "session_id", scope.SessionID, "err", err)
+		if r.CheckpointMetrics != nil {
+			r.CheckpointMetrics.CheckpointFailed("prune")
+		}
 		return
 	}
 	if pruned > 0 {
 		r.Logger.Info("pruned checkpoint projections", "session_id", scope.SessionID,
 			"pruned", pruned, "max", policy.MaxCheckpoints, "ttl", policy.TTL.String())
+		if r.CheckpointMetrics != nil {
+			r.CheckpointMetrics.CheckpointPruned(pruned)
+		}
 	}
 }
 

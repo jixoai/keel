@@ -98,6 +98,10 @@ type Config struct {
 	// lease. Nil answers 501: the route exists, but the deployment has no
 	// compaction seam wired.
 	CompactSession CompactSessionFunc
+	// CheckpointPolicies is the session checkpoint policy read/write surface
+	// (GET/PUT /v1/sessions/{id}/checkpoint-policy). Nil answers 501: the routes
+	// exist, but the deployment has no policy store wired.
+	CheckpointPolicies SessionCheckpointPolicyService
 	// Decisions is the approval primitive. Nil answers 503.
 	Decisions *harnessext.DecisionBroker
 	// Approvals records and reads approval provenance (who answered, over which
@@ -427,6 +431,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("DELETE /v1/sessions/{id}", s.archiveSession)
 	s.mux.HandleFunc("POST /v1/sessions/{id}/cancel", s.cancelSession)
 	s.mux.HandleFunc("POST /v1/sessions/{id}/compact", s.compactSession)
+	s.mux.HandleFunc("GET /v1/sessions/{id}/checkpoint-policy", s.getCheckpointPolicy)
+	s.mux.HandleFunc("PUT /v1/sessions/{id}/checkpoint-policy", s.putCheckpointPolicy)
 	s.mux.HandleFunc("GET /v1/sessions/{id}/decisions", s.listDecisions)
 	s.mux.HandleFunc("POST /v1/sessions/{id}/decisions", s.openDecision)
 	s.mux.HandleFunc("GET /v1/sessions/{id}/decisions/{decisionId}", s.getDecision)

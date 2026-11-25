@@ -166,6 +166,22 @@ CREATE UNIQUE INDEX IF NOT EXISTS checkpoints_request_id
     ON checkpoints (tenant_id, session_id, request_id)
     WHERE request_id IS NOT NULL;
 
+-- session_checkpoint_policies is the per-session narrowing override of the
+-- tenant checkpoint policy. The document is opaque JSON (internal/compaction
+-- owns its schema); the effective policy is always the tenant policy narrowed
+-- by this document, so a session can never widen a tenant ceiling. revision
+-- bumps on every accepted write. This table is a policy input, not a
+-- checkpoint: deleting it changes future decisions only and never touches the
+-- event log or existing checkpoint projections.
+CREATE TABLE IF NOT EXISTS session_checkpoint_policies (
+    tenant_id  uuid NOT NULL,
+    session_id uuid NOT NULL,
+    policy     jsonb NOT NULL DEFAULT '{}'::jsonb,
+    revision   bigint NOT NULL DEFAULT 1,
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (tenant_id, session_id)
+);
+
 CREATE TABLE IF NOT EXISTS submissions (
     tenant_id     uuid NOT NULL,
     request_id    text NOT NULL,

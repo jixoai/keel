@@ -125,6 +125,24 @@ func TestCompactRouteRefusals(t *testing.T) {
 		}
 	})
 
+	t.Run("session busy", func(t *testing.T) {
+		seam := &compactFake{results: map[string]CompactResult{}, err: ErrCompactBusy}
+		server := httptest.NewServer(New(Config{CompactSession: seam.compact, Access: permitAllAccess(), Logger: testLogger()}))
+		defer server.Close()
+		if code := doJSON(t, server.Client(), http.MethodPost, server.URL+url, tenant, map[string]any{"requestId": "r1"}, nil); code != http.StatusConflict {
+			t.Fatalf("status = %d, want 409", code)
+		}
+	})
+
+	t.Run("quota refused", func(t *testing.T) {
+		seam := &compactFake{results: map[string]CompactResult{}, err: ErrCompactQuota}
+		server := httptest.NewServer(New(Config{CompactSession: seam.compact, Access: permitAllAccess(), Logger: testLogger()}))
+		defer server.Close()
+		if code := doJSON(t, server.Client(), http.MethodPost, server.URL+url, tenant, map[string]any{"requestId": "r1"}, nil); code != http.StatusTooManyRequests {
+			t.Fatalf("status = %d, want 429", code)
+		}
+	})
+
 	t.Run("unknown session", func(t *testing.T) {
 		seam := &compactFake{results: map[string]CompactResult{}, err: ErrSessionNotFound}
 		server := httptest.NewServer(New(Config{CompactSession: seam.compact, Access: permitAllAccess(), Logger: testLogger()}))

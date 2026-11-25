@@ -13,27 +13,30 @@
 
 - [x] 2.1 checkpoint + tail 恢复路径；损坏/缺失 fail closed，回退全量事件重建
       （`modelView` 结构校验 + `corruptCheckpointReason`）。
-- [x] 2.2 重启/Worker 恢复统一走 `Runner.modelView`；PG 重启恢复测试已覆盖。
-      handoff 复用同一路径，尚无专项 E2E。
+- [x] 2.2 重启/handoff/Worker 恢复统一走 `Runner.modelView`；PG 重启与 handoff
+      （新 owner/新 epoch）恢复测试已覆盖。
 - [x] 2.3 MaxCheckpoints/TTL 清理只删投影；最近有效 checkpoint 保护；事件不删
       （kernel/store/MemStore/PGStore `PruneCheckpoints`）。
-- [x] 2.4 日志：checkpoint 创建/恢复失败/清理/手动压缩均为结构化日志，只含 ids/tokens/
-      cutSeq/policyVersion，不含正文。未新增 checkpoint 专属指标（复用
-      `keel_compactions_total`）。
+- [x] 2.4 日志与指标：checkpoint 创建/恢复/失败/清理/手动压缩均为结构化日志（只含
+      ids/tokens/cutSeq/policyVersion，不含正文）；固定基数指标
+      `keel_checkpoint_created_total`/`_recovered_total`/`_failed_total{reason}`/
+      `_pruned_total`。
 
 ## 3. 手动压缩与 API/UI
 
 - [x] 3.1 `POST /v1/sessions/{id}/compact`：路由 + `session.write` 权限 + requestId 幂等 +
-      返回值 + 脱敏审计日志 + handler 测试；`Runner.CompactNow` 内部 seam + PG 测试。
-      **生产 `cmd/keel/serve.go` 尚未注入 `CompactSession`，当前返回 501 not_wired。**
-- [ ] 3.2 设置页展示策略与最近 checkpoint（只读）；README/RUNBOOK 更新（RUNBOOK 已完成，
-      设置页未接）。
+      返回值 + 脱敏审计日志 + handler/适配器测试；生产 `cmd/keel/serve.go` 已接线
+      （run lease 认领/续租/settle，busy 409、quota 429、disabled 409）。
+- [x] 3.2 session 级策略存储与 API：`session_checkpoint_policies` 表 +
+      `GET/PUT /v1/sessions/{id}/checkpoint-policy`（tenant/session/effective/narrowed
+      只读投影）；runner 每 attempt 通过 resolver 读取生效策略。设置页 UI 未接。
 - [x] 3.3 自动/手动压缩共用切点/失败语义；重复 requestId 不重复 checkpoint（投影
       request_id 唯一 + 幂等回放测试）。
 
 ## 4. 验收
 
-- [x] 4.1 测试：阈值/保留/失败/取消/重启/损坏/权限/租户/TTL/最大数。
-- [x] 4.2 `go test -race` 相关包（compaction/kernel/agent/harnessapi/store/loop/host/
-      servicehost/accessgate）+ `openspec validate --strict`。
-- [ ] 4.3 独立 reviewer 复核；E2E 报告（压缩前后、恢复、失败态）；归档。
+- [x] 4.1 测试：阈值/保留/失败/取消/重启/handoff/损坏/权限/租户/TTL/最大数/指标基数。
+- [x] 4.2 `go test -race` 相关包（compaction/kernel/agent/harnessapi/store/
+      sessionpolicy/metrics/loop/host/servicehost/accessgate/cmd-keel）+
+      `openspec validate --strict`。
+- [ ] 4.3 独立 reviewer 复核；E2E 报告（压缩前后、恢复、失败态）；设置页 UI；归档。

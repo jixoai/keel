@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -370,7 +371,7 @@ func TestCompactionSettingsPolicyThreshold(t *testing.T) {
 		Settings:      compaction.CompactionSettings{Enabled: true, ReserveTokens: 1, KeepRecentTokens: 100},
 		Policy:        &policy,
 	}}
-	settings := runner.compactionSettings(5000)
+	settings := runner.compactionSettings(context.Background(), kernel.Scope{}, 5000)
 	if settings.ReserveTokens != 4000 {
 		t.Fatalf("reserve = %d, want 4000 (window 5000 - threshold 1000)", settings.ReserveTokens)
 	}
@@ -384,7 +385,120 @@ func TestCompactionSettingsPolicyThreshold(t *testing.T) {
 	plain := &Runner{Compaction: &CompactionOptions{
 		Settings: compaction.CompactionSettings{Enabled: true, ReserveTokens: 777},
 	}}
-	if got := plain.compactionSettings(5000); got.ReserveTokens != 777 {
+	if got := plain.compactionSettings(context.Background(), kernel.Scope{}, 5000); got.ReserveTokens != 777 {
 		t.Fatalf("reserve without policy = %d, want 777", got.ReserveTokens)
+	}
+
+	// The effective policy also gates the automatic loop and its retained
+	// budget: a session disabling compaction must stop it, not just skip the
+	// checkpoint write.
+	disabled := compaction.CheckpointPolicy{Enabled: false, RetainTokens: 50, ManualCompact: true}
+	resolver := &fakePolicyResolver{policy: disabled}
+	gated := &Runner{
+		Compaction:         &CompactionOptions{Settings: compaction.CompactionSettings{Enabled: true, KeepRecentTokens: 100}},
+		CheckpointPolicies: resolver,
+	}
+	settings = gated.compactionSettings(context.Background(), kernel.Scope{}, 5000)
+	if settings.Enabled || settings.KeepRecentTokens != 50 {
+		t.Fatalf("gated settings = %+v, want disabled and retain 50", settings)
+	}
+}
+
+// TestHandoffRestoresFromCheckpoint pins the handoff path: the successor owner
+// (a different runtime id and a higher fence epoch) rebuilds the model context
+// from the checkpoint + tail, exactly like a restart. No special-case recovery
+// code exists for handoff; it is the same Runner.modelView path.
+func TestHandoffRestoresFromCheckpoint(t *testing.T) {
+	st := testStore(t)
+	ctx := context.Background()
+	tenant, session, k, cp, _ := seedCompaction(t, st)
+	scope := kernel.Scope{TenantID: tenant, SessionID: session}
+	requeue(t, st, tenant, session)
+
+	first, err := k.ClaimScope(ctx, scope, "runtime-a", time.Minute)
+	if err != nil {
+		t.Fatalf("claim runtime-a: %v", err)
+	}
+	if err := k.Release(ctx, first); err != nil {
+		t.Fatalf("release runtime-a: %v", err)
+	}
+	second, err := k.ClaimScope(ctx, scope, "runtime-b", time.Minute)
+	if err != nil {
+		t.Fatalf("claim runtime-b: %v", err)
+	}
+	if second.Token.Epoch <= first.Token.Epoch {
+		t.Fatalf("handoff epoch = %d, want > %d", second.Token.Epoch, first.Token.Epoch)
+	}
+
+	commitInput(t, k, scope, "r4", "what color did I mention?", "", nil)
+	recorder := &checkpointRecordingStream{}
+	successor, _ := newTestRunner(t, st)
+	successor.Stream = recorder.stream
+	cursor, err := successor.Run(ctx, second)
+	if err != nil {
+		t.Fatalf("successor run: %v", err)
+	}
+	if err := k.Finish(ctx, kernel.FinishRequest{Lease: second, Cursor: cursor, MaxAttempts: 3}); err != nil {
+		t.Fatalf("finish successor: %v", err)
+	}
+
+	msgs := recorder.last(t)
+	checkpoint, ok := msgs[0].(agentcore.CompactionMessage)
+	if !ok {
+		t.Fatalf("handoff transcript starts with %T, want the checkpoint summary", msgs[0])
+	}
+	if checkpoint.Summary != cp.Summary {
+		t.Fatal("handoff used a checkpoint other than the newest")
+	}
+	if _, ok := firstUserMessageWith(msgs, "ALPHA"); ok {
+		t.Fatal("handoff replayed the summarized prefix instead of the checkpoint")
+	}
+	if _, ok := firstUserMessageWith(msgs, "what color"); !ok {
+		t.Fatal("handoff lost the input that arrived after the checkpoint")
+	}
+}
+
+// fakePolicyResolver is the session policy seam double.
+type fakePolicyResolver struct {
+	policy compaction.CheckpointPolicy
+	err    error
+	calls  int
+}
+
+func (f *fakePolicyResolver) CheckpointPolicy(context.Context, uuid.UUID, uuid.UUID) (compaction.CheckpointPolicy, error) {
+	f.calls++
+	return f.policy, f.err
+}
+
+// TestRunnerUsesSessionCheckpointPolicy pins the per-attempt resolver: a
+// session policy overrides the generation policy, and a resolver failure falls
+// back to the generation policy instead of stopping the run.
+func TestRunnerUsesSessionCheckpointPolicy(t *testing.T) {
+	ctx := context.Background()
+	base := compaction.CheckpointPolicy{Enabled: true, RetainTokens: 20000, MaxCheckpoints: 3, ManualCompact: true}
+	resolver := &fakePolicyResolver{policy: compaction.CheckpointPolicy{
+		Enabled: true, RetainTokens: 100, MaxCheckpoints: 1, TTL: time.Hour, ManualCompact: false,
+	}}
+	runner := &Runner{Compaction: &CompactionOptions{Policy: &base}, CheckpointPolicies: resolver, Logger: discardLog()}
+	got := runner.checkpointPolicy(ctx, kernel.Scope{TenantID: uuid.New(), SessionID: uuid.New()})
+	if got.MaxCheckpoints != 1 || got.RetainTokens != 100 || got.TTL != time.Hour || got.ManualCompact {
+		t.Fatalf("resolved policy = %+v, want the session override", got)
+	}
+	if resolver.calls != 1 {
+		t.Fatalf("resolver calls = %d, want 1", resolver.calls)
+	}
+
+	// A failing resolver keeps the generation policy (a policy read never stops
+	// a run).
+	resolver = &fakePolicyResolver{err: errors.New("policy store down")}
+	runner.CheckpointPolicies = resolver
+	if got := runner.checkpointPolicy(ctx, kernel.Scope{}); got.MaxCheckpoints != 3 || got.RetainTokens != 20000 {
+		t.Fatalf("fallback policy = %+v, want the generation policy", got)
+	}
+	// An invalid policy from the resolver also falls back.
+	resolver = &fakePolicyResolver{policy: compaction.CheckpointPolicy{RetainTokens: -1}}
+	runner.CheckpointPolicies = resolver
+	if got := runner.checkpointPolicy(ctx, kernel.Scope{}); got.RetainTokens != 20000 {
+		t.Fatalf("invalid policy fallback = %+v", got)
 	}
 }

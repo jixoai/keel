@@ -23,19 +23,23 @@ var DefaultDurationBuckets = []float64{
 // every execution; finished metrics count only the terminal state (done/failed)
 // that FinishRun committed to the database.
 type Set struct {
-	runsStarted    *Counter
-	runsFinished   *CounterVec
-	runsFailed     *Counter
-	runAttempts    *CounterVec
-	runAttemptTime *Histogram
-	runsActive     *Gauge
-	leaseExpired   *Counter
-	finishErrors   *Counter
-	compactions    *Counter
-	agentTurns     *Counter
-	agentToolCalls *Counter
-	agentContext   *Histogram
-	draining       *Gauge
+	runsStarted        *Counter
+	runsFinished       *CounterVec
+	runsFailed         *Counter
+	runAttempts        *CounterVec
+	runAttemptTime     *Histogram
+	runsActive         *Gauge
+	leaseExpired       *Counter
+	finishErrors       *Counter
+	compactions        *Counter
+	checkpointCreate   *Counter
+	checkpointRecover  *Counter
+	checkpointFailures *CounterVec
+	checkpointPruned   *Counter
+	agentTurns         *Counter
+	agentToolCalls     *Counter
+	agentContext       *Histogram
+	draining           *Gauge
 }
 
 // NewSet registers the runtime metric families on reg.
@@ -59,6 +63,14 @@ func NewSet(reg *Registry) *Set {
 			"Run attempts whose terminal state could not be persisted."),
 		compactions: reg.NewCounter("keel_compactions_total",
 			"Compaction events committed to the event log."),
+		checkpointCreate: reg.NewCounter("keel_checkpoint_created_total",
+			"Checkpoint projections written without error."),
+		checkpointRecover: reg.NewCounter("keel_checkpoint_recovered_total",
+			"Model contexts rebuilt from a valid checkpoint plus retained tail."),
+		checkpointFailures: reg.NewCounterVec("keel_checkpoint_failed_total",
+			"Checkpoint operations rejected or falling back, by bounded reason (save|summary|load|corrupt|anchor|prune|other).", "reason"),
+		checkpointPruned: reg.NewCounter("keel_checkpoint_pruned_total",
+			"Checkpoint projections deleted by retention; events are never deleted."),
 		agentTurns: reg.NewCounter("keel_agent_turns_total",
 			"Provider turns observed by the agent loop."),
 		agentToolCalls: reg.NewCounter("keel_agent_tool_calls_total",
@@ -127,6 +139,33 @@ func (s *Set) LeaseExpired() { s.leaseExpired.Inc() }
 func (s *Set) EventCommitted(kind string) {
 	if kind == "compaction" {
 		s.compactions.Inc()
+	}
+}
+
+// CheckpointCreated counts one checkpoint projection (automatic or manual).
+// Token counts are intentionally not labels.
+func (s *Set) CheckpointCreated(int, int) { s.checkpointCreate.Inc() }
+
+// CheckpointRecovered counts one model context rebuilt from a valid checkpoint
+// plus its retained tail.
+func (s *Set) CheckpointRecovered() { s.checkpointRecover.Inc() }
+
+// CheckpointFailed counts one rejected or degraded checkpoint operation. reason
+// is a bounded vocabulary; an unknown value is folded into "other" so a caller
+// cannot grow series cardinality.
+func (s *Set) CheckpointFailed(reason string) {
+	switch reason {
+	case "save", "summary", "load", "corrupt", "anchor", "prune":
+	default:
+		reason = "other"
+	}
+	s.checkpointFailures.With(reason).Inc()
+}
+
+// CheckpointPruned counts deleted checkpoint projections.
+func (s *Set) CheckpointPruned(n int64) {
+	if n > 0 {
+		s.checkpointPruned.Add(float64(n))
 	}
 }
 

@@ -169,6 +169,11 @@ var rules = []Rule{
 	// Manual checkpoint compaction (change keel-checkpoint): a write on the
 	// session's context, idempotent by requestId.
 	resource(http.MethodPost, "/v1/sessions/{id}/compact", access.KeySessionWrite, "session", "path:id"),
+	// Session checkpoint policy: the read projection is session.read; writing a
+	// narrowing override is session.write (the effective policy can never exceed
+	// the tenant ceiling).
+	resource(http.MethodGet, "/v1/sessions/{id}/checkpoint-policy", access.KeySessionRead, "session", "path:id"),
+	resource(http.MethodPut, "/v1/sessions/{id}/checkpoint-policy", access.KeySessionWrite, "session", "path:id"),
 	resource(http.MethodGet, "/v1/sessions/{id}/decisions", access.KeySessionRead, "session", "path:id"),
 	resource(http.MethodPost, "/v1/sessions/{id}/decisions", access.KeySessionWrite, "session", "path:id"),
 	resource(http.MethodGet, "/v1/sessions/{id}/decisions/{decisionId}", access.KeySessionRead, "session", "path:id"),

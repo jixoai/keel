@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"runtime/debug"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -28,6 +29,7 @@ import (
 	"github.com/jixoai/keel/internal/blob"
 	"github.com/jixoai/keel/internal/capturepolicy"
 	"github.com/jixoai/keel/internal/collab"
+	"github.com/jixoai/keel/internal/compaction"
 	"github.com/jixoai/keel/internal/configfile"
 	"github.com/jixoai/keel/internal/fileplugin"
 	"github.com/jixoai/keel/internal/harnessapi"
@@ -53,6 +55,7 @@ import (
 	"github.com/jixoai/keel/internal/quota"
 	"github.com/jixoai/keel/internal/servicehost"
 	"github.com/jixoai/keel/internal/sessionbinding"
+	"github.com/jixoai/keel/internal/sessionpolicy"
 	"github.com/jixoai/keel/internal/skilllib"
 	"github.com/jixoai/keel/internal/spillblob"
 	"github.com/jixoai/keel/internal/store"
@@ -709,9 +712,24 @@ func runServe(parent context.Context, opts serveOptions) error {
 		// reader without CASDir cannot recover them.
 		&blob.ImageSource{Store: st, Reader: blob.NewReaderWithCAS(st, 256, 1, opts.CASDir)},
 	)
+	// The session checkpoint policy service is built before Boot (the runner
+	// pins the resolver with the generation) and follows the live runtime once
+	// Boot returns, so a tenant reload is visible to the next policy read.
+	var liveCheckpointRuntime atomic.Pointer[servicehost.Runtime]
+	initialCheckpointPolicy := servicehost.CheckpointPolicyFor(tenantCfg)
+	sessionPolicies := sessionpolicy.New(st, func() compaction.CheckpointPolicy {
+		if current := liveCheckpointRuntime.Load(); current != nil {
+			return current.CheckpointPolicy()
+		}
+		return initialCheckpointPolicy
+	})
 	rt, err := servicehost.Boot(ctx, servicehost.Config{
 		Metrics: runMetrics,
-		Memory:  servicehost.MemoryOptions{Spill: spillStore},
+		// The session checkpoint policy is the tenant ceiling narrowed by the
+		// session's stored override. The closure follows the live generation, so
+		// a tenant reload changes later decisions without a restart.
+		CheckpointPolicies: sessionPolicies,
+		Memory:             servicehost.MemoryOptions{Spill: spillStore},
 		// Every model tool call is authorized against the session's principal
 		// (Bot Account ∩ Harness) before it executes (A4.2b1).
 		ToolAccess:      toolAccess,
@@ -901,6 +919,7 @@ func runServe(parent context.Context, opts serveOptions) error {
 		hooks.Close()
 		return fmt.Errorf("assemble service loadout: %w", err)
 	}
+	liveCheckpointRuntime.Store(rt)
 	defer func() {
 		closeCtx, cancel := context.WithTimeout(context.Background(), serveShutdownTimeout)
 		defer cancel()
@@ -954,7 +973,8 @@ func runServe(parent context.Context, opts serveOptions) error {
 	edge := newEdgeQuota(st)
 	hostTheme := loadHostTheme(static.root, log)
 	product, err := newProductLayer(ctx, st, kern, placementRT.Edge, placementRT.Gate, rt, hooks, runControl, partials, taskLog, opts, secretBox, secretReason,
-		accessBridge, mcpApps, mcpAppsSandboxOrigin, hostTheme, edge, mcpMetrics, mrtr, log)
+		accessBridge, mcpApps, mcpAppsSandboxOrigin, hostTheme, edge, mcpMetrics, mrtr,
+		newManualCompactor(rt.Binding(), st, kern, log), sessionPolicies, log)
 	if err != nil {
 		return err
 	}
@@ -1293,7 +1313,7 @@ func (r runRequeuer) RequeueRun(ctx context.Context, tenantID, sessionID uuid.UU
 // settings secret store; secretReason explains its absence to an operator;
 // theme is the host theme token document handed to plugin UIs through the
 // bridge (nil when the web build has none).
-func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, admission kernel.Committer, admissionGate *placement.Gate, rt *servicehost.Runtime, hooks *harnessext.HookBus, runControl *harnessext.RunControl, partials *harnessext.PartialHub, taskLog *tasklog.Service, opts serveOptions, secretBox *store.SecretBox, secretReason string, accessBridge *accesswire.Bridge, mcpApps *mcphost.Registry, mcpAppsSandboxOrigin string, theme json.RawMessage, edge *quota.Edge, mcpMetrics *mcphost.Metrics, mrtr *mcphost.MRTR, log *slog.Logger) (*productLayer, error) {
+func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, admission kernel.Committer, admissionGate *placement.Gate, rt *servicehost.Runtime, hooks *harnessext.HookBus, runControl *harnessext.RunControl, partials *harnessext.PartialHub, taskLog *tasklog.Service, opts serveOptions, secretBox *store.SecretBox, secretReason string, accessBridge *accesswire.Bridge, mcpApps *mcphost.Registry, mcpAppsSandboxOrigin string, theme json.RawMessage, edge *quota.Edge, mcpMetrics *mcphost.Metrics, mrtr *mcphost.MRTR, compactSession harnessapi.CompactSessionFunc, checkpointPolicies harnessapi.SessionCheckpointPolicyService, log *slog.Logger) (*productLayer, error) {
 	sessions := storeSessions{Store: st}
 	decisions := harnessext.NewDecisionBroker(harnessext.DecisionBrokerOptions{
 		Store:  harnessext.NewTasksDecisionStore(st),
@@ -1486,6 +1506,12 @@ func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, 
 	}
 	api := harnessapi.New(harnessapi.Config{
 		Sessions: harnessapi.NewPGSessionLister(st),
+		// Manual compaction and the session policy surface (change
+		// keel-checkpoint). Manual compaction runs the live runner under the
+		// session's run lease; the policy service reads/writes the session
+		// override and always narrows it against the current tenant policy.
+		CompactSession:     compactSession,
+		CheckpointPolicies: checkpointPolicies,
 		// Identity/access surface (change keel-bot-identity-access, A4.1): the
 		// same store and authorizer the auth middleware uses. A bot invoke/start
 		// creates an owned session and commits the turn through the one starter.

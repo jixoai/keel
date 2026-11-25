@@ -65,6 +65,10 @@ TS spike（pi-durable）已用 7 个 E2E 场景证明以下语义可行（报告
   投影与已提交事件对不上（compaction 事件缺失、tail 锚点不存在、摘要为空）视为损坏：
   fail closed，忽略该行并回退全量事件重建。
 - 切点永远不落在 toolResult 上；最后一条模型尚未看到的 user 不被压缩。
+- 策略是 tenant 上限；`session_checkpoint_policies` 存 session 的收窄 override，
+  每次读取都经 `NarrowCheckpointPolicy` 重新计算，session 不能突破 tenant。手动压缩
+  `POST /v1/sessions/{id}/compact` 在同一 run lease 下走自动路径的切点/失败语义，
+  以 requestId 幂等。
 - `maxCheckpoints`/`ttlHours` 清理只删 `checkpoints` 投影，最近一个 checkpoint 始终保留；
   事件永不删除。
 - 原始事件永不删除、不覆盖，仍可按 seq 读回；`owedTurn`、generation 去重、未读输入等

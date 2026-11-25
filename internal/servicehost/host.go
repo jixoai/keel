@@ -241,6 +241,11 @@ type Config struct {
 	Concurrency int
 	// Metrics observes worker runs (optional).
 	Metrics agent.RunObserver
+	// CheckpointPolicies resolves the attempt's effective checkpoint policy:
+	// the tenant ceiling narrowed by the session's stored override. Nil keeps
+	// the generation's tenant policy. The runner consults it per attempt and per
+	// manual compaction, so a policy write applies without a restart.
+	CheckpointPolicies agent.CheckpointPolicyResolver
 	// DrainGate, when set, closes the worker's claim path during a drain and
 	// reports the in-flight run count (internal/handoff's Coordinator).
 	DrainGate agent.DrainGate

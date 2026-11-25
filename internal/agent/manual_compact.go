@@ -71,7 +71,7 @@ func (r *Runner) CompactNow(ctx context.Context, lease kernel.Lease, requestID s
 	if r.Checkpoints == nil {
 		return ManualCompactResult{}, errors.New("agent: manual compaction needs the checkpoint seam")
 	}
-	policy := r.checkpointPolicy()
+	policy := r.checkpointPolicy(ctx, lease.Scope)
 	if !policy.Enabled || !policy.ManualCompact {
 		return ManualCompactResult{}, ErrManualCompactDisabled
 	}
@@ -137,6 +137,9 @@ func (r *Runner) CompactNow(ctx context.Context, lease kernel.Lease, requestID s
 		r.Logger.Warn("manual compaction failed; context unchanged",
 			"tenant_id", lease.Scope.TenantID, "session_id", lease.Scope.SessionID,
 			"tokens_before", before, "err", err)
+		if r.CheckpointMetrics != nil {
+			r.CheckpointMetrics.CheckpointFailed("summary")
+		}
 		return ManualCompactResult{TokensBefore: before, TokensAfter: before, PolicyVersion: policy.Version(), Reason: "summary-failed"}, err
 	}
 	if res == nil {
@@ -147,10 +150,16 @@ func (r *Runner) CompactNow(ctx context.Context, lease kernel.Lease, requestID s
 	rebuilt := res.RebuildContext(msgs, now)
 	tokensAfter := compaction.EstimateContextTokensConservative(rebuilt)
 	if res.FirstKeptIndex <= 0 || res.FirstKeptIndex >= len(seqs) {
+		if r.CheckpointMetrics != nil {
+			r.CheckpointMetrics.CheckpointFailed("anchor")
+		}
 		return ManualCompactResult{TokensBefore: before, TokensAfter: before, PolicyVersion: policy.Version(), Reason: "unanchored-cut"}, errors.New("agent: manual compaction cut cannot be anchored to committed events")
 	}
 	anchor := seqs[res.FirstKeptIndex]
 	if anchor <= 0 {
+		if r.CheckpointMetrics != nil {
+			r.CheckpointMetrics.CheckpointFailed("anchor")
+		}
 		return ManualCompactResult{TokensBefore: before, TokensAfter: before, PolicyVersion: policy.Version(), Reason: "unanchored-cut"}, errors.New("agent: manual compaction cut cannot be anchored to committed events")
 	}
 	summarized := len(msgs) - (len(rebuilt) - 1)
@@ -175,6 +184,9 @@ func (r *Runner) CompactNow(ctx context.Context, lease kernel.Lease, requestID s
 	})
 	if err != nil {
 		// Nothing durable changed; the caller can retry.
+		if r.CheckpointMetrics != nil {
+			r.CheckpointMetrics.CheckpointFailed("save")
+		}
 		return ManualCompactResult{}, err
 	}
 	record := kernel.CheckpointRecord{
@@ -193,7 +205,13 @@ func (r *Runner) CompactNow(ctx context.Context, lease kernel.Lease, requestID s
 		r.Logger.Warn("manual compaction checkpoint save failed",
 			"tenant_id", lease.Scope.TenantID, "session_id", lease.Scope.SessionID,
 			"seq", seq, "err", err)
+		if r.CheckpointMetrics != nil {
+			r.CheckpointMetrics.CheckpointFailed("save")
+		}
 		return ManualCompactResult{}, err
+	}
+	if r.CheckpointMetrics != nil {
+		r.CheckpointMetrics.CheckpointCreated(res.TokensBefore, tokensAfter)
 	}
 	r.pruneCheckpoints(ctx, lease.Scope)
 	r.Logger.Info("manual checkpoint created",

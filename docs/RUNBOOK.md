@@ -335,6 +335,10 @@ curl -s http://127.0.0.1:13740/metrics | head
 | `keel_runs_pending` | gauge | `runs` 表 pending 队列深度（抓取时查库） |
 | `keel_leases_expired_total` | counter | 过期租约被回收次数 |
 | `keel_compactions_total` | counter | 已提交的 compaction 事件数 |
+| `keel_checkpoint_created_total` | counter | 成功写入的 checkpoint 投影数（自动+手动） |
+| `keel_checkpoint_recovered_total` | counter | 从有效 checkpoint + tail 重建模型上下文的次数 |
+| `keel_checkpoint_failed_total{reason}` | counter | checkpoint 失败/降级；reason 固定为 `save`/`summary`/`load`/`corrupt`/`anchor`/`prune`/`other` |
+| `keel_checkpoint_pruned_total` | counter | 保留清理删除的 checkpoint 投影数（事件永不删除） |
 | `keel_streams_active` | gauge | 当前 SSE/文件流数 |
 | `keel_draining` | gauge | SIGTERM 排水期为 1 |
 | `go_goroutines` / `go_memstats_heap_alloc_bytes` / `go_memstats_heap_sys_bytes` | gauge | Go 运行时 |
@@ -402,8 +406,30 @@ X-Tenant-ID: <tenant>
 - 返回 `checkpointId`（compaction 事件 seq）、`tokensBefore/tokensAfter`、
   `keptFromSeq`、`policyVersion`、`performed/replayed`；
 - 与自动压缩共用切点/失败语义；摘要失败或取消时不写任何东西。
-- 路由已注册；宿主未注入 `harnessapi.Config.CompactSession` 时返回 501
-  `not_wired`（当前 `keel serve` 尚未接线，见 change 报告）。
+- 生产 `keel serve` 已接线：适配器先取得 session 的 run lease（无 run 行时入队一次），
+  摘要期间续租，成功后 finish（未读输入照常重新入队），失败则 release；
+  活动 run 持有租约时返回 409 `busy`，租户并发配额拒绝时返回 429。
+- 策略关闭手动压缩时返回 409 `disabled`。
+
+### session 级策略 API
+
+```
+GET /v1/sessions/{id}/checkpoint-policy
+PUT /v1/sessions/{id}/checkpoint-policy
+X-Tenant-ID: <tenant>
+{"maxCheckpoints": 1, "ttlHours": 12, "retainTokens": 5000,
+ "thresholdTokens": 80000, "enabled": true, "manualCompact": false}
+```
+
+- GET 需要 `session.read`，PUT 需要 `session.write`；
+- 返回 `tenant`（tenant 上限）、`effective`（收窄后的生效值）、`override`（已存
+  的 session 文档，可省略）、`narrowed`（被 tenant 收窄的字段与原因）、`revision`
+  和 `source`（tenant|session）；
+- session 只能收窄：超过 tenant 的 `maxCheckpoints`/`ttlHours`/`retainTokens` 会被
+  夹到 tenant 值并在 `narrowed` 中说明；tenant 关闭的能力不能被 session 打开；
+  tenant 设了绝对 `thresholdTokens` 时 session 不能回退到更早的窗口触发；
+- PUT `{}` 清除 override；负数返回 400；响应与日志都不含对话正文。
+- 当前只提供 API 与只读投影，设置页 UI 尚未接入（后续 change）。
 
 MCP 工具指标当前**不暴露**：`internal/mcp` 尚无调用计数，注册空 family 只会产生
 没有样本的 `# HELP`/`# TYPE`。接入计数后按 `tool`/`status` 重新加入。

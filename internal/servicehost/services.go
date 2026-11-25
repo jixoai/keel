@@ -464,6 +464,26 @@ func newCompactionFactory(cfg Config) servicegraph.Factory {
 	}
 }
 
+// CheckpointPolicyFor returns the tenant checkpoint policy derived from a
+// tenant document. It is the ceiling a session may narrow; the HTTP settings
+// read uses the same function as the runner's generation policy.
+func CheckpointPolicyFor(tenant host.TenantConfig) compaction.CheckpointPolicy {
+	options := compactionOptions(tenant)
+	if options.Policy == nil {
+		return compaction.DefaultCheckpointPolicy()
+	}
+	return *options.Policy
+}
+
+// CheckpointPolicy returns the checkpoint policy of the tenant document the
+// runtime currently serves. A reload is visible to the next call.
+func (r *Runtime) CheckpointPolicy() compaction.CheckpointPolicy {
+	if r == nil {
+		return compaction.DefaultCheckpointPolicy()
+	}
+	return CheckpointPolicyFor(r.tenantConfig())
+}
+
 // compactionOptions derives the loop's compaction knobs and the durable
 // checkpoint policy from the tenant document. The threshold is the fraction of
 // the context window at which blocking compaction starts; the loop expresses it
@@ -648,6 +668,14 @@ func newPiLoopFactory(tenant host.TenantConfig, cfg Config) servicegraph.Factory
 			runner.Models = models
 		}
 		runner.Assembly = assembly
+		// The checkpoint policy is resolved per attempt from the tenant ceiling
+		// narrowed by the session's stored override. The metrics sink is the
+		// same set the worker reports into, so checkpoint lifecycle facts land
+		// on the one fixed-cardinality registry.
+		runner.CheckpointPolicies = cfg.CheckpointPolicies
+		if metrics, ok := cfg.Metrics.(agent.CheckpointMetrics); ok {
+			runner.CheckpointMetrics = metrics
+		}
 		// Every model tool call is authorized against the session's principal
 		// (Bot Account ∩ Harness). A nil seam stays fail-closed in the runner;
 		// the product layer's absence is a deployment gap, never an open surface.

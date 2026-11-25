@@ -35,7 +35,7 @@ func (s *Store) notifyEvent(kind string) {
 // table the HTTP/worker paths touch, including the migration-added columns and
 // the handoff audit tables (internal/handoff schema 0001).
 var requiredTables = []string{
-	"tenants", "sessions", "events", "checkpoints", "submissions",
+	"tenants", "sessions", "events", "checkpoints", "session_checkpoint_policies", "submissions",
 	"tasks", "blobs", "blob_chunks", "blob_refs", "runs",
 	"usage_ledger", "mcp_oauth_pending", "mcp_oauth_credentials",
 	"runtime_instances", "handoffs",

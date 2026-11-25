@@ -137,12 +137,75 @@ type CheckpointPolicyOverride struct {
 	ManualCompact   *bool
 }
 
+// CheckpointPolicyOverrideDocument is the JSON document a session policy API
+// stores and serves. It is separate from CheckpointPolicyOverride because TTL
+// travels as whole hours on the wire (the tenant document uses ttlHours too).
+// Every field is optional: an omitted field inherits the tenant policy, and an
+// empty document ({}) clears an override.
+type CheckpointPolicyOverrideDocument struct {
+	Enabled         *bool `json:"enabled,omitempty"`
+	ThresholdTokens *int  `json:"thresholdTokens,omitempty"`
+	RetainTokens    *int  `json:"retainTokens,omitempty"`
+	MaxCheckpoints  *int  `json:"maxCheckpoints,omitempty"`
+	TTLHours        *int  `json:"ttlHours,omitempty"`
+	ManualCompact   *bool `json:"manualCompact,omitempty"`
+}
+
+// Validate rejects negative knobs. Zero is meaningful for every integer field
+// (see CheckpointPolicy), so only impossible values fail.
+func (d CheckpointPolicyOverrideDocument) Validate() error {
+	negative := func(name string, value *int) error {
+		if value != nil && *value < 0 {
+			return fmt.Errorf("compaction: checkpoint policy %s must be >= 0", name)
+		}
+		return nil
+	}
+	for _, check := range []struct {
+		name  string
+		value *int
+	}{
+		{"thresholdTokens", d.ThresholdTokens},
+		{"retainTokens", d.RetainTokens},
+		{"maxCheckpoints", d.MaxCheckpoints},
+		{"ttlHours", d.TTLHours},
+	} {
+		if err := negative(check.name, check.value); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// IsEmpty reports whether the document requests no override at all.
+func (d CheckpointPolicyOverrideDocument) IsEmpty() bool {
+	return d.Enabled == nil && d.ThresholdTokens == nil && d.RetainTokens == nil &&
+		d.MaxCheckpoints == nil && d.TTLHours == nil && d.ManualCompact == nil
+}
+
+// Override converts the wire document into the narrowing input. TTLHours is
+// converted to a duration; a zero value means "no expiry" (the narrower request
+// is clamped to the tenant TTL by NarrowCheckpointPolicy).
+func (d CheckpointPolicyOverrideDocument) Override() CheckpointPolicyOverride {
+	out := CheckpointPolicyOverride{
+		Enabled:         d.Enabled,
+		ThresholdTokens: d.ThresholdTokens,
+		RetainTokens:    d.RetainTokens,
+		MaxCheckpoints:  d.MaxCheckpoints,
+		ManualCompact:   d.ManualCompact,
+	}
+	if d.TTLHours != nil {
+		ttl := time.Duration(*d.TTLHours) * time.Hour
+		out.TTL = &ttl
+	}
+	return out
+}
+
 // PolicyNarrowing reports one field the session asked for that the tenant
 // policy refused or clamped. The reason is identifier-only (never a message
 // body), so a settings page can render "被 tenant 收窄" without leaking data.
 type PolicyNarrowing struct {
-	Field  string
-	Reason string
+	Field  string `json:"field"`
+	Reason string `json:"reason"`
 }
 
 // NarrowCheckpointPolicy applies a session override to the tenant policy.
