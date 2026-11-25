@@ -146,7 +146,10 @@ type CompactionConfig struct {
 // TelemetryConfig selects the telemetry adapter ("memory", "prometheus", or
 // "otlp"; empty inherits the default).
 type TelemetryConfig struct {
-	Adapter string `json:"adapter,omitempty"`
+	Adapter     string            `json:"adapter,omitempty"` // memory | none | otlp
+	Endpoint    string            `json:"endpoint,omitempty"`
+	Headers     map[string]string `json:"headers,omitempty"`
+	ServiceName string            `json:"serviceName,omitempty"`
 }
 
 // ToolsConfig filters the assembled tool registry. Allow holds tool names and
@@ -632,6 +635,20 @@ func (c TenantConfig) Validate() error {
 		}
 		if err := server.validate(); err != nil {
 			return problem("mcp.servers[%q]: %v", name, err)
+		}
+	}
+	switch strings.ToLower(strings.TrimSpace(c.Telemetry.Adapter)) {
+	case "", "memory", "none", "otlp":
+	default:
+		return problem("telemetry.adapter %q (want memory, none or otlp)", c.Telemetry.Adapter)
+	}
+	if endpoint := strings.TrimSpace(c.Telemetry.Endpoint); endpoint != "" {
+		parsed, err := url.Parse(endpoint)
+		if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+			return problem("telemetry.endpoint must be an absolute http(s) URL")
+		}
+		if parsed.Scheme != "http" && parsed.Scheme != "https" {
+			return problem("telemetry.endpoint scheme must be http or https")
 		}
 	}
 	for i, command := range c.Hooks.Commands {

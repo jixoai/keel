@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/jixoai/keel/internal/agent"
 	"github.com/jixoai/keel/internal/agentcore"
@@ -43,7 +44,7 @@ func newProvider(tenant host.TenantConfig, cfg Config, engine *servicegraph.Engi
 		loadout.ServiceTools:             newToolsFactory(cfg),
 		loadout.ServicePiLoop:            newPiLoopFactory(tenant, cfg),
 		loadout.ServiceSessionProjection: newProjectionFactory(cfg),
-		loadout.ServiceTelemetry:         newTelemetryFactory(cfg),
+		loadout.ServiceTelemetry:         newTelemetryFactory(tenant, cfg),
 		loadout.ServiceCompaction:        newCompactionFactory(cfg),
 		loadout.ServiceWorker:            newWorkerFactory(cfg, engine),
 		loadout.ServiceExternalAgent:     newExternalAgentFactory(cfg),
@@ -520,21 +521,57 @@ func newProjectionFactory(cfg Config) servicegraph.Factory {
 // --- telemetry -----------------------------------------------------------
 
 type telemetryService struct {
-	run *agent.RunTelemetry
+	run      *agent.RunTelemetry
+	shutdown func(context.Context) error
 }
 
 func (t *telemetryService) RunTelemetry() *agent.RunTelemetry                      { return t.run }
 func (t *telemetryService) Start(context.Context, *servicegraph.EffectScope) error { return nil }
-func (t *telemetryService) Stop(context.Context) error                             { return nil }
+func (t *telemetryService) Stop(ctx context.Context) error {
+	if t.shutdown == nil {
+		return nil
+	}
+	shutdownCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	return t.shutdown(shutdownCtx)
+}
 
-func newTelemetryFactory(cfg Config) servicegraph.Factory {
-	return func(context.Context, servicegraph.Resolved) (servicegraph.Instance, error) {
-		memory := telemetry.NewMemory()
-		runContext := telemetry.Context(memory)
+func newTelemetryFactory(tenant host.TenantConfig, cfg Config) servicegraph.Factory {
+	return func(ctx context.Context, _ servicegraph.Resolved) (servicegraph.Instance, error) {
+		var runContext telemetry.Context
+		var shutdown func(context.Context) error
+		switch strings.ToLower(strings.TrimSpace(tenant.Telemetry.Adapter)) {
+		case "", "memory":
+			runContext = telemetry.NewMemory()
+		case "none":
+			runContext = telemetry.NoopContext
+		case "otlp":
+			if strings.TrimSpace(tenant.Telemetry.Endpoint) == "" {
+				// OTLP without an endpoint must not create an exporter or a
+				// background goroutine; keep the in-process reference adapter.
+				runContext = telemetry.NewMemory()
+				break
+			}
+			adapter, err := telemetry.NewOTLP(ctx, telemetry.OTLPOptions{
+				Endpoint:    tenant.Telemetry.Endpoint,
+				Headers:     tenant.Telemetry.Headers,
+				ServiceName: tenant.Telemetry.ServiceName,
+			})
+			if err != nil {
+				return nil, err
+			}
+			runContext = adapter
+			shutdown = adapter.Shutdown
+		default:
+			return nil, fmt.Errorf("telemetry: unsupported adapter %q", tenant.Telemetry.Adapter)
+		}
 		if cfg.Product.WrapTelemetry != nil {
 			runContext = cfg.Product.WrapTelemetry(runContext)
 		}
-		return &telemetryService{run: &agent.RunTelemetry{Context: runContext, Metrics: memory}}, nil
+		return &telemetryService{
+			run:      &agent.RunTelemetry{Context: runContext, Metrics: runContext.Metrics()},
+			shutdown: shutdown,
+		}, nil
 	}
 }
 

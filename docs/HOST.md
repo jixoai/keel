@@ -48,7 +48,10 @@ compaction:
   threshold: 0.8
   keepRecentTokens: 20000
 telemetry:
-  adapter: "memory"         # memory | prometheus | otlp（后两者后续）
+  adapter: "memory"         # memory | none | otlp（otlp 需 endpoint，默认不连接）
+  # endpoint: "http://127.0.0.1:4318"   # OTLP/HTTP
+  # headers: { "authorization": "Bearer ${OTLP_TOKEN}" }
+  # serviceName: "keel"
 tools:
   # 省略 = 不过滤（推荐）；显式 [] = 不保留任何工具；尾部 * 为前缀通配（如 "keel_*"）
   allow: ["bash", "read", "write", "edit", "mcp", "skills", "tasks", "agent", "approve", "notify", "creation"]
@@ -139,7 +142,8 @@ filesystem:
    当前 turn span 的 event（通过 `telemetry.ManualStarter` 的事件驱动 tracker）。
    provider 请求 span 已存在；turns/tool/context 已接入固定基数 Prometheus 指标
    （`keel_agent_turns_total` / `keel_agent_tool_calls_total` /
-   `keel_agent_context_utilization`）。OTLP 仍待接。`run.finished` 作为业务汇总事件追加。
+   `keel_agent_context_utilization`）。`adapter=otlp` 且有 endpoint 时使用 OTLP/HTTP
+   导出 trace 与 metric，默认 memory、无 endpoint 不建连接。`run.finished` 作为业务汇总事件追加。
 6. **System prompt**：按 PI 的 section 形态拼装（`<preamble>`、`<skills>`、`<tenant>`），
    不再用单一字符串硬编码。
 

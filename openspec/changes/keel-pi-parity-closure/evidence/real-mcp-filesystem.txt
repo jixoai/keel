@@ -25,3 +25,19 @@ Boundary:
   This exercises the MCP client/transport directly. The aggregate `mcp`
   tool surface (constant 11 tools + manifest hash) is not covered by this
   test yet; T5 remains open for that integration check.
+
+Aggregate tool E2E — 2026-11-25
+==============================
+Command:
+  KEEL_REAL_MCP=1 go test ./internal/toolsurface -run TestRealFilesystemAggregateTool -v -count=1
+
+Result:
+  --- PASS: TestRealFilesystemAggregateTool (0.35s)
+  PASS
+  ok  	github.com/jixoai/keel/internal/toolsurface	0.615s
+
+Verified through the model-visible aggregate `mcp` tool:
+  - action=list returns the real filesystem server and its tools
+  - action=call {server:"filesystem", tool:<read tool>} reads the temp file
+  - content "hello through the aggregate tool" returned
+  - aggregate tool name is exactly `mcp` (no mcp__<server>__<tool> surface)

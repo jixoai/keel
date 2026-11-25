@@ -36,7 +36,7 @@ func TestProductTelemetryWrapInstalled(t *testing.T) {
 		}
 		return inner
 	}})
-	instance, err := newTelemetryFactory(cfg)(context.Background(), servicegraph.Resolved{})
+	instance, err := newTelemetryFactory(host.TenantConfig{}, cfg)(context.Background(), servicegraph.Resolved{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,7 +49,7 @@ func TestProductTelemetryWrapInstalled(t *testing.T) {
 	}
 
 	// Kernel-only deployment: no wrapper, the plain memory adapter is used.
-	instance, err = newTelemetryFactory(productTestConfig(ProductOptions{}))(context.Background(), servicegraph.Resolved{})
+	instance, err = newTelemetryFactory(host.TenantConfig{}, productTestConfig(ProductOptions{}))(context.Background(), servicegraph.Resolved{})
 	if err != nil {
 		t.Fatal(err)
 	}
