@@ -156,7 +156,7 @@ func newEnv(t *testing.T, opts envOpts) *testEnv {
 	tenant := uuid.New()
 	now := time.Date(2026, 11, 25, 12, 0, 0, 0, time.UTC)
 	env := &testEnv{tenant: tenant, clock: &now}
-	ceiling := collab.Limits{MaxDepth: 8, MaxChildren: 32, MaxConcurrent: 8, MaxTurns: 100, MaxTokens: 100_000, MaxDurationMs: 600_000}
+	ceiling := collab.Limits{Depth: collab.LimitedDepth(8), MaxChildren: 32, MaxConcurrent: 8, MaxTurns: 100, MaxTokens: 100_000, MaxDurationMs: 600_000}
 	registry, err := collab.NewModeRegistry(tenant, ceiling)
 	if err != nil {
 		t.Fatalf("NewModeRegistry: %v", err)
