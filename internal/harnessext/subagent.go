@@ -1233,9 +1233,12 @@ func (r *SubagentRunner) spawnChild(ctx context.Context, req SpawnRequest) (Suba
 			ParentSessionID: req.ParentSessionID, Depth: depth, MaxDepth: maxDepth,
 		}
 	}
-	maxChildren := req.MaxChildren
-	if maxChildren <= 0 {
-		maxChildren = r.maxChildren
+	// The request may narrow the deployment's width, never widen it. This
+	// defensive check is what makes a direct launcher call obey the same cap as
+	// the Host/tool paths.
+	maxChildren := r.maxChildren
+	if req.MaxChildren > 0 && req.MaxChildren < maxChildren {
+		maxChildren = req.MaxChildren
 	}
 	if maxChildren > 0 {
 		active, err := r.activeChildren(ctx, req.TenantID, req.ParentSessionID)

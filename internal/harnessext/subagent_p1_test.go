@@ -153,6 +153,27 @@ func TestSubagentLauncherCannotWidenDepth(t *testing.T) {
 	}
 }
 
+// TestSubagentLauncherCannotWidenWidth proves the direct launcher path clamps
+// a caller-supplied maxChildren to the deployment cap instead of trusting it.
+func TestSubagentLauncherCannotWidenWidth(t *testing.T) {
+	h := newDepthHarness(t, intPtr(3), withMaxChildren(1))
+	h.spawn(t, h.root, harnessext.SpawnRequest{})
+	launcher := harnessext.CollabSubagentLauncher{
+		Runner: func() *harnessext.SubagentRunner { return h.runner },
+	}
+	before := h.gate.count()
+	_, err := launcher.Launch(context.Background(), collab.LaunchRequest{
+		TenantID: h.tenant, ParentSessionID: h.root, Task: "forged width", Depth: 1,
+		Inputs: json.RawMessage(`{"maxChildren":50}`),
+	})
+	if !errors.Is(err, harnessext.ErrSubagentChildrenExceeded) {
+		t.Fatalf("forged width = %v, want ErrSubagentChildrenExceeded", err)
+	}
+	if h.gate.count() != before {
+		t.Fatalf("a forged width launch created %d sessions", h.gate.count()-before)
+	}
+}
+
 func TestSubagentLauncherDefensiveBotInvoke(t *testing.T) {
 	h := newDepthHarness(t, intPtr(3), withBotInvoker(func(context.Context, uuid.UUID, uuid.UUID, string) error {
 		return errors.New("no bot.invoke")
