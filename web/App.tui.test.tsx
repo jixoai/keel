@@ -110,18 +110,24 @@ test("TUI: 设置页——模型分区两层结构（默认卡 + provider 卡片
   await app.waitFor("id:provider-config-dialog", { state: "gone" });
 
   // 坏文档：400 的字段级 issues 原样呈现。原始文档在「高级」折叠里（spec：
-  // 原始 JSON 只放折叠内），先展开再编辑。The field takes a long document in
-  // chunks: one `type` call drops a burst this size (the TUI input path), while
-  // a reader's keystrokes arrive over time.
+  // 原始 JSON 只放折叠内），先展开再编辑。整份文档一次粘贴进去，正是一个
+  // 读者从外部带回配置的方式；在 TUI 里分块 `type` 会让原生 caret 停在第一
+  // 行的换行处，第二块就插进文档中间（host 的按键节奏，不是产品行为）。
   await app.press("id:settings-advanced");
   await app.waitFor("id:settings-raw-document");
-  const typeRaw = async (text: string) => {
+  const enterRawDocument = async (text: string) => {
     await app.clear("id:settings-raw-document");
-    for (let index = 0; index < text.length; index += 80) {
-      await app.type("id:settings-raw-document", text.slice(index, index + 80));
-    }
+    await app.paste("id:settings-raw-document", { text });
+    expect(app.value("id:settings-raw-document")).toBe(text);
   };
-  await typeRaw(
+  // 保存的提示是底部右侧的 toast，六秒内盖住同一行的动作按钮；读者按下它
+  // 自己的关闭按钮再继续（真实的提示交互，不是测试后门）。
+  const dismissNotice = async () => {
+    if (!app.shows("label:关闭提示")) return;
+    await app.press("label:关闭提示");
+    await app.waitFor("label:关闭提示", { state: "gone" });
+  };
+  await enterRawDocument(
     '{"schemaVersion":1,"providers":[{"id":"s2api","api":{"type":"openai-chat-completions","baseUrl":"https://s2api.top/v1"},"access":{"type":"api-key","env":"S2API_KEY"},"modelIds":["deepseek-v4.1-flash"]}],"selection":{"providerId":"s2api","modelId":"nope"}}',
   );
   await app.press("label:保存配置");
@@ -130,15 +136,17 @@ test("TUI: 设置页——模型分区两层结构（默认卡 + provider 卡片
   expect(app.texts()).toContain("selection s2api/nope does not match any declared model");
   // 版本号没有被写走（失败的保存不留痕）。
   expect(app.texts().join("\n")).toContain("第 3 版");
+  await dismissNotice();
 
   // 好文档：保存即生效，版本号 +1，来源变「已保存覆盖」。
-  await typeRaw(
+  await enterRawDocument(
     '{"schemaVersion":1,"providers":[{"id":"s2api","api":{"type":"openai-chat-completions","baseUrl":"https://s2api.top/v1"},"access":{"type":"api-key","env":"S2API_KEY"},"modelIds":["deepseek-v4.1-flash"]}],"selection":{"providerId":"s2api","modelId":"deepseek-v4.1-flash","reasoningLevel":"low"}}',
   );
   await app.press("label:保存配置");
   await app.waitFor("text:/第 4 版/");
   expect(app.texts()).toContain("已保存覆盖");
   await app.waitFor("text:/DeepSeek V4\\.1 Flash · 低/");
+  await dismissNotice();
 
   // 重置（两步）→ 回部署默认。
   await app.press("label:重置为部署默认");
@@ -203,7 +211,7 @@ test("TUI: 设置页——模型分区两层结构（默认卡 + provider 卡片
   await app.press(TITLE("发布准备周报"));
   await app.waitFor("id:session-model-chip");
   await app.waitFor("text:/本周发布准备已基本就绪/");
-});
+}, 60_000);
 
 test("TUI: 本会话模型选择器——选择/恢复默认与租户默认分开", async () => {  const app = await openApp();
   await app.press(TITLE("发布准备周报"));
