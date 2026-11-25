@@ -349,12 +349,12 @@ func newHostBackedHarness(t *testing.T, permissions collab.PermissionChecker, ma
 func newHostBackedHarnessWithAudit(t *testing.T, permissions collab.PermissionChecker, maxChildren int, auditSink collab.AuditSink) (*depthHarness, *collab.Coordinator, *recordingAudit) {
 	t.Helper()
 	h := newDepthHarness(t, intPtr(3))
-	modes, err := collab.NewModeRegistry(h.tenant, collab.Limits{MaxDepth: 0, MaxChildren: 32, MaxConcurrent: 64})
+	modes, err := collab.NewModeRegistry(h.tenant, collab.Limits{Depth: collab.UnlimitedDepth(), MaxChildren: 32, MaxConcurrent: 64})
 	if err != nil {
 		t.Fatal(err)
 	}
 	descriptor := collab.SubagentMode()
-	descriptor.Limits.MaxDepth = 0 // the runner owns the 3-level default
+	descriptor.Limits.Depth = collab.UnlimitedDepth() // the runner owns the 3-level default
 	descriptor.Limits.MaxChildren = maxChildren
 	if err := modes.Register(descriptor); err != nil {
 		t.Fatal(err)

@@ -137,8 +137,39 @@ func (i collabSessionIndex) Session(ctx context.Context, tenantID, sessionID uui
 // a second (weaker) source of the same fact.
 func (i collabSessionIndex) Put(context.Context, collab.SessionRef) error { return nil }
 
+// SetWorkItem exists for the generic Host contract. A sub-agent delegation has
+// no WorkItem; refusing a non-nil binding is honest rather than pretending the
+// session belongs to one. The super-agent mode supplies its own index.
+func (i collabSessionIndex) SetWorkItem(_ context.Context, _, _, workItemID uuid.UUID) error {
+	if workItemID == uuid.Nil {
+		return nil
+	}
+	return fmt.Errorf("%w: sub-agent sessions do not use work items", collab.ErrInvalidRequest)
+}
+
 func (i collabSessionIndex) SetState(ctx context.Context, tenantID, sessionID uuid.UUID, state collab.SessionState) error {
 	return i.store.SetSessionState(ctx, tenantID, sessionID, string(state))
+}
+
+// Children walks the durable spawn projection. The cancel path resolves each
+// child's live state with Session before acting, so the projection only needs
+// identity, parent, mode and depth here.
+func (i collabSessionIndex) Children(ctx context.Context, tenantID, parentSessionID uuid.UUID) ([]collab.SessionRef, error) {
+	rows, err := i.store.SubagentChildren(ctx, tenantID, parentSessionID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]collab.SessionRef, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, collab.SessionRef{
+			TenantID:        row.TenantID,
+			SessionID:       row.SessionID,
+			ParentSessionID: row.ParentSessionID,
+			ModeID:          row.ModeID,
+			Depth:           row.Depth,
+		})
+	}
+	return out, nil
 }
 
 func (i collabSessionIndex) ActiveChildren(ctx context.Context, tenantID, parentSessionID uuid.UUID) (int, error) {

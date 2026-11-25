@@ -45,12 +45,12 @@ func TestNewCollabModesMapsDepthSettings(t *testing.T) {
 	tenant := uuid.New()
 	cases := []struct {
 		setting int
-		want    int
+		want    collab.DepthPolicy
 	}{
-		{setting: 3, want: 3},
-		{setting: 1, want: 1},
-		{setting: 0, want: 0},
-		{setting: -1, want: 0}, // unlimited: the mode layer owns it, the core sees no cap
+		{setting: 3, want: collab.LimitedDepth(3)},
+		{setting: 1, want: collab.LimitedDepth(1)},
+		{setting: 0, want: collab.ForbiddenDepth()},
+		{setting: -1, want: collab.UnlimitedDepth()},
 	}
 	for _, tc := range cases {
 		registry, err := newCollabModes(tenant, tc.setting)
@@ -61,8 +61,8 @@ func TestNewCollabModesMapsDepthSettings(t *testing.T) {
 		if !ok {
 			t.Fatalf("setting %d: subagent mode missing", tc.setting)
 		}
-		if view.Limits.MaxDepth != tc.want {
-			t.Fatalf("setting %d: descriptor maxDepth = %d, want %d", tc.setting, view.Limits.MaxDepth, tc.want)
+		if view.Limits.Depth != tc.want {
+			t.Fatalf("setting %d: descriptor depth = %+v, want %+v", tc.setting, view.Limits.Depth, tc.want)
 		}
 	}
 }
