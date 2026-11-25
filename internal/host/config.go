@@ -694,6 +694,9 @@ func (c TenantConfig) Validate() error {
 	if c.Compaction.TTLHours < 0 {
 		return problem("compaction.ttlHours must be >= 0")
 	}
+	if c.Compaction.TTLHours > 24*365*10 {
+		return problem("compaction.ttlHours must be <= %d", 24*365*10)
+	}
 	for i, pattern := range c.Tools.Allow {
 		if strings.TrimSpace(pattern) == "" {
 			return problem("tools.allow[%d] is empty", i)

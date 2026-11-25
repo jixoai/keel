@@ -108,6 +108,9 @@ func (m *manualCompactor) compact(ctx context.Context, tenantID, sessionID uuid.
 			}, nil
 		case errors.Is(compactErr, agent.ErrManualCompactDisabled):
 			return harnessapi.CompactResult{}, harnessapi.ErrCompactDisabled
+		case errors.Is(compactErr, agent.ErrManualCompactToolCallOpen),
+			errors.Is(compactErr, agent.ErrManualCompactUnsafe):
+			return harnessapi.CompactResult{}, harnessapi.ErrCompactConflict
 		default:
 			return harnessapi.CompactResult{}, compactErr
 		}

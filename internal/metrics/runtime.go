@@ -68,7 +68,7 @@ func NewSet(reg *Registry) *Set {
 		checkpointRecover: reg.NewCounter("keel_checkpoint_recovered_total",
 			"Model contexts rebuilt from a valid checkpoint plus retained tail."),
 		checkpointFailures: reg.NewCounterVec("keel_checkpoint_failed_total",
-			"Checkpoint operations rejected or falling back, by bounded reason (save|summary|load|corrupt|anchor|prune|other).", "reason"),
+			"Checkpoint operations rejected or falling back, by bounded reason (save|summary|load|corrupt|anchor|prune|conflict|policy|other).", "reason"),
 		checkpointPruned: reg.NewCounter("keel_checkpoint_pruned_total",
 			"Checkpoint projections deleted by retention; events are never deleted."),
 		agentTurns: reg.NewCounter("keel_agent_turns_total",
@@ -155,7 +155,7 @@ func (s *Set) CheckpointRecovered() { s.checkpointRecover.Inc() }
 // cannot grow series cardinality.
 func (s *Set) CheckpointFailed(reason string) {
 	switch reason {
-	case "save", "summary", "load", "corrupt", "anchor", "prune":
+	case "save", "summary", "load", "corrupt", "anchor", "prune", "conflict", "policy":
 	default:
 		reason = "other"
 	}

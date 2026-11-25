@@ -137,6 +137,11 @@ type CheckpointPolicyOverride struct {
 	ManualCompact   *bool
 }
 
+// MaxCheckpointTTLHours bounds a policy TTL before it is converted to a
+// time.Duration. It is ten years: far beyond any real retention and safely
+// below the 64-bit duration overflow when multiplied by time.Hour.
+const MaxCheckpointTTLHours = 24 * 365 * 10
+
 // CheckpointPolicyOverrideDocument is the JSON document a session policy API
 // stores and serves. It is separate from CheckpointPolicyOverride because TTL
 // travels as whole hours on the wire (the tenant document uses ttlHours too).
@@ -172,6 +177,9 @@ func (d CheckpointPolicyOverrideDocument) Validate() error {
 		if err := negative(check.name, check.value); err != nil {
 			return err
 		}
+	}
+	if d.TTLHours != nil && *d.TTLHours > MaxCheckpointTTLHours {
+		return fmt.Errorf("compaction: checkpoint policy ttlHours must be <= %d", MaxCheckpointTTLHours)
 	}
 	return nil
 }

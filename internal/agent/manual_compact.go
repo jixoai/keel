@@ -15,6 +15,7 @@ package agent
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -25,12 +26,20 @@ import (
 )
 
 // ErrManualCompactDisabled reports that the effective checkpoint policy does
-// not allow manual compaction (or checkpoints at all).
+// not allow manual compaction.
 var ErrManualCompactDisabled = errors.New("agent: manual compaction is disabled by the checkpoint policy")
 
 // ErrManualCompactNothing reports that the transcript has no safe cut to
 // summarize; the context is unchanged.
 var ErrManualCompactNothing = errors.New("agent: nothing to compact at a safe cut point")
+
+// ErrManualCompactToolCallOpen reports a dangling assistant tool call: the turn
+// is incomplete and must be settled by a normal attempt, not summarized.
+var ErrManualCompactToolCallOpen = errors.New("agent: manual compaction refused: unresolved tool call")
+
+// ErrManualCompactUnsafe reports a cut that cannot be anchored without hiding an
+// unread input, the inherited fork prefix, or an uncommitted boundary.
+var ErrManualCompactUnsafe = errors.New("agent: manual compaction has no safe cut")
 
 // ManualCompactResult is the outcome of one manual compaction (or of the
 // idempotent replay of an earlier one).
@@ -72,7 +81,8 @@ func (r *Runner) CompactNow(ctx context.Context, lease kernel.Lease, requestID s
 		return ManualCompactResult{}, errors.New("agent: manual compaction needs the checkpoint seam")
 	}
 	policy := r.checkpointPolicy(ctx, lease.Scope)
-	if !policy.Enabled || !policy.ManualCompact {
+	// Enabled gates automatic compaction only; the manual switch is independent.
+	if !policy.ManualCompact {
 		return ManualCompactResult{}, ErrManualCompactDisabled
 	}
 
@@ -101,36 +111,128 @@ func (r *Runner) CompactNow(ctx context.Context, lease kernel.Lease, requestID s
 	if err != nil {
 		return ManualCompactResult{}, err
 	}
-	view, checkpoint, checkpointSeq := r.modelView(ctx, lease.Scope, events)
+	// A dangling tool call is an incomplete turn. Summarizing it would hide the
+	// call from the next model request and let the run settle as done; refuse and
+	// let a normal attempt fill (or fail) the result instead.
+	unresolved, err := r.Events.UnresolvedToolCalls(ctx, lease.Scope)
+	if err != nil {
+		return ManualCompactResult{}, err
+	}
+	if len(unresolved) > 0 {
+		return ManualCompactResult{}, ErrManualCompactToolCallOpen
+	}
+
+	// The summary call uses the same execution identity as a normal attempt:
+	// the run's selection/binding, the resolved provider stream, dynamic key,
+	// thinking level, context window and request overlay. A resolver failure is
+	// fail closed: never call the static/fake stream behind the resolver's back.
+	selection := runSelection(events)
+	surface, err := r.resolveSurface(ctx, lease, selection)
+	if err != nil {
+		return ManualCompactResult{}, fmt.Errorf("agent: resolve agent binding: %w", err)
+	}
+	active, err := r.activeModelFor(ctx, lease, events, MergeSelectionDefaultModel(selection, surface.DefaultModel))
+	if err != nil {
+		return ManualCompactResult{}, fmt.Errorf("agent: resolve model: %w", err)
+	}
+	if active.Stream == nil {
+		return ManualCompactResult{}, fmt.Errorf("agent: manual compaction has no provider stream for %s/%s", active.ProviderID, active.Model)
+	}
+
+	// The projection is read with the attempt's unread-input guard: a checkpoint
+	// whose retained tail starts after an unread input is corrupt and falls back
+	// to the full log.
+	view, checkpoint, checkpointSeq := r.loadModelView(ctx, lease.Scope, events, lease.ReadWatermark, true, false)
 	msgs, seqs := DecodeMessages(view, nil)
-	prevIndex := -1
 	if checkpoint != nil {
 		msgs = append(agentcore.MessageList{*checkpoint}, msgs...)
 		seqs = append([]int64{checkpointSeq}, seqs...)
-		prevIndex = 0
 	}
 	if len(msgs) == 0 {
 		return ManualCompactResult{PolicyVersion: policy.Version(), Reason: "nothing-to-compact"}, ErrManualCompactNothing
 	}
+
+	// Forked sessions inherit the parent prefix as a read-time union. The prefix
+	// carries negative synthetic seqs, so it can be summarized but never anchors
+	// a checkpoint to the child's log.
+	prefixMsgs, prefixSeqs, err := r.forkPrefixMessages(ctx, lease.Scope)
+	if err != nil {
+		return ManualCompactResult{}, err
+	}
+	prefixLen := len(prefixMsgs)
+	if prefixLen > 0 {
+		msgs = append(prefixMsgs, msgs...)
+		seqs = append(prefixSeqs, seqs...)
+	}
+
+	// Unread inputs are presented last, exactly like a normal attempt. A cut that
+	// would summarize one of them is refused before the summary request, so a
+	// manual compaction can never swallow an input the model still owes an answer.
+	unread, consumptionKnown := unreadInputs(events, lease.ReadWatermark)
+	isUnread := func(seq int64) bool {
+		if seq <= 0 {
+			return false
+		}
+		if consumptionKnown {
+			return unread[seq]
+		}
+		if lease.ReadWatermark <= 0 {
+			// No attempt has proven a read point and the log carries no
+			// consumption fact: every committed input is treated as unread.
+			return true
+		}
+		return seq > lease.ReadWatermark
+	}
+	msgs, seqs, movedStart := presentUnreadInputLast(msgs, seqs, isUnread)
+	initialLen := len(msgs)
 	before := compaction.EstimateContextTokensConservative(msgs)
 
 	settings := compaction.DefaultCompactionSettings
 	if r.Compaction != nil {
 		settings = r.Compaction.Settings
 	}
-	if r.Compaction != nil && r.Compaction.Policy != nil {
-		// An explicit policy is authoritative, including a zero retained budget.
-		settings.KeepRecentTokens = policy.RetainTokens
+	// The effective policy is authoritative for retention, including a zero
+	// retained budget.
+	settings.KeepRecentTokens = policy.RetainTokens
+	window := active.ContextWindow
+	if window <= 0 && r.Compaction != nil {
+		window = r.Compaction.ContextWindow
 	}
-	// The explicit call bypasses the threshold: the user asked now. Safety rules
-	// (pending user, tool boundary) still apply inside Compact.
-	model := provider.Model{
-		Provider:      r.ProviderName,
-		ID:            r.Model,
-		ContextWindow: r.compactionContextWindow(),
+
+	// Preflight the cut before spending a summary request: the compaction is only
+	// safe when it starts at a committed child event after every unread input and
+	// outside the inherited prefix.
+	cut := compaction.FindCutPoint(msgs, settings.KeepRecentTokens)
+	if cut.FirstKeptIndex <= 0 {
+		return ManualCompactResult{TokensBefore: before, TokensAfter: before, PolicyVersion: policy.Version(), Reason: "nothing-to-compact"}, ErrManualCompactNothing
 	}
-	streamConfig := provider.StreamConfig{APIKey: r.APIKey, ThinkingLevel: r.ThinkingLevel}
-	res, err := compaction.Compact(ctx, r.Stream, model, msgs, settings, prevIndex, nil, "", streamConfig)
+	if problem := manualCutUnsafe(seqs, cut.FirstKeptIndex, prefixLen, movedStart, initialLen, isUnread); problem != "" {
+		if r.CheckpointMetrics != nil {
+			r.CheckpointMetrics.CheckpointFailed("conflict")
+		}
+		return ManualCompactResult{TokensBefore: before, TokensAfter: before, PolicyVersion: policy.Version(), Reason: "unsafe-cut"}, fmt.Errorf("%w: %s", ErrManualCompactUnsafe, problem)
+	}
+	// Resolve the anchor against log order, not the in-memory (prefix/reordered)
+	// transcript: a cut before a moved unread input maps to an earlier-or-equal
+	// committed seq, never to a later one that would hide the input. uptoSeq is
+	// the next sequence; the pre-commit mapping is identical to the post-commit
+	// one because the compaction event itself is excluded.
+	lastSeq := events[len(events)-1].Seq
+	anchor := r.checkpointAnchor(ctx, lease.Scope, cut.FirstKeptIndex, lastSeq+1)
+	if anchor <= 0 {
+		if r.CheckpointMetrics != nil {
+			r.CheckpointMetrics.CheckpointFailed("conflict")
+		}
+		return ManualCompactResult{TokensBefore: before, TokensAfter: before, PolicyVersion: policy.Version(), Reason: "unanchored-cut"}, fmt.Errorf("%w: cut is not anchored to a committed child event", ErrManualCompactUnsafe)
+	}
+
+	providerModel := provider.Model{Provider: active.ProviderID, ID: active.Model, ContextWindow: window}
+	streamConfig := provider.StreamConfig{
+		APIKey:        active.APIKey,
+		ThinkingLevel: active.ThinkingLevel,
+		Extra:         active.RequestPatch,
+	}
+	res, err := compaction.Compact(ctx, active.Stream, providerModel, msgs, settings, -1, nil, "", streamConfig)
 	if err != nil {
 		// The summary request failed or was cancelled: the original context (the
 		// event log) is untouched and nothing is written.
@@ -145,23 +247,18 @@ func (r *Runner) CompactNow(ctx context.Context, lease kernel.Lease, requestID s
 	if res == nil {
 		return ManualCompactResult{TokensBefore: before, TokensAfter: before, PolicyVersion: policy.Version(), Reason: "nothing-to-compact"}, ErrManualCompactNothing
 	}
+	// The second cut is computed from the same messages/settings; if it differs
+	// or the index cannot be anchored, refuse instead of guessing.
+	if problem := manualCutUnsafe(seqs, res.FirstKeptIndex, prefixLen, movedStart, initialLen, isUnread); problem != "" {
+		if r.CheckpointMetrics != nil {
+			r.CheckpointMetrics.CheckpointFailed("conflict")
+		}
+		return ManualCompactResult{TokensBefore: before, TokensAfter: before, PolicyVersion: policy.Version(), Reason: "unsafe-cut"}, fmt.Errorf("%w: %s", ErrManualCompactUnsafe, problem)
+	}
 
 	now := time.Now().UnixMilli()
 	rebuilt := res.RebuildContext(msgs, now)
 	tokensAfter := compaction.EstimateContextTokensConservative(rebuilt)
-	if res.FirstKeptIndex <= 0 || res.FirstKeptIndex >= len(seqs) {
-		if r.CheckpointMetrics != nil {
-			r.CheckpointMetrics.CheckpointFailed("anchor")
-		}
-		return ManualCompactResult{TokensBefore: before, TokensAfter: before, PolicyVersion: policy.Version(), Reason: "unanchored-cut"}, errors.New("agent: manual compaction cut cannot be anchored to committed events")
-	}
-	anchor := seqs[res.FirstKeptIndex]
-	if anchor <= 0 {
-		if r.CheckpointMetrics != nil {
-			r.CheckpointMetrics.CheckpointFailed("anchor")
-		}
-		return ManualCompactResult{TokensBefore: before, TokensAfter: before, PolicyVersion: policy.Version(), Reason: "unanchored-cut"}, errors.New("agent: manual compaction cut cannot be anchored to committed events")
-	}
 	summarized := len(msgs) - (len(rebuilt) - 1)
 	raw, err := marshalPayload(map[string]any{
 		"summary":             res.Summary,
@@ -189,6 +286,16 @@ func (r *Runner) CompactNow(ctx context.Context, lease kernel.Lease, requestID s
 		}
 		return ManualCompactResult{}, err
 	}
+	// Recompute against the committed sequence. The mapping is the same as the
+	// preflight; a surprise answers an unanchored projection (replay falls back
+	// to the event log) instead of guessing a boundary.
+	committedAnchor := r.checkpointAnchor(ctx, lease.Scope, res.FirstKeptIndex, seq)
+	reason := "compacted"
+	if committedAnchor <= 0 {
+		committedAnchor = 0
+		reason = "compacted-unanchored"
+	}
+	anchor = committedAnchor
 	record := kernel.CheckpointRecord{
 		UptoSeq:       seq,
 		KeptFromSeq:   anchor,
@@ -213,7 +320,7 @@ func (r *Runner) CompactNow(ctx context.Context, lease kernel.Lease, requestID s
 	if r.CheckpointMetrics != nil {
 		r.CheckpointMetrics.CheckpointCreated(res.TokensBefore, tokensAfter)
 	}
-	r.pruneCheckpoints(ctx, lease.Scope)
+	r.pruneCheckpointsFor(ctx, lease.Scope, policy)
 	r.Logger.Info("manual checkpoint created",
 		"tenant_id", lease.Scope.TenantID, "session_id", lease.Scope.SessionID,
 		"cut_seq", seq, "kept_from_seq", anchor,
@@ -226,8 +333,32 @@ func (r *Runner) CompactNow(ctx context.Context, lease kernel.Lease, requestID s
 		TokensAfter:   tokensAfter,
 		KeptFromSeq:   anchor,
 		PolicyVersion: policy.Version(),
-		Reason:        "compacted",
+		Reason:        reason,
 	}, nil
+}
+
+// manualCutUnsafe rejects a cut that would summarize an unread input, start
+// inside the inherited fork prefix, enter the moved-unread tail, or fail to name
+// a committed child event.
+func manualCutUnsafe(seqs []int64, cut, prefixLen, movedStart, initialLen int, isUnread func(int64) bool) string {
+	if cut <= 0 || cut >= len(seqs) {
+		return "cut outside the retained transcript"
+	}
+	if cut <= prefixLen {
+		return "cut falls inside the inherited fork prefix"
+	}
+	if movedStart < initialLen && cut >= movedStart {
+		return "cut enters the moved unread inputs"
+	}
+	for i := 0; i < cut; i++ {
+		if seq := seqs[i]; seq > 0 && isUnread(seq) {
+			return "cut would summarize an unread input"
+		}
+	}
+	if seqs[cut] <= 0 {
+		return "cut is not anchored to a child event"
+	}
+	return ""
 }
 
 // compactionContextWindow is the model window used while summarizing. The loop's

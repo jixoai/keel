@@ -289,7 +289,9 @@ func (m *MemStore) SaveCheckpoint(ctx context.Context, tenantID, sessionID uuid.
 	return nil
 }
 
-// LoadCheckpoint returns the session's newest checkpoint projection.
+// LoadCheckpoint returns the session's newest anchored checkpoint projection.
+// Unanchored rows (kept_from_seq 0) cannot stand in for a prefix; they are
+// skipped so an older anchored checkpoint remains usable.
 func (m *MemStore) LoadCheckpoint(ctx context.Context, tenantID, sessionID uuid.UUID) (Checkpoint, bool, error) {
 	if err := ctx.Err(); err != nil {
 		return Checkpoint{}, false, err
@@ -303,6 +305,9 @@ func (m *MemStore) LoadCheckpoint(ctx context.Context, tenantID, sessionID uuid.
 	var newest Checkpoint
 	found := false
 	for _, cp := range s.checkpoints {
+		if cp.KeptFromSeq <= 0 {
+			continue
+		}
 		if !found || cp.UptoSeq > newest.UptoSeq {
 			newest, found = cp, true
 		}
@@ -344,17 +349,28 @@ func (m *MemStore) PruneCheckpoints(ctx context.Context, tenantID, sessionID uui
 	if !ok {
 		return 0, fmt.Errorf("memstore: session: %w", ErrNotFound)
 	}
-	if len(s.checkpoints) <= 1 {
-		return 0, nil
-	}
 	ordered := append([]Checkpoint(nil), s.checkpoints...)
 	sort.Slice(ordered, func(i, j int) bool { return ordered[i].UptoSeq > ordered[j].UptoSeq })
-	newest := ordered[0].UptoSeq
+	newestAnchored := int64(0)
+	for _, cp := range ordered {
+		if cp.KeptFromSeq > 0 {
+			newestAnchored = cp.UptoSeq
+			break
+		}
+	}
 	now := m.now()
 	kept := make([]Checkpoint, 0, len(ordered))
 	pruned := int64(0)
-	for rank, cp := range ordered {
-		if cp.UptoSeq == newest {
+	anchoredRank := 0
+	for _, cp := range ordered {
+		// Unanchored rows are unusable projections: prune them freely.
+		if cp.KeptFromSeq <= 0 {
+			pruned++
+			continue
+		}
+		rank := anchoredRank
+		anchoredRank++
+		if cp.UptoSeq == newestAnchored {
 			kept = append(kept, cp)
 			continue
 		}

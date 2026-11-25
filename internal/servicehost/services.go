@@ -491,7 +491,13 @@ func (r *Runtime) CheckpointPolicy() compaction.CheckpointPolicy {
 // narrows it (never widens it) through the checkpoint policy rules.
 func compactionOptions(tenant host.TenantConfig) agent.CompactionOptions {
 	settings := compaction.DefaultCompactionSettings
+	// compaction.enabled is a pointer so an explicit false overrides the default;
+	// nil inherits the default (on). The policy view and the loop share this one
+	// resolution.
 	settings.Enabled = true
+	if tenant.Compaction.Enabled != nil {
+		settings.Enabled = *tenant.Compaction.Enabled
+	}
 	if tenant.Compaction.KeepRecentTokens > 0 {
 		settings.KeepRecentTokens = tenant.Compaction.KeepRecentTokens
 	}

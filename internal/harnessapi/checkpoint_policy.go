@@ -44,7 +44,7 @@ func (s *Server) getCheckpointPolicy(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	if s.cfg.Access != nil && !s.authorizeSessionResource(w, r, tenantID, sessionID, access.KeySessionRead) {
+	if !s.authorizeSessionResource(w, r, tenantID, sessionID, access.KeySessionRead) {
 		return
 	}
 	view, err := s.cfg.CheckpointPolicies.Get(r.Context(), tenantID, sessionID)
@@ -72,7 +72,7 @@ func (s *Server) putCheckpointPolicy(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	if s.cfg.Access != nil && !s.authorizeSessionResource(w, r, tenantID, sessionID, access.KeySessionWrite) {
+	if !s.authorizeSessionResource(w, r, tenantID, sessionID, access.KeySessionWrite) {
 		return
 	}
 	var document compaction.CheckpointPolicyOverrideDocument

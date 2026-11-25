@@ -55,6 +55,10 @@ var (
 	// ErrCompactQuota reports that the tenant's run admission budget refuses
 	// the claim.
 	ErrCompactQuota = errors.New("harnessapi: run quota exceeded")
+	// ErrCompactConflict reports a context that cannot be compacted safely now
+	// (an unread input at the cut, an inherited prefix boundary, or an
+	// unresolved tool call).
+	ErrCompactConflict = errors.New("harnessapi: session context cannot be compacted safely")
 )
 
 const compactRequestIDMax = 200
@@ -81,11 +85,10 @@ func (s *Server) compactSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Permission runs before the body is read: a caller without session.write
-	// learns nothing about the session's context by probing this route.
-	if s.cfg.Access != nil {
-		if !s.authorizeSessionResource(w, r, tenantID, sessionID, access.KeySessionWrite) {
-			return
-		}
+	// learns nothing about the session's context by probing this route. A
+	// deployment without the access seam fails closed (503), never open.
+	if !s.authorizeSessionResource(w, r, tenantID, sessionID, access.KeySessionWrite) {
+		return
 	}
 	var body compactRequest
 	if err := decodeBody(w, r, s.cfg.MaxBody, &body); err != nil {
@@ -120,6 +123,11 @@ func (s *Server) compactSession(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusTooManyRequests, map[string]any{
 				"error":  "run admission quota exceeded",
 				"status": "quota",
+			})
+		case errors.Is(err, ErrCompactConflict):
+			writeJSON(w, http.StatusConflict, map[string]any{
+				"error":  "session context cannot be compacted safely; retry after the turn settles",
+				"status": "conflict",
 			})
 		case errors.Is(err, ErrExternalSession):
 			writeJSON(w, http.StatusConflict, map[string]any{

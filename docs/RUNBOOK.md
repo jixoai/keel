@@ -337,7 +337,7 @@ curl -s http://127.0.0.1:13740/metrics | head
 | `keel_compactions_total` | counter | 已提交的 compaction 事件数 |
 | `keel_checkpoint_created_total` | counter | 成功写入的 checkpoint 投影数（自动+手动） |
 | `keel_checkpoint_recovered_total` | counter | 从有效 checkpoint + tail 重建模型上下文的次数 |
-| `keel_checkpoint_failed_total{reason}` | counter | checkpoint 失败/降级；reason 固定为 `save`/`summary`/`load`/`corrupt`/`anchor`/`prune`/`other` |
+| `keel_checkpoint_failed_total{reason}` | counter | checkpoint 失败/降级；reason 固定为 `save`/`summary`/`load`/`corrupt`/`anchor`/`prune`/`conflict`/`policy`/`other` |
 | `keel_checkpoint_pruned_total` | counter | 保留清理删除的 checkpoint 投影数（事件永不删除） |
 | `keel_streams_active` | gauge | 当前 SSE/文件流数 |
 | `keel_draining` | gauge | SIGTERM 排水期为 1 |
@@ -405,11 +405,16 @@ X-Tenant-ID: <tenant>
 - `requestId` 幂等：重复请求返回同一个 `checkpointId`（`replayed=true`），不再调用模型；
 - 返回 `checkpointId`（compaction 事件 seq）、`tokensBefore/tokensAfter`、
   `keptFromSeq`、`policyVersion`、`performed/replayed`；
-- 与自动压缩共用切点/失败语义；摘要失败或取消时不写任何东西。
+- 与自动压缩共用切点/失败语义：未读输入按自动路径重排到最后，切点若会覆盖任何
+  未读输入、落在 fork 前缀内或无法锚定到子会话事件，返回 409 `conflict` 且不写事件；
+  悬空 assistant tool call 同样 409 `conflict`（交给正常 attempt 收尾）。
+- 摘要请求使用本次 attempt 解析出的模型（selection/binding、provider stream、动态
+  key、thinking、context window、request patch）；解析失败 fail closed，不落假摘要。
+- 摘要失败或取消时不写任何东西。
 - 生产 `keel serve` 已接线：适配器先取得 session 的 run lease（无 run 行时入队一次），
   摘要期间续租，成功后 finish（未读输入照常重新入队），失败则 release；
   活动 run 持有租约时返回 409 `busy`，租户并发配额拒绝时返回 429。
-- 策略关闭手动压缩时返回 409 `disabled`。
+- 策略 `manualCompact=false` 时返回 409 `disabled`；`enabled` 只控制自动压缩。
 
 ### session 级策略 API
 

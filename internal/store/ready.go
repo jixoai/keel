@@ -122,7 +122,15 @@ func (s *Store) CheckReady(ctx context.Context) error {
 		   AND EXISTS (SELECT 1 FROM information_schema.columns
 		               WHERE table_schema = current_schema() AND table_name = 'runs' AND column_name = 'loadout_generation')
 		   AND EXISTS (SELECT 1 FROM information_schema.columns
-		               WHERE table_schema = current_schema() AND table_name = 'runs' AND column_name = 'loadout_owner_epoch')`).
+		               WHERE table_schema = current_schema() AND table_name = 'runs' AND column_name = 'loadout_owner_epoch')
+		   AND EXISTS (SELECT 1 FROM information_schema.columns
+		               WHERE table_schema = current_schema() AND table_name = 'checkpoints' AND column_name = 'tokens_before')
+		   AND EXISTS (SELECT 1 FROM information_schema.columns
+		               WHERE table_schema = current_schema() AND table_name = 'checkpoints' AND column_name = 'tokens_after')
+		   AND EXISTS (SELECT 1 FROM information_schema.columns
+		               WHERE table_schema = current_schema() AND table_name = 'checkpoints' AND column_name = 'policy_version')
+		   AND EXISTS (SELECT 1 FROM information_schema.columns
+		               WHERE table_schema = current_schema() AND table_name = 'checkpoints' AND column_name = 'request_id')`).
 		Scan(&migrated); err != nil {
 		return fmt.Errorf("store: ready: migration probe: %w", err)
 	}

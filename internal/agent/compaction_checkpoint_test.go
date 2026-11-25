@@ -312,10 +312,13 @@ func TestCheckpointCutInMovedUnreadInputFailSafe(t *testing.T) {
 		t.Fatalf("run 2: %v", err)
 	}
 	cp, found, err := k.LoadCheckpoint(ctx, scope)
-	if err != nil || !found {
-		t.Fatalf("checkpoint = (found=%v, err=%v), want found", found, err)
+	if err != nil {
+		t.Fatalf("load checkpoint: %v", err)
 	}
-	if cp.KeptFromSeq > u3Seq {
+	// An unanchored projection is no longer served by LoadCheckpoint (it cannot
+	// stand in for a prefix); the safety requirement is only that any served
+	// anchor never starts after the moved unread input.
+	if found && cp.KeptFromSeq > u3Seq {
 		t.Fatalf("checkpoint kept_from_seq = %d, want <= u3 seq %d (a later anchor drops u3)", cp.KeptFromSeq, u3Seq)
 	}
 

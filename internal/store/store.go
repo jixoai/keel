@@ -649,7 +649,7 @@ func (s *Store) LoadCheckpoint(ctx context.Context, tenantID, sessionID uuid.UUI
 		`SELECT upto_seq, COALESCE(kept_from_seq, 0), summary,
 		        tokens_before, tokens_after, policy_version, COALESCE(request_id, ''), created_at
 		 FROM checkpoints
-		 WHERE tenant_id = $1 AND session_id = $2
+		 WHERE tenant_id = $1 AND session_id = $2 AND kept_from_seq IS NOT NULL
 		 ORDER BY upto_seq DESC LIMIT 1`, tenantID, sessionID).
 		Scan(&cp.UptoSeq, &cp.KeptFromSeq, &cp.Summary, &cp.TokensBefore, &cp.TokensAfter,
 			&cp.PolicyVersion, &cp.RequestID, &cp.CreatedAt)
@@ -700,19 +700,24 @@ func (s *Store) PruneCheckpoints(ctx context.Context, tenantID, sessionID uuid.U
 		     SELECT upto_seq, created_at,
 		            row_number() OVER (ORDER BY upto_seq DESC) AS rn
 		     FROM checkpoints
-		     WHERE tenant_id = $1 AND session_id = $2
+		     WHERE tenant_id = $1 AND session_id = $2 AND kept_from_seq IS NOT NULL
 		 ),
 		 newest AS (
 		     SELECT max(upto_seq) AS seq FROM checkpoints
-		     WHERE tenant_id = $1 AND session_id = $2
+		     WHERE tenant_id = $1 AND session_id = $2 AND kept_from_seq IS NOT NULL
 		 )
 		 DELETE FROM checkpoints c
 		 WHERE c.tenant_id = $1 AND c.session_id = $2
-		   AND c.upto_seq <> (SELECT seq FROM newest)
 		   AND (
-		       ($3 > 0 AND c.upto_seq IN (SELECT upto_seq FROM ranked WHERE rn > $3))
-		       OR
-		       ($4 > 0 AND c.created_at < now() - make_interval(secs => $4))
+		       c.kept_from_seq IS NULL
+		       OR (
+		           c.upto_seq <> COALESCE((SELECT seq FROM newest), -1)
+		           AND (
+		               ($3 > 0 AND c.upto_seq IN (SELECT upto_seq FROM ranked WHERE rn > $3))
+		               OR
+		               ($4 > 0 AND c.created_at < now() - make_interval(secs => $4))
+		           )
+		       )
 		   )`,
 		tenantID, sessionID, maxCheckpoints, ttlSeconds)
 	if err != nil {

@@ -208,21 +208,39 @@ func TestManualCompactFailureKeepsContext(t *testing.T) {
 func TestManualCompactPolicyGate(t *testing.T) {
 	st := testStore(t)
 	ctx := context.Background()
-	tenant, session, k, _ := seedManualHistory(t, st)
-	runner := manualRunner(t, st)
-	disabled := *runner.Compaction.Policy
-	disabled.ManualCompact = false
-	runner.Compaction.Policy = &disabled
-	lease := claimScope(t, k, tenant, session)
-
-	if _, err := runner.CompactNow(ctx, lease, "manual-disabled"); !errors.Is(err, ErrManualCompactDisabled) {
-		t.Fatalf("CompactNow err = %v, want ErrManualCompactDisabled", err)
-	}
-	disabled.Enabled = true
-	disabled.ManualCompact = true
-	// Sanity: the same history is compactable once manual is allowed.
-	if _, err := runner.CompactNow(ctx, lease, "manual-allowed"); err != nil {
-		t.Fatalf("CompactNow with manual enabled: %v", err)
+	for _, tc := range []struct {
+		name     string
+		enabled  bool
+		manual   bool
+		disabled bool
+	}{
+		{name: "automatic off, manual on", enabled: false, manual: true},
+		{name: "automatic on, manual off", enabled: true, manual: false, disabled: true},
+		{name: "both off", enabled: false, manual: false, disabled: true},
+		{name: "both on", enabled: true, manual: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tenant, session, k, _ := seedManualHistory(t, st)
+			runner := manualRunner(t, st)
+			policy := compaction.CheckpointPolicy{
+				Enabled: tc.enabled, RetainTokens: 10, ManualCompact: tc.manual,
+			}
+			runner.Compaction.Policy = &policy
+			lease := claimScope(t, k, tenant, session)
+			result, err := runner.CompactNow(ctx, lease, "manual-policy-"+tc.name)
+			if tc.disabled {
+				if !errors.Is(err, ErrManualCompactDisabled) {
+					t.Fatalf("CompactNow err = %v, want ErrManualCompactDisabled", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("CompactNow: %v", err)
+			}
+			if !result.Performed {
+				t.Fatalf("result = %+v, want a performed compaction", result)
+			}
+		})
 	}
 }
 

@@ -242,3 +242,33 @@ func TestPruneCheckpointsKeepsNewest(t *testing.T) {
 		})
 	}
 }
+
+// TestCheckpointSkipsUnanchoredRows pins the recovery rule: an unanchored
+// projection cannot stand in for a prefix, so LoadCheckpoint serves the newest
+// anchored row; pruning deletes unanchored rows and keeps the newest anchored.
+func TestCheckpointSkipsUnanchoredRows(t *testing.T) {
+	for _, impl := range implementations(t) {
+		t.Run(impl.name, func(t *testing.T) {
+			h := impl.build(t)
+			ctx := context.Background()
+			scope := h.newSession()
+			if err := h.k.SaveCheckpoint(ctx, scope, CheckpointRecord{UptoSeq: 5, KeptFromSeq: 3, Summary: "anchored"}); err != nil {
+				t.Fatal(err)
+			}
+			if err := h.k.SaveCheckpoint(ctx, scope, CheckpointRecord{UptoSeq: 9, Summary: "unanchored"}); err != nil {
+				t.Fatal(err)
+			}
+			cp, found, err := h.k.LoadCheckpoint(ctx, scope)
+			if err != nil || !found || cp.UptoSeq != 5 {
+				t.Fatalf("load = (%+v, found=%v, err=%v), want anchored seq 5", cp, found, err)
+			}
+			if pruned, err := h.k.PruneCheckpoints(ctx, scope, PruneRequest{MaxCheckpoints: 1}); err != nil || pruned != 1 {
+				t.Fatalf("prune = (%d, %v), want the unanchored row removed", pruned, err)
+			}
+			cp, found, err = h.k.LoadCheckpoint(ctx, scope)
+			if err != nil || !found || cp.UptoSeq != 5 {
+				t.Fatalf("load after prune = (%+v, found=%v, err=%v)", cp, found, err)
+			}
+		})
+	}
+}

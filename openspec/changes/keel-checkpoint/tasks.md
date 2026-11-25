@@ -40,3 +40,21 @@
       sessionpolicy/metrics/loop/host/servicehost/accessgate/cmd-keel）+
       `openspec validate --strict`。
 - [ ] 4.3 独立 reviewer 复核；E2E 报告（压缩前后、恢复、失败态）；设置页 UI；归档。
+
+## 5. 独立复核修复（No-Go 回合）
+
+- [x] P0 未读输入：手动压缩复用 `unreadInputs` + `presentUnreadInputLast`；切点进入未读块
+      或覆盖未读 seq 时拒绝（409 conflict）；锚点改由 `checkpointAnchor` 按日志顺序解析；
+      恢复时 `unreadBelowCheckpoint` fail closed。测试覆盖 retain 0、默认 retain、损坏锚点。
+- [x] P0 模型解析：手动压缩与自动 run 共用 `resolveSurface`/`activeModelFor`，使用解析后的
+      stream/provider/key/thinking/contextWindow/request patch；resolver 失败 fail closed。
+- [x] P1 悬空 tool call：手动压缩先查 `UnresolvedToolCalls`，有未闭合调用返回 conflict。
+- [x] P1 `enabled=false` 不再关闭手动压缩；补完整策略矩阵（enabled × manual）。
+- [x] P1 tenant `compaction.enabled` 接入 `settings.Enabled` 与策略投影。
+- [x] P1 fork 前缀：`checkpointAnchor` 减去 prefix 长度，切点落在前缀内返回 0；
+      手动压缩在前缀内/无法锚定时拒绝。补 fork compaction + restart 测试。
+- [x] P2（已做）：retainTokens 无条件应用；`LoadCheckpoint` 跳过未锚定行；prune 只保护
+      最新已锚定行；readiness 校验 checkpoint 新列；TTL 上界；手动读取不计 recovered；
+      Access 未接线 fail closed；策略读取失败计 `policy` 指标；每 attempt 策略只解析一次。
+- [ ] P2（未做）：checkpoint summary hash；requestId 去重表独立于 prune；TTL 惰性清理；
+      手动压缩走 hygiene/hooks；手动 claim 不消耗 attempts。
