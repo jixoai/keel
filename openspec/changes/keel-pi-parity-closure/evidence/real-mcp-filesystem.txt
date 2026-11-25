@@ -1,0 +1,27 @@
+Real MCP filesystem server E2E — 2026-11-25
+==========================================
+
+Command:
+  KEEL_REAL_MCP=1 go test ./internal/mcp -run TestRealFilesystemServer -v -count=1
+
+Result:
+  === RUN   TestRealFilesystemServer
+  --- PASS: TestRealFilesystemServer (0.25s)
+  PASS
+  ok  	github.com/jixoai/keel/internal/mcp	0.637s
+
+Server:
+  @modelcontextprotocol/server-filesystem@2.4.0
+  launched with `pnpm dlx ... <tempdir>` over stdio (no Keel fixture/adaptor)
+
+Verified:
+  - initialize handshake with the real server
+  - ListTools returned the upstream tool set
+  - read tool read a temp file created by the test
+  - exact content "hello from a real MCP server" returned
+  - Close terminated the child process
+
+Boundary:
+  This exercises the MCP client/transport directly. The aggregate `mcp`
+  tool surface (constant 11 tools + manifest hash) is not covered by this
+  test yet; T5 remains open for that integration check.

@@ -7,5 +7,5 @@
 - [x] 2.1 telemetry：run 下挂 turn/tool/compaction 子 span；`message_*` span event。
 - [x] 2.2 metrics：turns/tool/context 指标，固定基数。
 - [ ] 3.1 OTLP adapter（默认关），无 endpoint 零连接。
-- [ ] 4.1 真实 MCP filesystem server stdio E2E，evidence 入库。
+- [ ] 4.1 真实 MCP filesystem server stdio E2E（client/transport 已通，evidence 入库；聚合工具面/manifest 未覆盖）。
 - [ ] 5.1 `go test -race` 相关包、main CI、openspec validate --strict；归档。
