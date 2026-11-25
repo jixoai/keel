@@ -1,0 +1,8 @@
+Closure gates — 2026-11-25
+=========================
+- go build ./...                                      PASS
+- KEEL_TEST_DSN=… go test -p 1 ./...                  PASS (exit 0)
+- go test -race ./internal/telemetry ./internal/agent PASS
+- ./scripts/binary-size.sh --base 6111aef             PASS (52–64 KiB, budget 128 KiB)
+- openspec validate keel-pi-parity-closure --strict   PASS
+- main CI run 45559023844 (keel 9b74d15)              PASS

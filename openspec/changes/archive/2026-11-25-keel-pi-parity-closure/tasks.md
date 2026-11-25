@@ -8,4 +8,4 @@
 - [x] 2.2 metrics：turns/tool/context 指标，固定基数。
 - [x] 3.1 OTLP adapter（默认关），无 endpoint 零连接。
 - [x] 4.1 真实 MCP filesystem server stdio E2E（client/transport + 聚合 mcp 工具，evidence 入库）。
-- [ ] 5.1 `go test -race` 相关包、main CI、openspec validate --strict；归档。
+- [x] 5.1 `go test -race` 相关包、main CI、openspec validate --strict；归档。
