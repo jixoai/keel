@@ -27,6 +27,7 @@ import (
 	"github.com/jixoai/keel/internal/bashbridge"
 	"github.com/jixoai/keel/internal/blob"
 	"github.com/jixoai/keel/internal/capturepolicy"
+	"github.com/jixoai/keel/internal/collab"
 	"github.com/jixoai/keel/internal/configfile"
 	"github.com/jixoai/keel/internal/fileplugin"
 	"github.com/jixoai/keel/internal/harnessapi"
@@ -1150,8 +1151,11 @@ type productLayer struct {
 	runCtrl   *harnessext.RunControl
 	starter   *harnessext.TurnStarter
 	subagents *harnessext.SubagentRunner
-	triggers  *harnessext.TriggerEngine
-	plugins   *harnessext.Runtime
+	// collabModes is the deployment's collaboration mode catalogue. It is
+	// read-only at this layer; mode registration happens during assembly.
+	collabModes *collab.ModeRegistry
+	triggers    *harnessext.TriggerEngine
+	plugins     *harnessext.Runtime
 	// pluginManager is the lifecycle authority over plugins; api serves it and
 	// the runtime is only ever told what to load through it.
 	pluginManager *harnessext.Manager
@@ -1365,6 +1369,16 @@ func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, 
 		InheritOwnership: newSessionOwnershipInheritor(st),
 		OwnSpawnedChild:  st.CreateSpawnedSession,
 	})
+	// The collaboration mode registry is completed before the product API is
+	// constructed: duplicate ids and unknown disable targets must fail startup,
+	// and the read-only catalogue is served from this same object. The guarded
+	// collab.Host is not constructed here yet: the existing SubagentRunner path
+	// stays untouched, and harnessext.CollabSubagentLauncher is the adapter seam
+	// keel-collab-subagent wires.
+	collabModes, err := newCollabModes(opts.TenantID)
+	if err != nil {
+		return nil, fmt.Errorf("collaboration modes: %w", err)
+	}
 	// Triggers fire as a Bot: the store-backed resolver validates the Bot
 	// (existence/archive/tenant) at registration and before every fire, and
 	// the ownership writer creates the session with its Bot/account/created-by
@@ -1488,7 +1502,11 @@ func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, 
 		MCPAppMetrics: mcpMetrics,
 		Triggers:      triggers,
 		Subagents:     subagents,
-		Hooks:         hooks,
+		// The read-only collaboration catalogue (change keel-collab-core):
+		// enabled and disabled modes alike, so a client can keep existing work
+		// visible after a disable.
+		CollabModes: collabModes.List,
+		Hooks:       hooks,
 		ModelsLive: func() harnessapi.ModelCatalog {
 			if rt.Models() == nil {
 				return nil
@@ -1583,6 +1601,7 @@ func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, 
 		runCtrl:       runControl,
 		starter:       starter,
 		subagents:     subagents,
+		collabModes:   collabModes,
 		triggers:      triggers,
 		plugins:       plugins,
 		pluginManager: manager,

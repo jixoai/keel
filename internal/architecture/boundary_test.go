@@ -25,6 +25,7 @@ var kernelPackages = []string{
 var productPackages = []string{
 	"github.com/jixoai/keel/internal/harnessapi",
 	"github.com/jixoai/keel/internal/harnessext",
+	"github.com/jixoai/keel/internal/collab",
 	"github.com/jixoai/keel/internal/access",
 	"github.com/jixoai/keel/internal/auth",
 	"github.com/jixoai/keel/internal/botteam",
@@ -81,6 +82,29 @@ func TestModelConfigStaysIndependent(t *testing.T) {
 				t.Errorf("provider configuration imports the kernel: %s", forbidden)
 			}
 		}
+	}
+}
+
+// TestCollabCoreStaysIndependent pins the contract half of keel-collab-core:
+// a mode plugin must not reach the kernel/store to create a session. The collab
+// package is the port vocabulary every mode shares, so it may only depend on
+// the standard library and uuid; the Host adapter in harnessext and the
+// registry assembly in cmd/keel are the product-layer side.
+func TestCollabCoreStaysIndependent(t *testing.T) {
+	const collabPackage = "github.com/jixoai/keel/internal/collab"
+	forbidden := append([]string{}, kernelPackages...)
+	forbidden = append(forbidden,
+		"github.com/jixoai/keel/internal/harnessapi",
+		"github.com/jixoai/keel/internal/harnessext",
+		"github.com/jixoai/keel/internal/access",
+		"github.com/jixoai/keel/internal/accesswire",
+		"github.com/jixoai/keel/internal/toolauth",
+		"github.com/jixoai/keel/internal/toolsurface",
+		"github.com/jixoai/keel/cmd/keel",
+	)
+	graph := packageGraph(t, collabPackage)
+	for _, dependency := range forbidden {
+		requireNoImport(t, graph, collabPackage, dependency)
 	}
 }
 

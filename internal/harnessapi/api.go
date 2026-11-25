@@ -39,6 +39,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jixoai/keel/internal/approval"
+	"github.com/jixoai/keel/internal/collab"
 	"github.com/jixoai/keel/internal/harnessext"
 	"github.com/jixoai/keel/internal/logsafe"
 	"github.com/jixoai/keel/internal/notify"
@@ -128,6 +129,11 @@ type Config struct {
 	// Subagents is the sub-agent runner. Nil answers 503 on the sub-agent
 	// routes.
 	Subagents *harnessext.SubagentRunner
+	// CollabModes projects the deployment's registered collaboration modes
+	// (change keel-collab-core). It is read-only: disabled modes stay in the
+	// answer with enabled=false so a client can still show existing work.
+	// Nil omits the block and reports collab.modes=false.
+	CollabModes func() []collab.ModeView
 	// Hooks is the hook bus (detailed subscription stats on GET /v1/plugins).
 	Hooks *harnessext.HookBus
 	// Parents optionally resolves sub-agent parent links; defaults to Subagents.
@@ -523,6 +529,17 @@ type Capabilities struct {
 	// loadout-derived configHash; AnchorEventSeq is 0 at boot and only becomes
 	// a ledger sequence when a rotation event anchors the file.
 	ConfigFile *ConfigFileCapabilities `json:"configFile,omitempty"`
+	// Collab is the read-only collaboration mode catalogue
+	// (change keel-collab-core). It is the UI's discovery source for which
+	// modes this deployment serves and which are disabled.
+	Collab *CollabCapabilities `json:"collab,omitempty"`
+}
+
+// CollabCapabilities is the collaboration discovery block. Modes include
+// disabled descriptors: a client must be able to show existing work after an
+// operator disables a mode.
+type CollabCapabilities struct {
+	Modes []collab.ModeView `json:"modes"`
 }
 
 // ConfigFileCapabilities is the config.toml discovery block. It deliberately
@@ -575,8 +592,11 @@ func (s *Server) capabilities(w http.ResponseWriter, _ *http.Request) {
 		"plugins.bridge":    s.cfg.PluginManager != nil,
 		"triggers":          s.cfg.Triggers != nil,
 		"subagents":         s.cfg.Subagents != nil,
-		"team.tasks":        s.cfg.TeamTasks != nil,
-		"hooks":             s.cfg.Plugins != nil,
+		// collab.modes is the read-only collaboration catalogue. It does not
+		// gate a write surface: session creation remains the Host's job.
+		"collab.modes": s.cfg.CollabModes != nil,
+		"team.tasks":   s.cfg.TeamTasks != nil,
+		"hooks":        s.cfg.Plugins != nil,
 		// Settings is its own surface: the model write path and secret storage
 		// are separately discoverable, so a client can hide a section this
 		// deployment does not serve.
@@ -667,6 +687,13 @@ func (s *Server) capabilities(w http.ResponseWriter, _ *http.Request) {
 		if block := s.cfg.ConfigFileStatus(); block != nil {
 			capabilities.ConfigFile = block
 		}
+	}
+	if s.cfg.CollabModes != nil {
+		modes := s.cfg.CollabModes()
+		if modes == nil {
+			modes = []collab.ModeView{}
+		}
+		capabilities.Collab = &CollabCapabilities{Modes: modes}
 	}
 	writeJSON(w, http.StatusOK, capabilities)
 }
