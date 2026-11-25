@@ -2,7 +2,7 @@
 
 > Owner 2026-11-22 裁决。本文件是唯一程序板（canonical board）；任务真值仍是各 change 的
 > `tasks.md` + 证据。勾选数只表示板面状态，不表示本文件重新验收过实现。
-> 更新：2026-11-25（v0.3.1 Windows 启动修复）· 分支：`main` · 基线：`44e774b`
+> 更新：2026-11-25（P4 测试债清零）· 分支：`main` · 基线：`f120e70`
 
 ## 当前状态（板面快照）
 
@@ -65,7 +65,9 @@ v0.2.0 发布后仍开的口子（归档板 41 项，按去向分组）：
    telemetry OTLP、testkit、credentials/storage/identity、keel.oar、ui-* 槽位内容、
    gbash mcp CLI、fileplugin 锁回收）；多租户插件面；macOS 原生 target；Rust+gRPC layerfs。
 9. **运维/测试债**：聚合仓 `FDE2E_RELEASES_TOKEN` 未配置（镜像跳过）；父仓 8 个子模块检出
-   待同步（browser 有他人 WIP）；TUI 设置页 raw JSON 1 例失败；headless 模式 4 个布局差异。
+   待同步（browser 有他人 WIP）。TUI 设置页 raw JSON 1 例与 headless 模式 4 个布局差异已
+   于 2026-11-25 修复（keel `f120e70`；headless 409/409、TUI 409/409；Go CI run
+   `45604850921` 全绿）。
 
 **下一阶段没有活跃主线**：任何新工作先按 OpenSpec 立项（或经 Owner 解冻
 `keel-ecosystem`），不得直接在归档板上继续勾选。候选排程（P1 Alpha 残余 →
