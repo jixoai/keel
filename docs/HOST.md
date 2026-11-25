@@ -137,8 +137,9 @@ filesystem:
    重建，未锚定或无 checkpoint 时回退全量事件。
 5. **Telemetry**：run = span；turn/tool/compaction 作为 run 的子 span，`message_*` 作为
    当前 turn span 的 event（通过 `telemetry.ManualStarter` 的事件驱动 tracker）。
-   provider 请求 span 已存在；turns/tool/context 指标与 OTLP 仍待接。`run.finished`
-   作为业务汇总事件追加。
+   provider 请求 span 已存在；turns/tool/context 已接入固定基数 Prometheus 指标
+   （`keel_agent_turns_total` / `keel_agent_tool_calls_total` /
+   `keel_agent_context_utilization`）。OTLP 仍待接。`run.finished` 作为业务汇总事件追加。
 6. **System prompt**：按 PI 的 section 形态拼装（`<preamble>`、`<skills>`、`<tenant>`），
    不再用单一字符串硬编码。
 

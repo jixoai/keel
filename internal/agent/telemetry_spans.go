@@ -12,7 +12,8 @@ import (
 // does not implement telemetry.ManualStarter (callback-only adapters still get
 // the run span and provider span).
 type runSpanTracker struct {
-	root telemetry.Span
+	root    telemetry.Span
+	runtime RuntimeMetrics
 
 	turn    telemetry.Span
 	endTurn func()
@@ -32,6 +33,8 @@ func newRunSpanTracker(root telemetry.Span) *runSpanTracker {
 	return &runSpanTracker{root: root, tools: map[string]toolSpan{}}
 }
 
+func (t *runSpanTracker) setRuntime(runtime RuntimeMetrics) { t.runtime = runtime }
+
 func (t *runSpanTracker) child(parent telemetry.Span, options telemetry.SpanOptions) (telemetry.Span, func()) {
 	if parent == nil {
 		return nil, func() {}
@@ -44,11 +47,14 @@ func (t *runSpanTracker) child(parent telemetry.Span, options telemetry.SpanOpti
 }
 
 func (t *runSpanTracker) observe(event agentcore.AgentEvent) {
-	if t == nil || t.root == nil {
+	if t == nil || (t.root == nil && t.runtime == nil) {
 		return
 	}
 	switch e := event.(type) {
 	case agentcore.TurnStartEvent:
+		if t.runtime != nil {
+			t.runtime.AgentTurn()
+		}
 		t.finishTurn()
 		t.turn, t.endTurn = t.child(t.root, telemetry.SpanOptions{Name: "keel.agent.turn"})
 	case agentcore.TurnEndEvent:
@@ -63,6 +69,9 @@ func (t *runSpanTracker) observe(event agentcore.AgentEvent) {
 	case agentcore.MessageEndEvent:
 		t.addMessageEvent("message_end", e.Message)
 	case agentcore.ToolExecutionStartEvent:
+		if t.runtime != nil {
+			t.runtime.AgentToolCall()
+		}
 		parent := t.turn
 		if parent == nil {
 			parent = t.root
@@ -111,6 +120,10 @@ func (t *runSpanTracker) observe(event agentcore.AgentEvent) {
 			})
 		}
 		t.finishCompaction()
+	case agentcore.TelemetryEvent:
+		if t.runtime != nil {
+			t.runtime.AgentContext(e.ContextUtilization)
+		}
 	case agentcore.AgentEndEvent:
 		t.close()
 	}

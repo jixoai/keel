@@ -16,6 +16,17 @@ import (
 type RunTelemetry struct {
 	Context telemetry.Context
 	Metrics telemetry.Metrics
+	// Runtime, when set, receives the fixed-cardinality Prometheus counters
+	// used by the hosting process (turns/tool calls/context utilization).
+	Runtime RuntimeMetrics
+}
+
+// RuntimeMetrics is the process-level metric sink for the span tracker. It is
+// separate from telemetry.Metrics (the PI adapter metrics).
+type RuntimeMetrics interface {
+	AgentTurn()
+	AgentToolCall()
+	AgentContext(ratio float64)
 }
 
 // observeRun wraps one run in a span and records its duration and outcome. The

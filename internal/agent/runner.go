@@ -614,6 +614,9 @@ func (r *Runner) ResolveCapturePolicy(ctx context.Context, scope kernel.Scope) (
 func (r *Runner) run(ctx context.Context, lease kernel.Lease, span telemetry.Span) (RunResult, error) {
 	var res RunResult
 	spans := newRunSpanTracker(span)
+	if r.Telemetry != nil {
+		spans.setRuntime(r.Telemetry.Runtime)
+	}
 	defer spans.close()
 	events, cursor, err := r.loadEvents(ctx, lease.Scope)
 	// The load high-water mark: everything the transcript was built from.

@@ -28,8 +28,8 @@
   `cmd/keel` 依赖图，租户 `hooks.commands` 只校验/计数；**不得按 delivered 记**。
 - 2026-11-25 closure T2 已把 hooks 接进 `agent.Runner`（tool gate/context/compact cancel），
   §6 的 6 条从“未接线”转为“已接线（待归档验收）”。
-- 2026-11-25 closure T3 已接 run→turn/tool/compaction span 树；turns/tool/context 指标与 OTLP 仍待。
-- 真缺口：turns/tool/context 指标、真实 MCP server E2E；
+- 2026-11-25 closure T3 已接 run→turn/tool/compaction span 树与 turns/tool/context 指标；OTLP 待接。
+- 真缺口：OTLP adapter、真实 MCP server E2E；
   P1 见 `keel-pi-parity-audit/audit.md`。
 - 建议保持本板冻结；另开 `keel-pi-parity-closure`（T1 审计入库 → T2 hooks → T3 span
   树+指标 → T4 OTLP → T5 真实 MCP E2E）。本文件的审计不改变 `tasks.md` 字符。

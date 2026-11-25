@@ -32,6 +32,9 @@ type Set struct {
 	leaseExpired   *Counter
 	finishErrors   *Counter
 	compactions    *Counter
+	agentTurns     *Counter
+	agentToolCalls *Counter
+	agentContext   *Histogram
 	draining       *Gauge
 }
 
@@ -56,9 +59,29 @@ func NewSet(reg *Registry) *Set {
 			"Run attempts whose terminal state could not be persisted."),
 		compactions: reg.NewCounter("keel_compactions_total",
 			"Compaction events committed to the event log."),
+		agentTurns: reg.NewCounter("keel_agent_turns_total",
+			"Provider turns observed by the agent loop."),
+		agentToolCalls: reg.NewCounter("keel_agent_tool_calls_total",
+			"Tool calls executed by the agent loop."),
+		agentContext: reg.NewHistogram("keel_agent_context_utilization",
+			"Latest context utilization ratio (tokens/window) after a turn.", []float64{0.5, 0.7, 0.8, 0.9, 0.95, 1}),
 		draining: reg.NewGauge("keel_draining",
 			"1 while the process is draining, else 0."),
 	}
+}
+
+// AgentTurn counts one provider turn.
+func (s *Set) AgentTurn() { s.agentTurns.Inc() }
+
+// AgentToolCall counts one executed (or blocked) tool call.
+func (s *Set) AgentToolCall() { s.agentToolCalls.Inc() }
+
+// AgentContext records the latest context utilization ratio.
+func (s *Set) AgentContext(ratio float64) {
+	if ratio < 0 {
+		ratio = 0
+	}
+	s.agentContext.Observe(ratio)
 }
 
 // RunStarted counts a claimed attempt and marks it active.

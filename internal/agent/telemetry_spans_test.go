@@ -80,3 +80,29 @@ func TestTurnSpanCarriesMessageEvents(t *testing.T) {
 	}
 	t.Fatal("missing turn span")
 }
+
+type fakeRuntime struct {
+	turns, tools int
+	context      float64
+}
+
+func (f *fakeRuntime) AgentTurn()                 { f.turns++ }
+func (f *fakeRuntime) AgentToolCall()             { f.tools++ }
+func (f *fakeRuntime) AgentContext(ratio float64) { f.context = ratio }
+
+func TestSpanTrackerFeedsRuntimeMetrics(t *testing.T) {
+	mem := telemetry.NewMemory()
+	root, end := mem.StartManualSpan(telemetry.SpanOptions{Name: "keel.agent.run"})
+	tracker := newRunSpanTracker(root)
+	runtime := &fakeRuntime{}
+	tracker.setRuntime(runtime)
+	tracker.observe(agentcore.TurnStartEvent{})
+	tracker.observe(agentcore.ToolExecutionStartEvent{ToolCallID: "c1", ToolName: "echo"})
+	tracker.observe(agentcore.ToolExecutionEndEvent{ToolCallID: "c1", ToolName: "echo"})
+	tracker.observe(agentcore.TelemetryEvent{ContextUtilization: 0.75})
+	tracker.close()
+	end()
+	if runtime.turns != 1 || runtime.tools != 1 || runtime.context != 0.75 {
+		t.Fatalf("runtime metrics = %+v", runtime)
+	}
+}

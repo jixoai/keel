@@ -834,6 +834,14 @@ func newWorkerFactory(cfg Config, engine *servicegraph.Engine) servicegraph.Fact
 				runner.Telemetry = telemetryService.RunTelemetry()
 			}
 		}
+		if runner.Telemetry == nil && cfg.Metrics != nil {
+			runner.Telemetry = &agent.RunTelemetry{}
+		}
+		if runner.Telemetry != nil {
+			if runtime, ok := cfg.Metrics.(agent.RuntimeMetrics); ok {
+				runner.Telemetry.Runtime = runtime
+			}
+		}
 		worker := agent.NewWorker(cfg.Seams.Leases, mirror, runner, cfg.RuntimeID, cfg.Concurrency, cfg.Seams.Logger)
 		worker.Metrics = cfg.Metrics
 		worker.DrainGate = cfg.DrainGate
