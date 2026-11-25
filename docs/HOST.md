@@ -125,8 +125,10 @@ filesystem:
    对内置与插件/外部工具同时生效；省略不过滤，显式 `[]` 不保留任何工具，尾部 `*` 为前缀
    通配，如 `keel_*`）；skill 的 `allowed-tools` 目前只解析进元数据，执行期与工具集取交集
    尚未接线（2026-11-25 parity 审计）。
-3. **Hooks**：`internal/hooks` 已实现事件、命令钩子、决策、审计与 `wrapTool`，但尚未接入
-   出货二进制；租户 `hooks.commands` 目前只做校验/计数，没有加载执行点。
+3. **Hooks**：`internal/hooks` 已接入 `agent.Runner`；租户 `hooks.commands` 在 servicehost
+   装配时加载为命令钩子。当前接线 before_agent_start（system prompt）、context、tool_call
+   （deny/modify）、tool_result（patch）、session_before_compact（cancel）与生命周期通知；
+   turn_end / agent_before_settle 的可执行边界尚未接线。
 4. **Compaction**：`loop.LoopConfig.Compaction` 使用 PI `DEFAULT_COMPACTION_POLICY`
    （threshold/keepRecentTokens/backgroundTokens）。`agent.Runner` 在有序事件消费者里
    提交 `compaction` 事件（摘要/保留段/token 数），随后写 `checkpoints`

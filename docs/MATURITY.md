@@ -37,7 +37,7 @@
 | 可观测 | v2：`run.finished` + run span；turn/tool/compaction 子 span 未接线 | G5 | span 树、turns/tool/context 指标、OTLP |
 | Skills | v2 已交付加载/渐进披露/租户库/不可变版本 | G5 | `allowed-tools` 执行期交集、文件监听、`.gitignore`/project-trust |
 | MCP | v2 已交付 client/stdio/Streamable HTTP/OAuth/Apps | G5 | 真实 server E2E、连接池/健康检查、模型路径破坏性审批 |
-| Hooks | 库已实现未接线（`internal/hooks` 不在出货依赖图） | G5 | 产品接线（P0）、命令钩子加载、决策/审计落 run |
+| Hooks | 已接线（tool gate/context/compact cancel/通知；`internal/hooks` 进出货依赖） | G5 | turn_end/settle 边界、审计落账本 |
 | 租户/配额 | G1（tenant_id） | G5 | API key、RLS、配额、用量 |
 | Provider 文件 | v2：`file_id > url > base64` 已实现（`internal/provider/media.go:52-79`、`internal/provider/imagefiles.go:7-30`） | G5 | 剩余见归档 evidence |
 | 运维 | G1（health） | G5 | ready、metrics、CI、镜像、排水 |

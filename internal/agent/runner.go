@@ -18,6 +18,7 @@ import (
 	"github.com/jixoai/keel/internal/agenttool"
 	"github.com/jixoai/keel/internal/capturepolicy"
 	"github.com/jixoai/keel/internal/compaction"
+	"github.com/jixoai/keel/internal/hooks"
 	"github.com/jixoai/keel/internal/kernel"
 	"github.com/jixoai/keel/internal/loop"
 	"github.com/jixoai/keel/internal/promptcache"
@@ -140,6 +141,10 @@ type Runner struct {
 	// Compaction, when set, enables automatic context compaction for every run
 	// of this runner (the compaction service adapter). Nil keeps it off.
 	Compaction *CompactionOptions
+	// Hooks is the tenant extension registry wired into the loop (PI hooks:
+	// before_agent_start, context, tool_call, tool_result,
+	// session_before_compact, lifecycle notifications). Nil means no hooks.
+	Hooks *hooks.Registry
 	// PromptCache opts into keel.prompt-cache for this runner's attempts. It is
 	// an explicit runtime/tenant setting (AgentConfig.PromptCache), default off:
 	// off keeps the pre-feature request bytes, on canonicalizes the system/tool
@@ -921,6 +926,9 @@ func (r *Runner) run(ctx context.Context, lease kernel.Lease, span telemetry.Spa
 	if guard != nil {
 		beforeToolCall = guard.composeBefore(beforeToolCall)
 	}
+	if r.Hooks != nil {
+		beforeToolCall = r.hookBeforeToolCall(beforeToolCall)
+	}
 	var guardCancel context.CancelFunc
 	loopCtx := runCtx
 	if guard != nil {
@@ -969,6 +977,7 @@ func (r *Runner) run(ctx context.Context, lease kernel.Lease, span telemetry.Spa
 				// is fail-closed when no access seam is wired. Guardrails run
 				// after authorization, so a refusal is never counted as a repeat.
 				BeforeToolCall: beforeToolCall,
+				AfterToolCall:  r.hookAfterToolCall(),
 			},
 		},
 		EventBuffer: 32,
@@ -987,6 +996,9 @@ func (r *Runner) run(ctx context.Context, lease kernel.Lease, span telemetry.Spa
 		// "current feed state" — the loop may run ahead through the event buffer.
 		PrepareRequest: func(ctx context.Context, req loop.PrepareRequestContext) *loop.RequestUpdate {
 			feed.beginRequest()
+			if r.Hooks != nil && req.Context != nil {
+				req.Context.Messages = r.Hooks.EmitContext(ctx, req.Context.Messages)
+			}
 			return nil
 		},
 		ShouldStopAfterTurn: func(ctx context.Context, agentCtx *agentcore.AgentContext) bool {
@@ -1037,6 +1049,14 @@ func (r *Runner) run(ctx context.Context, lease kernel.Lease, span telemetry.Spa
 		cfg.Compaction = r.Compaction.Settings
 		cfg.Hygiene = r.Compaction.Hygiene
 		cfg.Spill = r.Compaction.Spill
+		if r.Hooks != nil {
+			cfg.BeforeCompaction = func(ctx context.Context, messages agentcore.MessageList) bool {
+				result := r.Hooks.EmitSessionBeforeCompact(ctx, &hooks.SessionBeforeCompactEvent{
+					Reason: hooks.CompactReasonThreshold,
+				})
+				return result.Cancel
+			}
+		}
 		cfg.SpillScope = spill.Scope{
 			TenantID:  lease.Scope.TenantID.String(),
 			SessionID: lease.Scope.SessionID.String(),
@@ -1066,6 +1086,13 @@ func (r *Runner) run(ctx context.Context, lease kernel.Lease, span telemetry.Spa
 	} else if strings.TrimSpace(surface.Prompt) != "" || strings.TrimSpace(systemPrompt) != "" {
 		res.Summary.PromptHash = digestPrompt(systemPrompt)
 	}
+	if r.Hooks != nil && promptCount > 0 {
+		beforePrompt := systemPrompt
+		systemPrompt = r.applyBeforeAgentStart(ctx, systemPrompt, trailingUserText(msgs))
+		if systemPrompt != beforePrompt {
+			res.Summary.PromptHash = digestPrompt(systemPrompt)
+		}
+	}
 	agentCtx := &agentcore.AgentContext{
 		SystemPrompt: systemPrompt,
 		Messages:     msgs,
@@ -1073,6 +1100,7 @@ func (r *Runner) run(ctx context.Context, lease kernel.Lease, span telemetry.Spa
 	}
 	stream := loop.StartRun(loopCtx, agentCtx, cfg)
 	for ev := range stream.Events() {
+		r.emitHookNotification(ctx, ev)
 		if ctx.Err() != nil {
 			res.Cursor = cursor
 			summary.StopReason = agentcore.StopReasonAborted
@@ -1093,7 +1121,15 @@ func (r *Runner) run(ctx context.Context, lease kernel.Lease, span telemetry.Spa
 			if e.ErrorMessage != "" || strings.TrimSpace(e.Summary) == "" {
 				// A failed compaction is observable on the event stream only; it
 				// has no fact to persist (the context was left unchanged).
+				if r.Hooks != nil {
+					r.Hooks.Emit(ctx, &hooks.SessionCompactFailedEvent{
+						Reason: "threshold", ErrorMessage: e.ErrorMessage, Aborted: ctx.Err() != nil,
+					})
+				}
 				continue
+			}
+			if r.Hooks != nil {
+				r.Hooks.Emit(ctx, &hooks.SessionCompactEvent{Reason: "threshold"})
 			}
 			raw, err := marshalPayload(map[string]any{
 				"summary":             e.Summary,
@@ -1522,10 +1558,14 @@ func (r *Runner) fillMissingToolResults(ctx context.Context, lease kernel.Lease,
 	if guard != nil {
 		before = guard.composeBefore(before)
 	}
+	if r.Hooks != nil {
+		before = r.hookBeforeToolCall(before)
+	}
 	results, _ := agenttool.ExecuteToolCalls(ctx, agenttool.BatchConfig{
 		ToolExecutorConfig: agenttool.ToolExecutorConfig{
 			Registry:       tools,
 			BeforeToolCall: before,
+			AfterToolCall:  r.hookAfterToolCall(),
 		},
 	}, missing, nil)
 	for _, tr := range results {

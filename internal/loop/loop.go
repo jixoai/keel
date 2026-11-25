@@ -248,6 +248,12 @@ type RunConfig struct {
 	// is the host's to log; the loop continues on the compacted context either
 	// way.
 	OnCompaction func(ctx context.Context, summary string, firstKeptIndex, summarizedCount int)
+
+	// BeforeCompaction, when set, runs immediately before an automatic
+	// compaction (after the threshold check). Returning true cancels this
+	// compaction: the context is left intact and the run continues. A custom
+	// summary is not supported here; the host hook layer may add it later.
+	BeforeCompaction func(ctx context.Context, messages agentcore.MessageList) bool
 }
 
 // LoopEventStream is the stream returned by the loop entry points: it carries
@@ -799,6 +805,9 @@ func maybeAutoCompact(ctx context.Context, agentCtx *agentcore.AgentContext, cfg
 		tel.recordContext(before, cfg.ContextWindow)
 	}
 	if !compaction.ShouldCompact(before, cfg.ContextWindow, cfg.Compaction) {
+		return false
+	}
+	if cfg.BeforeCompaction != nil && cfg.BeforeCompaction(ctx, agentCtx.Messages) {
 		return false
 	}
 	// Signal the start so a front-end can show an in-progress indicator while the

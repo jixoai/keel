@@ -12,6 +12,7 @@ import (
 	"github.com/jixoai/keel/internal/agenttool"
 	"github.com/jixoai/keel/internal/compaction"
 	"github.com/jixoai/keel/internal/externalgw"
+	"github.com/jixoai/keel/internal/hooks"
 	"github.com/jixoai/keel/internal/host"
 	"github.com/jixoai/keel/internal/kernel"
 	"github.com/jixoai/keel/internal/loadout"
@@ -563,6 +564,11 @@ func newPiLoopFactory(tenant host.TenantConfig, cfg Config) servicegraph.Factory
 		}
 		runner := agent.NewRunner(cfg.Seams.Committer, cfg.Seams.Reader,
 			llm.StreamFn(), llm.ProviderName(), llm.Model(), llm.APIKey(), cfg.Seams.Logger)
+		hookRegistry, err := newHookRegistry(tenant, cfg.Seams.Logger)
+		if err != nil {
+			return nil, err
+		}
+		runner.Hooks = hookRegistry
 		// keel.prompt-cache is an explicit tenant opt-in. Off (the default)
 		// keeps the pre-feature request bytes; on canonicalizes the system/tool
 		// prefix and allows a wire cache breakpoint. The runner pins the setting
@@ -650,6 +656,50 @@ func newPiLoopFactory(tenant host.TenantConfig, cfg Config) servicegraph.Factory
 		}
 		return &loopService{runner: runner}, nil
 	}
+}
+
+// newHookRegistry turns the tenant's command hooks into the PI hook registry
+// the runner consumes. Audit records go to structured logs only: hook.executed
+// is not a session event kind, and adding one would change the client event
+// stream. Payloads, arguments and secrets are never logged.
+//
+// The tenant document is the only source of command hooks; a malformed event
+// name fails assembly instead of silently registering nothing.
+func newHookRegistry(tenant host.TenantConfig, logger *slog.Logger) (*hooks.Registry, error) {
+	if logger == nil {
+		logger = slog.Default()
+	}
+	registry := hooks.NewRegistry(hooks.WithAuditSink(hooks.AuditFunc(func(record hooks.AuditRecord) {
+		logger.Info("hook executed",
+			"hook", record.Hook,
+			"event", record.Event,
+			"decision", record.Decision,
+			"duration_ms", record.Duration.Milliseconds(),
+			"failed", record.Error != "",
+		)
+	})))
+	configs := make([]hooks.CommandHookConfig, 0, len(tenant.Hooks.Commands))
+	for i, command := range tenant.Hooks.Commands {
+		timeout := ""
+		if command.TimeoutMS > 0 {
+			timeout = fmt.Sprintf("%dms", command.TimeoutMS)
+		}
+		configs = append(configs, hooks.CommandHookConfig{
+			Name:    fmt.Sprintf("tenant-hook-%d", i),
+			Event:   command.Event,
+			Command: append([]string(nil), command.Command...),
+			Timeout: timeout,
+		})
+	}
+	if len(configs) > 0 {
+		if _, err := registry.RegisterCommandHooks(configs); err != nil {
+			return nil, fmt.Errorf("hooks: %w", err)
+		}
+	}
+	registry.OnError(func(hookErr hooks.HookError) {
+		logger.Warn("hook failed", "hook", hookErr.Hook, "event", hookErr.Event)
+	})
+	return registry, nil
 }
 
 // newImageResolver builds the outbound image resolver from the hosting process
