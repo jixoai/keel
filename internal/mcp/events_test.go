@@ -612,8 +612,11 @@ func TestClientProgressCorrelatesPerCall(t *testing.T) {
 	start("same-token", "a")
 	start("same-token", "b")
 
-	requests := waitForRequests(t, server, "tools/call")
-	if len(requests) != 2 {
+	var requests []*Request
+	if !waitFor(t, 2*time.Second, func() bool {
+		requests = server.requests("tools/call")
+		return len(requests) >= 2
+	}) {
 		t.Fatalf("tools/call requests = %d, want 2", len(requests))
 	}
 	tokens := make([]string, 0, 2)
