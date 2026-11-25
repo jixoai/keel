@@ -282,6 +282,11 @@ type Config struct {
 	// MCPAppNow overrides the limiter clock (tests use a fake clock). Nil uses
 	// time.Now.
 	MCPAppNow func() time.Time
+	// MCPAppAuditDisableSampleTimers stops the real-time flush timer for sampled
+	// rejections. A fake clock cannot advance time.AfterFunc, so tests that drive
+	// the limiter with a fake clock and flush explicitly set this; otherwise a
+	// slow machine can fire the real timer mid-burst and split one fake window.
+	MCPAppAuditDisableSampleTimers bool
 	// Identity is the identity store behind /v1/accounts, /v1/permission-groups,
 	// /v1/bots and /v1/team-bots (change keel-bot-identity-access, A4.1). Nil
 	// makes those routes answer 503.

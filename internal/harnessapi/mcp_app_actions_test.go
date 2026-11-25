@@ -173,14 +173,15 @@ func newBridgeAPIServer(t *testing.T, tenant uuid.UUID, runtime MCPAppRuntime, a
 	t.Helper()
 	apps := &fakeMCPApps{tenant: tenant, published: true, surface: testSurface(t)}
 	api := New(Config{
-		MCPApps:              apps,
-		MCPAppRuntime:        runtime,
-		MCPAppAudit:          audit,
-		MCPAppInputCommit:    commit,
-		Decisions:            decisions,
-		MCPAppConfirmTimeout: 2 * time.Second,
-		MCPAppNow:            now,
-		Logger:               testLogger(),
+		MCPApps:                        apps,
+		MCPAppRuntime:                  runtime,
+		MCPAppAudit:                    audit,
+		MCPAppInputCommit:              commit,
+		Decisions:                      decisions,
+		MCPAppConfirmTimeout:           2 * time.Second,
+		MCPAppNow:                      now,
+		MCPAppAuditDisableSampleTimers: true,
+		Logger:                         testLogger(),
 	})
 	server := httptest.NewServer(api)
 	t.Cleanup(server.Close)

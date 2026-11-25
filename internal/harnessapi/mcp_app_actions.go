@@ -406,11 +406,14 @@ func (s *Server) recordSampledRejection(ctx context.Context, tenantID, sessionID
 	s.mcpAuditSamples[key] = sample
 	// A real timer makes the row durable even if the rejection burst stops. It
 	// waits slightly past the window so a scheduled callback never fires before
-	// the next second's first rejection and re-samples the same window. In tests
-	// the clock is fake and the window is flushed explicitly.
-	sample.timer = time.AfterFunc(mcpAppAuditSampleWindow+100*time.Millisecond, func() {
-		s.flushMCPAppAuditSample(key, sample)
-	})
+	// the next second's first rejection and re-samples the same window. Tests
+	// with a fake clock disable it and flush explicitly; a real timer cannot see
+	// that the fake window has not advanced.
+	if !s.cfg.MCPAppAuditDisableSampleTimers {
+		sample.timer = time.AfterFunc(mcpAppAuditSampleWindow+100*time.Millisecond, func() {
+			s.flushMCPAppAuditSample(key, sample)
+		})
+	}
 	s.mcpAuditMu.Unlock()
 }
 
