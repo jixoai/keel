@@ -14,7 +14,7 @@ import (
 func catalogServer() *Server {
 	tool := Tool{
 		Name: "dashboard",
-		UI: ToolUI{ResourceURI: "ui://weather/dashboard", Visibility: []string{VisibilityModel, VisibilityApp}},
+		UI:   ToolUI{ResourceURI: "ui://weather/dashboard", Visibility: []string{VisibilityModel, VisibilityApp}},
 	}
 	return &Server{
 		Entry: ServerEntry{Name: "weather"},

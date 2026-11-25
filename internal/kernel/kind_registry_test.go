@@ -12,7 +12,7 @@ func TestKindRegistryDeclaresClassAndKey(t *testing.T) {
 		ClassEdge: true, ClassOwner: true, ClassExternal: true, ClassSystem: true,
 	}
 	keys := map[KeyKind]bool{
-		"": true,
+		"":         true,
 		KeyRequest: true, KeyGeneration: true, KeyToolCall: true, KeyRun: true,
 		KeyTask: true, KeyFSWrite: true, KeyFSCapture: true, KeyFSCaptureFailed: true,
 		KeyConfig: true, KeyPlacement: true, KeySupervision: true, KeyGuardrail: true,
