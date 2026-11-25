@@ -20,6 +20,17 @@
 - 不得恢复已废弃条目（例如 `mcp__<server>__<tool>`、脚本默认禁止、抽 `pkg/` 稳定 SDK），
   这些已被后续 Owner 裁决或 `keel-harness-v2` 口径取代。
 
+## 2026-11-25 parity 审计（只读）
+
+- 68 条未勾：**44 无需重新实现**（38 条已等价交付 + 6 条库已实现）、**7 不适用**、
+  **10 部分**、**7 缺失**（去重后 6 个能力）。
+- §6 的 6 条 hooks（94/97/98/99/100/101）**库已实现但未接线**：`internal/hooks` 不在
+  `cmd/keel` 依赖图，租户 `hooks.commands` 只校验/计数；**不得按 delivered 记**。
+- 真缺口：hooks 产品接线、turn/tool/compaction span 树、真实 MCP server E2E；
+  P1 见 `keel-pi-parity-audit/audit.md`。
+- 建议保持本板冻结；另开 `keel-pi-parity-closure`（T1 审计入库 → T2 hooks → T3 span
+  树+指标 → T4 OTLP → T5 真实 MCP E2E）。本文件的审计不改变 `tasks.md` 字符。
+
 ## 相关
 
 - `openspec/changes/keel-harness-v2/RECONCILIATION.md` §2（生态板逐条去向）

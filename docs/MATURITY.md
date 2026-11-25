@@ -31,13 +31,13 @@
 
 | 能力 | 当前 | 目标 | 主要缺口 |
 |---|---|---|---|
-| 智能体执行 | G1（fake 可跑） | G5 | G2 混沌、G3 遥测、G4 生态、G5 规模 |
-| 可恢复性 | G1（模型/工具 kill 各一例） | G5 | generation 幂等、task 状态机、checkpoint 回放、10min 混沌 |
+| 智能体执行 | v2 主链已交付（loop/事件/工具）；G2/G3/G4 缺口见 audit | G5 | G2 混沌、G3 span 树/指标、G4 真实 MCP、G5 规模 |
+| 可恢复性 | v2：runs/lease + checkpoint + 模型/工具 kill；缺压缩 kill 格与 nightly chaos | G5 | 压缩 kill 格、10min 混沌 CI |
 | 上下文压缩 | v2 已接线（`internal/servicehost/services.go:46`、`:468`；`internal/compaction`） | G5 | 剩余见归档 evidence |
-| 可观测 | v2：`run.finished` 已注册并带 `KeyRun`（`internal/kernel/validate.go:53`） | G5 | 剩余见归档 evidence（trace 可选） |
-| Skills | G0 | G5 | SKILL.md 加载、渐进披露、租户隔离、权限 |
-| MCP | G0 | G5 | 客户端/传输/命名空间/重连/鉴权 |
-| Hooks | G0 | G5 | 事件模型、命令钩子、决策语义、审计 |
+| 可观测 | v2：`run.finished` + run span；turn/tool/compaction 子 span 未接线 | G5 | span 树、turns/tool/context 指标、OTLP |
+| Skills | v2 已交付加载/渐进披露/租户库/不可变版本 | G5 | `allowed-tools` 执行期交集、文件监听、`.gitignore`/project-trust |
+| MCP | v2 已交付 client/stdio/Streamable HTTP/OAuth/Apps | G5 | 真实 server E2E、连接池/健康检查、模型路径破坏性审批 |
+| Hooks | 库已实现未接线（`internal/hooks` 不在出货依赖图） | G5 | 产品接线（P0）、命令钩子加载、决策/审计落 run |
 | 租户/配额 | G1（tenant_id） | G5 | API key、RLS、配额、用量 |
 | Provider 文件 | v2：`file_id > url > base64` 已实现（`internal/provider/media.go:52-79`、`internal/provider/imagefiles.go:7-30`） | G5 | 剩余见归档 evidence |
 | 运维 | G1（health） | G5 | ready、metrics、CI、镜像、排水 |

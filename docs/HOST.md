@@ -123,16 +123,19 @@ filesystem:
    `mcp {action:"list"|"describe"|"call"}` 暴露，不生成 `mcp__server__tool`；skills 正文
    经 `skills {action:"view"}` 按需加载。工具集按 `tools.allow` 过滤（host 装配统一执行：
    对内置与插件/外部工具同时生效；省略不过滤，显式 `[]` 不保留任何工具，尾部 `*` 为前缀
-   通配，如 `keel_*`）；skill 的 `allowed-tools` 与实际集合取交集。
-3. **Hooks**：把 `internal/hooks` 的事件接到 loop 的 `PrepareRequest` / `OnStop` /
-   `ShouldStopAfterTurn` / tool executor 的 before/after；命令钩子按配置加载。
+   通配，如 `keel_*`）；skill 的 `allowed-tools` 目前只解析进元数据，执行期与工具集取交集
+   尚未接线（2026-11-25 parity 审计）。
+3. **Hooks**：`internal/hooks` 已实现事件、命令钩子、决策、审计与 `wrapTool`，但尚未接入
+   出货二进制；租户 `hooks.commands` 目前只做校验/计数，没有加载执行点。
 4. **Compaction**：`loop.LoopConfig.Compaction` 使用 PI `DEFAULT_COMPACTION_POLICY`
    （threshold/keepRecentTokens/backgroundTokens）。`agent.Runner` 在有序事件消费者里
    提交 `compaction` 事件（摘要/保留段/token 数），随后写 `checkpoints`
    （`upto_seq`=事件 seq、`kept_from_seq`=保留段首个事件 seq；投影，不覆盖事件）。
    保存失败只记日志、不回滚事件；新 run 以最新 checkpoint 的摘要 + `seq >= kept_from_seq`
    重建，未锚定或无 checkpoint 时回退全量事件。
-5. **Telemetry**：run = span，turn/tool = 子 span；`run.finished` 作为业务汇总事件追加。
+5. **Telemetry**：run = span；provider 请求 span 已存在。turn/tool/compaction 子 span 与
+   `message_*` span event 尚未接线（当前只有 run span + provider span）。`run.finished`
+   作为业务汇总事件追加。
 6. **System prompt**：按 PI 的 section 形态拼装（`<preamble>`、`<skills>`、`<tenant>`），
    不再用单一字符串硬编码。
 
