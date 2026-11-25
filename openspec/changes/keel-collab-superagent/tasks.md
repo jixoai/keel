@@ -2,38 +2,58 @@
 
 ## 1. 领域与存储
 
-- [ ] 1.1 定义 Ticket/Assignment/Subscription/Attention/Channel/Source cursor 类型与状态机；
-      全部带 tenant_id。
-- [ ] 1.2 新表与迁移：`collab_work_items`、`collab_assignments`、`collab_subscriptions`、
+- [x] 1.1 定义 Ticket/Assignment/Subscription/Attention/Channel/Source cursor 类型与状态机；
+      全部带 tenant_id。（`internal/superagent/domain.go`）
+- [x] 1.2 新表与迁移：`collab_work_items`、`collab_assignments`、`collab_subscriptions`、
       `collab_attention`、`collab_source_cursors`（或等价）；幂等键/索引。
-- [ ] 1.3 与现有 Bot/Session/decision/notify/task log 的吸附边界；不新增 BotKind。
+      （`internal/store/schema.sql` + `internal/store/superagent.go`；Ticket mandate 存 input JSON，
+      不向 sessions/tasks 加 superagent 专属列）
+- [x] 1.3 与现有 Bot/Session/decision/notify/task log 的吸附边界；不新增 BotKind。
+      （Worker 走 `collab.Host` + `CollabSubagentLauncher`；Attention 复用 `collab.Attention`/
+      decision 词汇；审计写 auth_events；无 BotKind=super）
+- [x] 1.4 core 边界：superagent 不私补权限。Assign/Ask/CreateSession 只经 Host；不使用
+      `HumanTakeover`；operator/takeover 走独立 `OperatorAuthorizer` seam（未装配即 fail closed）；
+      accepted 路径审计 fail-closed；Ticket 取消的 session/子树 fan-out 交给 core Cancel。
+- [ ] 1.5 依赖 core P1 修复复核：WorkItem membership/Scope.BotIDs、bare child 取消、
+      session 完成/失败投影（P2-2）落地后 rebase 再验；本切片未在 superagent 另写一套。
 
 ## 2. Orchestrator 与 Worker
 
-- [ ] 2.1 `superagent` mode 注册：roles=orchestrator/worker；工单看板/装配投影。
-- [ ] 2.2 Orchestrator：Source 事件 → Trigger/Thread → 评估 accept/attach/stop/ignore；
-      accept 创建 Ticket + Mandate；重复 Trigger 幂等。
-- [ ] 2.3 WorkerHost：Ticket → Assignment → Worker Session；重启恢复/重派/幂等；
-      Worker 可在 Ticket 内使用 subagent mode。
-- [ ] 2.4 并发槽位：tenant 上限 + 人工 follow-up 额外槽位；排队/取消/接管。
+- [x] 2.1 `superagent` mode 注册：roles=orchestrator/worker；工单看板/装配投影。
+      （`cmd/keel/superagent.go` 环境变量启用路径；默认仍 disabled）
+- [x] 2.2 Orchestrator：Source 事件 → Trigger/Thread → 评估 accept/attach/stop/ignore；
+      accept 创建 Ticket + Mandate；重复 Trigger 幂等。（`seen` 收件箱 + Ticket idempotency key）
+- [x] 2.3 WorkerHost：Ticket → Assignment → Worker Session；重启恢复/重派/幂等；
+      Worker 可在 Ticket 内使用 subagent mode。（Assignment 独立于 Session；Host 对重复 child
+      Put 做同 parent/workitem/bot 的幂等接受）
+- [x] 2.4 并发槽位：tenant 上限 + 人工 follow-up 额外槽位；排队/取消/接管。
+      （`Slots` 计数 durable assignments，不是进程内计数；`Reconcile` 把 SessionIndex 的
+      done/cancelled 投影回 Assignment 释放槽位；Host `MaxConcurrent` 是硬上限）
 
 ## 3. GitHub Source/Channel（MVP）
 
-- [ ] 3.1 GitHub Source：Issue/PR/comment/CI 读取、游标、幂等、权限/允许列表。
-- [ ] 3.2 GitHub Channel：评论/PR 回写、消息 id 幂等、Outbox 重试、保序。
-- [ ] 3.3 订阅/fan-out：Ticket ↔ Thread；人类 follow-up 归属；不重复创建 Ticket。
-- [ ] 3.4 不可信输入：Source 文本不能改 Policy/授权；审计不含正文/密钥。
+- [x] 3.1 GitHub Source：Issue/PR/comment 读取、RFC3339 游标、幂等 id、允许列表。
+      （CI 状态未实现，保留 `EventCIStatus` 词汇；真实 GitHub E2E 未跑，httptest 覆盖读取/游标）
+- [x] 3.2 GitHub Channel：评论回写、消息 id 幂等标记、Outbox 重试、按创建顺序发送。
+- [x] 3.3 订阅/fan-out：Ticket ↔ Thread；人类 follow-up 归属；不重复创建 Ticket。
+- [x] 3.4 不可信输入：Source 文本不能改 Policy/授权；审计不含正文/密钥。
 
 ## 4. Attention 与 UI
 
-- [ ] 4.1 结构化 Attention：问题/来源/选项/路由/过期；答复唤醒同一 Ticket。
-- [ ] 4.2 工单看板：待人工/执行中/完成/失败；Ticket 详情、Assignment、报告。
-- [ ] 4.3 Attention 收件箱与来源跳转；web/TUI/headless 五态。
-- [ ] 4.4 不提供“新建 Super Agent Bot”入口；只提供 mode/角色配置。
+- [x] 4.1 结构化 Attention：问题/来源/选项/路由/过期；答复唤醒同一 Ticket。
+      （`Ask`/`AnswerAttention`/`ExpireAttentions`；answer 幂等；停掉的 Ticket 不重开；
+      重试走 Outbox）
+- [x] 4.2 工单看板 API：待人工/执行中/完成/失败计数、Ticket 详情、Assignment、报告。
+      （`GET /v1/superagent/tickets`；web 看板未做）
+- [x] 4.3 Attention 收件箱 API 与来源跳转字段；web/TUI/headless 五态未做。
+      （`GET /v1/superagent/attention`）
+- [x] 4.4 不提供“新建 Super Agent Bot”入口；只提供 mode/角色配置。
 
 ## 5. 验收
 
 - [ ] 5.1 真 PG 集成：事件幂等、Ticket/Assignment 恢复、并发槽位、跨租户负控。
+      （已加 `internal/store/superagent_test.go`，本机无 `KEEL_TEST_DSN`，未实跑；内存 Store 用
+      `go test -race` 覆盖同一状态机/幂等/恢复/槽位/跨租户）
 - [ ] 5.2 GitHub 真链路 E2E：Issue → Ticket → Worker → PR/评论 → Attention → 完成；
-      每步截图 + HTML 报告（公网）。
+      每步截图 + HTML 报告（公网）。（未跑；无 GitHub 凭据/网络 E2E）
 - [ ] 5.3 独立 reviewer 复核；P0/P1 清零；`openspec validate --strict`；归档。

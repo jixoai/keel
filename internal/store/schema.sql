@@ -1430,3 +1430,207 @@ CREATE INDEX IF NOT EXISTS sessions_by_created_by
     ON sessions (tenant_id, created_by_account_id) WHERE created_by_account_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS sessions_by_team_bot
     ON sessions (tenant_id, team_bot_id) WHERE team_bot_id IS NOT NULL;
+
+-- --- collab-superagent (change keel-collab-superagent) ----------------------
+--
+-- Durable work-queue records for the superagent collaboration mode. The core
+-- collab.WorkStore contract (WorkItem/Assignment/Attention/Link) is backed by
+-- the first five tables; subscriptions, source cursors, the seen-event inbox,
+-- the outbox and the Host's session index are the mode's own records. Every
+-- table is tenant-scoped and listed in rlsTenantTables.
+--
+-- A Ticket is a collab_work_items row with mode_id='superagent'; its Mandate and
+-- Thread live in the input JSON document, so no superagent-only column leaks
+-- into the generic work-item shape.
+CREATE TABLE IF NOT EXISTS collab_work_items (
+    tenant_id        uuid NOT NULL,
+    work_item_id     uuid NOT NULL,
+    mode_id          text NOT NULL,
+    title            text NOT NULL DEFAULT '',
+    input            jsonb,
+    source           jsonb NOT NULL DEFAULT '{}'::jsonb,
+    scope            jsonb NOT NULL DEFAULT '{}'::jsonb,
+    limits           jsonb NOT NULL DEFAULT '{}'::jsonb,
+    status           text NOT NULL,
+    idempotency_key  text NOT NULL DEFAULT '',
+    created_at       timestamptz NOT NULL DEFAULT now(),
+    updated_at       timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (tenant_id, work_item_id)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS collab_work_items_idempotent
+    ON collab_work_items (tenant_id, mode_id, idempotency_key)
+    WHERE idempotency_key <> '';
+CREATE INDEX IF NOT EXISTS collab_work_items_by_status
+    ON collab_work_items (tenant_id, mode_id, status, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS collab_assignments (
+    tenant_id          uuid NOT NULL,
+    assignment_id      uuid NOT NULL,
+    work_item_id       uuid NOT NULL,
+    mode_id            text NOT NULL,
+    bot_id             text NOT NULL DEFAULT '',
+    session_id         uuid,
+    caller_session_id  uuid,
+    status             text NOT NULL,
+    title              text NOT NULL DEFAULT '',
+    input              jsonb,
+    result             jsonb,
+    error              text NOT NULL DEFAULT '',
+    idempotency_key    text NOT NULL DEFAULT '',
+    created_at         timestamptz NOT NULL DEFAULT now(),
+    updated_at         timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (tenant_id, assignment_id),
+    CONSTRAINT collab_assignments_work_item_fk FOREIGN KEY (tenant_id, work_item_id)
+        REFERENCES collab_work_items (tenant_id, work_item_id) ON DELETE CASCADE
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS collab_assignments_idempotent
+    ON collab_assignments (tenant_id, work_item_id, idempotency_key)
+    WHERE idempotency_key <> '';
+CREATE INDEX IF NOT EXISTS collab_assignments_by_status
+    ON collab_assignments (tenant_id, status, created_at);
+
+CREATE TABLE IF NOT EXISTS collab_attentions (
+    tenant_id       uuid NOT NULL,
+    attention_id    uuid NOT NULL,
+    work_item_id    uuid NOT NULL,
+    assignment_id   uuid,
+    mode_id         text NOT NULL,
+    session_id      uuid,
+    request_id      text NOT NULL DEFAULT '',
+    kind            text NOT NULL,
+    prompt          text NOT NULL,
+    options         jsonb,
+    allow_free_text boolean NOT NULL DEFAULT false,
+    route           text NOT NULL,
+    channel         text NOT NULL DEFAULT '',
+    status          text NOT NULL,
+    answer          jsonb,
+    created_at      timestamptz NOT NULL DEFAULT now(),
+    deadline        timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (tenant_id, attention_id),
+    CONSTRAINT collab_attentions_work_item_fk FOREIGN KEY (tenant_id, work_item_id)
+        REFERENCES collab_work_items (tenant_id, work_item_id) ON DELETE CASCADE
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS collab_attentions_request
+    ON collab_attentions (tenant_id, work_item_id, request_id)
+    WHERE request_id <> '';
+CREATE INDEX IF NOT EXISTS collab_attentions_open
+    ON collab_attentions (tenant_id, created_at)
+    WHERE status = 'open';
+
+CREATE TABLE IF NOT EXISTS collab_links (
+    tenant_id     uuid NOT NULL,
+    link_id       uuid NOT NULL,
+    work_item_id  uuid,
+    kind          text NOT NULL,
+    from_type     text NOT NULL,
+    from_id       text NOT NULL,
+    to_type       text NOT NULL,
+    to_id         text NOT NULL,
+    created_at    timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (tenant_id, link_id)
+);
+
+CREATE INDEX IF NOT EXISTS collab_links_by_work_item
+    ON collab_links (tenant_id, work_item_id);
+
+CREATE TABLE IF NOT EXISTS collab_subscriptions (
+    tenant_id       uuid NOT NULL,
+    subscription_id uuid NOT NULL,
+    work_item_id    uuid NOT NULL,
+    source_id       text NOT NULL,
+    thread_kind     text NOT NULL DEFAULT '',
+    thread_id       text NOT NULL,
+    active          boolean NOT NULL DEFAULT true,
+    created_at      timestamptz NOT NULL DEFAULT now(),
+    updated_at      timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (tenant_id, subscription_id),
+    CONSTRAINT collab_subscriptions_work_item_fk FOREIGN KEY (tenant_id, work_item_id)
+        REFERENCES collab_work_items (tenant_id, work_item_id) ON DELETE CASCADE
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS collab_subscriptions_thread
+    ON collab_subscriptions (tenant_id, work_item_id, source_id, thread_id);
+CREATE INDEX IF NOT EXISTS collab_subscriptions_by_thread
+    ON collab_subscriptions (tenant_id, source_id, thread_id)
+    WHERE active;
+
+CREATE TABLE IF NOT EXISTS collab_source_cursors (
+    tenant_id  uuid NOT NULL,
+    source_id  text NOT NULL,
+    cursor     text NOT NULL,
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (tenant_id, source_id)
+);
+
+CREATE TABLE IF NOT EXISTS collab_source_events (
+    tenant_id    uuid NOT NULL,
+    source_id    text NOT NULL,
+    event_id     text NOT NULL,
+    kind         text NOT NULL DEFAULT '',
+    actor_id     text NOT NULL DEFAULT '',
+    thread_id    text NOT NULL DEFAULT '',
+    payload      jsonb,
+    decision     text NOT NULL DEFAULT '',
+    work_item_id uuid,
+    received_at  timestamptz NOT NULL DEFAULT now(),
+    created_at   timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (tenant_id, source_id, event_id)
+);
+
+CREATE INDEX IF NOT EXISTS collab_source_events_by_decision
+    ON collab_source_events (tenant_id, decision, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS collab_outbox (
+    tenant_id       uuid NOT NULL,
+    message_id      uuid NOT NULL,
+    work_item_id    uuid,
+    attention_id    uuid,
+    channel_id      text NOT NULL,
+    thread_kind     text NOT NULL DEFAULT '',
+    thread_id       text NOT NULL DEFAULT '',
+    body            text NOT NULL,
+    data            jsonb,
+    idempotency_key text NOT NULL DEFAULT '',
+    status          text NOT NULL DEFAULT 'pending',
+    attempts        int NOT NULL DEFAULT 0,
+    next_attempt_at timestamptz NOT NULL DEFAULT now(),
+    last_error      text NOT NULL DEFAULT '',
+    created_at      timestamptz NOT NULL DEFAULT now(),
+    updated_at      timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (tenant_id, message_id)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS collab_outbox_idempotent
+    ON collab_outbox (tenant_id, idempotency_key)
+    WHERE idempotency_key <> '';
+CREATE INDEX IF NOT EXISTS collab_outbox_due
+    ON collab_outbox (tenant_id, created_at)
+    WHERE status = 'pending';
+CREATE INDEX IF NOT EXISTS collab_outbox_sending
+    ON collab_outbox (tenant_id, updated_at)
+    WHERE status = 'sending';
+
+CREATE TABLE IF NOT EXISTS collab_session_index (
+    tenant_id         uuid NOT NULL,
+    session_id        uuid NOT NULL,
+    parent_session_id uuid,
+    bot_id            text NOT NULL DEFAULT '',
+    mode_id           text NOT NULL DEFAULT '',
+    work_item_id      uuid,
+    depth             int NOT NULL DEFAULT 0,
+    state             text NOT NULL,
+    created_at        timestamptz NOT NULL DEFAULT now(),
+    updated_at        timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (tenant_id, session_id)
+);
+
+CREATE INDEX IF NOT EXISTS collab_session_index_children
+    ON collab_session_index (tenant_id, parent_session_id)
+    WHERE state = 'active';
+CREATE INDEX IF NOT EXISTS collab_session_index_mode
+    ON collab_session_index (tenant_id, mode_id)
+    WHERE state = 'active';

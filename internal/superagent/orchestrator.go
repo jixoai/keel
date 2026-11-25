@@ -1,0 +1,1402 @@
+package superagent
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"log/slog"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/jixoai/keel/internal/collab"
+)
+
+// InputRequest is one message delivered into an existing Worker session. The
+// super-agent layer does not commit turns itself; the product adapter maps this
+// onto the TurnStarter (the same edge triggers and sub-agents use).
+type InputRequest struct {
+	TenantID     uuid.UUID `json:"tenantId"`
+	WorkItemID   uuid.UUID `json:"workItemId"`
+	AssignmentID uuid.UUID `json:"assignmentId"`
+	SessionID    uuid.UUID `json:"sessionId"`
+	Text         string    `json:"text"`
+	RequestID    string    `json:"requestId"`
+	Kind         string    `json:"kind,omitempty"`
+}
+
+// InputSink delivers follow-ups and human answers into a live Worker session.
+type InputSink interface {
+	Deliver(ctx context.Context, request InputRequest) error
+}
+
+// WorkerWatcher observes a spawned worker session and projects its terminal
+// state into the core SessionIndex. The orchestrator's slot reconciler then
+// releases the durable Assignment; the watcher is not a second slot counter.
+type WorkerWatcher interface {
+	Watch(ctx context.Context, tenantID, sessionID uuid.UUID)
+}
+
+// ErrOperatorUnavailable means an operator action (resume/stop from a console)
+// has no authorization seam in this deployment. It is fail-closed: the action
+// must not be treated as an implicit human takeover.
+var ErrOperatorUnavailable = errors.New("superagent: operator authorization is not wired")
+
+// OperatorAuthorizer is the independent permission seam for operator actions.
+// It is deliberately not the HumanTakeover boolean: a free bool on an
+// Assignment request is not an authorization, and no mode may mint one for
+// itself.
+type OperatorAuthorizer interface {
+	AuthorizeOperator(ctx context.Context, tenantID, ticketID uuid.UUID, actor, action string) error
+}
+
+// NoopInputSink accepts input without delivering it. It is the honest adapter
+// of a deployment that has not wired the TurnStarter yet; the decision is still
+// recorded in the Ticket/Attention rows.
+type NoopInputSink struct{}
+
+// Deliver implements InputSink.
+func (NoopInputSink) Deliver(context.Context, InputRequest) error { return nil }
+
+// Config configures one tenant's orchestrator.
+type Config struct {
+	TenantID uuid.UUID
+	ModeID   string
+	Store    Store
+	Host     collab.Host
+	Policy   Policy
+	// Source/Channel are optional. A nil Source leaves events to the
+	// HandleSourceEvent entry point; a nil Channel keeps outbox rows readable
+	// but unsent.
+	Source  collab.Source
+	Channel collab.Channel
+	Inputs  InputSink
+	// Sessions reads the Host-created session index so recovery can tell a live
+	// worker from a lost one. Nil skips liveness checks.
+	Sessions collab.SessionIndex
+	// WorkerWatcher projects worker-session completion/failure into Sessions.
+	// Nil leaves completion to an explicit Report (tests without a product
+	// runner).
+	WorkerWatcher WorkerWatcher
+	Audit         collab.AuditSink
+	Outbox        *Outbox
+	Slots         *Slots
+	// Operator authorizes console actions (resume/stop). Nil keeps those
+	// actions unavailable; source events are authorized by Policy instead.
+	Operator OperatorAuthorizer
+	// OrchestratorSession is the active Bot session that acts as the assignment
+	// caller (the orchestrator role). It is a root Session created by the
+	// product, not by a mode.
+	OrchestratorSession uuid.UUID
+	// OrchestratorBot/WorkerBot are default role identities. A Verdict may
+	// override the worker per ticket.
+	OrchestratorBot  string
+	WorkerBot        string
+	MaxPoll          int
+	AttentionTimeout time.Duration
+	TicketLimits     collab.Limits
+	Now              func() time.Time
+	Logger           *slog.Logger
+}
+
+// Orchestrator is the super-agent queue. It evaluates Source events, creates
+// Tickets, dispatches Workers through the guarded collab.Host, routes structured
+// Attention and keeps the Ticket/Assignment records independent of any Worker
+// Session's lifetime.
+type Orchestrator struct {
+	cfg Config
+	mu  sync.Mutex
+}
+
+// NewOrchestrator validates the assembly. Missing identity/seams fail at
+// construction, never at the first event.
+func NewOrchestrator(cfg Config) (*Orchestrator, error) {
+	if cfg.TenantID == uuid.Nil {
+		return nil, fmt.Errorf("%w: tenant is required", collab.ErrTenantRequired)
+	}
+	if cfg.Store == nil {
+		return nil, fmt.Errorf("superagent: work store is required")
+	}
+	if cfg.Host == nil {
+		return nil, fmt.Errorf("superagent: collab host is required")
+	}
+	if cfg.Policy == nil {
+		return nil, fmt.Errorf("superagent: policy is required")
+	}
+	if cfg.Audit == nil {
+		return nil, fmt.Errorf("superagent: audit sink is required (accepted paths are fail-closed)")
+	}
+	if cfg.OrchestratorSession == uuid.Nil {
+		return nil, fmt.Errorf("superagent: orchestrator session is required")
+	}
+	if strings.TrimSpace(cfg.WorkerBot) == "" {
+		return nil, fmt.Errorf("superagent: worker bot is required")
+	}
+	if cfg.ModeID == "" {
+		cfg.ModeID = DefaultModeID
+	}
+	if cfg.Inputs == nil {
+		cfg.Inputs = NoopInputSink{}
+	}
+	if cfg.MaxPoll <= 0 {
+		cfg.MaxPoll = 50
+	}
+	if cfg.AttentionTimeout <= 0 {
+		cfg.AttentionTimeout = collab.DefaultAttentionTimeout
+	}
+	if cfg.Now == nil {
+		cfg.Now = func() time.Time { return time.Now().UTC() }
+	}
+	if cfg.Logger == nil {
+		cfg.Logger = slog.Default()
+	}
+	return &Orchestrator{cfg: cfg}, nil
+}
+
+// Run polls the Source until the context is cancelled. It recovers interrupted
+// work first, then polls at the interval; a poll error is logged and retried
+// (the cursor is not advanced on an infrastructure failure).
+func (o *Orchestrator) Run(ctx context.Context, interval time.Duration) {
+	if interval <= 0 {
+		interval = 30 * time.Second
+	}
+	if _, err := o.Recover(ctx); err != nil {
+		o.cfg.Logger.Warn("superagent: recovery failed", "error", err)
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		if _, err := o.PollOnce(ctx); err != nil {
+			o.cfg.Logger.Warn("superagent: poll failed", "error", err)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+// PollOnce reads one bounded page, handles every event and advances the durable
+// cursor. A repeated page is harmless: the seen-event record and ticket
+// idempotency key make it a no-op.
+func (o *Orchestrator) PollOnce(ctx context.Context) (int, error) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if err := o.checkTenant(o.cfg.TenantID); err != nil {
+		return 0, err
+	}
+	handled := 0
+	if o.cfg.Source != nil {
+		cursor, err := o.cfg.Store.GetSourceCursor(ctx, o.cfg.TenantID, sourceID(o.cfg.Source))
+		if err != nil {
+			return 0, err
+		}
+		page, err := o.cfg.Source.Poll(ctx, o.cfg.TenantID, cursor, o.cfg.MaxPoll)
+		if err != nil {
+			return 0, err
+		}
+		for _, raw := range page.Events {
+			if _, err := o.handleSourceEventLocked(ctx, raw); err != nil {
+				return handled, err
+			}
+			handled++
+		}
+		if page.NextCursor != "" && page.NextCursor != cursor {
+			if err := o.cfg.Store.SetSourceCursor(ctx, o.cfg.TenantID, sourceID(o.cfg.Source), page.NextCursor); err != nil {
+				return handled, err
+			}
+		}
+	}
+	if _, err := o.expireAttentionsLocked(ctx); err != nil {
+		return handled, err
+	}
+	if _, err := o.reconcileLocked(ctx); err != nil {
+		return handled, err
+	}
+	if _, err := o.dispatchQueuedLocked(ctx); err != nil {
+		return handled, err
+	}
+	if o.cfg.Outbox != nil {
+		if _, err := o.cfg.Outbox.Flush(ctx, o.cfg.TenantID, 50); err != nil {
+			return handled, err
+		}
+	}
+	return handled, nil
+}
+
+// HandleSourceEvent is the single-event entry point (a webhook or a test).
+// It is idempotent by source event id.
+func (o *Orchestrator) HandleSourceEvent(ctx context.Context, raw collab.SourceEvent) (EventResult, error) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.handleSourceEventLocked(ctx, raw)
+}
+
+// EventResult reports what one event did.
+type EventResult struct {
+	EventID   string
+	Decision  string
+	TicketID  uuid.UUID
+	Duplicate bool
+	Reason    string
+}
+
+func (o *Orchestrator) handleSourceEventLocked(ctx context.Context, raw collab.SourceEvent) (EventResult, error) {
+	event, parseErr := ParseSourceEvent(raw)
+	result := EventResult{EventID: event.EventID}
+	if parseErr != nil {
+		// An undecodable event is recorded as seen-only when it has an identity;
+		// it never blocks the cursor forever.
+		if event.EventID != "" && event.SourceID != "" {
+			_ = o.recordSeen(ctx, event, "invalid", uuid.Nil)
+		}
+		result.Decision = "invalid"
+		result.Reason = parseErr.Error()
+		return result, nil
+	}
+	result.EventID = event.EventID
+	if err := event.Validate(); err != nil {
+		result.Decision = "invalid"
+		result.Reason = err.Error()
+		return result, nil
+	}
+	seen, err := o.cfg.Store.SourceEventSeen(ctx, o.cfg.TenantID, event.SourceID, event.EventID)
+	if err != nil {
+		return result, err
+	}
+	if seen {
+		result.Decision = "duplicate"
+		result.Duplicate = true
+		result.Reason = "the source event was already consumed"
+		return result, nil
+	}
+	verdict, err := o.cfg.Policy.Evaluate(ctx, o.cfg.TenantID, event)
+	if err != nil {
+		return result, err
+	}
+	if !verdict.Action.Valid() {
+		verdict = Verdict{Action: ActionIgnore, Reason: "policy returned an unknown action"}
+	}
+	if verdict.Action == ActionStop {
+		stopped, err := o.stopThreadLocked(ctx, event, verdict)
+		if err != nil {
+			return result, err
+		}
+		_ = o.recordSeen(ctx, event, string(ActionStop), firstUUID(stopped))
+		result.Decision = string(ActionStop)
+		result.TicketID = firstUUID(stopped)
+		result.Reason = verdict.Reason
+		return result, nil
+	}
+
+	// A matching subscription fans out regardless of the sender identity: the
+	// thread is context, not authority. An untrusted comment is delivered to the
+	// already-accepted Ticket, but it can never create one or reach a stopped
+	// Ticket (attachLocked skips those).
+	subs, err := o.cfg.Store.ListThreadSubscriptions(ctx, o.cfg.TenantID, event.Thread)
+	if err != nil {
+		return result, err
+	}
+	if len(subs) > 0 {
+		tickets, err := o.attachLocked(ctx, event, verdict, subs)
+		if err != nil {
+			return result, err
+		}
+		reason := verdict.Reason
+		if verdict.Action == ActionIgnore {
+			reason = "delivered as untrusted thread context: " + verdict.Reason
+		}
+		_ = o.recordSeen(ctx, event, string(ActionAttach), firstTicketID(tickets))
+		result.Decision = string(ActionAttach)
+		result.TicketID = firstTicketID(tickets)
+		result.Reason = reason
+		return result, nil
+	}
+	if verdict.Action == ActionIgnore {
+		_ = o.recordSeen(ctx, event, string(ActionIgnore), uuid.Nil)
+		o.audit(ctx, AuditEventIgnored, "accepted", event, uuid.Nil, verdict.Reason)
+		result.Decision = string(ActionIgnore)
+		result.Reason = verdict.Reason
+		return result, nil
+	}
+	if verdict.Action == ActionAttach {
+		_ = o.recordSeen(ctx, event, string(ActionIgnore), uuid.Nil)
+		o.audit(ctx, AuditEventIgnored, "accepted", event, uuid.Nil, "attach without a subscription")
+		result.Decision = string(ActionIgnore)
+		result.Reason = "no ticket subscribes to this thread"
+		return result, nil
+	}
+
+	ticket, err := o.acceptLocked(ctx, event, verdict)
+	if err != nil {
+		return result, err
+	}
+	_ = o.recordSeen(ctx, event, string(ActionAccept), ticket.ID)
+	result.Decision = string(ActionAccept)
+	result.TicketID = ticket.ID
+	result.Reason = verdict.Reason
+	_, _ = o.dispatchTicketLocked(ctx, ticket, false, "accepted event "+event.EventID)
+	return result, nil
+}
+
+func (o *Orchestrator) acceptLocked(ctx context.Context, event Event, verdict Verdict) (Ticket, error) {
+	now := o.cfg.Now()
+	workerBot := strings.TrimSpace(verdict.BotID)
+	if workerBot == "" {
+		workerBot = o.cfg.WorkerBot
+	}
+	ticket := NewTicket(o.cfg.TenantID, o.cfg.ModeID, event, verdict, workerBot, now)
+	ticket.Mandate.AcceptedBy = o.cfg.OrchestratorBot
+	ticket.Limits = o.cfg.TicketLimits
+	ticket.IdempotencyKey = event.IdempotencyKey()
+	ticket.WorkerBot = workerBot
+	if err := o.auditRequired(ctx, AuditTicketAccepted, "accepted", ticket.ID, verdict.Reason); err != nil {
+		return Ticket{}, err
+	}
+	stored, err := o.cfg.Store.CreateWorkItem(ctx, ticket.Record())
+	if err != nil {
+		return Ticket{}, err
+	}
+	ticket = TicketFromWorkItem(stored)
+	if ticket.WorkerBot == "" {
+		ticket.WorkerBot = workerBot
+	}
+	if _, err := o.ensureSubscription(ctx, ticket); err != nil {
+		return Ticket{}, err
+	}
+	if o.cfg.Outbox != nil {
+		_, _ = o.cfg.Outbox.Enqueue(ctx, OutboxMessage{
+			TenantID:       o.cfg.TenantID,
+			WorkItemID:     ticket.ID,
+			ChannelID:      ticket.Thread.ID,
+			Thread:         ticket.Thread,
+			Text:           fmt.Sprintf("Ticket %s accepted: %s", shortID(ticket.ID), ticket.Title),
+			Data:           marshalData(map[string]any{"ticketId": ticket.ID.String(), "event": "accepted"}),
+			IdempotencyKey: "ticket:" + ticket.ID.String() + ":accepted",
+		})
+	}
+	return ticket, nil
+}
+
+func (o *Orchestrator) attachLocked(ctx context.Context, event Event, verdict Verdict, subs []Subscription) ([]Ticket, error) {
+	seenTickets := make(map[uuid.UUID]bool, len(subs))
+	var delivered []Ticket
+	for _, subscription := range subs {
+		if seenTickets[subscription.WorkItemID] {
+			continue
+		}
+		seenTickets[subscription.WorkItemID] = true
+		ticket, err := o.loadTicket(ctx, o.cfg.TenantID, subscription.WorkItemID)
+		if err != nil {
+			continue
+		}
+		if ticket.Mandate.Revoked() || ticket.Status == collab.WorkItemCancelled || ticket.Status == collab.WorkItemCancelling {
+			// A context subscription never grants authority and never reopens a
+			// stopped ticket.
+			_ = o.deactivateSubscription(ctx, subscription)
+			continue
+		}
+		if ticket.Status == collab.WorkItemDone || ticket.Status == collab.WorkItemFailed {
+			// Human follow-up may resume a finished ticket, but a subscribed
+			// comment must not do it automatically (spec: subscription is context,
+			// not authorization).
+			continue
+		}
+		if err := o.auditRequired(ctx, AuditTicketAttached, "accepted", ticket.ID, verdict.Reason); err != nil {
+			return nil, err
+		}
+		assignment, _ := o.activeAssignment(ctx, ticket.ID)
+		if assignment.ID != uuid.Nil && assignment.SessionID != uuid.Nil {
+			text := eventInputText(event)
+			if err := o.cfg.Inputs.Deliver(ctx, InputRequest{
+				TenantID: o.cfg.TenantID, WorkItemID: ticket.ID, AssignmentID: assignment.ID,
+				SessionID: assignment.SessionID, Text: text,
+				RequestID: "followup:" + event.SourceID + ":" + event.EventID, Kind: "followup",
+			}); err != nil {
+				return nil, err
+			}
+		} else {
+			// No live worker: resume an open/blocked ticket with a human-follow-up
+			// assignment. This is the explicit person continuation path, not a
+			// subscription auto-resume of a finished ticket (handled above).
+			if ticket.Status == collab.WorkItemBlocked {
+				if err := o.setTicketStatus(ctx, &ticket, collab.WorkItemActive, "follow-up received"); err != nil {
+					continue
+				}
+			}
+			if _, err := o.dispatchTicketLocked(ctx, ticket, true, "human follow-up on "+event.Thread.ID); err != nil {
+				o.cfg.Logger.Warn("superagent: follow-up dispatch failed", "ticket", ticket.ID, "error", err)
+			}
+		}
+		delivered = append(delivered, ticket)
+	}
+	return delivered, nil
+}
+
+func (o *Orchestrator) stopThreadLocked(ctx context.Context, event Event, verdict Verdict) ([]uuid.UUID, error) {
+	subs, err := o.cfg.Store.ListThreadSubscriptions(ctx, o.cfg.TenantID, event.Thread)
+	if err != nil {
+		return nil, err
+	}
+	var stopped []uuid.UUID
+	for _, subscription := range subs {
+		if err := o.stopTicketLocked(ctx, subscription.WorkItemID, event.Actor, "human stop from "+event.SourceID, event); err != nil {
+			return stopped, err
+		}
+		stopped = append(stopped, subscription.WorkItemID)
+	}
+	if len(stopped) == 0 {
+		o.audit(ctx, AuditEventIgnored, "accepted", event, uuid.Nil, "stop without a subscribed ticket")
+	}
+	return stopped, nil
+}
+
+// dispatchQueuedLocked dispatches open tickets that have no live assignment.
+func (o *Orchestrator) dispatchQueuedLocked(ctx context.Context) (int, error) {
+	items, err := o.cfg.Store.ListWorkItems(ctx, o.cfg.TenantID, collab.WorkFilter{ModeID: o.cfg.ModeID, Status: collab.WorkItemOpen})
+	if err != nil {
+		return 0, err
+	}
+	dispatched := 0
+	for _, item := range items {
+		ticket := TicketFromWorkItem(item)
+		if !ticket.CanDispatch() {
+			continue
+		}
+		ok, err := o.dispatchTicketLocked(ctx, ticket, false, "queued ticket")
+		if err != nil {
+			if errors.Is(err, collab.ErrConcurrencyExceeded) {
+				break
+			}
+			return dispatched, err
+		}
+		if ok {
+			dispatched++
+		}
+	}
+	return dispatched, nil
+}
+
+// DispatchQueued is the public bounded queue pump (tests/admin calls).
+func (o *Orchestrator) DispatchQueued(ctx context.Context) (int, error) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.dispatchQueuedLocked(ctx)
+}
+
+// dispatchTicketLocked creates one Assignment and Worker Session. The old
+// Assignment is never overwritten: a replacement is a new row so the history
+// stays auditable. The guarded Host is the only authorization gate: this
+// method does not inspect WorkItemID membership or Scope.BotIDs itself; core
+// owns those checks. It never sets HumanTakeover — a human resume goes through
+// OperatorAuthorizer, not a free boolean.
+func (o *Orchestrator) dispatchTicketLocked(ctx context.Context, ticket Ticket, humanFollowUp bool, reason string) (bool, error) {
+	if !ticket.CanDispatch() {
+		return false, nil
+	}
+	if existing, err := o.activeAssignment(ctx, ticket.ID); err != nil {
+		return false, err
+	} else if existing.ID != uuid.Nil {
+		return false, nil
+	}
+	if o.cfg.Slots != nil {
+		if err := o.cfg.Slots.Acquire(ctx, o.cfg.TenantID, humanFollowUp); err != nil {
+			return false, err
+		}
+	}
+	workerBot := strings.TrimSpace(ticket.WorkerBot)
+	if workerBot == "" {
+		workerBot = o.cfg.WorkerBot
+	}
+	assignments, err := o.cfg.Store.ListAssignments(ctx, o.cfg.TenantID, ticket.ID)
+	if err != nil {
+		return false, err
+	}
+	attempt := len(assignments) + 1
+	assignmentKey := fmt.Sprintf("ticket:%s:assignment:%d", ticket.ID, attempt)
+	input := marshalData(assignmentDoc{HumanFollowUp: humanFollowUp, Reason: reason})
+	if err := o.auditRequired(ctx, AuditDispatch, "accepted", ticket.ID, reason); err != nil {
+		return false, err
+	}
+	assignment, err := o.cfg.Host.Assign(ctx, o.cfg.TenantID, ticket.ID, workerBot, collab.AssignmentRequest{
+		CallerSessionID: o.cfg.OrchestratorSession,
+		Title:           ticket.Title,
+		Input:           input,
+		IdempotencyKey:  assignmentKey,
+	})
+	if err != nil {
+		o.audit(ctx, AuditDispatchFailed, "denied", Event{SourceID: ticket.Source.Kind, Thread: ticket.Thread}, ticket.ID, err.Error())
+		return false, err
+	}
+	if _, err := o.bindWorkerSession(ctx, ticket, assignment); err != nil {
+		o.audit(ctx, AuditDispatchFailed, "failed", Event{SourceID: ticket.Source.Kind, Thread: ticket.Thread}, ticket.ID, err.Error())
+		return false, err
+	}
+	return true, nil
+}
+
+func (o *Orchestrator) bindWorkerSession(ctx context.Context, ticket Ticket, assignment collab.Assignment) (collab.SessionRef, error) {
+	// The worker is an ordinary Bot session spawned through the sub-agent
+	// launcher. Its own sub-agent children are counted by the subagent mode's
+	// depth tree, not by the Ticket/Assignment level: a Ticket is not a session
+	// parent and never consumes sub-agent depth.
+	task := workerTask(ticket)
+	inputs := marshalData(map[string]any{
+		"ticketId": ticket.ID.String(),
+		"title":    ticket.Title,
+		"source":   ticket.Source,
+		"thread":   ticket.Thread,
+		"mandate":  ticket.Mandate,
+	})
+	session, err := o.cfg.Host.CreateSession(ctx, o.cfg.TenantID, o.cfg.ModeID, collab.SessionRequest{
+		WorkItemID:      ticket.ID,
+		ParentSessionID: o.cfg.OrchestratorSession,
+		BotID:           assignment.BotID,
+		Task:            task,
+		Inputs:          inputs,
+		AssignmentID:    assignment.ID,
+		IdempotencyKey:  "worker:" + assignment.ID.String(),
+	})
+	if err != nil {
+		assignment.Status = collab.AssignmentFailed
+		assignment.Error = err.Error()
+		assignment.UpdatedAt = o.cfg.Now()
+		_, _ = o.cfg.Store.UpdateAssignment(ctx, assignment)
+		return collab.SessionRef{}, err
+	}
+	if o.cfg.WorkerWatcher != nil && session.SessionID != uuid.Nil {
+		o.cfg.WorkerWatcher.Watch(ctx, o.cfg.TenantID, session.SessionID)
+	}
+	return session, nil
+}
+
+// ExpireAttentions closes open questions whose deadline passed. The row keeps
+// its history; the inbox simply stops showing it. Expiry is a super-agent
+// lifecycle over the core Attention row, not a second table.
+func (o *Orchestrator) ExpireAttentions(ctx context.Context) (int, error) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.expireAttentionsLocked(ctx)
+}
+
+func (o *Orchestrator) expireAttentionsLocked(ctx context.Context) (int, error) {
+	attentions, err := o.cfg.Store.ListOpenAttentions(ctx, o.cfg.TenantID)
+	if err != nil {
+		return 0, err
+	}
+	now := o.cfg.Now()
+	expired := 0
+	for _, attention := range attentions {
+		if attention.Deadline.IsZero() || attention.Deadline.After(now) {
+			continue
+		}
+		attention.Status = collab.AttentionTimedOut
+		if _, err := o.cfg.Store.UpdateAttention(ctx, attention); err != nil {
+			return expired, err
+		}
+		expired++
+		o.audit(ctx, AuditAttentionExpire, "accepted", Event{}, attention.WorkItemID, "attention "+attention.ID.String())
+	}
+	return expired, nil
+}
+
+// Reconcile projects the core SessionIndex onto Assignments. It is a repair
+// pass, not a second scheduler: a worker session the Host already marked done
+// or cancelled stops occupying a durable slot. Missing session rows are left to
+// Recover (a restart), because another process may legitimately own a live
+// session handle.
+func (o *Orchestrator) Reconcile(ctx context.Context) (int, error) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.reconcileLocked(ctx)
+}
+
+func (o *Orchestrator) reconcileLocked(ctx context.Context) (int, error) {
+	if o.cfg.Sessions == nil {
+		return 0, nil
+	}
+	assignments, err := o.cfg.Store.ListAssignmentsByStatus(ctx, o.cfg.TenantID, collab.AssignmentOpen, collab.AssignmentActive)
+	if err != nil {
+		return 0, err
+	}
+	changed := 0
+	for _, assignment := range assignments {
+		if assignment.SessionID == uuid.Nil {
+			continue
+		}
+		ref, err := o.cfg.Sessions.Session(ctx, o.cfg.TenantID, assignment.SessionID)
+		if err != nil {
+			continue
+		}
+		if ref.State != collab.SessionDone && ref.State != collab.SessionCancelled {
+			continue
+		}
+		ticket, err := o.loadTicket(ctx, o.cfg.TenantID, assignment.WorkItemID)
+		if err != nil {
+			continue
+		}
+		if ref.State == collab.SessionCancelled {
+			assignment.Status = collab.AssignmentCancelled
+			assignment.Error = "worker session was cancelled; slot released"
+			if ticket.Status == collab.WorkItemActive {
+				_ = o.setTicketStatus(ctx, &ticket, collab.WorkItemOpen, "worker session cancelled")
+			}
+		} else {
+			assignment.Status = collab.AssignmentDone
+			assignment.Error = "worker session ended without a report"
+			if ticket.Status == collab.WorkItemActive || ticket.Status == collab.WorkItemOpen {
+				_ = o.setTicketStatus(ctx, &ticket, collab.WorkItemBlocked, "worker session ended without a report")
+			}
+		}
+		assignment.UpdatedAt = o.cfg.Now()
+		if _, err := o.cfg.Store.UpdateAssignment(ctx, assignment); err != nil {
+			return changed, err
+		}
+		changed++
+		o.audit(ctx, AuditRecovered, "accepted", Event{}, ticket.ID, assignment.Error)
+	}
+	return changed, nil
+}
+
+// Recover repairs work interrupted by a restart: an open Assignment is bound to
+// its Worker session, a dead running Assignment is marked interrupted and the
+// Ticket gets a new Assignment with a recovery note. Source cursors are durable,
+// so already-consumed events are not replayed into new tickets.
+func (o *Orchestrator) Recover(ctx context.Context) (int, error) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	recovered := 0
+	if _, err := o.expireAttentionsLocked(ctx); err != nil {
+		return 0, err
+	}
+	if _, err := o.reconcileLocked(ctx); err != nil {
+		return 0, err
+	}
+	if o.cfg.Outbox != nil {
+		if n, err := o.cfg.Outbox.RecoverOutbox(ctx, o.cfg.TenantID, 100); err != nil {
+			return 0, err
+		} else {
+			recovered += n
+		}
+	}
+	assignments, err := o.cfg.Store.ListAssignmentsByStatus(ctx, o.cfg.TenantID, collab.AssignmentOpen, collab.AssignmentActive)
+	if err != nil {
+		return recovered, err
+	}
+	for _, assignment := range assignments {
+		ticket, err := o.loadTicket(ctx, o.cfg.TenantID, assignment.WorkItemID)
+		if err != nil {
+			assignment.Status = collab.AssignmentFailed
+			assignment.Error = "ticket not found during recovery"
+			assignment.UpdatedAt = o.cfg.Now()
+			_, _ = o.cfg.Store.UpdateAssignment(ctx, assignment)
+			continue
+		}
+		if ticket.Status == collab.WorkItemCancelled || ticket.Status == collab.WorkItemCancelling || ticket.Mandate.Revoked() {
+			assignment.Status = collab.AssignmentCancelled
+			assignment.Error = "ticket was stopped"
+			assignment.UpdatedAt = o.cfg.Now()
+			_, _ = o.cfg.Store.UpdateAssignment(ctx, assignment)
+			continue
+		}
+		if assignment.SessionID == uuid.Nil {
+			if err := o.auditRequired(ctx, AuditRecovered, "accepted", ticket.ID, "bind missing worker session"); err != nil {
+				return recovered, err
+			}
+			if _, err := o.bindWorkerSession(ctx, ticket, assignment); err != nil {
+				o.cfg.Logger.Warn("superagent: recovery bind failed", "assignment", assignment.ID, "error", err)
+				continue
+			}
+			recovered++
+			continue
+		}
+		if o.cfg.Sessions != nil {
+			ref, err := o.cfg.Sessions.Session(ctx, o.cfg.TenantID, assignment.SessionID)
+			if err != nil || ref.State != collab.SessionActive {
+				assignment.Status = collab.AssignmentFailed
+				assignment.Error = "worker session was lost; assignment restarted with a recovery note"
+				assignment.UpdatedAt = o.cfg.Now()
+				if err := o.auditRequired(ctx, AuditRecovered, "accepted", ticket.ID, assignment.Error); err != nil {
+					return recovered, err
+				}
+				if _, err := o.cfg.Store.UpdateAssignment(ctx, assignment); err != nil {
+					return recovered, err
+				}
+				if ticket.Status == collab.WorkItemActive {
+					if err := o.setTicketStatus(ctx, &ticket, collab.WorkItemOpen, "worker lost after restart"); err != nil {
+						continue
+					}
+				}
+				human := assignmentDocOf(assignment).HumanFollowUp
+				if _, err := o.dispatchTicketLocked(ctx, ticket, human, "recovered after restart"); err != nil {
+					o.cfg.Logger.Warn("superagent: recovery dispatch failed", "ticket", ticket.ID, "error", err)
+					continue
+				}
+				recovered++
+			}
+		}
+	}
+	if _, err := o.dispatchQueuedLocked(ctx); err != nil {
+		return recovered, err
+	}
+	return recovered, nil
+}
+
+// ReportState is the closed worker report vocabulary. "waiting" requires a
+// structured Attention id: a free-text "I am waiting" is never inferred.
+type ReportState string
+
+const (
+	ReportProgress ReportState = "progress"
+	ReportWaiting  ReportState = "waiting"
+	ReportReady    ReportState = "ready"
+	ReportBlocked  ReportState = "blocked"
+	ReportFailed   ReportState = "failed"
+	ReportDropped  ReportState = "dropped"
+)
+
+// Valid reports whether the state is in the closed vocabulary.
+func (s ReportState) Valid() bool {
+	switch s {
+	case ReportProgress, ReportWaiting, ReportReady, ReportBlocked, ReportFailed, ReportDropped:
+		return true
+	default:
+		return false
+	}
+}
+
+// ReportRequest is one structured worker report. It is not a free-text status
+// string: waiting/blocked must name the Attention that asks the human.
+type ReportRequest struct {
+	TenantID     uuid.UUID       `json:"tenantId"`
+	WorkItemID   uuid.UUID       `json:"workItemId"`
+	AssignmentID uuid.UUID       `json:"assignmentId"`
+	State        ReportState     `json:"state"`
+	Summary      string          `json:"summary,omitempty"`
+	AttentionID  uuid.UUID       `json:"attentionId,omitempty"`
+	Result       json.RawMessage `json:"result,omitempty"`
+}
+
+// Report applies a worker report. Ready/failed are Ticket decisions; a report
+// never silently changes another tenant's row.
+func (o *Orchestrator) Report(ctx context.Context, request ReportRequest) error {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if err := o.checkTenant(request.TenantID); err != nil {
+		return err
+	}
+	if !request.State.Valid() {
+		return fmt.Errorf("superagent: report state %q is not in the closed vocabulary", request.State)
+	}
+	ticket, err := o.loadTicket(ctx, request.TenantID, request.WorkItemID)
+	if err != nil {
+		return err
+	}
+	assignment, err := o.cfg.Store.GetAssignment(ctx, request.TenantID, request.AssignmentID)
+	if err != nil {
+		return err
+	}
+	if assignment.WorkItemID != ticket.ID {
+		return fmt.Errorf("superagent: assignment does not belong to the ticket")
+	}
+	if err := o.auditRequired(ctx, AuditReport, "accepted", ticket.ID, string(request.State)); err != nil {
+		return err
+	}
+	switch request.State {
+	case ReportProgress:
+		return nil
+	case ReportWaiting, ReportBlocked:
+		if request.State == ReportWaiting && request.AttentionID == uuid.Nil {
+			return fmt.Errorf("superagent: a waiting report must name a structured attention")
+		}
+		if request.AttentionID != uuid.Nil {
+			attention, err := o.cfg.Store.GetAttention(ctx, request.TenantID, request.AttentionID)
+			if err != nil {
+				return err
+			}
+			if attention.WorkItemID != ticket.ID {
+				return fmt.Errorf("superagent: attention does not belong to the ticket")
+			}
+		}
+		if ticket.Status == collab.WorkItemActive || ticket.Status == collab.WorkItemOpen {
+			if err := o.setTicketStatus(ctx, &ticket, collab.WorkItemBlocked, request.Summary); err != nil {
+				return err
+			}
+		}
+		return nil
+	case ReportReady:
+		if err := o.finishAssignment(ctx, assignment, collab.AssignmentDone, request.Result); err != nil {
+			return err
+		}
+		if ticket.Status != collab.WorkItemDone {
+			if err := o.setTicketStatus(ctx, &ticket, collab.WorkItemDone, request.Summary); err != nil {
+				return err
+			}
+			o.enqueueTerminal(ctx, ticket, "completed", request.Summary)
+		}
+		_, err := o.dispatchQueuedLocked(ctx)
+		return err
+	case ReportFailed:
+		if err := o.finishAssignment(ctx, assignment, collab.AssignmentFailed, request.Result); err != nil {
+			return err
+		}
+		if ticket.Status != collab.WorkItemFailed && ticket.Status != collab.WorkItemCancelled {
+			if err := o.setTicketStatus(ctx, &ticket, collab.WorkItemFailed, request.Summary); err != nil {
+				return err
+			}
+			o.enqueueTerminal(ctx, ticket, "failed", request.Summary)
+		}
+		_, err := o.dispatchQueuedLocked(ctx)
+		return err
+	case ReportDropped:
+		if err := o.finishAssignment(ctx, assignment, collab.AssignmentCancelled, request.Result); err != nil {
+			return err
+		}
+		if ticket.Status == collab.WorkItemActive {
+			if err := o.setTicketStatus(ctx, &ticket, collab.WorkItemOpen, "worker dropped the assignment"); err != nil {
+				return err
+			}
+		}
+		_, err := o.dispatchQueuedLocked(ctx)
+		return err
+	}
+	return nil
+}
+
+func (o *Orchestrator) finishAssignment(ctx context.Context, assignment collab.Assignment, status collab.AssignmentStatus, result json.RawMessage) error {
+	assignment.Status = status
+	assignment.Result = append(json.RawMessage(nil), result...)
+	assignment.UpdatedAt = o.cfg.Now()
+	if _, err := o.cfg.Store.UpdateAssignment(ctx, assignment); err != nil {
+		return err
+	}
+	if assignment.SessionID != uuid.Nil && o.cfg.Sessions != nil {
+		_ = o.cfg.Sessions.SetState(ctx, o.cfg.TenantID, assignment.SessionID, collab.SessionDone)
+	}
+	return nil
+}
+
+// Ask opens one structured Attention through the guarded Host. The question is
+// routed back to the Ticket thread, never to an unrelated Channel.
+func (o *Orchestrator) Ask(ctx context.Context, ticketID, assignmentID uuid.UUID, request collab.AttentionRequest) (collab.Attention, error) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if err := o.checkTenant(o.cfg.TenantID); err != nil {
+		return collab.Attention{}, err
+	}
+	ticket, err := o.loadTicket(ctx, o.cfg.TenantID, ticketID)
+	if err != nil {
+		return collab.Attention{}, err
+	}
+	if request.Route == "" {
+		request.Route = collab.AttentionRouteChannel
+	}
+	if request.Channel == "" {
+		request.Channel = ticket.Thread.ID
+	}
+	if request.Timeout == 0 {
+		request.Timeout = o.cfg.AttentionTimeout
+	}
+	assignment, err := o.cfg.Store.GetAssignment(ctx, o.cfg.TenantID, assignmentID)
+	if err != nil {
+		return collab.Attention{}, err
+	}
+	if assignment.SessionID == uuid.Nil {
+		return collab.Attention{}, fmt.Errorf("superagent: assignment has no worker session")
+	}
+	if err := o.auditRequired(ctx, AuditAttentionOpen, "accepted", ticket.ID, "assignment "+assignment.ID.String()); err != nil {
+		return collab.Attention{}, err
+	}
+	request.CallerSessionID = assignment.SessionID
+	request.AssignmentID = assignment.ID
+	return o.cfg.Host.Ask(ctx, o.cfg.TenantID, ticketID, request)
+}
+
+// AnswerAttention records a human answer and wakes the same Ticket. A stopped
+// Ticket is never reopened: its Mandate was revoked.
+func (o *Orchestrator) AnswerAttention(ctx context.Context, tenantID, attentionID uuid.UUID, optionID, text, actor string) (collab.Attention, error) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if err := o.checkTenant(tenantID); err != nil {
+		return collab.Attention{}, err
+	}
+	attention, err := o.cfg.Store.GetAttention(ctx, tenantID, attentionID)
+	if err != nil {
+		return collab.Attention{}, err
+	}
+	optionID = strings.TrimSpace(optionID)
+	text = strings.TrimSpace(text)
+	alreadyAnswered := attention.Status == collab.AttentionAnswered && attention.Answer != nil &&
+		attention.Answer.OptionID == optionID && attention.Answer.Text == text
+	if attention.Status != collab.AttentionOpen && !alreadyAnswered {
+		return collab.Attention{}, fmt.Errorf("superagent: attention is already terminal")
+	}
+	if optionID != "" {
+		found := false
+		for _, option := range attention.Options {
+			if option.ID == optionID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return collab.Attention{}, fmt.Errorf("superagent: option %q is not part of the attention", optionID)
+		}
+	}
+	if optionID == "" && text == "" {
+		return collab.Attention{}, fmt.Errorf("superagent: an answer needs an option or free text")
+	}
+	if optionID == "" && !attention.AllowFreeText {
+		return collab.Attention{}, fmt.Errorf("superagent: free text is not allowed for this attention")
+	}
+	ticket, err := o.loadTicket(ctx, tenantID, attention.WorkItemID)
+	if err != nil {
+		return collab.Attention{}, err
+	}
+	if ticket.Status == collab.WorkItemCancelled || ticket.Status == collab.WorkItemCancelling || ticket.Mandate.Revoked() {
+		return collab.Attention{}, fmt.Errorf("%w: the ticket was stopped", collab.ErrWorkItemClosed)
+	}
+	if err := o.auditRequired(ctx, AuditAttentionAnswer, "accepted", ticket.ID, "attention "+attention.ID.String()); err != nil {
+		return collab.Attention{}, err
+	}
+	stored := attention
+	if !alreadyAnswered {
+		now := o.cfg.Now()
+		attention.Status = collab.AttentionAnswered
+		attention.Answer = &collab.AttentionAnswer{OptionID: optionID, Text: text, At: now}
+		stored, err = o.cfg.Store.UpdateAttention(ctx, attention)
+		if err != nil {
+			return collab.Attention{}, err
+		}
+	}
+	if ticket.Status == collab.WorkItemBlocked {
+		if err := o.setTicketStatus(ctx, &ticket, collab.WorkItemActive, "attention answered by "+actor); err != nil {
+			return collab.Attention{}, err
+		}
+	} else if ticket.CanAcceptFollowUp() {
+		// An explicit human answer is the one follow-up path allowed to resume a
+		// finished ticket; a context subscription never does it automatically.
+		if err := o.setTicketStatus(ctx, &ticket, collab.WorkItemOpen, "attention answered by "+actor); err != nil {
+			return collab.Attention{}, err
+		}
+	}
+	assignment, err := o.activeAssignment(ctx, ticket.ID)
+	if err != nil {
+		return collab.Attention{}, err
+	}
+	answerText := attentionAnswerText(attention)
+	if assignment.ID != uuid.Nil && assignment.SessionID != uuid.Nil {
+		if err := o.cfg.Inputs.Deliver(ctx, InputRequest{
+			TenantID: tenantID, WorkItemID: ticket.ID, AssignmentID: assignment.ID,
+			SessionID: assignment.SessionID, Text: answerText,
+			RequestID: "attention:" + attention.ID.String(), Kind: "attention_answer",
+		}); err != nil {
+			return collab.Attention{}, err
+		}
+	} else {
+		if _, err := o.dispatchTicketLocked(ctx, ticket, true, "attention answered by "+actor); err != nil {
+			return collab.Attention{}, err
+		}
+	}
+	return stored, nil
+}
+
+// ResumeTicket is the explicit human follow-up path: a finished or blocked
+// Ticket reopens and gets a human-follow-up Assignment if no worker is live.
+// It is deliberately separate from subscription fan-out, which never resumes a
+// finished Ticket automatically. A stopped Ticket stays stopped because its
+// Mandate was revoked.
+func (o *Orchestrator) ResumeTicket(ctx context.Context, tenantID, ticketID uuid.UUID, actor, reason string) (Ticket, error) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if err := o.checkTenant(tenantID); err != nil {
+		return Ticket{}, err
+	}
+	if err := o.requireOperator(ctx, tenantID, ticketID, actor, "resume"); err != nil {
+		return Ticket{}, err
+	}
+	ticket, err := o.loadTicket(ctx, tenantID, ticketID)
+	if err != nil {
+		return Ticket{}, err
+	}
+	if ticket.Mandate.Revoked() || ticket.Status == collab.WorkItemCancelled || ticket.Status == collab.WorkItemCancelling {
+		return Ticket{}, fmt.Errorf("%w: the ticket was stopped", collab.ErrWorkItemClosed)
+	}
+	if err := o.auditRequired(ctx, AuditTicketResumed, "accepted", ticket.ID, reason); err != nil {
+		return Ticket{}, err
+	}
+	switch ticket.Status {
+	case collab.WorkItemDone, collab.WorkItemFailed, collab.WorkItemBlocked:
+		if err := o.setTicketStatus(ctx, &ticket, collab.WorkItemOpen, "human follow-up by "+actor); err != nil {
+			return Ticket{}, err
+		}
+	case collab.WorkItemOpen, collab.WorkItemActive:
+		// Already live; the caller may still want a human-follow-up assignment.
+	default:
+		return Ticket{}, fmt.Errorf("superagent: ticket %s cannot resume from %s", ticketID, ticket.Status)
+	}
+	if _, err := o.dispatchTicketLocked(ctx, ticket, true, "human follow-up: "+reason); err != nil && !errors.Is(err, collab.ErrConcurrencyExceeded) {
+		return Ticket{}, err
+	}
+	return o.loadTicket(ctx, tenantID, ticketID)
+}
+
+// StopTicket applies a human stop: the Mandate is revoked, the Ticket cannot
+// accept automatic input again, and every bound session/attention is cancelled
+// through the guarded Host. The records stay auditable.
+func (o *Orchestrator) StopTicket(ctx context.Context, tenantID, ticketID uuid.UUID, actor, reason string) error {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if err := o.checkTenant(tenantID); err != nil {
+		return err
+	}
+	if err := o.requireOperator(ctx, tenantID, ticketID, actor, "stop"); err != nil {
+		return err
+	}
+	return o.stopTicketLocked(ctx, ticketID, Actor{ID: actor, Login: actor}, reason, Event{})
+}
+
+func (o *Orchestrator) stopTicketLocked(ctx context.Context, ticketID uuid.UUID, actor Actor, reason string, event Event) error {
+	if err := o.checkTenant(o.cfg.TenantID); err != nil {
+		return err
+	}
+	ticket, err := o.loadTicket(ctx, o.cfg.TenantID, ticketID)
+	if err != nil {
+		return err
+	}
+	if ticket.Status == collab.WorkItemCancelled {
+		return nil
+	}
+	now := o.cfg.Now()
+	ticket.Mandate.RevokedAt = &now
+	ticket.Mandate.RevokedBy = actor.Login
+	if ticket.Mandate.RevokedBy == "" {
+		ticket.Mandate.RevokedBy = actor.ID
+	}
+	ticket.Mandate.RevocationCause = reason
+	if err := o.auditRequired(ctx, AuditTicketStopped, "accepted", ticket.ID, reason); err != nil {
+		return err
+	}
+	// Cancellation fan-out (including every bound worker session and its
+	// subtree) is the core Host's contract. This method never enumerates or
+	// cancels sessions itself, so a core fix for bare children applies here
+	// without a second implementation.
+	if err := o.cfg.Host.Cancel(ctx, o.cfg.TenantID, ticketID, reason); err != nil {
+		// The Host leaves the item in "cancelling" when propagation fails; keep
+		// the mandate revocation fact so a retry cannot resurrect the ticket.
+		ticket.Status = collab.WorkItemCancelling
+		ticket.UpdatedAt = now
+		_, _ = o.cfg.Store.UpdateWorkItem(ctx, ticket.Record())
+		return err
+	}
+	subs, err := o.cfg.Store.ListSubscriptions(ctx, o.cfg.TenantID, ticketID)
+	if err != nil {
+		return err
+	}
+	for _, subscription := range subs {
+		_ = o.deactivateSubscription(ctx, subscription)
+	}
+	ticket.Status = collab.WorkItemCancelled
+	ticket.UpdatedAt = now
+	if _, err := o.cfg.Store.UpdateWorkItem(ctx, ticket.Record()); err != nil {
+		return err
+	}
+	return nil
+}
+
+// Board is the read-only ticket board projection.
+type BoardFilter struct {
+	Status collab.WorkItemStatus `json:"status,omitempty"`
+	Limit  int                   `json:"limit,omitempty"`
+}
+
+// TicketView is one board row.
+type TicketView struct {
+	Ticket
+	AssignmentCount    int                `json:"assignmentCount"`
+	ActiveAssignment   *collab.Assignment `json:"activeAssignment,omitempty"`
+	AttentionCount     int                `json:"attentionCount"`
+	OpenAttentionCount int                `json:"openAttentionCount"`
+}
+
+// BoardView is the board response.
+type BoardView struct {
+	TenantID uuid.UUID      `json:"tenantId"`
+	ModeID   string         `json:"modeId"`
+	Tickets  []TicketView   `json:"tickets"`
+	Counts   map[string]int `json:"counts"`
+}
+
+// Board lists the tenant's tickets, newest first (bounded by filter limit).
+func (o *Orchestrator) Board(ctx context.Context, tenantID uuid.UUID, filter BoardFilter) (BoardView, error) {
+	if err := o.checkTenant(tenantID); err != nil {
+		return BoardView{}, err
+	}
+	items, err := o.cfg.Store.ListWorkItems(ctx, tenantID, collab.WorkFilter{ModeID: o.cfg.ModeID, Status: filter.Status})
+	if err != nil {
+		return BoardView{}, err
+	}
+	if filter.Limit > 0 && len(items) > filter.Limit {
+		items = items[len(items)-filter.Limit:]
+	}
+	view := BoardView{TenantID: tenantID, ModeID: o.cfg.ModeID, Tickets: make([]TicketView, 0, len(items)), Counts: map[string]int{}}
+	for _, item := range items {
+		ticket := TicketFromWorkItem(item)
+		assignments, _ := o.cfg.Store.ListAssignments(ctx, tenantID, ticket.ID)
+		attentions, _ := o.cfg.Store.ListAttentions(ctx, tenantID, ticket.ID)
+		row := TicketView{Ticket: ticket, AssignmentCount: len(assignments), AttentionCount: len(attentions)}
+		for i := range assignments {
+			assignment := assignments[i]
+			if assignment.Status == collab.AssignmentActive || assignment.Status == collab.AssignmentOpen {
+				row.ActiveAssignment = &assignment
+			}
+		}
+		for _, attention := range attentions {
+			if attention.Status == collab.AttentionOpen {
+				row.OpenAttentionCount++
+			}
+		}
+		view.Tickets = append(view.Tickets, row)
+		view.Counts[string(ticket.Status)]++
+	}
+	return view, nil
+}
+
+// AttentionView is one inbox row.
+type AttentionView struct {
+	collab.Attention
+	TicketTitle string    `json:"ticketTitle,omitempty"`
+	Thread      ThreadRef `json:"thread"`
+}
+
+// AttentionInbox is the read-only inbox response.
+type AttentionInbox struct {
+	TenantID uuid.UUID       `json:"tenantId"`
+	Items    []AttentionView `json:"items"`
+}
+
+// Inbox lists open attention requests across the tenant's tickets.
+func (o *Orchestrator) Inbox(ctx context.Context, tenantID uuid.UUID) (AttentionInbox, error) {
+	if err := o.checkTenant(tenantID); err != nil {
+		return AttentionInbox{}, err
+	}
+	attentions, err := o.cfg.Store.ListOpenAttentions(ctx, tenantID)
+	if err != nil {
+		return AttentionInbox{}, err
+	}
+	inbox := AttentionInbox{TenantID: tenantID, Items: make([]AttentionView, 0, len(attentions))}
+	for _, attention := range attentions {
+		ticket, err := o.loadTicket(ctx, tenantID, attention.WorkItemID)
+		if err != nil {
+			continue
+		}
+		inbox.Items = append(inbox.Items, AttentionView{Attention: attention, TicketTitle: ticket.Title, Thread: ticket.Thread})
+	}
+	return inbox, nil
+}
+
+func (o *Orchestrator) loadTicket(ctx context.Context, tenantID, ticketID uuid.UUID) (Ticket, error) {
+	item, err := o.cfg.Store.GetWorkItem(ctx, tenantID, ticketID)
+	if err != nil {
+		return Ticket{}, err
+	}
+	if item.ModeID != o.cfg.ModeID {
+		return Ticket{}, fmt.Errorf("%w: work item belongs to mode %q", collab.ErrInvalidRequest, item.ModeID)
+	}
+	return TicketFromWorkItem(item), nil
+}
+
+func (o *Orchestrator) setTicketStatus(ctx context.Context, ticket *Ticket, to collab.WorkItemStatus, reason string) error {
+	if err := ValidateTransition(ticket.Status, to); err != nil {
+		return err
+	}
+	ticket.Status = to
+	ticket.UpdatedAt = o.cfg.Now()
+	ticket.WorkItem = ticket.Record()
+	stored, err := o.cfg.Store.UpdateWorkItem(ctx, ticket.Record())
+	if err != nil {
+		return err
+	}
+	*ticket = TicketFromWorkItem(stored)
+	_ = reason
+	return nil
+}
+
+func (o *Orchestrator) ensureSubscription(ctx context.Context, ticket Ticket) (Subscription, error) {
+	return o.cfg.Store.CreateSubscription(ctx, Subscription{
+		TenantID: o.cfg.TenantID, WorkItemID: ticket.ID, Thread: ticket.Thread, Active: true,
+	})
+}
+
+func (o *Orchestrator) deactivateSubscription(ctx context.Context, subscription Subscription) error {
+	subscription.Active = false
+	_, err := o.cfg.Store.UpdateSubscription(ctx, subscription)
+	return err
+}
+
+func (o *Orchestrator) activeAssignment(ctx context.Context, ticketID uuid.UUID) (collab.Assignment, error) {
+	assignments, err := o.cfg.Store.ListAssignments(ctx, o.cfg.TenantID, ticketID)
+	if err != nil {
+		return collab.Assignment{}, err
+	}
+	for _, assignment := range assignments {
+		if assignment.Status == collab.AssignmentActive || assignment.Status == collab.AssignmentOpen {
+			return assignment, nil
+		}
+	}
+	return collab.Assignment{}, nil
+}
+
+func (o *Orchestrator) recordSeen(ctx context.Context, event Event, decision string, ticketID uuid.UUID) error {
+	return o.cfg.Store.RecordSourceEvent(ctx, SeenEvent{
+		TenantID: o.cfg.TenantID, SourceID: event.SourceID, EventID: event.EventID,
+		Kind: string(event.Kind), ActorID: event.Actor.ID, ThreadID: event.Thread.ID,
+		Payload: event.Raw, Decision: decision, WorkItemID: ticketID,
+		ReceivedAt: event.ReceivedAt, CreatedAt: o.cfg.Now(),
+	})
+}
+
+func (o *Orchestrator) enqueueTerminal(ctx context.Context, ticket Ticket, event, summary string) {
+	if o.cfg.Outbox == nil {
+		return
+	}
+	text := fmt.Sprintf("Ticket %s %s", shortID(ticket.ID), event)
+	if strings.TrimSpace(summary) != "" {
+		text += ": " + strings.TrimSpace(summary)
+	}
+	_, _ = o.cfg.Outbox.Enqueue(ctx, OutboxMessage{
+		TenantID: o.cfg.TenantID, WorkItemID: ticket.ID,
+		ChannelID: ticket.Thread.ID, Thread: ticket.Thread, Text: text,
+		Data:           marshalData(map[string]any{"ticketId": ticket.ID.String(), "event": event}),
+		IdempotencyKey: "ticket:" + ticket.ID.String() + ":" + event,
+	})
+}
+
+// auditRequired writes the audit row that authorizes an accepted state change.
+// It is fail-closed: an accepted Ticket/Assignment/Attention/report cannot be
+// created without its durable row.
+func (o *Orchestrator) auditRequired(ctx context.Context, kind, result string, ticketID uuid.UUID, detail string) error {
+	if o.cfg.Audit == nil {
+		return fmt.Errorf("%w: no audit sink", collab.ErrAuditUnavailable)
+	}
+	err := o.cfg.Audit.Record(ctx, collab.AuditEvent{
+		Kind: kind, Result: result, Operation: "superagent",
+		TenantID: o.cfg.TenantID, ModeID: o.cfg.ModeID, WorkItemID: ticketID,
+		BotID: o.cfg.OrchestratorBot, Detail: detail, At: o.cfg.Now(),
+	})
+	if err != nil {
+		return fmt.Errorf("%w: %v", collab.ErrAuditUnavailable, err)
+	}
+	return nil
+}
+
+func (o *Orchestrator) audit(ctx context.Context, kind, result string, event Event, ticketID uuid.UUID, detail string) {
+	if o.cfg.Audit == nil {
+		return
+	}
+	_ = o.cfg.Audit.Record(ctx, collab.AuditEvent{
+		Kind: kind, Result: result, Reason: detail, Operation: "superagent",
+		TenantID: o.cfg.TenantID, ModeID: o.cfg.ModeID, WorkItemID: ticketID,
+		BotID: o.cfg.OrchestratorBot, Detail: detail, At: o.cfg.Now(),
+	})
+}
+
+func (o *Orchestrator) requireOperator(ctx context.Context, tenantID, ticketID uuid.UUID, actor, action string) error {
+	if o.cfg.Operator == nil {
+		return ErrOperatorUnavailable
+	}
+	return o.cfg.Operator.AuthorizeOperator(ctx, tenantID, ticketID, actor, action)
+}
+
+func (o *Orchestrator) checkTenant(tenantID uuid.UUID) error {
+	if tenantID == uuid.Nil {
+		return fmt.Errorf("%w: tenant is required", collab.ErrTenantRequired)
+	}
+	if tenantID != o.cfg.TenantID {
+		return fmt.Errorf("%w: the tenant does not own this orchestrator", collab.ErrTenantMismatch)
+	}
+	return nil
+}
+
+type assignmentDoc struct {
+	HumanFollowUp bool   `json:"humanFollowUp,omitempty"`
+	Reason        string `json:"reason,omitempty"`
+}
+
+func assignmentDocOf(assignment collab.Assignment) assignmentDoc {
+	var doc assignmentDoc
+	if len(assignment.Input) > 0 {
+		_ = json.Unmarshal(assignment.Input, &doc)
+	}
+	return doc
+}
+
+func sourceID(source collab.Source) string {
+	if source == nil {
+		return ""
+	}
+	switch source.(type) {
+	case *GitHubSource:
+		return SourceGitHub
+	case *FixtureSource:
+		return SourceFixture
+	default:
+		return "source"
+	}
+}
+
+func eventInputText(event Event) string {
+	if strings.TrimSpace(event.Body) == "" {
+		return fmt.Sprintf("New %s on %s", event.Kind, event.Thread.ID)
+	}
+	return event.Body
+}
+
+func workerTask(ticket Ticket) string {
+	var builder strings.Builder
+	fmt.Fprintf(&builder, "Ticket %s: %s\n\n", shortID(ticket.ID), ticket.Title)
+	if strings.TrimSpace(ticket.Request) != "" {
+		builder.WriteString(ticket.Request)
+		builder.WriteString("\n\n")
+	}
+	if ticket.Source.URI != "" {
+		fmt.Fprintf(&builder, "Source: %s\n\n", ticket.Source.URI)
+	}
+	builder.WriteString("Work in your own session. Use structured attention when you need a human decision; do not infer approval from free text.")
+	return builder.String()
+}
+
+func attentionAnswerText(attention collab.Attention) string {
+	if attention.Answer == nil {
+		return "A human answered the attention."
+	}
+	if attention.Answer.Text != "" {
+		return "Human answer: " + attention.Answer.Text
+	}
+	return "Human selected: " + attention.Answer.OptionID
+}
+
+func firstTicketID(tickets []Ticket) uuid.UUID {
+	if len(tickets) == 0 {
+		return uuid.Nil
+	}
+	return tickets[0].ID
+}
+
+func firstUUID(ids []uuid.UUID) uuid.UUID {
+	if len(ids) == 0 {
+		return uuid.Nil
+	}
+	return ids[0]
+}
+
+func shortID(id uuid.UUID) string {
+	text := id.String()
+	if len(text) > 8 {
+		return text[:8]
+	}
+	return text
+}

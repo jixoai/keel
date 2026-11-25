@@ -1411,6 +1411,15 @@ func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, 
 		Ownership: triggerOwnership,
 	})
 
+	// The super-agent queue (change keel-collab-superagent) is assembled only
+	// when KEEL_SUPERAGENT_SOURCE names a Source and both role Bots. It enables
+	// the mode and starts the poller; with no configuration the descriptor stays
+	// disabled exactly as the core change left it.
+	superagentRuntime, err := newSuperagentRuntime(ctx, opts.TenantID, st, collabModes, accessBridge, subagents, starter, log)
+	if err != nil {
+		return nil, fmt.Errorf("super-agent: %w", err)
+	}
+
 	surface, err := newPluginSurface(ctx, rt, st, opts, hooks, triggers, decisions, approvals, notifications, subagents, partials, taskLog, log)
 	if err != nil {
 		return nil, err
@@ -1469,6 +1478,12 @@ func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, 
 	// The bounded transcript reads (W12 session-query) run over the same store
 	// and tenant scope as the session list; they never become a second ledger.
 	sessionQuery := harnessapi.NewPGSessionQuery(st)
+	// A typed nil *superagent.Orchestrator in an interface would advertise the
+	// board as wired; keep the interface nil unless the queue is assembled.
+	var superagentReader harnessapi.SuperagentReader
+	if superagentRuntime != nil {
+		superagentReader = superagentRuntime
+	}
 	api := harnessapi.New(harnessapi.Config{
 		Sessions: harnessapi.NewPGSessionLister(st),
 		// Identity/access surface (change keel-bot-identity-access, A4.1): the
@@ -1541,7 +1556,10 @@ func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, 
 		// enabled and disabled modes alike, so a client can keep existing work
 		// visible after a disable.
 		CollabModes: collabModes.List,
-		Hooks:       hooks,
+		// The read-only super-agent ticket board / attention inbox. Nil keeps
+		// both routes at 503 and superagent.board=false.
+		Superagent: superagentReader,
+		Hooks:      hooks,
 		ModelsLive: func() harnessapi.ModelCatalog {
 			if rt.Models() == nil {
 				return nil

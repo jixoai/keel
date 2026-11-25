@@ -71,6 +71,7 @@ keel version
 | GET | `/v1/triggers`、POST `/v1/triggers/{id}/fire` | 触发器审计与手动/签名触发（幂等键；签名头见 §3.3）；fire 以 trigger 的 `botId` 创建 Bot-owned Session，`created_by` = 调用者 |
 | GET | `/v1/subagents`、`/v1/subagents/{id}` | 子代理列表/详情 |
 | POST | `/v1/sessions/{id}/subagents` | 派生子代理（`wait:true` 同步等待；断线不再取消子代理） |
+| GET | `/v1/superagent/tickets`、`/v1/superagent/attention` | super-agent 工单看板 / Attention 收件箱只读投影（需 `task.read`；未装配 503，`superagent.board=false`） |
 
 ### 身份与 Bot API（`internal/harnessapi`，A2–A4）
 
@@ -201,6 +202,25 @@ keel version
 - **示例插件**：`keel.example` 只在配置了 `--example-bot-id`（或 `KEEL_EXAMPLE_BOT_ID`）时声明
   trigger；先创建 Bot，再以该 Bot 启动 `keel serve`，`POST /v1/triggers/keel.example.ping/fire`
   才会以该 Bot 身份起 turn。未配置时示例插件只加载工具/hook，不注册 trigger。
+
+### 3.5 super-agent 工单/调度（keel-collab-superagent）
+
+super-agent 是一种协作 mode（orchestrator/worker 角色），不是 Bot kind。默认关闭；配置后
+`keel serve` 装配 Source → Ticket → Assignment → Worker Session 主链路并启用 `superagent`
+mode：
+
+- `KEEL_SUPERAGENT_SOURCE=github|fixture`（空=关闭）
+- `KEEL_SUPERAGENT_ORCHESTRATOR_BOT` / `KEEL_SUPERAGENT_WORKER_BOT`（必填，角色 Bot）
+- `KEEL_SUPERAGENT_ALLOWED_ACTORS`（逗号分隔的 Source actor id/login 允许列表）
+- `KEEL_SUPERAGENT_GITHUB_REPO=owner/name`、`KEEL_SUPERAGENT_GITHUB_TOKEN`（或
+  `GITHUB_TOKEN`）、可选 `KEEL_SUPERAGENT_GITHUB_SINCE`（空=首次轮询只建立基线，不回放仓库历史）
+- `KEEL_SUPERAGENT_INTERVAL`、`KEEL_SUPERAGENT_SLOTS`、`KEEL_SUPERAGENT_HUMAN_SLOTS`
+- `KEEL_SUPERAGENT_ORCHESTRATOR_SESSION`（可选；空=按 tenant+Bot 派生稳定 session id）
+
+工单、派工、订阅、Source 游标、Outbox 与 Host 的 session index 落在 `collab_*` 表（全部带
+`tenant_id` 并启用 RLS）。Worker 仍通过 subagent Host 创建自己的 Session；Ticket/Assignment
+层级不消耗 sub-agent depth。首版只实现 GitHub Issue/PR/评论（CI 状态留给后续适配器），
+Feishu、自动 merge、市场与完整 web 看板不在本切片。
 
 ## 4. 与内核的接缝
 

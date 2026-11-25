@@ -138,6 +138,10 @@ type Config struct {
 	// answer with enabled=false so a client can still show existing work.
 	// Nil omits the block and reports collab.modes=false.
 	CollabModes func() []collab.ModeView
+	// Superagent is the read-only ticket board / attention inbox of the
+	// super-agent queue (change keel-collab-superagent). Nil answers 503 on the
+	// two projection routes and reports superagent.board=false.
+	Superagent SuperagentReader
 	// Hooks is the hook bus (detailed subscription stats on GET /v1/plugins).
 	Hooks *harnessext.HookBus
 	// Parents optionally resolves sub-agent parent links; defaults to Subagents.
@@ -435,6 +439,9 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /v1/sessions/{id}/resume", s.resumeSubagent)
 	s.mux.HandleFunc("POST /v1/subagents/{id}/cancel", s.cancelSubagent)
 	s.mux.HandleFunc("GET /v1/subagents/{id}", s.getSubagent)
+	// Super-agent board (change keel-collab-superagent): read-only tickets and
+	// attention inbox; no create/stop/answer route in the first slice.
+	s.superagentRoutes()
 	// Tenancy surface (change keel-ga §2): who am I, provisioning, quota.
 	s.registerTenancyRoutes()
 	// Identity surface (change keel-bot-identity-access, A4.1): accounts,
@@ -599,8 +606,11 @@ func (s *Server) capabilities(w http.ResponseWriter, _ *http.Request) {
 		// collab.modes is the read-only collaboration catalogue. It does not
 		// gate a write surface: session creation remains the Host's job.
 		"collab.modes": s.cfg.CollabModes != nil,
-		"team.tasks":   s.cfg.TeamTasks != nil,
-		"hooks":        s.cfg.Plugins != nil,
+		// superagent.board is the read-only ticket board / attention inbox; the
+		// queue itself is assembled by the host process, not by this API.
+		"superagent.board": s.cfg.Superagent != nil,
+		"team.tasks":       s.cfg.TeamTasks != nil,
+		"hooks":            s.cfg.Plugins != nil,
 		// Settings is its own surface: the model write path and secret storage
 		// are separately discoverable, so a client can hide a section this
 		// deployment does not serve.

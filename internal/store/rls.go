@@ -103,6 +103,16 @@ var rlsTenantTables = []string{
 	"auth_sessions",
 	"auth_events",
 	"bot_api_keys",
+	// collab-superagent. Every durable work-queue record is tenant-scoped.
+	"collab_work_items",
+	"collab_assignments",
+	"collab_attentions",
+	"collab_links",
+	"collab_subscriptions",
+	"collab_source_cursors",
+	"collab_source_events",
+	"collab_outbox",
+	"collab_session_index",
 }
 
 // ApplyRLS applies the RLS migration. It is safe to run on every boot, on a
