@@ -35,6 +35,13 @@ import (
 type CompactionOptions struct {
 	ContextWindow int
 	Settings      compaction.CompactionSettings
+	// Policy is the checkpoint policy (threshold/retain/max/TTL/manual) the
+	// durable checkpoint seam follows. Nil derives the policy from Settings:
+	// automatic compaction keeps its historical trigger, manual compaction is
+	// allowed and no projection is pruned. A positive ThresholdTokens is mapped
+	// onto the loop's existing window-minus-reserve trigger; the other knobs
+	// govern what is persisted and retained.
+	Policy *compaction.CheckpointPolicy
 	// Hygiene configures the keel.compaction memory-hygiene extensions
 	// (tool-result pruner and image offload). Its Enabled flag is checked
 	// alongside Settings.Enabled by the loop; the production wiring enables both
@@ -1051,7 +1058,7 @@ func (r *Runner) run(ctx context.Context, lease kernel.Lease, span telemetry.Spa
 		// when the window is unknown: hygiene's own bounds are token-based and
 		// do not need the model's window. Auto-compaction itself still refuses
 		// to run without a window.
-		cfg.Compaction = r.Compaction.Settings
+		cfg.Compaction = r.compactionSettings(window)
 		cfg.Hygiene = r.Compaction.Hygiene
 		cfg.Spill = r.Compaction.Spill
 		if r.Hooks != nil {
@@ -1188,8 +1195,17 @@ func (r *Runner) run(ctx context.Context, lease kernel.Lease, span telemetry.Spa
 			default:
 				anchor = r.checkpointAnchor(ctx, lease.Scope, e.FirstKeptTranscriptIndex, seq)
 			}
-			if err := r.Checkpoints.SaveCheckpoint(ctx, lease.Scope, seq, anchor, e.Summary); err != nil {
+			if err := r.Checkpoints.SaveCheckpoint(ctx, lease.Scope, kernel.CheckpointRecord{
+				UptoSeq:       seq,
+				KeptFromSeq:   anchor,
+				Summary:       e.Summary,
+				TokensBefore:  e.TokensBefore,
+				TokensAfter:   e.TokensAfter,
+				PolicyVersion: r.checkpointPolicy().Version(),
+			}); err != nil {
 				r.Logger.Warn("save checkpoint", "session_id", lease.Scope.SessionID, "seq", seq, "err", err)
+			} else {
+				r.pruneCheckpoints(ctx, lease.Scope)
 			}
 		case agentcore.MessageEndEvent:
 			// User prompts and tool results are persisted by their own paths
@@ -1704,6 +1720,11 @@ func (r *Runner) loadEvents(ctx context.Context, scope kernel.Scope) ([]store.Ev
 // tied the retained tail to committed events, and truncating on a guessed
 // boundary could drop context. The fallback is the full log, which is always
 // correct.
+//
+// A checkpoint whose projection does not resolve against the committed log is
+// corrupt (missing compaction event, missing tail anchor, empty summary or an
+// impossible boundary). Recovery fails closed: the corrupt row is ignored and
+// the model sees the full event log, never a silently truncated context.
 func (r *Runner) modelView(ctx context.Context, scope kernel.Scope, events []store.Event) ([]store.Event, *agentcore.CompactionMessage, int64) {
 	if r.Checkpoints == nil {
 		return events, nil, 0
@@ -1714,7 +1735,12 @@ func (r *Runner) modelView(ctx context.Context, scope kernel.Scope, events []sto
 		r.Logger.Warn("load checkpoint", "session_id", scope.SessionID, "err", err)
 		return events, nil, 0
 	}
-	if !found || cp.KeptFromSeq <= 0 {
+	if !found {
+		return events, nil, 0
+	}
+	if problem := corruptCheckpointReason(cp, events); problem != "" {
+		r.Logger.Warn("checkpoint unusable; rebuilding from the full event log",
+			"session_id", scope.SessionID, "checkpoint_seq", cp.UptoSeq, "reason", problem)
 		return events, nil, 0
 	}
 	trimmed := make([]store.Event, 0, len(events))
@@ -1735,14 +1761,51 @@ func (r *Runner) modelView(ctx context.Context, scope kernel.Scope, events []sto
 	return trimmed, &msg, cp.UptoSeq
 }
 
+// corruptCheckpointReason validates a projection against the committed event
+// log. An empty result means the checkpoint can stand in for its summarized
+// prefix. The checks are structural only: they prove the row names committed
+// facts, never that the summary is semantically good.
+func corruptCheckpointReason(cp kernel.Checkpoint, events []store.Event) string {
+	if cp.UptoSeq <= 0 {
+		return "missing compaction seq"
+	}
+	if strings.TrimSpace(cp.Summary) == "" {
+		return "empty summary"
+	}
+	if cp.KeptFromSeq <= 0 {
+		return "missing tail anchor"
+	}
+	if cp.KeptFromSeq >= cp.UptoSeq {
+		return "tail anchor is not before the compaction event"
+	}
+	compactionFound := false
+	tailFound := false
+	for _, ev := range events {
+		if ev.Seq == cp.UptoSeq && ev.Kind == store.EventCompaction {
+			compactionFound = true
+		}
+		if ev.Seq == cp.KeptFromSeq {
+			tailFound = true
+		}
+	}
+	if !compactionFound {
+		return "compaction event is missing"
+	}
+	if !tailFound {
+		return "retained tail anchor is missing"
+	}
+	return ""
+}
+
 // checkpointMessage rebuilds the CompactionMessage a checkpoint stands for,
-// reading the fields the checkpoint row does not store (tokens-before and
-// timestamp) from the committed compaction event. The summary is the
-// checkpoint's own text: it is the projection the row was saved from.
+// preferring the projection's own token accounting and falling back to the
+// committed compaction event for fields older rows did not store (tokens-before
+// and timestamp).
 func checkpointMessage(cp kernel.Checkpoint, events []store.Event) agentcore.CompactionMessage {
 	msg := agentcore.CompactionMessage{
-		RoleField: agentcore.RoleCompaction,
-		Summary:   cp.Summary,
+		RoleField:    agentcore.RoleCompaction,
+		Summary:      cp.Summary,
+		TokensBefore: cp.TokensBefore,
 	}
 	for _, ev := range events {
 		if ev.Seq != cp.UptoSeq || ev.Kind != store.EventCompaction {
@@ -1753,7 +1816,9 @@ func checkpointMessage(cp kernel.Checkpoint, events []store.Event) agentcore.Com
 			Timestamp    int64 `json:"timestamp"`
 		}
 		if err := json.Unmarshal(ev.Payload, &p); err == nil {
-			msg.TokensBefore = p.TokensBefore
+			if msg.TokensBefore == 0 {
+				msg.TokensBefore = p.TokensBefore
+			}
 			msg.Timestamp = p.Timestamp
 		}
 		break
@@ -1801,6 +1866,73 @@ func (r *Runner) checkpointAnchor(ctx context.Context, scope kernel.Scope, first
 		return 0
 	}
 	return anchor
+}
+
+// checkpointPolicy is the effective checkpoint policy of this runner. A host
+// that supplies one is authoritative; otherwise the policy is derived from the
+// loop settings so the historical deployment keeps its behavior (automatic
+// compaction on/off, the same retained budget, unlimited projections, no
+// expiry). The derived policy still allows manual compaction because the loop
+// settings never modeled it.
+func (r *Runner) checkpointPolicy() compaction.CheckpointPolicy {
+	if r.Compaction != nil && r.Compaction.Policy != nil {
+		return *r.Compaction.Policy
+	}
+	policy := compaction.DefaultCheckpointPolicy()
+	policy.ManualCompact = true
+	if r.Compaction != nil {
+		policy.Enabled = r.Compaction.Settings.Enabled
+		policy.RetainTokens = r.Compaction.Settings.KeepRecentTokens
+	}
+	return policy
+}
+
+// compactionSettings derives the loop's settings from the configured ones and
+// the checkpoint policy. An absolute policy threshold is expressed as a reserve
+// against the window the attempt actually runs with, so the loop's existing
+// trigger (tokens > window - reserve) is exactly the policy threshold.
+func (r *Runner) compactionSettings(window int) compaction.CompactionSettings {
+	if r.Compaction == nil {
+		return compaction.CompactionSettings{}
+	}
+	settings := r.Compaction.Settings
+	policy := r.Compaction.Policy
+	if policy == nil || policy.ThresholdTokens <= 0 || window <= 0 {
+		return settings
+	}
+	reserve := window - policy.ThresholdTokens
+	if reserve < 0 {
+		reserve = 0
+	}
+	settings.ReserveTokens = reserve
+	return settings
+}
+
+// pruneCheckpoints applies the policy's retention to the session's projections.
+// It is best-effort like the save: the event log is the truth and a pruning
+// failure never affects the run. Only the newest projection is protected by the
+// seam; the policy bounds everything older.
+func (r *Runner) pruneCheckpoints(ctx context.Context, scope kernel.Scope) {
+	pruner, ok := r.Checkpoints.(kernel.CheckpointPruner)
+	if !ok {
+		return
+	}
+	policy := r.checkpointPolicy()
+	if policy.MaxCheckpoints <= 0 && policy.TTL <= 0 {
+		return
+	}
+	pruned, err := pruner.PruneCheckpoints(ctx, scope, kernel.PruneRequest{
+		MaxCheckpoints: policy.MaxCheckpoints,
+		TTL:            policy.TTL,
+	})
+	if err != nil {
+		r.Logger.Warn("prune checkpoints", "session_id", scope.SessionID, "err", err)
+		return
+	}
+	if pruned > 0 {
+		r.Logger.Info("pruned checkpoint projections", "session_id", scope.SessionID,
+			"pruned", pruned, "max", policy.MaxCheckpoints, "ttl", policy.TTL.String())
+	}
 }
 
 // appendToolResult commits a tool result through the kernel with its

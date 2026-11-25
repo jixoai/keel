@@ -166,6 +166,9 @@ var rules = []Rule{
 	resource(http.MethodGet, "/v1/sessions/{id}/run/loadout", access.KeySessionRead, "session", "path:id"),
 	resource(http.MethodDelete, "/v1/sessions/{id}", access.KeySessionDelete, "session", "path:id"),
 	resource(http.MethodPost, "/v1/sessions/{id}/cancel", access.KeySessionWrite, "session", "path:id"),
+	// Manual checkpoint compaction (change keel-checkpoint): a write on the
+	// session's context, idempotent by requestId.
+	resource(http.MethodPost, "/v1/sessions/{id}/compact", access.KeySessionWrite, "session", "path:id"),
 	resource(http.MethodGet, "/v1/sessions/{id}/decisions", access.KeySessionRead, "session", "path:id"),
 	resource(http.MethodPost, "/v1/sessions/{id}/decisions", access.KeySessionWrite, "session", "path:id"),
 	resource(http.MethodGet, "/v1/sessions/{id}/decisions/{decisionId}", access.KeySessionRead, "session", "path:id"),

@@ -464,9 +464,11 @@ func newCompactionFactory(cfg Config) servicegraph.Factory {
 	}
 }
 
-// compactionOptions derives the loop's compaction knobs from the tenant
-// document. The threshold is the fraction of the context window at which
-// blocking compaction starts; the loop expresses it as reserve tokens.
+// compactionOptions derives the loop's compaction knobs and the durable
+// checkpoint policy from the tenant document. The threshold is the fraction of
+// the context window at which blocking compaction starts; the loop expresses it
+// as reserve tokens. The checkpoint policy is the tenant ceiling: a session
+// narrows it (never widens it) through the checkpoint policy rules.
 func compactionOptions(tenant host.TenantConfig) agent.CompactionOptions {
 	settings := compaction.DefaultCompactionSettings
 	settings.Enabled = true
@@ -480,15 +482,37 @@ func compactionOptions(tenant host.TenantConfig) agent.CompactionOptions {
 			settings.ReserveTokens = reserve
 		}
 	}
+	// An absolute threshold is the narrower trigger: the loop's blocking test
+	// (tokens > window - reserve) is exactly "tokens > thresholdTokens".
+	if tenant.Compaction.ThresholdTokens > 0 && window > 0 {
+		reserve := window - tenant.Compaction.ThresholdTokens
+		if reserve < 0 {
+			reserve = 0
+		}
+		settings.ReserveTokens = reserve
+	}
 	hygiene := compaction.DefaultHygieneSettings()
 	// The pruner protects the same recent tail compaction keeps verbatim; that
 	// is the one window the tenant already tunes, so a second knob would let
 	// the two disagree.
 	hygiene.KeepRecentTokens = settings.KeepRecentTokens
 	hygiene.ImageRecentTokens = settings.KeepRecentTokens
+	manualCompact := true
+	if tenant.Compaction.ManualCompact != nil {
+		manualCompact = *tenant.Compaction.ManualCompact
+	}
+	policy := compaction.CheckpointPolicy{
+		Enabled:         settings.Enabled,
+		ThresholdTokens: tenant.Compaction.ThresholdTokens,
+		RetainTokens:    settings.KeepRecentTokens,
+		MaxCheckpoints:  tenant.Compaction.MaxCheckpoints,
+		TTL:             time.Duration(tenant.Compaction.TTLHours) * time.Hour,
+		ManualCompact:   manualCompact,
+	}
 	return agent.CompactionOptions{
 		ContextWindow: window,
 		Settings:      settings,
+		Policy:        &policy,
 		Hygiene:       hygiene,
 	}
 }

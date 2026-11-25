@@ -92,6 +92,12 @@ type Config struct {
 	// Cancel stops a session's active run. Nil answers 501 (the endpoint exists
 	// but the deployment has no cancel seam).
 	Cancel CancelFunc
+	// CompactSession runs one manual checkpoint compaction
+	// (POST /v1/sessions/{id}/compact). The adapter lives in the hosting process
+	// because it needs the live runner, the provider stream and the kernel
+	// lease. Nil answers 501: the route exists, but the deployment has no
+	// compaction seam wired.
+	CompactSession CompactSessionFunc
 	// Decisions is the approval primitive. Nil answers 503.
 	Decisions *harnessext.DecisionBroker
 	// Approvals records and reads approval provenance (who answered, over which
@@ -420,6 +426,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/sessions/{id}/external/projection", s.externalProjection)
 	s.mux.HandleFunc("DELETE /v1/sessions/{id}", s.archiveSession)
 	s.mux.HandleFunc("POST /v1/sessions/{id}/cancel", s.cancelSession)
+	s.mux.HandleFunc("POST /v1/sessions/{id}/compact", s.compactSession)
 	s.mux.HandleFunc("GET /v1/sessions/{id}/decisions", s.listDecisions)
 	s.mux.HandleFunc("POST /v1/sessions/{id}/decisions", s.openDecision)
 	s.mux.HandleFunc("GET /v1/sessions/{id}/decisions/{decisionId}", s.getDecision)

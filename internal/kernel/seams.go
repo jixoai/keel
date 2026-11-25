@@ -34,8 +34,9 @@ type Reader interface {
 
 // Checkpoint is one compaction projection: the summary of a successful
 // compaction (keyed by the compaction event's seq) plus the seq of the first
-// event the compaction retained. It is derived state; the event log stays the
-// only truth and is never shortened.
+// event the compaction retained, the token accounting and the policy identity
+// it was produced under. It is derived state; the event log stays the only
+// truth and is never shortened.
 type Checkpoint struct {
 	// UptoSeq is the seq of the compaction event that produced this checkpoint.
 	UptoSeq int64
@@ -45,6 +46,46 @@ type Checkpoint struct {
 	// rather than guessing.
 	KeptFromSeq int64
 	Summary     string
+	// TokensBefore is the context-token estimate before the compaction.
+	TokensBefore int
+	// TokensAfter is the context-token estimate after the projection
+	// (summary + retained tail).
+	TokensAfter int
+	// PolicyVersion is the effective CheckpointPolicy identity at generation
+	// time. It explains differences between checkpoints; it never enables a
+	// replay on its own.
+	PolicyVersion string
+	// RequestID is the manual-compaction requestId, empty for automatic
+	// compactions. It is the idempotency key of the manual surface.
+	RequestID string
+	// CreatedAt is when the projection row was written (the TTL clock).
+	CreatedAt time.Time
+}
+
+// CheckpointRecord is the durable input of one checkpoint save. UptoSeq is the
+// compaction event's sequence and therefore the idempotency boundary of an
+// automatic compaction; RequestID carries the manual surface's idempotency.
+type CheckpointRecord struct {
+	UptoSeq       int64
+	KeptFromSeq   int64
+	Summary       string
+	TokensBefore  int
+	TokensAfter   int
+	PolicyVersion string
+	RequestID     string
+}
+
+// PruneRequest bounds the checkpoint projections one session keeps. Both
+// dimensions are projections only: pruning never deletes or rewrites events,
+// and the newest checkpoint is always retained so a running session can still
+// replay from it until a newer one replaces it.
+type PruneRequest struct {
+	// MaxCheckpoints keeps at most this many newest projections. Zero means no
+	// count limit.
+	MaxCheckpoints int
+	// TTL deletes projections older than this. Zero means no expiry. The newest
+	// projection is exempt: it is the only recovery anchor of the session.
+	TTL time.Duration
 }
 
 // CheckpointStore is the compaction-projection seam. Saving is best-effort by
@@ -52,8 +93,23 @@ type Checkpoint struct {
 // event, and the caller logs it instead of pretending the checkpoint exists.
 // Loading is tenant-bound and returns found=false when no checkpoint exists.
 type CheckpointStore interface {
-	SaveCheckpoint(ctx context.Context, scope Scope, uptoSeq, keptFromSeq int64, summary string) error
+	SaveCheckpoint(ctx context.Context, scope Scope, rec CheckpointRecord) error
 	LoadCheckpoint(ctx context.Context, scope Scope) (Checkpoint, bool, error)
+}
+
+// CheckpointPruner is the retention half of the checkpoint seam. It deletes
+// projections only; the event log is untouched and stays readable. The newest
+// checkpoint survives every pruning pass.
+type CheckpointPruner interface {
+	PruneCheckpoints(ctx context.Context, scope Scope, req PruneRequest) (int64, error)
+}
+
+// CheckpointRequestLookup resolves the manual-compaction idempotency key. It is
+// separate from CheckpointStore so a host that only implements the automatic
+// projection path keeps compiling; a missing implementation means the caller
+// cannot replay a requestId and must not guess.
+type CheckpointRequestLookup interface {
+	CheckpointByRequest(ctx context.Context, scope Scope, requestID string) (Checkpoint, bool, error)
 }
 
 // ReadMarker is the durable read-point seam. A run records where its transcript

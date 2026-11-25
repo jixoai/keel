@@ -31,9 +31,10 @@ func TestMergeOverlaysTenantOnDefaults(t *testing.T) {
 		Hooks: HooksConfig{Commands: []HookCommand{{
 			Event: "tool_execution_start", Command: []string{"./deny.sh"}, TimeoutMS: 5000,
 		}}},
-		Compaction: CompactionConfig{Enabled: boolPtr(true), Threshold: 0.8, KeepRecentTokens: 20000},
-		Telemetry:  TelemetryConfig{Adapter: "memory"},
-		Tools:      ToolsConfig{Allow: []string{"bash"}},
+		Compaction: CompactionConfig{Enabled: boolPtr(true), Threshold: 0.8, KeepRecentTokens: 20000, ThresholdTokens: 100000, MaxCheckpoints: 5, TTLHours: 48},
+		// Manual compact defaults on when the field is unset.
+		Telemetry: TelemetryConfig{Adapter: "memory"},
+		Tools:     ToolsConfig{Allow: []string{"bash"}},
 	}
 	tenant := TenantConfig{
 		Agent: AgentConfig{
@@ -51,7 +52,7 @@ func TestMergeOverlaysTenantOnDefaults(t *testing.T) {
 		Hooks: HooksConfig{Commands: []HookCommand{{
 			Event: "tool_execution_end", Command: []string{"./log.sh"},
 		}}},
-		Compaction: CompactionConfig{Enabled: boolPtr(false)},
+		Compaction: CompactionConfig{Enabled: boolPtr(false), MaxCheckpoints: 2, TTLHours: 24, ManualCompact: boolPtr(false)},
 		Tools:      ToolsConfig{Allow: []string{"read", "agent"}},
 	}
 
@@ -97,6 +98,13 @@ func TestMergeOverlaysTenantOnDefaults(t *testing.T) {
 	}
 	if merged.Compaction.Threshold != 0.8 || merged.Compaction.KeepRecentTokens != 20000 {
 		t.Fatalf("compaction = %+v", merged.Compaction)
+	}
+	if merged.Compaction.ThresholdTokens != 100000 || merged.Compaction.MaxCheckpoints != 2 ||
+		merged.Compaction.TTLHours != 24 {
+		t.Fatalf("checkpoint knobs = %+v, want the tenant values", merged.Compaction)
+	}
+	if merged.Compaction.ManualCompact == nil || *merged.Compaction.ManualCompact {
+		t.Fatalf("manual compact = %v, want explicit false", merged.Compaction.ManualCompact)
 	}
 	if merged.Telemetry.Adapter != "memory" {
 		t.Fatalf("telemetry = %+v", merged.Telemetry)
@@ -270,6 +278,9 @@ func TestValidateRejectsBadFields(t *testing.T) {
 		{"threshold above one", TenantConfig{Compaction: CompactionConfig{Threshold: 1.5}}, "compaction.threshold"},
 		{"threshold below zero", TenantConfig{Compaction: CompactionConfig{Threshold: -0.1}}, "compaction.threshold"},
 		{"negative keep recent", TenantConfig{Compaction: CompactionConfig{KeepRecentTokens: -1}}, "keepRecentTokens"},
+		{"negative threshold tokens", TenantConfig{Compaction: CompactionConfig{ThresholdTokens: -1}}, "thresholdTokens"},
+		{"negative max checkpoints", TenantConfig{Compaction: CompactionConfig{MaxCheckpoints: -1}}, "maxCheckpoints"},
+		{"negative ttl", TenantConfig{Compaction: CompactionConfig{TTLHours: -1}}, "ttlHours"},
 		{"unknown telemetry", TenantConfig{Telemetry: TelemetryConfig{Adapter: "datadog"}}, "telemetry.adapter"},
 		{"bad tool allow", TenantConfig{Tools: ToolsConfig{Allow: []string{"bad name"}}}, "tools.allow[0]"},
 	}

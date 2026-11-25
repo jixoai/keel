@@ -47,6 +47,10 @@ compaction:
   enabled: true
   threshold: 0.8
   keepRecentTokens: 20000
+  # thresholdTokens: 100000   # 绝对阈值，优先于 threshold（窗口占比）
+  # maxCheckpoints: 5         # 单会话保留的 checkpoint 投影数；0 = 不限
+  # ttlHours: 168             # 旧 checkpoint 投影过期；0 = 不过期；最近一个始终保留
+  # manualCompact: true       # 是否允许 POST /v1/sessions/{id}/compact
 telemetry:
   adapter: "memory"         # memory | none | otlp（otlp 需 endpoint，默认不连接）
   # endpoint: "http://127.0.0.1:4318"   # OTLP/HTTP

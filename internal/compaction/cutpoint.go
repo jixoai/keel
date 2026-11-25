@@ -105,6 +105,37 @@ func FindCutPoint(msgs []agentcore.Message, keepRecentTokens int) CutPointResult
 	return findCutPoint(msgs, keepRecentTokens, 0)
 }
 
+// pendingUserIndex returns the index of the newest user message that no visible
+// assistant answer follows, or -1 when the newest user message was already seen
+// by the model (an assistant answer — including a tool call — follows it). A
+// trailing user message is the case the rule protects: a compaction must never
+// fold the prompt the model still owes an answer to into a summary. An answer
+// ending in error/aborted does not count; that turn produced nothing.
+func pendingUserIndex(msgs []agentcore.Message, from int) int {
+	if from < 0 {
+		from = 0
+	}
+	if len(msgs) == 0 || from >= len(msgs) {
+		return -1
+	}
+	newestUser := -1
+	for i := len(msgs) - 1; i >= from; i-- {
+		if msgs[i].Role() == agentcore.RoleUser {
+			newestUser = i
+			break
+		}
+	}
+	if newestUser < 0 {
+		return -1
+	}
+	for i := newestUser + 1; i < len(msgs); i++ {
+		if a, ok := msgs[i].(agentcore.AssistantMessage); ok && !excludedFromContext(a) {
+			return -1
+		}
+	}
+	return newestUser
+}
+
 // findCutPoint is FindCutPoint with a lower bound: only messages at or after
 // from may be candidates or count toward the retained budget. Compact passes
 // the index just past the previous checkpoint, because pi's view starts at its
@@ -153,6 +184,18 @@ func findCutPoint(msgs []agentcore.Message, keepRecentTokens, from int) CutPoint
 	if cut < 0 {
 		// The budget never filled: everything is recent enough to keep.
 		return noCut
+	}
+
+	// A pending user message (one the model still owes an answer to) is never
+	// summarized. The cut moves back to that message so it heads the retained
+	// tail; when it cannot (it is not a valid cut point) or the tail would start
+	// at the lowest allowed index, this pass has no safe cut and the caller
+	// keeps the original context.
+	if pending := pendingUserIndex(msgs, from); pending >= 0 && cut > pending {
+		if !isValidCutPoint(msgs, pending) {
+			return noCut
+		}
+		cut = pending
 	}
 
 	// pi requires a real message before the cut; a range holding only an

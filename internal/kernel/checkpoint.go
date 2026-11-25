@@ -3,24 +3,35 @@ package kernel
 import (
 	"context"
 	"fmt"
+	"strings"
 )
 
-// SaveCheckpoint stores the compaction projection named by the compaction
-// event's sequence. It is not an append: the event log is already committed and
-// remains the only truth. The tenant boundary is enforced like every other read
-// and write; a foreign or missing session answers ErrNotFound.
-func (k *Kernel) SaveCheckpoint(ctx context.Context, scope Scope, uptoSeq, keptFromSeq int64, summary string) error {
+// SaveCheckpoint stores the compaction projection described by rec. It is not
+// an append: the event log is already committed and remains the only truth. The
+// tenant boundary is enforced like every other read and write; a foreign or
+// missing session answers ErrNotFound.
+//
+// The compaction event's sequence is the automatic idempotency boundary (a
+// replay updates the row). A non-empty RequestID is the manual surface's
+// idempotency boundary: the store refuses to create a second row for it.
+func (k *Kernel) SaveCheckpoint(ctx context.Context, scope Scope, rec CheckpointRecord) error {
 	if scope.IsZero() {
 		return k.reject(ReasonInvalidRequest, OpCommit, scope, KindCompaction, OwnerToken{}, "tenant and session are required", ErrInvalidRequest)
 	}
-	if uptoSeq <= 0 {
+	if rec.UptoSeq <= 0 {
 		return k.reject(ReasonInvalidRequest, OpCommit, scope, KindCompaction, OwnerToken{}, "checkpoint needs the compaction event's seq", ErrInvalidRequest)
 	}
-	if keptFromSeq < 0 || (keptFromSeq > 0 && keptFromSeq > uptoSeq) {
+	if rec.KeptFromSeq < 0 || (rec.KeptFromSeq > 0 && rec.KeptFromSeq >= rec.UptoSeq) {
 		return k.reject(ReasonInvalidRequest, OpCommit, scope, KindCompaction, OwnerToken{},
-			fmt.Sprintf("checkpoint kept_from_seq %d is outside (0, upto_seq=%d]", keptFromSeq, uptoSeq), ErrInvalidRequest)
+			fmt.Sprintf("checkpoint kept_from_seq %d must be inside (0, upto_seq=%d)", rec.KeptFromSeq, rec.UptoSeq), ErrInvalidRequest)
 	}
-	if err := k.log.SaveCheckpoint(ctx, scope.TenantID, scope.SessionID, uptoSeq, keptFromSeq, summary); err != nil {
+	if strings.TrimSpace(rec.Summary) == "" {
+		return k.reject(ReasonInvalidRequest, OpCommit, scope, KindCompaction, OwnerToken{}, "checkpoint summary is empty", ErrInvalidRequest)
+	}
+	if rec.TokensBefore < 0 || rec.TokensAfter < 0 {
+		return k.reject(ReasonInvalidRequest, OpCommit, scope, KindCompaction, OwnerToken{}, "checkpoint tokens must be >= 0", ErrInvalidRequest)
+	}
+	if err := k.log.SaveCheckpoint(ctx, scope.TenantID, scope.SessionID, rec); err != nil {
 		return k.classifyStoreError(OpCommit, CommitRequest{Scope: scope, Kind: KindCompaction}, err)
 	}
 	return nil
@@ -38,4 +49,38 @@ func (k *Kernel) LoadCheckpoint(ctx context.Context, scope Scope) (Checkpoint, b
 		return Checkpoint{}, false, k.classifyStoreError(OpRead, CommitRequest{Scope: scope, Kind: KindCompaction}, err)
 	}
 	return cp, found, nil
+}
+
+// CheckpointByRequest resolves a manual-compaction requestId to the checkpoint
+// its earlier call produced. found=false means the request never completed (or
+// was pruned) and a fresh compaction may run.
+func (k *Kernel) CheckpointByRequest(ctx context.Context, scope Scope, requestID string) (Checkpoint, bool, error) {
+	if scope.IsZero() || strings.TrimSpace(requestID) == "" {
+		return Checkpoint{}, false, k.reject(ReasonInvalidRequest, OpRead, scope, KindCompaction, OwnerToken{}, "tenant, session and requestId are required", ErrInvalidRequest)
+	}
+	cp, found, err := k.log.CheckpointByRequest(ctx, scope.TenantID, scope.SessionID, requestID)
+	if err != nil {
+		return Checkpoint{}, false, k.classifyStoreError(OpRead, CommitRequest{Scope: scope, Kind: KindCompaction}, err)
+	}
+	return cp, found, nil
+}
+
+// PruneCheckpoints deletes old checkpoint projections of one session. It only
+// removes projections; the event log is never shortened, and the newest valid
+// checkpoint is always kept so the session keeps a recovery anchor.
+func (k *Kernel) PruneCheckpoints(ctx context.Context, scope Scope, req PruneRequest) (int64, error) {
+	if scope.IsZero() {
+		return 0, k.reject(ReasonInvalidRequest, OpCommit, scope, KindCompaction, OwnerToken{}, "tenant and session are required", ErrInvalidRequest)
+	}
+	if req.MaxCheckpoints < 0 || req.TTL < 0 {
+		return 0, k.reject(ReasonInvalidRequest, OpCommit, scope, KindCompaction, OwnerToken{}, "prune bounds must be >= 0", ErrInvalidRequest)
+	}
+	if req.MaxCheckpoints == 0 && req.TTL == 0 {
+		return 0, nil
+	}
+	pruned, err := k.log.PruneCheckpoints(ctx, scope.TenantID, scope.SessionID, req)
+	if err != nil {
+		return 0, k.classifyStoreError(OpCommit, CommitRequest{Scope: scope, Kind: KindCompaction}, err)
+	}
+	return pruned, nil
 }

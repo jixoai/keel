@@ -139,18 +139,32 @@ CREATE UNIQUE INDEX IF NOT EXISTS events_dedupe
 -- that produced the row (the checkpoint is aligned with that fact); summary is
 -- that event's summary. kept_from_seq is the seq of the first event the
 -- compaction retained (the tail that must follow the summary on replay), NULL
--- until the host anchors it to committed events.
+-- until the host anchors it to committed events. tokens_before/tokens_after and
+-- policy_version record the projection's accounting and policy identity; a
+-- manual compaction's request_id is unique per session so a replay cannot
+-- create a second projection.
 CREATE TABLE IF NOT EXISTS checkpoints (
-    tenant_id     uuid NOT NULL,
-    session_id    uuid NOT NULL,
-    upto_seq      bigint NOT NULL,
-    kept_from_seq bigint,
-    summary       text NOT NULL,
-    created_at    timestamptz NOT NULL DEFAULT now(),
+    tenant_id      uuid NOT NULL,
+    session_id     uuid NOT NULL,
+    upto_seq       bigint NOT NULL,
+    kept_from_seq  bigint,
+    summary        text NOT NULL,
+    tokens_before  bigint NOT NULL DEFAULT 0,
+    tokens_after   bigint NOT NULL DEFAULT 0,
+    policy_version text NOT NULL DEFAULT '',
+    request_id     text,
+    created_at     timestamptz NOT NULL DEFAULT now(),
     PRIMARY KEY (tenant_id, session_id, upto_seq)
 );
 
 ALTER TABLE checkpoints ADD COLUMN IF NOT EXISTS kept_from_seq bigint;
+ALTER TABLE checkpoints ADD COLUMN IF NOT EXISTS tokens_before bigint NOT NULL DEFAULT 0;
+ALTER TABLE checkpoints ADD COLUMN IF NOT EXISTS tokens_after bigint NOT NULL DEFAULT 0;
+ALTER TABLE checkpoints ADD COLUMN IF NOT EXISTS policy_version text NOT NULL DEFAULT '';
+ALTER TABLE checkpoints ADD COLUMN IF NOT EXISTS request_id text;
+CREATE UNIQUE INDEX IF NOT EXISTS checkpoints_request_id
+    ON checkpoints (tenant_id, session_id, request_id)
+    WHERE request_id IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS submissions (
     tenant_id     uuid NOT NULL,

@@ -41,12 +41,22 @@ type LogStore interface {
 
 	// SaveCheckpoint stores a compaction projection keyed by the compaction
 	// event's seq. A replay of the same compaction updates the row instead of
-	// inserting a second one.
-	SaveCheckpoint(ctx context.Context, tenantID, sessionID uuid.UUID, uptoSeq, keptFromSeq int64, summary string) error
+	// inserting a second one. The requestId of a manual compaction is an
+	// additional idempotency key: a second save with the same non-empty
+	// requestId must not create a second projection.
+	SaveCheckpoint(ctx context.Context, tenantID, sessionID uuid.UUID, rec CheckpointRecord) error
 
 	// LoadCheckpoint returns the newest checkpoint projection of the session.
 	// found=false means the event log is the only projection available.
 	LoadCheckpoint(ctx context.Context, tenantID, sessionID uuid.UUID) (Checkpoint, bool, error)
+
+	// CheckpointByRequest resolves a manual-compaction requestId to the
+	// projection it produced. found=false means the request has not completed.
+	CheckpointByRequest(ctx context.Context, tenantID, sessionID uuid.UUID, requestID string) (Checkpoint, bool, error)
+
+	// PruneCheckpoints deletes old checkpoint projections (never events) and
+	// reports how many rows it removed. The newest projection is always kept.
+	PruneCheckpoints(ctx context.Context, tenantID, sessionID uuid.UUID, req PruneRequest) (int64, error)
 
 	// FindDedupe looks up one committed event by its namespaced dedupe key
 	// without taking the session write lock (the Lookup path is read-only).

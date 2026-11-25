@@ -344,6 +344,67 @@ curl -s http://127.0.0.1:13740/metrics | head
 `status='running'` + `attempts` 守卫拒绝（`ErrStaleRun`），worker 记
 `abandoned` 且**不写终态**。
 
+## Checkpoint（压缩存档点）
+
+事件日志是唯一真值；checkpoint 只是压缩后的投影行，删除/清理它**永远不会删除
+事件**。恢复路径是「最近有效 checkpoint 的 summary + `kept_from_seq` 之后的事件」，
+重启、handoff 和 worker 恢复走同一条路径。
+
+### 策略（tenant 文档 `compaction` 段）
+
+| 字段 | 含义 | 0 值 |
+| --- | --- | --- |
+| `enabled` | 自动压缩开关（指针，显式 false 覆盖默认） | 继承 |
+| `threshold` | 窗口占比阈值 (0,1] | 继承 |
+| `keepRecentTokens` | 压缩后保留的近似 tail token | 默认 20000 |
+| `thresholdTokens` | 绝对 token 阈值（优先于窗口占比） | 用窗口−reserve |
+| `maxCheckpoints` | 单会话最多保留的 checkpoint 投影数 | 不限制 |
+| `ttlHours` | 旧 checkpoint 投影过期小时数 | 不过期 |
+| `manualCompact` | 是否允许手动压缩 | 允许 |
+
+session 级只能**收窄** tenant 上限：不能开启 tenant 关闭的能力，不能超过
+`maxCheckpoints`/`ttlHours`/`keepRecentTokens` 上限，不能比 tenant 更早触发压缩。
+收窄由 `compaction.NarrowCheckpointPolicy` 计算并返回 `PolicyNarrowing`（仅字段名与
+原因，不含正文）；设置页面接线后可直接呈现。
+
+### 切点与失败
+
+- 切点永远不落在 toolResult 上；最后一条尚未被模型看到的 user（其后再无可见
+  assistant 回答）不会被压缩，必要时切点回退到该 user 或本次不压缩。
+- 摘要请求失败或取消：当前上下文（事件日志）不变，不写 compaction 事件、
+  不写 checkpoint，可直接重试。
+- 成功时先提交 `compaction` 事件（owner-scoped，需要 run lease），再写
+  `checkpoints` 投影。投影写失败只记 WARN，事件保留，回放退化为全量日志。
+
+### 恢复与损坏
+
+回放前会校验投影：`upto_seq` 必须指向一条已提交的 `compaction` 事件、
+`kept_from_seq` 必须是已提交事件的 seq、summary 非空、锚点小于 `upto_seq`。
+任一不满足即 fail closed：忽略该投影并**回退全量事件重建**，日志记录
+`checkpoint unusable; rebuilding from the full event log`（只有 ids/原因，不含正文）。
+
+### 保留清理
+
+`maxCheckpoints`/`ttlHours` 清理只删 `checkpoints` 行，**最近一个 checkpoint
+永远保留**（它是当前会话唯一恢复锚点），直到被更新的 checkpoint 取代；事件与
+历史全文始终可按 seq 读取。清理失败只记 WARN，不影响 run。
+
+### 手动压缩 API
+
+```
+POST /v1/sessions/{id}/compact
+X-Tenant-ID: <tenant>
+{"requestId": "compact-2026-11-25-1"}
+```
+
+- 需要 session 写权限（`session.write`），否则 403 且不读取上下文；
+- `requestId` 幂等：重复请求返回同一个 `checkpointId`（`replayed=true`），不再调用模型；
+- 返回 `checkpointId`（compaction 事件 seq）、`tokensBefore/tokensAfter`、
+  `keptFromSeq`、`policyVersion`、`performed/replayed`；
+- 与自动压缩共用切点/失败语义；摘要失败或取消时不写任何东西。
+- 路由已注册；宿主未注入 `harnessapi.Config.CompactSession` 时返回 501
+  `not_wired`（当前 `keel serve` 尚未接线，见 change 报告）。
+
 MCP 工具指标当前**不暴露**：`internal/mcp` 尚无调用计数，注册空 family 只会产生
 没有样本的 `# HELP`/`# TYPE`。接入计数后按 `tool`/`status` 重新加入。
 

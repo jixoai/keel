@@ -476,16 +476,28 @@ func (s *PGStore) LoadEvents(ctx context.Context, tenantID, sessionID uuid.UUID,
 // duplicates, and a later tail anchor fills kept_from_seq without clearing a
 // value already recorded. A missing (or foreign) session answers ErrNotFound:
 // the guarded INSERT cannot create a projection for a session that does not
-// exist, matching the in-memory implementation and every other write path.
-func (s *PGStore) SaveCheckpoint(ctx context.Context, tenantID, sessionID uuid.UUID, uptoSeq, keptFromSeq int64, summary string) error {
+// exist, matching the in-memory implementation and every other write path. A
+// non-empty requestId is unique per session (partial unique index), so a
+// replayed manual compaction for a different seq fails instead of creating a
+// second projection.
+func (s *PGStore) SaveCheckpoint(ctx context.Context, tenantID, sessionID uuid.UUID, rec CheckpointRecord) error {
 	tag, err := s.pool.Exec(ctx,
-		`INSERT INTO checkpoints (tenant_id, session_id, upto_seq, kept_from_seq, summary)
-		 SELECT $1, $2, $3, NULLIF($4, 0), $5
+		`INSERT INTO checkpoints (tenant_id, session_id, upto_seq, kept_from_seq, summary,
+		                          tokens_before, tokens_after, policy_version, request_id)
+		 SELECT $1, $2, $3, NULLIF($4, 0), $5, $6, $7, $8, NULLIF($9, '')
 		 WHERE EXISTS (SELECT 1 FROM sessions WHERE tenant_id = $1 AND session_id = $2)
 		 ON CONFLICT (tenant_id, session_id, upto_seq) DO UPDATE
 		 SET summary = EXCLUDED.summary,
-		     kept_from_seq = COALESCE(EXCLUDED.kept_from_seq, checkpoints.kept_from_seq)`,
-		tenantID, sessionID, uptoSeq, keptFromSeq, summary)
+		     kept_from_seq = COALESCE(EXCLUDED.kept_from_seq, checkpoints.kept_from_seq),
+		     tokens_before = CASE WHEN EXCLUDED.tokens_before <> 0 OR checkpoints.tokens_before = 0
+		                          THEN EXCLUDED.tokens_before ELSE checkpoints.tokens_before END,
+		     tokens_after = CASE WHEN EXCLUDED.tokens_after <> 0 OR checkpoints.tokens_after = 0
+		                         THEN EXCLUDED.tokens_after ELSE checkpoints.tokens_after END,
+		     policy_version = CASE WHEN EXCLUDED.policy_version <> '' THEN EXCLUDED.policy_version
+		                           ELSE checkpoints.policy_version END,
+		     request_id = COALESCE(EXCLUDED.request_id, checkpoints.request_id)`,
+		tenantID, sessionID, rec.UptoSeq, rec.KeptFromSeq, rec.Summary,
+		rec.TokensBefore, rec.TokensAfter, rec.PolicyVersion, rec.RequestID)
 	if err != nil {
 		return fmt.Errorf("kernel: save checkpoint: %w", pgFail(err))
 	}
@@ -501,11 +513,13 @@ func (s *PGStore) SaveCheckpoint(ctx context.Context, tenantID, sessionID uuid.U
 func (s *PGStore) LoadCheckpoint(ctx context.Context, tenantID, sessionID uuid.UUID) (Checkpoint, bool, error) {
 	var cp Checkpoint
 	err := s.pool.QueryRow(ctx,
-		`SELECT upto_seq, COALESCE(kept_from_seq, 0), summary
+		`SELECT upto_seq, COALESCE(kept_from_seq, 0), summary,
+		        tokens_before, tokens_after, policy_version, COALESCE(request_id, ''), created_at
 		 FROM checkpoints
 		 WHERE tenant_id = $1 AND session_id = $2
 		 ORDER BY upto_seq DESC LIMIT 1`, tenantID, sessionID).
-		Scan(&cp.UptoSeq, &cp.KeptFromSeq, &cp.Summary)
+		Scan(&cp.UptoSeq, &cp.KeptFromSeq, &cp.Summary, &cp.TokensBefore, &cp.TokensAfter,
+			&cp.PolicyVersion, &cp.RequestID, &cp.CreatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		exists, existsErr := s.SessionExists(ctx, tenantID, sessionID)
 		if existsErr != nil {
@@ -520,6 +534,77 @@ func (s *PGStore) LoadCheckpoint(ctx context.Context, tenantID, sessionID uuid.U
 		return Checkpoint{}, false, fmt.Errorf("kernel: load checkpoint: %w", pgFail(err))
 	}
 	return cp, true, nil
+}
+
+// CheckpointByRequest resolves a manual-compaction requestId to its projection.
+func (s *PGStore) CheckpointByRequest(ctx context.Context, tenantID, sessionID uuid.UUID, requestID string) (Checkpoint, bool, error) {
+	var cp Checkpoint
+	err := s.pool.QueryRow(ctx,
+		`SELECT upto_seq, COALESCE(kept_from_seq, 0), summary,
+		        tokens_before, tokens_after, policy_version, request_id, created_at
+		 FROM checkpoints
+		 WHERE tenant_id = $1 AND session_id = $2 AND request_id = $3`,
+		tenantID, sessionID, requestID).
+		Scan(&cp.UptoSeq, &cp.KeptFromSeq, &cp.Summary, &cp.TokensBefore, &cp.TokensAfter,
+			&cp.PolicyVersion, &cp.RequestID, &cp.CreatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Checkpoint{}, false, nil
+	}
+	if err != nil {
+		return Checkpoint{}, false, fmt.Errorf("kernel: checkpoint by request: %w", pgFail(err))
+	}
+	return cp, true, nil
+}
+
+// PruneCheckpoints deletes old checkpoint projections. The newest projection is
+// always kept (it is the session's only recovery anchor); events are never
+// touched. A missing session answers ErrNotFound like every other write.
+func (s *PGStore) PruneCheckpoints(ctx context.Context, tenantID, sessionID uuid.UUID, req PruneRequest) (int64, error) {
+	if req.MaxCheckpoints == 0 && req.TTL == 0 {
+		return 0, nil
+	}
+	var ttlSeconds int64
+	if req.TTL > 0 {
+		ttlSeconds = int64(req.TTL / time.Second)
+		if ttlSeconds == 0 {
+			ttlSeconds = 1
+		}
+	}
+	tag, err := s.pool.Exec(ctx,
+		`WITH ranked AS (
+		     SELECT upto_seq, created_at,
+		            row_number() OVER (ORDER BY upto_seq DESC) AS rn
+		     FROM checkpoints
+		     WHERE tenant_id = $1 AND session_id = $2
+		 ),
+		 newest AS (
+		     SELECT max(upto_seq) AS seq FROM checkpoints
+		     WHERE tenant_id = $1 AND session_id = $2
+		 )
+		 DELETE FROM checkpoints c
+		 WHERE c.tenant_id = $1 AND c.session_id = $2
+		   AND c.upto_seq <> (SELECT seq FROM newest)
+		   AND (
+		       ($3 > 0 AND c.upto_seq IN (SELECT upto_seq FROM ranked WHERE rn > $3))
+		       OR
+		       ($4 > 0 AND c.created_at < now() - make_interval(secs => $4))
+		   )`,
+		tenantID, sessionID, req.MaxCheckpoints, ttlSeconds)
+	if err != nil {
+		return 0, fmt.Errorf("kernel: prune checkpoints: %w", pgFail(err))
+	}
+	if tag.RowsAffected() == 0 {
+		// Distinguish "nothing to prune" from a missing session without failing
+		// the caller: the guarded DELETE cannot tell them apart.
+		exists, existsErr := s.SessionExists(ctx, tenantID, sessionID)
+		if existsErr != nil {
+			return 0, existsErr
+		}
+		if !exists {
+			return 0, fmt.Errorf("kernel: session %s/%s: %w", tenantID, sessionID, ErrNotFound)
+		}
+	}
+	return tag.RowsAffected(), nil
 }
 
 // FindDedupe looks up one committed event by its namespaced dedupe key.

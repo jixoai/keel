@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"sync"
 	"time"
 
@@ -232,8 +233,10 @@ func (m *MemStore) SessionExists(ctx context.Context, tenantID, sessionID uuid.U
 }
 
 // SaveCheckpoint upserts a compaction projection (PG parity: keyed by the
-// compaction event's seq; a known tail anchor is never cleared).
-func (m *MemStore) SaveCheckpoint(ctx context.Context, tenantID, sessionID uuid.UUID, uptoSeq, keptFromSeq int64, summary string) error {
+// compaction event's seq; a known tail anchor is never cleared). A non-empty
+// requestId is unique per session: a second save for it is refused, exactly
+// like the partial unique index in PostgreSQL.
+func (m *MemStore) SaveCheckpoint(ctx context.Context, tenantID, sessionID uuid.UUID, rec CheckpointRecord) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -243,17 +246,46 @@ func (m *MemStore) SaveCheckpoint(ctx context.Context, tenantID, sessionID uuid.
 	if !ok {
 		return fmt.Errorf("memstore: session: %w", ErrNotFound)
 	}
+	if rec.RequestID != "" {
+		for _, cp := range s.checkpoints {
+			if cp.RequestID == rec.RequestID && cp.UptoSeq != rec.UptoSeq {
+				return errors.New("memstore: checkpoint requestId already produced a different checkpoint")
+			}
+		}
+	}
 	for i := range s.checkpoints {
-		if s.checkpoints[i].UptoSeq != uptoSeq {
+		if s.checkpoints[i].UptoSeq != rec.UptoSeq {
 			continue
 		}
-		s.checkpoints[i].Summary = summary
-		if keptFromSeq > 0 {
-			s.checkpoints[i].KeptFromSeq = keptFromSeq
+		cp := &s.checkpoints[i]
+		cp.Summary = rec.Summary
+		if rec.KeptFromSeq > 0 {
+			cp.KeptFromSeq = rec.KeptFromSeq
+		}
+		if rec.TokensBefore != 0 || cp.TokensBefore == 0 {
+			cp.TokensBefore = rec.TokensBefore
+		}
+		if rec.TokensAfter != 0 || cp.TokensAfter == 0 {
+			cp.TokensAfter = rec.TokensAfter
+		}
+		if rec.PolicyVersion != "" {
+			cp.PolicyVersion = rec.PolicyVersion
+		}
+		if rec.RequestID != "" {
+			cp.RequestID = rec.RequestID
 		}
 		return nil
 	}
-	s.checkpoints = append(s.checkpoints, Checkpoint{UptoSeq: uptoSeq, KeptFromSeq: keptFromSeq, Summary: summary})
+	s.checkpoints = append(s.checkpoints, Checkpoint{
+		UptoSeq:       rec.UptoSeq,
+		KeptFromSeq:   rec.KeptFromSeq,
+		Summary:       rec.Summary,
+		TokensBefore:  rec.TokensBefore,
+		TokensAfter:   rec.TokensAfter,
+		PolicyVersion: rec.PolicyVersion,
+		RequestID:     rec.RequestID,
+		CreatedAt:     m.now(),
+	})
 	return nil
 }
 
@@ -276,6 +308,66 @@ func (m *MemStore) LoadCheckpoint(ctx context.Context, tenantID, sessionID uuid.
 		}
 	}
 	return newest, found, nil
+}
+
+// CheckpointByRequest resolves a manual-compaction requestId.
+func (m *MemStore) CheckpointByRequest(ctx context.Context, tenantID, sessionID uuid.UUID, requestID string) (Checkpoint, bool, error) {
+	if err := ctx.Err(); err != nil {
+		return Checkpoint{}, false, err
+	}
+	if requestID == "" {
+		return Checkpoint{}, false, nil
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	s, ok := m.sessions[Scope{TenantID: tenantID, SessionID: sessionID}]
+	if !ok {
+		return Checkpoint{}, false, fmt.Errorf("memstore: session: %w", ErrNotFound)
+	}
+	for _, cp := range s.checkpoints {
+		if cp.RequestID == requestID {
+			return cp, true, nil
+		}
+	}
+	return Checkpoint{}, false, nil
+}
+
+// PruneCheckpoints deletes old projections. The newest projection survives
+// every pass; events are untouched (PG parity).
+func (m *MemStore) PruneCheckpoints(ctx context.Context, tenantID, sessionID uuid.UUID, req PruneRequest) (int64, error) {
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	s, ok := m.sessions[Scope{TenantID: tenantID, SessionID: sessionID}]
+	if !ok {
+		return 0, fmt.Errorf("memstore: session: %w", ErrNotFound)
+	}
+	if len(s.checkpoints) <= 1 {
+		return 0, nil
+	}
+	ordered := append([]Checkpoint(nil), s.checkpoints...)
+	sort.Slice(ordered, func(i, j int) bool { return ordered[i].UptoSeq > ordered[j].UptoSeq })
+	newest := ordered[0].UptoSeq
+	now := m.now()
+	kept := make([]Checkpoint, 0, len(ordered))
+	pruned := int64(0)
+	for rank, cp := range ordered {
+		if cp.UptoSeq == newest {
+			kept = append(kept, cp)
+			continue
+		}
+		overCount := req.MaxCheckpoints > 0 && rank >= req.MaxCheckpoints
+		expired := req.TTL > 0 && !cp.CreatedAt.IsZero() && now.Sub(cp.CreatedAt) > req.TTL
+		if overCount || expired {
+			pruned++
+			continue
+		}
+		kept = append(kept, cp)
+	}
+	s.checkpoints = kept
+	return pruned, nil
 }
 
 // ClaimLease claims the first runnable run.

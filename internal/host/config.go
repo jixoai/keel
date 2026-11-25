@@ -134,13 +134,26 @@ type HookCommand struct {
 	TimeoutMS int      `json:"timeoutMs,omitempty"`
 }
 
-// CompactionConfig tunes context compaction. Enabled is a pointer so an
-// explicit false can override a default of true; nil inherits. Threshold is a
-// fraction of the context window in (0, 1]; 0 means unset.
+// CompactionConfig tunes context compaction and the checkpoint projections it
+// produces. Enabled is a pointer so an explicit false can override a default of
+// true; nil inherits. Threshold is a fraction of the context window in (0, 1];
+// 0 means unset. The checkpoint knobs (thresholdTokens/maxCheckpoints/ttlHours/
+// manualCompact) are tenant ceilings: a session may narrow them but never widen
+// them.
 type CompactionConfig struct {
 	Enabled          *bool   `json:"enabled,omitempty"`
 	Threshold        float64 `json:"threshold,omitempty"`
 	KeepRecentTokens int     `json:"keepRecentTokens,omitempty"`
+	// ThresholdTokens is the absolute context-token threshold for automatic
+	// checkpoint compaction; 0 derives it from the window and Threshold.
+	ThresholdTokens int `json:"thresholdTokens,omitempty"`
+	// MaxCheckpoints bounds the projections a session keeps; 0 means unlimited.
+	MaxCheckpoints int `json:"maxCheckpoints,omitempty"`
+	// TTLHours expires old checkpoint projections; 0 means no expiry. The newest
+	// projection is always kept.
+	TTLHours int `json:"ttlHours,omitempty"`
+	// ManualCompact allows POST /v1/sessions/{id}/compact; nil inherits (on).
+	ManualCompact *bool `json:"manualCompact,omitempty"`
 }
 
 // TelemetryConfig selects the telemetry adapter ("memory", "prometheus", or
@@ -492,6 +505,10 @@ func Merge(defaults, tenant TenantConfig) TenantConfig {
 			Enabled:          cloneBool(defaults.Compaction.Enabled),
 			Threshold:        pickFloat(defaults.Compaction.Threshold, tenant.Compaction.Threshold),
 			KeepRecentTokens: pickInt(defaults.Compaction.KeepRecentTokens, tenant.Compaction.KeepRecentTokens),
+			ThresholdTokens:  pickInt(defaults.Compaction.ThresholdTokens, tenant.Compaction.ThresholdTokens),
+			MaxCheckpoints:   pickInt(defaults.Compaction.MaxCheckpoints, tenant.Compaction.MaxCheckpoints),
+			TTLHours:         pickInt(defaults.Compaction.TTLHours, tenant.Compaction.TTLHours),
+			ManualCompact:    pickBool(defaults.Compaction.ManualCompact, tenant.Compaction.ManualCompact),
 		},
 		Telemetry: TelemetryConfig{
 			Adapter: pickString(defaults.Telemetry.Adapter, tenant.Telemetry.Adapter),
@@ -667,6 +684,15 @@ func (c TenantConfig) Validate() error {
 	}
 	if c.Compaction.KeepRecentTokens < 0 {
 		return problem("compaction.keepRecentTokens must be >= 0")
+	}
+	if c.Compaction.ThresholdTokens < 0 {
+		return problem("compaction.thresholdTokens must be >= 0")
+	}
+	if c.Compaction.MaxCheckpoints < 0 {
+		return problem("compaction.maxCheckpoints must be >= 0")
+	}
+	if c.Compaction.TTLHours < 0 {
+		return problem("compaction.ttlHours must be >= 0")
 	}
 	for i, pattern := range c.Tools.Allow {
 		if strings.TrimSpace(pattern) == "" {

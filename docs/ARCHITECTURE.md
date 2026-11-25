@@ -57,10 +57,16 @@ TS spike（pi-durable）已用 7 个 E2E 场景证明以下语义可行（报告
 
 - 上下文超阈值时追加 `compaction` 事件（摘要、保留段边界、token 数），并由有序消费者
   在同一路径写 `checkpoints` 行：`upto_seq` = compaction 事件 seq，`kept_from_seq` =
-  保留段第一个事件的 seq。事件先提交，checkpoint 后写；checkpoint 保存失败只记日志，
+  保留段第一个事件的 seq，另记录 `tokens_before/tokens_after`、`policy_version` 与手动
+  压缩的 `request_id`。事件先提交，checkpoint 后写；checkpoint 保存失败只记日志，
   **不回滚事件**。
 - 新 run 读取最新 checkpoint：模型上下文 = 摘要 + `seq >= kept_from_seq` 的后续事件。
   无 checkpoint 或 `kept_from_seq` 未锚定（NULL/0）时回退全量事件，绝不猜截断点。
+  投影与已提交事件对不上（compaction 事件缺失、tail 锚点不存在、摘要为空）视为损坏：
+  fail closed，忽略该行并回退全量事件重建。
+- 切点永远不落在 toolResult 上；最后一条模型尚未看到的 user 不被压缩。
+- `maxCheckpoints`/`ttlHours` 清理只删 `checkpoints` 投影，最近一个 checkpoint 始终保留；
+  事件永不删除。
 - 原始事件永不删除、不覆盖，仍可按 seq 读回；`owedTurn`、generation 去重、未读输入等
   事实判定始终基于全量日志，checkpoint 只影响送模的上下文投影。
 

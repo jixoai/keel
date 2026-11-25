@@ -52,7 +52,7 @@ func (s *checkpointRecordingStream) last(t *testing.T) agentcore.MessageList {
 // the projection is best-effort: the committed compaction event must survive.
 type failingCheckpoints struct{}
 
-func (failingCheckpoints) SaveCheckpoint(context.Context, kernel.Scope, int64, int64, string) error {
+func (failingCheckpoints) SaveCheckpoint(context.Context, kernel.Scope, kernel.CheckpointRecord) error {
 	return errors.New("checkpoint store down")
 }
 
@@ -170,7 +170,7 @@ func TestCompactionPersistsEventAndCheckpoint(t *testing.T) {
 
 	// A replay of the same compaction updates the projection instead of
 	// appending a second row, and does not clear the anchor.
-	if err := k.SaveCheckpoint(ctx, scope, cp.UptoSeq, 0, "replayed summary"); err != nil {
+	if err := k.SaveCheckpoint(ctx, scope, kernel.CheckpointRecord{UptoSeq: cp.UptoSeq, Summary: "replayed summary"}); err != nil {
 		t.Fatalf("replay checkpoint: %v", err)
 	}
 	got, found, err := k.LoadCheckpoint(ctx, scope)
