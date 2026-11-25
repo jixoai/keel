@@ -59,7 +59,7 @@ v0.2.0 发布后仍开的口子（归档板 41 项，按去向分组）：
    均已归档；`keel-client-updater` 提供无签名依赖的 `keel update [--check|--force|--manifest]`
    （公开 Release 页解析、同版本 SHA256SUMS 校验、替换前跑 `version`、同盘暂存原子替换；
    macOS `.app` 重 ad-hoc 签名，Windows 用退出后 helper 等锁释放再替换重启）；`keel install`
-   另写带标记的 `~/.local/bin/keel` shim。Windows 运行期待实机验证。
+   另写带标记的 `~/.local/bin/keel` shim。Windows 运行期待实机验证。已发布 `v0.4.0`（Release 成功，五平台 + web zip + SHA256SUMS；官网已上线）。
 8. **冻结 backlog（未开始/部分）**：插件生态（checkpoint、super-agent、creation 聚合、
    attachment/commands/permission/feedback、subprocess/terminal、bundles/presets、
    telemetry OTLP、testkit、credentials/storage/identity、keel.oar、ui-* 槽位内容、

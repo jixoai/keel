@@ -1,0 +1,55 @@
+keel-client-updater — v0.4.0 发布后回归（2026-11-25）
+====================================================
+
+发布：tag v0.4.0 → keel ad92447
+Release run 45534427428: success（前两次外部依赖失败后重跑）
+- 第一次：nsh.dev / GitHub 下载 nsh v0.6.1 返回 503
+- 第二次：Maven Central 下载 PG 18.7.0 jar 连续 429
+- 第三次：通过；五平台二进制 + web zip + SHA256SUMS 全部发布
+
+资产：
+keel-0.4.0-darwin-amd64.tar.gz   97787140
+keel-0.4.0-darwin-arm64.tar.gz   97447539
+keel-0.4.0-linux-amd64.tar.gz    41387498
+keel-0.4.0-linux-arm64.tar.gz    39128694
+keel-0.4.0-windows-amd64.zip     52066176
+keel-web-0.4.0.zip               13371347
+SHA256SUMS.txt                        566
+
+真实升级：
+$ /tmp/keel-039 update --check
+keel 0.3.9 → 0.4.0 available (keel-0.4.0-darwin-arm64.tar.gz)
+$ /tmp/keel-039 update
+downloading keel-0.4.0-darwin-arm64.tar.gz (0.4.0)
+updated to 0.4.0; restart keel to use it
+real 0m27.498s
+$ /tmp/keel-039 version
+keel 0.4.0
+  commit:   ad924479145a97fecc4225a30d1e452a04787afd
+$ /tmp/keel-039 update --check
+keel 0.4.0 is up to date (latest 0.4.0)
+
+发布二进制安装 + shim：
+$ HOME=/tmp/keel-release-home /tmp/keel-039 install --no-open
+cli: /tmp/keel-release-home/.local/bin/keel (add ... to PATH)
+installed: /tmp/keel-release-home/Applications/Keel.app
+$ ~/.local/bin/keel update --check
+keel 0.4.0 is up to date (latest 0.4.0)
+$ uninstall
+removed cli: .../.local/bin/keel
+removed: .../Keel.app
+
+站点/链接：
+https://keel.jixoai.com/downloads.html 200（v0.4.0 / Update 段）
+https://keel.jixoai.com/zh/downloads.html 200（v0.4.0 / 升级段）
+GitHub darwin-arm64 资产 200；SHA256SUMS.txt 200
+
+门禁：
+- main CI 2c3736a success（含 go vet / go test -race / build / image）
+- tag v0.4.0 的 CI 红：ad92447 含两个既有测试文件未 gofmt；已在 2c3736a 修复并通过 main CI
+- Site workflow 成功部署 v0.4.0 页面
+
+边界：
+- Windows updater 仍只有交叉编译 + 脚本单测，未在真实 Windows 运行
+- 聚合仓镜像因 FDE2E_RELEASES_TOKEN 未配置而跳过（已知运维债）
+- 校验和与归档来自同一 GitHub 发布账号，只防传输损坏，不防账号失陷
