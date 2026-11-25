@@ -69,11 +69,12 @@ v0.2.0 发布后仍开的口子（归档板 41 项，按去向分组）：
    于 2026-11-25 修复（keel `f120e70`；headless 409/409、TUI 409/409；Go CI run
    `45604850921` 全绿）。
 
-**下一阶段没有活跃主线**：任何新工作先按 OpenSpec 立项（或经 Owner 解冻
-`keel-ecosystem`），不得直接在归档板上继续勾选。候选排程（P1 Alpha 残余 →
-P2 客户端产品化 → P3 解冻审计 → P4 运维债）在本地报告
-`.agents/reports/keel/remaining-plan-2026-11-24/PLAN-AFTER-V0.2.0.md`（报告目录不入库，
-上方的四组口子即入库摘要）。
+**下一阶段：协作架构五条并行线（Owner 2026-11-25 立项）**：Bot 只定义角色；协作模式是
+可插拔拓扑。`keel-collab-core` 先冻结 Mode/Host 契约；`keel-collab-subagent`（树形委派，
+depth 默认 3/-1 不限）与 `keel-collab-superagent`（Source → Ticket → Assignment → Worker
+工单/调度，不是更大的 sub-agent）依赖 core；`keel-checkpoint` 与 `keel-creation` 独立并行。
+五个 change 的 proposal/design/spec/tasks 均已落地，严格校验通过；具体任务真值在各
+`tasks.md`，不得在归档板上继续勾选。
 
 ## Owner 裁决（2026-11-22，记录，不再讨论）
 
