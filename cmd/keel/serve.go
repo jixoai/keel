@@ -137,6 +137,10 @@ type serveOptions struct {
 	// is also the explicit checkpoint surface behind bash
 	// {action:"checkpoint"} and the run-completion capture hook.
 	Workspace *bashbridge.LayerWorkspaces
+	// SubagentMaxDepth is the deployment's sub-agent depth setting
+	// (KEEL_SUBAGENT_MAX_DEPTH): -1 unlimited, 0 forbidden, positive a cap.
+	// Nil keeps the mode's three-level default.
+	SubagentMaxDepth *int
 }
 
 const (
@@ -1328,6 +1332,7 @@ func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, 
 	if admissionGate != nil {
 		forkAdmissionOpt = forkAdmission{gate: admissionGate}
 	}
+	subagentMaxDepth := resolveSubagentMaxDepth(opts.SubagentMaxDepth)
 	subagents := harnessext.NewSubagentRunner(harnessext.SubagentOptions{
 		Gate:    sessions,
 		Edge:    admission,
@@ -1336,6 +1341,13 @@ func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, 
 		Control: runControl,
 		Hooks:   hooks,
 		Logger:  log,
+		// The mode's depth setting lives in the request layer: -1/0 are
+		// interpreted there, and the Host only enforces the positive cap.
+		MaxDepth: &subagentMaxDepth,
+		// The spawn link projection (parent/depth/mode) makes width counting
+		// and restart recovery queryable; the first user.message stays the
+		// semantic truth.
+		Links: collabSubagentLinks{store: st},
 		// A spawned child's input carries a selection fact exactly like a
 		// session input; the spawn must refuse an unexecutable one at the call,
 		// before the child session or its user.message exists. Bind the same
@@ -1372,12 +1384,14 @@ func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, 
 	// The collaboration mode registry is completed before the product API is
 	// constructed: duplicate ids and unknown disable targets must fail startup,
 	// and the read-only catalogue is served from this same object. The guarded
-	// collab.Host is not constructed here yet: the existing SubagentRunner path
-	// stays untouched, and harnessext.CollabSubagentLauncher is the adapter seam
-	// keel-collab-subagent wires.
-	collabModes, err := newCollabModes(opts.TenantID)
+	// collab.Host is then built over the same runner, so the `agent` tool and
+	// the HTTP sub-agent routes share one enforced creation gate.
+	collabModes, err := newCollabModes(opts.TenantID, subagentMaxDepth)
 	if err != nil {
 		return nil, fmt.Errorf("collaboration modes: %w", err)
+	}
+	if _, err := newCollabHost(opts.TenantID, collabModes, st, kern, accessBridge, subagents, log); err != nil {
+		return nil, err
 	}
 	// Triggers fire as a Bot: the store-backed resolver validates the Bot
 	// (existence/archive/tenant) at registration and before every fire, and
@@ -1415,7 +1429,24 @@ func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, 
 			return harnessext.CancelResult{Status: "idle", RunStatus: "external",
 				Detail: "external sessions have no native run to cancel"}, harnessapi.ErrExternalSession
 		}
-		return runControl.Cancel(cancelCtx, kernel.Scope{TenantID: tenantID, SessionID: sessionID})
+		result, err := runControl.Cancel(cancelCtx, kernel.Scope{TenantID: tenantID, SessionID: sessionID})
+		if err != nil {
+			return result, err
+		}
+		// Cancel propagation: a stopped parent must not leave a live sub-agent
+		// subtree behind. The tree is read from the durable spawn projection, so
+		// this also reaches children created before a restart. A child failure is
+		// reported in the detail, never hidden (the parent itself did stop).
+		tree, treeErr := subagents.CancelTree(cancelCtx, tenantID, sessionID, "parent session cancelled")
+		switch {
+		case treeErr != nil:
+			result.Detail = joinDetail(result.Detail, "sub-agent tree cancel failed: "+treeErr.Error())
+		case len(tree.Failed) > 0:
+			result.Detail = joinDetail(result.Detail, fmt.Sprintf("sub-agent tree cancel: %d cancelled, %d failed", len(tree.Cancelled), len(tree.Failed)))
+		case len(tree.Cancelled) > 0:
+			result.Detail = joinDetail(result.Detail, fmt.Sprintf("sub-agent tree cancel: %d cancelled", len(tree.Cancelled)))
+		}
+		return result, nil
 	}
 
 	// The settings/registry projection (GET /v1/providers, GET /v1/models) comes
@@ -1502,6 +1533,10 @@ func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, 
 		MCPAppMetrics: mcpMetrics,
 		Triggers:      triggers,
 		Subagents:     subagents,
+		// The durable spawn-link projection: the registry is a warm index, this
+		// is what GET /v1/subagents?rootSessionId= and the single-record read
+		// answer after a restart.
+		SubagentLinks: collabSubagentLinks{store: st},
 		// The read-only collaboration catalogue (change keel-collab-core):
 		// enabled and disabled modes alike, so a client can keep existing work
 		// visible after a disable.
@@ -2142,4 +2177,18 @@ func buildInfo() (module, revision string, modified bool) {
 		}
 	}
 	return info.Main.Version, revision, modified
+}
+
+// joinDetail appends one cancellation detail without losing the earlier one.
+func joinDetail(existing, added string) string {
+	existing = strings.TrimSpace(existing)
+	added = strings.TrimSpace(added)
+	switch {
+	case existing == "":
+		return added
+	case added == "":
+		return existing
+	default:
+		return existing + "; " + added
+	}
 }

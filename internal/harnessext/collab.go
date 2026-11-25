@@ -1,7 +1,9 @@
 package harnessext
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/google/uuid"
@@ -12,12 +14,11 @@ import (
 // mode-agnostic collab.SessionLauncher port (change keel-collab-core).
 //
 // The adapter is deliberately thin: the Host has already checked tenant,
-// bot.invoke, budget, depth/width and concurrency, while SpawnAsync still owns
+// bot.invoke, budget, depth, width and concurrency, while spawnChild still owns
 // the existing child-session mechanics (idempotent child id, parent link,
-// ownership inheritance and the turn starter). No behavior of the
-// SubagentRunner or the `agent` tool changes: nothing calls the adapter in this
-// change, and keel-collab-subagent is the change that maps the runner's depth
-// semantics onto the mode limits.
+// durable depth fact, ownership inheritance and the turn starter). SpawnAsync is
+// the guarded entry that calls the Host; the Host calls Launch, which calls
+// spawnChild directly, so a spawn is never re-entered through the gate.
 type CollabSubagentLauncher struct {
 	// Runner is lazy because the product assembly builds the launcher before
 	// the runner exists in some boot orders.
@@ -46,9 +47,9 @@ func (l CollabSubagentLauncher) modeID() string {
 	return collab.ModeSubagent
 }
 
-// Launch creates the child through the existing SpawnAsync path. The returned
-// SessionRef carries the Host-computed depth and the mode identity; the runner
-// keeps owning the child ledger.
+// Launch creates the child through spawnChild. The returned SessionRef carries
+// the Host-computed depth and the mode identity; the runner keeps owning the
+// child ledger.
 func (l CollabSubagentLauncher) Launch(ctx context.Context, req collab.LaunchRequest) (collab.SessionRef, error) {
 	runner, err := l.runner()
 	if err != nil {
@@ -57,17 +58,29 @@ func (l CollabSubagentLauncher) Launch(ctx context.Context, req collab.LaunchReq
 	if req.TenantID == uuid.Nil || req.ParentSessionID == uuid.Nil {
 		return collab.SessionRef{}, fmt.Errorf("%w: tenant and parent session are required", collab.ErrInvalidCreation)
 	}
-	record, err := runner.SpawnAsync(ctx, SpawnRequest{
+	var input subagentLaunchInput
+	if raw := bytes.TrimSpace(req.Inputs); len(raw) > 0 && !bytes.Equal(raw, []byte("null")) {
+		if err := json.Unmarshal(raw, &input); err != nil {
+			return collab.SessionRef{}, fmt.Errorf("%w: decode sub-agent input: %v", ErrInvalidSpawn, err)
+		}
+	}
+	record, err := runner.spawnChild(ctx, SpawnRequest{
 		TenantID:        req.TenantID,
 		ParentSessionID: req.ParentSessionID,
 		Task:            req.Task,
+		Agent:           input.Agent,
 		BotID:           req.BotID,
+		Selection:       input.Selection,
 		IdempotencyKey:  req.IdempotencyKey,
 		Budget: Budget{
 			MaxTurns:  req.Budget.MaxTurns,
 			MaxTokens: req.Budget.MaxTokens,
 			TimeoutMs: req.Budget.TimeoutMs,
 		},
+		MaxDepth:    input.MaxDepth,
+		MaxChildren: input.MaxChildren,
+		Depth:       req.Depth,
+		ModeID:      l.modeID(),
 	})
 	if err != nil {
 		return collab.SessionRef{}, err

@@ -40,7 +40,9 @@ export interface SubagentUsageView {
 
 /** One child run as the sub-agent registry reports it. `origin` is the real
  * edge the run recorded: `spawn` (an invoke) or `fork`. A record whose origin
- * is absent keeps no edge label rather than guessing one. */
+ * is absent keeps no edge label rather than guessing one. `depth` is the
+ * collaboration depth of the child (main is 0); a fork record carries none
+ * because a fork is a ledger branch, not a delegation. */
 export interface SubagentView {
   id: string;
   parentSessionId: string;
@@ -55,6 +57,10 @@ export interface SubagentView {
   error?: string;
   summary?: string;
   usage?: SubagentUsageView;
+  depth?: number;
+  maxDepth?: number;
+  maxChildren?: number;
+  modeId?: string;
 }
 
 /** One session-ledger event. `payload` keeps the raw JSON value: the run page
@@ -140,6 +146,7 @@ export function parseSubagent(value: unknown): SubagentView | undefined {
     durationMs: numberOrUndefined(usageRow.durationMs),
   };
   const hasUsage = Object.values(usage).some((entry) => entry !== undefined);
+  const depth = numberOrUndefined(row.depth);
   return {
     id: text(row.id) || sessionId,
     parentSessionId: text(row.parentSessionId),
@@ -154,6 +161,10 @@ export function parseSubagent(value: unknown): SubagentView | undefined {
     error: textOrUndefined(row.error) ?? textOrUndefined(result.error),
     summary: textOrUndefined(result.summary),
     usage: hasUsage ? usage : undefined,
+    depth,
+    maxDepth: numberOrUndefined(row.maxDepth),
+    maxChildren: numberOrUndefined(row.maxChildren),
+    modeId: textOrUndefined(row.modeId),
   };
 }
 

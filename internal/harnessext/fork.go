@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/jixoai/keel/internal/collab"
 	"github.com/jixoai/keel/internal/kernel"
 	"github.com/jixoai/keel/internal/sessionfork"
 	"github.com/jixoai/keel/internal/tasklog"
@@ -802,6 +803,179 @@ func (r *SubagentRunner) durableParent(ctx context.Context, tenantID, childID uu
 		return ""
 	}
 	return link.ParentSessionID.String()
+}
+
+// DurableSubagentLink answers the durable spawn link of a sub-agent session:
+// the mode, parent session and collaboration depth recorded in the child's
+// first user.message. It is the restart truth the in-process registry cannot
+// provide and the one the depth guard reads. A fork is a ledger branch, not a
+// delegation: it reports no link (depth does not travel through forks). A spawn
+// link written before depths existed is refused (fail closed) rather than
+// guessed.
+func DurableSubagentLink(ctx context.Context, reader kernel.Reader, tenantID, childID uuid.UUID) (SubagentLink, bool, error) {
+	if reader == nil || tenantID == uuid.Nil || childID == uuid.Nil {
+		return SubagentLink{}, false, nil
+	}
+	// The spawn/fork mark is the child's first input, so one page from seq 0 is
+	// enough; reading the whole ledger on every depth check would replay a long
+	// child conversation for a fact that lives at its head.
+	events, err := reader.LoadEvents(ctx, kernel.Scope{TenantID: tenantID, SessionID: childID}, 0, 200)
+	if err != nil {
+		return SubagentLink{}, false, err
+	}
+	return parseDurableSubagentLink(events, tenantID, childID)
+}
+
+func (r *SubagentRunner) durableSubagentLink(ctx context.Context, tenantID, childID uuid.UUID) (SubagentLink, bool, error) {
+	if r.events == nil {
+		return SubagentLink{}, false, nil
+	}
+	// Same head-only read as DurableSubagentLink: the link is in the first
+	// user.message.
+	events, err := r.events.LoadEvents(ctx, kernel.Scope{TenantID: tenantID, SessionID: childID}, 0, 200)
+	if err != nil {
+		return SubagentLink{}, false, err
+	}
+	return parseDurableSubagentLink(events, tenantID, childID)
+}
+
+// parseDurableSubagentLink reads the first user.message (the child's spawn
+// input). Origin "fork" and a fork block are ledger branches and yield no
+// delegation link. A spawn link lacking depth is the pre-depth record shape and
+// is refused: Alpha has no compatibility shim, and a guessed depth would let an
+// old child spawn past the configured cap.
+func parseDurableSubagentLink(events []kernel.Event, tenantID, childID uuid.UUID) (SubagentLink, bool, error) {
+	for _, event := range events {
+		if event.Kind != kernel.KindUserMessage {
+			continue
+		}
+		var payload struct {
+			Subagent struct {
+				Mode            string `json:"mode"`
+				ParentSessionID string `json:"parentSessionId"`
+				Depth           *int   `json:"depth"`
+				MaxDepth        int    `json:"maxDepth"`
+				MaxChildren     int    `json:"maxChildren"`
+				Origin          string `json:"origin"`
+			} `json:"subagent"`
+			Fork struct {
+				ParentSessionID string `json:"parentSessionId"`
+			} `json:"fork"`
+		}
+		if err := json.Unmarshal(event.Payload, &payload); err != nil {
+			continue
+		}
+		link := payload.Subagent
+		if link.Origin == "fork" || (link.ParentSessionID == "" && payload.Fork.ParentSessionID != "") {
+			return SubagentLink{}, false, nil
+		}
+		if strings.TrimSpace(link.ParentSessionID) == "" {
+			return SubagentLink{}, false, nil
+		}
+		parentID, err := uuid.Parse(link.ParentSessionID)
+		if err != nil || parentID == uuid.Nil {
+			return SubagentLink{}, false, fmt.Errorf("%w: spawn link has an invalid parent session id", ErrSubagentLinkInvalid)
+		}
+		if link.Depth == nil {
+			return SubagentLink{}, false, fmt.Errorf("%w: spawn link of %s has no depth (pre-depth record)", ErrSubagentLinkInvalid, childID)
+		}
+		depth := *link.Depth
+		if depth < 1 {
+			return SubagentLink{}, false, fmt.Errorf("%w: spawn link of %s has depth %d", ErrSubagentLinkInvalid, childID, depth)
+		}
+		modeID := strings.TrimSpace(link.Mode)
+		if modeID == "" {
+			modeID = collab.ModeSubagent
+		}
+		if modeID != collab.ModeSubagent {
+			return SubagentLink{}, false, fmt.Errorf("%w: spawn link of %s names mode %q", ErrSubagentLinkInvalid, childID, modeID)
+		}
+		return SubagentLink{
+			TenantID:        tenantID,
+			SessionID:       childID,
+			ParentSessionID: parentID,
+			ModeID:          modeID,
+			Depth:           depth,
+			MaxDepth:        link.MaxDepth,
+			MaxChildren:     link.MaxChildren,
+		}, true, nil
+	}
+	return SubagentLink{}, false, nil
+}
+
+// SubagentChildren lists the direct children of a session. The durable
+// projection is preferred (it survives a restart); the in-process registry is
+// the fallback for tests and deployments without the store seam.
+func (r *SubagentRunner) SubagentChildren(ctx context.Context, tenantID, parentSessionID uuid.UUID) ([]SubagentLink, error) {
+	if links := r.linkStore(); links != nil {
+		return links.SubagentChildren(ctx, tenantID, parentSessionID)
+	}
+	records := r.List(tenantID, &parentSessionID)
+	out := make([]SubagentLink, 0, len(records))
+	for _, record := range records {
+		if record.Origin == "fork" {
+			continue
+		}
+		sessionID, err := uuid.Parse(record.SessionID)
+		if err != nil {
+			continue
+		}
+		out = append(out, SubagentLink{
+			TenantID: tenantID, SessionID: sessionID, ParentSessionID: parentSessionID,
+			ModeID: r.modeID, Depth: record.Depth, MaxDepth: record.MaxDepth, MaxChildren: record.MaxChildren,
+		})
+	}
+	return out, nil
+}
+
+// CancelTree stops every non-terminal direct child under parentSessionID and
+// recurses into their subtrees. The host cancel policy is "cancel every open
+// child"; a failure is returned per session so a partial stop is visible, and
+// the recursion continues (a failed branch must not hide its siblings).
+func (r *SubagentRunner) CancelTree(ctx context.Context, tenantID, parentSessionID uuid.UUID, reason string) (CancelTreeResult, error) {
+	result := CancelTreeResult{Cancelled: []string{}, Failed: []string{}}
+	seen := map[uuid.UUID]bool{parentSessionID: true}
+	var walk func(parent uuid.UUID, depth int) error
+	walk = func(parent uuid.UUID, depth int) error {
+		if depth > 64 {
+			return fmt.Errorf("%w: sub-agent tree is deeper than 64 levels", ErrSubagentLinkInvalid)
+		}
+		children, err := r.SubagentChildren(ctx, tenantID, parent)
+		if err != nil {
+			return err
+		}
+		for _, child := range children {
+			if seen[child.SessionID] {
+				continue
+			}
+			seen[child.SessionID] = true
+			cancel := CancelRequest{
+				TenantID:        tenantID,
+				ParentSessionID: parent,
+				SessionID:       child.SessionID,
+				Reason:          reason,
+			}
+			if _, cancelErr := r.Cancel(ctx, cancel); cancelErr != nil {
+				result.Failed = append(result.Failed, child.SessionID.String())
+			} else {
+				result.Cancelled = append(result.Cancelled, child.SessionID.String())
+			}
+			if err := walk(child.SessionID, depth+1); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	if err := walk(parentSessionID, 0); err != nil {
+		return result, err
+	}
+	return result, nil
+}
+
+// CancelTreeResult is the observable outcome of a subtree stop.
+type CancelTreeResult struct {
+	Cancelled []string `json:"cancelled"`
+	Failed    []string `json:"failed"`
 }
 
 // currentConfig reports the configuration identity the next attempt resolves.

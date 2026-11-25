@@ -188,8 +188,16 @@ func runServeCmd(args []string, stdout, stderr io.Writer) int {
 		exampleBot   = fs.String("example-bot-id", os.Getenv("KEEL_EXAMPLE_BOT_ID"), "Bot handle the example plugin's triggers fire as (empty: the example plugin declares no trigger)")
 		exampleInt   = fs.Duration("example-interval", envDuration("KEEL_EXAMPLE_INTERVAL", 0), "also register the example plugin's interval trigger (e.g. 5m)")
 		pluginsRoot  = fs.String("plugins-root", defaultPluginsRoot(), "managed plugins directory ($KEEL_HOME/plugins)")
+		// subagentMaxDepth is the sub-agent mode's depth setting: -1 unlimited,
+		// 0 forbidden, positive a concrete cap. Empty keeps the 3-level default.
+		subagentDepthRaw = fs.String("subagent-max-depth", os.Getenv("KEEL_SUBAGENT_MAX_DEPTH"), "sub-agent max depth: -1 unlimited, 0 forbidden, positive cap (default 3)")
 	)
 	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	subagentMaxDepth, err := parseSubagentMaxDepth(*subagentDepthRaw)
+	if err != nil {
+		fmt.Fprintf(stderr, "keel serve: %v\n", err)
 		return 2
 	}
 	tenantID, err := parseTenant(*tenantRaw)
@@ -246,6 +254,7 @@ func runServeCmd(args []string, stdout, stderr io.Writer) int {
 		PluginsRoot:      *pluginsRoot,
 		ExampleBotID:     strings.TrimSpace(*exampleBot),
 		ExampleInterval:  *exampleInt,
+		SubagentMaxDepth: subagentMaxDepth,
 		Log:              log,
 	}
 	if err := runServe(context.Background(), opts); err != nil {
@@ -351,4 +360,23 @@ func splitPaths(raw string) []string {
 		return nil
 	}
 	return filepath.SplitList(raw)
+}
+
+// parseSubagentMaxDepth parses the mode's depth setting. Empty keeps the
+// 3-level default (nil); -1 is unlimited, 0 forbids spawning, and a positive
+// value is the concrete cap. Anything below -1 is rejected at boot instead of
+// being silently clamped.
+func parseSubagentMaxDepth(raw string) (*int, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, nil
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil {
+		return nil, fmt.Errorf("subagent-max-depth must be an integer >= -1")
+	}
+	if value < -1 {
+		return nil, fmt.Errorf("subagent-max-depth must be an integer >= -1")
+	}
+	return &value, nil
 }

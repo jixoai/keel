@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strconv"
@@ -15,6 +16,7 @@ import (
 	"github.com/jixoai/keel/internal/access"
 	"github.com/jixoai/keel/internal/harnessext"
 	"github.com/jixoai/keel/internal/kernel"
+	"github.com/jixoai/keel/internal/logsafe"
 	"github.com/jixoai/keel/internal/placement"
 	"github.com/jixoai/keel/internal/store"
 )
@@ -186,6 +188,38 @@ func (s *Server) fireTrigger(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"result": result})
 }
 
+// SubagentLinkReader is the durable spawn-link projection the sub-agent reads
+// fall back to when the in-process registry is cold (after a restart). A nil
+// seam keeps the registry-only behavior.
+type SubagentLinkReader interface {
+	// ListSubagentTree returns the spawned descendants of rootSessionID in
+	// depth order. Forks are absent by construction.
+	ListSubagentTree(ctx context.Context, tenantID, rootSessionID uuid.UUID) ([]harnessext.SubagentLink, error)
+	// SubagentLink returns one session's spawn link (found=false for a root or
+	// an unknown session).
+	SubagentLink(ctx context.Context, tenantID, childID uuid.UUID) (harnessext.SubagentLink, bool, error)
+}
+
+// subagentRecordFromLink projects a durable link onto the wire record the
+// existing sub-agent UI consumes. Task/agent/usage live in the child ledger and
+// the registry, not in the link; a cold-registry read reports the link facts and
+// an unknown status instead of inventing them.
+func subagentRecordFromLink(link harnessext.SubagentLink) harnessext.SubagentRecord {
+	status := "unknown"
+	return harnessext.SubagentRecord{
+		ID:              link.SessionID.String(),
+		TenantID:        link.TenantID.String(),
+		ParentSessionID: link.ParentSessionID.String(),
+		SessionID:       link.SessionID.String(),
+		Status:          status,
+		Origin:          "spawn",
+		Depth:           link.Depth,
+		ModeID:          link.ModeID,
+		MaxDepth:        link.MaxDepth,
+		MaxChildren:     link.MaxChildren,
+	}
+}
+
 func (s *Server) listSubagents(w http.ResponseWriter, r *http.Request) {
 	tenantID, ok := tenantFrom(w, r)
 	if !ok {
@@ -198,6 +232,44 @@ func (s *Server) listSubagents(w http.ResponseWriter, r *http.Request) {
 	limit, err := queryInt(r, "limit", 50, 1, 200)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	// The durable tree read (post-restart): the in-process registry is empty,
+	// but the spawn projection still knows the delegation tree. The records are
+	// link facts only; task/usage stay in the child ledger.
+	if rawRoot := r.URL.Query().Get("rootSessionId"); rawRoot != "" {
+		rootID, err := uuid.Parse(rawRoot)
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, errors.New("rootSessionId must be a UUID"))
+			return
+		}
+		if s.cfg.SubagentLinks == nil {
+			writeErr(w, http.StatusServiceUnavailable, errors.New("the durable sub-agent tree is not wired"))
+			return
+		}
+		links, err := s.cfg.SubagentLinks.ListSubagentTree(r.Context(), tenantID, rootID)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, err)
+			return
+		}
+		if len(links) > limit {
+			links = links[:limit]
+		}
+		candidates := make([]string, 0, len(links))
+		for _, link := range links {
+			candidates = append(candidates, link.SessionID.String())
+		}
+		allowed, ok := s.visibleSessionIDs(w, r, tenantID, access.KeySessionRead, candidates)
+		if !ok {
+			return
+		}
+		records := make([]harnessext.SubagentRecord, 0, len(links))
+		for _, link := range links {
+			if allowed[link.SessionID.String()] {
+				records = append(records, subagentRecordFromLink(link))
+			}
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"subagents": records})
 		return
 	}
 	var parent *uuid.UUID
@@ -250,8 +322,21 @@ func (s *Server) getSubagent(w http.ResponseWriter, r *http.Request) {
 	}
 	record, found := s.cfg.Subagents.Get(sessionID)
 	if !found || record.TenantID != tenantID.String() {
-		writeErr(w, http.StatusNotFound, errors.New("sub-agent not found"))
-		return
+		// The registry is a warm index; the durable link answers after a restart.
+		if s.cfg.SubagentLinks != nil {
+			link, ok, linkErr := s.cfg.SubagentLinks.SubagentLink(r.Context(), tenantID, sessionID)
+			if linkErr != nil {
+				writeErr(w, http.StatusInternalServerError, linkErr)
+				return
+			}
+			if ok {
+				record, found = subagentRecordFromLink(link), true
+			}
+		}
+		if !found || record.TenantID != tenantID.String() {
+			writeErr(w, http.StatusNotFound, errors.New("sub-agent not found"))
+			return
+		}
 	}
 	if !s.authorizeSessionResource(w, r, tenantID, sessionID, access.KeySessionRead) {
 		return
@@ -351,6 +436,9 @@ type spawnSubagentRequest struct {
 	IdempotencyKey string            `json:"idempotencyKey"`
 	Budget         harnessext.Budget `json:"budget"`
 	Wait           bool              `json:"wait"`
+	// MaxDepth narrows this spawn's depth cap (0 refuses it). It can never widen
+	// the deployment setting; the runner refuses that as an invalid request.
+	MaxDepth *int `json:"maxDepth,omitempty"`
 }
 
 func (s *Server) spawnSubagent(w http.ResponseWriter, r *http.Request) {
@@ -382,6 +470,7 @@ func (s *Server) spawnSubagent(w http.ResponseWriter, r *http.Request) {
 		BotID:           body.BotID,
 		Selection:       body.Selection,
 		Budget:          body.Budget,
+		MaxDepth:        body.MaxDepth,
 	})
 	if err != nil {
 		writeSubagentError(w, err)
@@ -392,6 +481,17 @@ func (s *Server) spawnSubagent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	budget := body.Budget
+	// The Host may have narrowed the child budget to the mode ceiling; the wait
+	// enforces the same turns/tokens, and an unset request timeout inherits the
+	// effective one. The transport default remains the floor when neither set a
+	// timeout. A fork record carries no Host budget, so this is a no-op there.
+	if record.Budget != nil {
+		budget.MaxTurns = record.Budget.MaxTurns
+		budget.MaxTokens = record.Budget.MaxTokens
+		if budget.TimeoutMs <= 0 {
+			budget.TimeoutMs = record.Budget.TimeoutMs
+		}
+	}
 	if budget.TimeoutMs <= 0 {
 		budget.TimeoutMs = s.cfg.SubagentWaitDefault.Milliseconds()
 	}
@@ -422,6 +522,12 @@ func (s *Server) spawnSubagent(w http.ResponseWriter, r *http.Request) {
 func writeSubagentError(w http.ResponseWriter, err error) {
 	var capacity *placement.CapacityError
 	switch {
+	case errors.Is(err, harnessext.ErrSubagentDepthExceeded):
+		writeRefusal(w, http.StatusConflict, "subagent_depth_exceeded", err)
+	case errors.Is(err, harnessext.ErrSubagentChildrenExceeded):
+		writeRefusal(w, http.StatusConflict, "subagent_children_exceeded", err)
+	case errors.Is(err, harnessext.ErrSubagentLinkInvalid):
+		writeRefusal(w, http.StatusConflict, "subagent_link_invalid", err)
 	case errors.Is(err, harnessext.ErrParentSessionNotFound), errors.Is(err, harnessext.ErrSubagentNotFound):
 		writeErr(w, http.StatusNotFound, err)
 	case errors.Is(err, kernel.ErrQuota):
@@ -446,6 +552,12 @@ func writeSubagentError(w http.ResponseWriter, err error) {
 	default:
 		writeErr(w, http.StatusBadRequest, err)
 	}
+}
+
+// writeRefusal is the typed sub-agent refusal: the stable code is machine
+// readable next to the redacted message.
+func writeRefusal(w http.ResponseWriter, status int, code string, err error) {
+	writeJSON(w, status, map[string]any{"error": logsafe.Redact(err.Error()), "code": code})
 }
 
 // forkSubagentRequest is the additive HTTP form of agent.fork. The model-facing
@@ -505,6 +617,17 @@ func (s *Server) forkSubagent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	budget := body.Budget
+	// The Host may have narrowed the child budget to the mode ceiling; the wait
+	// enforces the same turns/tokens, and an unset request timeout inherits the
+	// effective one. The transport default remains the floor when neither set a
+	// timeout. A fork record carries no Host budget, so this is a no-op there.
+	if record.Budget != nil {
+		budget.MaxTurns = record.Budget.MaxTurns
+		budget.MaxTokens = record.Budget.MaxTokens
+		if budget.TimeoutMs <= 0 {
+			budget.TimeoutMs = record.Budget.TimeoutMs
+		}
+	}
 	if budget.TimeoutMs <= 0 {
 		budget.TimeoutMs = s.cfg.SubagentWaitDefault.Milliseconds()
 	}
@@ -622,10 +745,38 @@ func (s *Server) cancelSubagent(w http.ResponseWriter, r *http.Request) {
 		TenantID:        tenantID,
 		ParentSessionID: parentID,
 		SessionID:       childID,
+		Reason:          body.Reason,
 	})
 	if err != nil {
 		writeSubagentError(w, err)
 		return
 	}
+	// Cancel propagation: a stopped child must not leave its own sub-tree
+	// running. The tree read is durable, so this also reaches descendants
+	// created before a restart; a failed branch is reported, not hidden.
+	tree, treeErr := s.cfg.Subagents.CancelTree(r.Context(), tenantID, childID, body.Reason)
+	switch {
+	case treeErr != nil:
+		result.Detail = joinSubagentDetail(result.Detail, "sub-agent tree cancel failed: "+treeErr.Error())
+	case len(tree.Failed) > 0:
+		result.Detail = joinSubagentDetail(result.Detail,
+			fmt.Sprintf("sub-agent tree cancel: %d cancelled, %d failed", len(tree.Cancelled), len(tree.Failed)))
+	case len(tree.Cancelled) > 0:
+		result.Detail = joinSubagentDetail(result.Detail,
+			fmt.Sprintf("sub-agent tree cancel: %d cancelled", len(tree.Cancelled)))
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"cancel": result})
+}
+
+func joinSubagentDetail(existing, added string) string {
+	existing = strings.TrimSpace(existing)
+	added = strings.TrimSpace(added)
+	switch {
+	case existing == "":
+		return added
+	case added == "":
+		return existing
+	default:
+		return existing + "; " + added
+	}
 }

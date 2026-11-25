@@ -129,6 +129,10 @@ type Config struct {
 	// Subagents is the sub-agent runner. Nil answers 503 on the sub-agent
 	// routes.
 	Subagents *harnessext.SubagentRunner
+	// SubagentLinks is the durable spawn-link projection (parent/depth/mode).
+	// The runner registry is a warm index only: after a restart this seam is
+	// what the tree/status reads have. Nil keeps the registry-only behavior.
+	SubagentLinks SubagentLinkReader
 	// CollabModes projects the deployment's registered collaboration modes
 	// (change keel-collab-core). It is read-only: disabled modes stay in the
 	// answer with enabled=false so a client can still show existing work.

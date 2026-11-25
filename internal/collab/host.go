@@ -643,7 +643,7 @@ func (c *Coordinator) CreateSession(ctx context.Context, tenantID uuid.UUID, mod
 	_ = c.record(ctx, AuditEvent{
 		Kind: AuditSessionCreated, Result: "accepted", Operation: operation,
 		ModeID: descriptor.ID, WorkItemID: req.WorkItemID, AssignmentID: assignment.ID,
-		SessionID: ref.SessionID, BotID: botID, Actual: int64(depth),
+		SessionID: ref.SessionID, ParentSessionID: parent.SessionID, BotID: botID, Actual: int64(depth),
 	})
 	return ref, nil
 }

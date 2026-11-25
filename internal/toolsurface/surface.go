@@ -88,6 +88,12 @@ const (
 	// CodeForkSnapshotMissing reports a fork origin whose file view is not an
 	// exact captured snapshot. Forking there would invent a file view.
 	CodeForkSnapshotMissing = "fork_snapshot_missing"
+	// Sub-agent mode refusals (change keel-collab-subagent). The codes are the
+	// mode contract's own vocabulary, returned unchanged by the Host and both
+	// entry points.
+	CodeSubagentDepthExceeded    = "subagent_depth_exceeded"
+	CodeSubagentChildrenExceeded = "subagent_children_exceeded"
+	CodeSubagentLinkInvalid      = "subagent_link_invalid"
 )
 
 // actionInput is the envelope every aggregate tool parses.

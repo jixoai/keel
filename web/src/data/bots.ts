@@ -1584,6 +1584,22 @@ class BotAccessStore {
             gaps.push("子会话注册表读不到：缺这次会话的查看关系。");
           }
         }
+        // The registry is a warm in-process index: after a server restart it is
+        // empty even though the delegation tree is durable. The projection read
+        // (rootSessionId) answers the same tree from the spawn links; records
+        // carry depth/parent/status but not the task text.
+        if (subagents.length === 0 && api.listSubagentTree) {
+          try {
+            const durable = await api.listSubagentTree(runId, 200);
+            if (durable.length > 0) {
+              subagents = durable;
+              gaps.push("子会话注册表已冷：树来自持久化派生子链接，任务文本与用量需打开子会话查看。");
+            }
+          } catch (error) {
+            const failure = failureOf(error);
+            if (failure.status !== 403 && failure.status !== 404) throw error;
+          }
+        }
       } else {
         gaps.push("需要 GET /v1/subagents 才能画出 create/fork/invoke 边。");
       }
@@ -1879,6 +1895,16 @@ const humanWriteError = (error: unknown, action: string): string => {
   return `${action}失败：${failure.message}`;
 };
 
+/** The sub-agent node's one-line subtitle. `depth` is the collaboration depth
+ * (main is 0); a fork shows its edge instead because it does not consume depth. */
+function subagentSubtitle(record: SubagentView): string {
+  if (record.origin === "fork") return "分叉 · 子会话";
+  if (typeof record.depth === "number" && record.depth > 0) {
+    return record.maxDepth ? `调用 · depth ${record.depth}/${record.maxDepth}` : `调用 · depth ${record.depth}`;
+  }
+  return "调用 · 子会话";
+}
+
 /** The sub-agent closure rooted at one captain session. A record outside the
  * closure belongs to another run; drawing it here would invent a node. */
 function subagentClosure(records: SubagentView[], rootSessionId: string): SubagentView[] {
@@ -2033,7 +2059,7 @@ function buildRun(input: {
       id,
       kind: "member",
       name: record.agent || record.task || "子会话",
-      subtitle: record.origin === "fork" ? "分叉 · 子会话" : "调用 · 子会话",
+      subtitle: subagentSubtitle(record),
       sessionId: record.sessionId,
       parentId: parent?.id ?? captainId,
       depth: (parent?.depth ?? 1) + 1,

@@ -5,17 +5,20 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jixoai/keel/internal/collab"
+	"github.com/jixoai/keel/internal/harnessext"
 )
 
 // collabTenantCeiling is the single-tenant deployment's hard cap for every
 // collaboration mode (change keel-collab-core). A mode descriptor and a
 // per-request budget may only narrow it; nothing can raise it at runtime.
 //
-// These numbers are deliberately separate from the existing sub-agent budget:
-// the change freezes the contract first, and keel-collab-subagent maps the
-// runner's current behavior onto the mode limits it declares.
+// MaxDepth is deliberately 0 ("no core cap"): the sub-agent contract encodes
+// -1/unlimited and 0/forbidden, which the mode's request layer resolves before
+// it calls the Host. A numeric ceiling here would silently turn "-1" into
+// "8" and contradict the mode semantics. Width, concurrency, turns, tokens and
+// duration stay hard-capped.
 var collabTenantCeiling = collab.Limits{
-	MaxDepth:      8,
+	MaxDepth:      0,
 	MaxChildren:   32,
 	MaxConcurrent: 64,
 	MaxTurns:      500,
@@ -27,12 +30,23 @@ var collabTenantCeiling = collab.Limits{
 // Registration is the only way a mode becomes usable, so a duplicate id or a
 // disable of an unknown id fails startup instead of serving a half-assembled
 // catalogue.
-func newCollabModes(tenantID uuid.UUID) (*collab.ModeRegistry, error) {
+//
+// subagentMaxDepth is the deployment's sub-agent setting: -1 unlimited, 0
+// forbidden, positive a concrete cap. It is already resolved from serveOptions
+// (nil -> the 3-level default). The core Host only understands a positive cap,
+// so the -1/0 settings register 0 (no core cap) and the runner enforces them.
+func newCollabModes(tenantID uuid.UUID, subagentMaxDepth int) (*collab.ModeRegistry, error) {
 	registry, err := collab.NewModeRegistry(tenantID, collabTenantCeiling)
 	if err != nil {
 		return nil, fmt.Errorf("collaboration registry: %w", err)
 	}
-	if err := registry.Register(collab.SubagentMode()); err != nil {
+	subagent := collab.SubagentMode()
+	if subagentMaxDepth < 0 {
+		subagent.Limits.MaxDepth = 0
+	} else {
+		subagent.Limits.MaxDepth = subagentMaxDepth
+	}
+	if err := registry.Register(subagent); err != nil {
 		return nil, fmt.Errorf("register %q mode: %w", collab.ModeSubagent, err)
 	}
 	// Registration point for the super-agent mode. keel-collab-superagent owns
@@ -46,4 +60,14 @@ func newCollabModes(tenantID uuid.UUID) (*collab.ModeRegistry, error) {
 		return nil, fmt.Errorf("disable %q mode: %w", collab.ModeSuperagent, err)
 	}
 	return registry, nil
+}
+
+// resolveSubagentMaxDepth resolves the serve option. nil keeps the mode's
+// 3-level default; an explicit value is used verbatim (-1 unlimited, 0
+// forbidden, positive a cap).
+func resolveSubagentMaxDepth(configured *int) int {
+	if configured == nil {
+		return harnessext.DefaultSubagentMaxDepth
+	}
+	return *configured
 }

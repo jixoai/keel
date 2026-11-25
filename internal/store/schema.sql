@@ -90,6 +90,23 @@ CREATE INDEX IF NOT EXISTS sessions_fork_parent
     ON sessions (tenant_id, fork_parent_session_id)
     WHERE fork_parent_session_id IS NOT NULL;
 
+-- Sub-agent spawn link (change keel-collab-subagent). The child's first
+-- user.message carries the semantic link (mode/parentSessionId/depth); these
+-- columns are the queryable projection, exactly like fork_parent_session_id:
+-- they let the guarded Host count direct children and recover a session's
+-- depth after a restart without replaying every child ledger. A fork never
+-- writes them (a ledger branch is not a delegation and does not consume depth).
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS subagent_parent_session_id uuid;
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS subagent_depth int;
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS subagent_mode text;
+
+CREATE INDEX IF NOT EXISTS sessions_subagent_parent
+    ON sessions (tenant_id, subagent_parent_session_id)
+    WHERE subagent_parent_session_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS sessions_subagent_mode
+    ON sessions (tenant_id, subagent_mode)
+    WHERE subagent_mode IS NOT NULL;
+
 CREATE TABLE IF NOT EXISTS events (
     tenant_id   uuid NOT NULL,
     session_id  uuid NOT NULL,

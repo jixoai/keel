@@ -2094,6 +2094,20 @@ export class KeelHttp implements SettingsApi {
     });
   }
 
+  /** `GET /v1/subagents?rootSessionId=` — the durable spawn-link tree. The
+   * in-process registry is cold after a restart; these rows survive. The server
+   * bounds this read to 1..200. */
+  async listSubagentTree(rootSessionId: string, limit = 200): Promise<SubagentView[]> {
+    const bounded = Math.min(200, Math.max(1, Math.floor(limit)));
+    const query = new URLSearchParams({ rootSessionId, limit: String(bounded) });
+    const response = await this.request(`/v1/subagents?${query.toString()}`);
+    const body = asRecord(await response.json());
+    return listOf(body.subagents).flatMap((row) => {
+      const record = parseSubagent(row);
+      return record ? [record] : [];
+    });
+  }
+
   /** `POST /v1/sessions/{id}/cancel` — the run page's stop. A deployment whose
    * cancel seam is not wired answers 501; the page prints that instead of
    * pretending the run stopped. */

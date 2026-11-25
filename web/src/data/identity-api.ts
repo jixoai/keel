@@ -151,6 +151,9 @@ export interface IdentityApi {
   sessionDeliverables?(sessionId: string, opts?: DeliverablesOptions): Promise<DeliverablesView>;
   sessionEvents?(sessionId: string, limit?: number): Promise<SessionEventView[]>;
   listSubagents?(parentSessionId?: string, limit?: number): Promise<SubagentView[]>;
+  /** The durable spawn-link tree (`GET /v1/subagents?rootSessionId=`). Optional:
+   * a deployment without the projection keeps the registry-only read. */
+  listSubagentTree?(rootSessionId: string, limit?: number): Promise<SubagentView[]>;
   cancelSession?(sessionId: string): Promise<SessionCancelView>;
 
   /** The audit projection. Absent until the server exposes the route. */

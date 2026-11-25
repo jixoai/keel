@@ -27,9 +27,10 @@ type AgentBackend interface {
 var agentActions = []string{ActionSpawn, ActionFork, ActionResume, ActionCancel, ActionList, ActionStatus}
 
 const agentToolDescription = "Internal sub-agents (independent session + task card). Actions: " +
-	"spawn {task, botId?, agent?, idempotencyKey?, maxTurns?, maxTokens?, timeoutMs?} (returns the child's structured result); " +
+	"spawn {task, botId?, agent?, idempotencyKey?, maxTurns?, maxTokens?, timeoutMs?, maxDepth?} (returns the child's structured result; " +
+	"maxDepth only narrows the deployment cap and 0 refuses the spawn; an over-depth spawn returns subagent_depth_exceeded and creates nothing); " +
 	"fork {eventSeq, task?, title?, taskId?, botId?, idempotencyKey?, budget fields} (a new session inherits the parent ledger " +
-	"and file view at eventSeq; the new card's parentTaskId points at the origin card); " +
+	"and file view at eventSeq; the new card's parentTaskId points at the origin card; a fork does not consume sub-agent depth); " +
 	"resume {sessionId, requestId?, reason?, selection?, botId?} (continue the same child after an interruption; " +
 	"an optional selection changes its binding for the resumed attempt; never reopens a completed task); " +
 	"cancel {sessionId, reason?}; list (this session's children); status {sessionId}. " +
@@ -41,7 +42,7 @@ func agentSchema() json.RawMessage {
 		`"reason":{"type":"string"}, "title":{"type":"string"}, "taskId":{"type":"string"}, ` +
 		`"eventSeq":{"type":"integer","minimum":0}, "selection":{"type":"object"}, ` +
 		`"maxTurns":{"type":"integer","minimum":0}, "maxTokens":{"type":"integer","minimum":0}, ` +
-		`"timeoutMs":{"type":"integer","minimum":0}`)
+		`"timeoutMs":{"type":"integer","minimum":0}, "maxDepth":{"type":"integer","minimum":-1}`)
 }
 
 func newAgentTool(backend AgentBackend) *actionTool {
@@ -106,9 +107,31 @@ func agentBackendWired(backend AgentBackend) bool {
 // retryAfterMs and wait, exactly like the HTTP edge's 429 + Retry-After.
 func agentFailure(action string, err error) (agentcore.AgentToolResult, error) {
 	var capacity *placement.CapacityError
+	var depth *harnessext.SubagentDepthError
+	var children *harnessext.SubagentChildrenError
 	switch {
 	case errors.Is(err, harnessext.ErrRunScopeMissing):
 		return agentScopeMissing()
+	case errors.As(err, &depth):
+		return ErrorResult(CodeSubagentDepthExceeded, Agent, err.Error(), map[string]any{
+			"action":   action,
+			"parentId": depth.ParentSessionID.String(),
+			"depth":    depth.Depth,
+			"maxDepth": depth.MaxDepth,
+		})
+	case errors.As(err, &children):
+		return ErrorResult(CodeSubagentChildrenExceeded, Agent, err.Error(), map[string]any{
+			"action":         action,
+			"parentId":       children.ParentSessionID.String(),
+			"activeChildren": children.Active,
+			"maxChildren":    children.Limit,
+		})
+	case errors.Is(err, harnessext.ErrSubagentLinkInvalid):
+		return ErrorResult(CodeSubagentLinkInvalid, Agent, err.Error(), map[string]any{"action": action})
+	case errors.Is(err, harnessext.ErrSubagentDepthExceeded):
+		return ErrorResult(CodeSubagentDepthExceeded, Agent, err.Error(), map[string]any{"action": action})
+	case errors.Is(err, harnessext.ErrSubagentChildrenExceeded):
+		return ErrorResult(CodeSubagentChildrenExceeded, Agent, err.Error(), map[string]any{"action": action})
 	case errors.Is(err, harnessext.ErrInvalidSpawn), errors.Is(err, harnessext.ErrForkOriginInvalid):
 		return invalidArguments(Agent, err.Error())
 	case errors.Is(err, harnessext.ErrForkSnapshotMissing):
