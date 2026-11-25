@@ -206,6 +206,14 @@ var rules = []Rule{
 	resource(http.MethodGet, "/v1/subagents/{id}", access.KeySessionRead, "session", "path:id"),
 	resource(http.MethodPost, "/v1/subagents/{id}/cancel", access.KeySessionWrite, "session", "query:parentSessionId"),
 
+	// --- super-agent board (read-only projections) --------------------------
+	// The queue is tenant-scoped; task.read is relation-scoped on individual
+	// task cards, so the held-key mode is the same shape as the other
+	// collection read edges. Writes stay in the Source/Channel and operator
+	// paths, not these routes.
+	route(http.MethodGet, "/v1/superagent/tickets", ModeHeldKey, access.KeyTaskRead),
+	route(http.MethodGet, "/v1/superagent/attention", ModeHeldKey, access.KeyTaskRead),
+
 	// --- realtime voice bridge ---------------------------------------------
 	resource(http.MethodGet, "/v1/realtime", access.KeySessionRead, "session", "query:session_id"),
 	route(http.MethodGet, "/v1/realtime/status", ModeKey, access.KeyAppRead),
