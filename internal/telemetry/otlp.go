@@ -1,346 +1,249 @@
 package telemetry
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"net/http"
 	"net/url"
 	"strings"
-
-	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/codes"
-	otelmetric "go.opentelemetry.io/otel/metric"
-	"go.opentelemetry.io/otel/propagation"
-	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
-	"go.opentelemetry.io/otel/sdk/resource"
-	sdktrace "go.opentelemetry.io/otel/sdk/trace"
-	"go.opentelemetry.io/otel/trace"
-
-	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp"
-	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
+	"time"
 )
 
-// OTLPOptions configures the optional OTLP/HTTP adapter. Endpoint is a URL
-// such as http://127.0.0.1:4318; an empty endpoint means the caller should not
-// construct this adapter at all (the host keeps the in-process memory adapter).
+// OTLPOptions configures the optional OTLP/HTTP JSON adapter. Endpoint is the
+// base URL (for example http://127.0.0.1:4318); the adapter appends the
+// standard /v1/traces and /v1/metrics paths. An empty endpoint is rejected:
+// the host keeps the in-process memory adapter instead of creating an exporter.
 type OTLPOptions struct {
 	Endpoint    string
 	Headers     map[string]string
 	ServiceName string
 }
 
-// OTLP is the optional OpenTelemetry adapter. It is constructed only when a
-// tenant explicitly selects telemetry.adapter=otlp with an endpoint; the
-// default factory never creates an exporter or a background goroutine.
+// OTLP is the optional zero-dependency OTLP/HTTP JSON adapter. It records into
+// the in-process Memory adapter and exports settled spans/measurements on
+// Shutdown, so no exporter goroutine or connection exists while it is idle.
+// It intentionally does not pull the OpenTelemetry SDK into the shipping
+// binary (the binary-size gate forbids that dependency).
 type OTLP struct {
-	*otlpContext
-	tracer trace.Tracer
-	meter  otelmetric.Meter
-	tp     *sdktrace.TracerProvider
-	mp     *sdkmetric.MeterProvider
-	prop   propagation.TextMapPropagator
+	*Memory
+	endpoint string
+	headers  map[string]string
+	service  string
+	client   *http.Client
 }
 
-type otlpContext struct {
-	owner *OTLP
-	ctx   context.Context
-}
-
-func (c *otlpContext) Metrics() Metrics         { return &otlpMetrics{owner: c.owner} }
-func (c *otlpContext) Propagation() Propagation { return c.owner }
-func (c *otlpContext) StartSpan(options SpanOptions, callback func(Span) error) error {
-	return c.owner.startSpan(c.ctx, options, callback)
-}
-func (c *otlpContext) StartManualSpan(options SpanOptions) (Span, func()) {
-	return c.owner.startManualSpan(c.ctx, options)
-}
-
-// NewOTLP builds OTLP/HTTP trace and metric exporters. Callers must Shutdown
-// the returned adapter when the hosting process stops.
-func NewOTLP(ctx context.Context, options OTLPOptions) (*OTLP, error) {
+// NewOTLP validates the endpoint and returns an idle adapter. No network
+// connection is made until Shutdown.
+func NewOTLP(_ context.Context, options OTLPOptions) (*OTLP, error) {
 	endpoint := strings.TrimSpace(options.Endpoint)
 	if endpoint == "" {
 		return nil, fmt.Errorf("telemetry: otlp endpoint is empty")
 	}
 	parsed, err := url.Parse(endpoint)
-	if err != nil {
-		return nil, fmt.Errorf("telemetry: parse otlp endpoint: %w", err)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return nil, fmt.Errorf("telemetry: otlp endpoint must be an absolute http(s) URL")
 	}
-	host := parsed.Host
-	if host == "" {
-		host = endpoint
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return nil, fmt.Errorf("telemetry: otlp endpoint scheme must be http or https")
 	}
-	traceOpts := []otlptracehttp.Option{otlptracehttp.WithEndpoint(host)}
-	metricOpts := []otlpmetrichttp.Option{otlpmetrichttp.WithEndpoint(host)}
-	if len(options.Headers) > 0 {
-		traceOpts = append(traceOpts, otlptracehttp.WithHeaders(options.Headers))
-		metricOpts = append(metricOpts, otlpmetrichttp.WithHeaders(options.Headers))
+	service := strings.TrimSpace(options.ServiceName)
+	if service == "" {
+		service = "keel"
 	}
-	if parsed.Scheme == "http" {
-		traceOpts = append(traceOpts, otlptracehttp.WithInsecure())
-		metricOpts = append(metricOpts, otlpmetrichttp.WithInsecure())
+	headers := make(map[string]string, len(options.Headers))
+	for key, value := range options.Headers {
+		headers[key] = value
 	}
-	if path := strings.TrimSpace(parsed.Path); path != "" && path != "/" {
-		traceOpts = append(traceOpts, otlptracehttp.WithURLPath(path))
-		metricOpts = append(metricOpts, otlpmetrichttp.WithURLPath(path))
-	}
-	traceExporter, err := otlptracehttp.New(ctx, traceOpts...)
-	if err != nil {
-		return nil, fmt.Errorf("telemetry: otlp trace exporter: %w", err)
-	}
-	metricExporter, err := otlpmetrichttp.New(ctx, metricOpts...)
-	if err != nil {
-		return nil, fmt.Errorf("telemetry: otlp metric exporter: %w", err)
-	}
-	serviceName := strings.TrimSpace(options.ServiceName)
-	if serviceName == "" {
-		serviceName = "keel"
-	}
-	res := resource.NewSchemaless(attribute.String("service.name", serviceName))
-	tp := sdktrace.NewTracerProvider(
-		sdktrace.WithBatcher(traceExporter),
-		sdktrace.WithResource(res),
-		sdktrace.WithSampler(sdktrace.AlwaysSample()),
-	)
-	mp := sdkmetric.NewMeterProvider(
-		sdkmetric.WithReader(sdkmetric.NewPeriodicReader(metricExporter)),
-		sdkmetric.WithResource(res),
-	)
-	adapter := &OTLP{
-		tracer: tp.Tracer("keel"),
-		meter:  mp.Meter("keel"),
-		tp:     tp,
-		mp:     mp,
-		prop:   propagation.NewCompositeTextMapPropagator(propagation.TraceContext{}, propagation.Baggage{}),
-	}
-	adapter.otlpContext = &otlpContext{owner: adapter, ctx: ctx}
-	return adapter, nil
+	return &OTLP{
+		Memory:   NewMemory(),
+		endpoint: strings.TrimSuffix(endpoint, "/"),
+		headers:  headers,
+		service:  service,
+		client:   &http.Client{Timeout: 10 * time.Second},
+	}, nil
 }
 
-// Shutdown flushes and stops both providers.
+// Shutdown exports the gathered spans and metrics as OTLP/HTTP JSON.
 func (o *OTLP) Shutdown(ctx context.Context) error {
 	if o == nil {
 		return nil
 	}
-	if err := o.tp.Shutdown(ctx); err != nil {
+	if err := o.post(ctx, "/v1/traces", o.tracePayload()); err != nil {
 		return err
 	}
-	return o.mp.Shutdown(ctx)
+	return o.post(ctx, "/v1/metrics", o.metricPayload())
 }
 
-func (o *OTLP) startSpan(ctx context.Context, options SpanOptions, callback func(Span) error) error {
-	spanCtx, span := o.tracer.Start(ctx, options.Name, o.startOptions(options)...)
-	defer span.End()
-	err := callback(&otlpSpan{owner: o, ctx: spanCtx, span: span})
+func (o *OTLP) post(ctx context.Context, path string, payload any) error {
+	body, err := json.Marshal(payload)
 	if err != nil {
-		span.SetStatus(codes.Error, err.Error())
+		return err
 	}
-	return err
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, o.endpoint+path, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	for key, value := range o.headers {
+		req.Header.Set(key, value)
+	}
+	resp, err := o.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("telemetry: otlp %s returned %s", path, resp.Status)
+	}
+	return nil
 }
 
-func (o *OTLP) startManualSpan(ctx context.Context, options SpanOptions) (Span, func()) {
-	spanCtx, span := o.tracer.Start(ctx, options.Name, o.startOptions(options)...)
-	return &otlpSpan{owner: o, ctx: spanCtx, span: span}, func() { span.End() }
+func (o *OTLP) resource() map[string]any {
+	return map[string]any{"attributes": otlpAttrs(SpanAttributes{"service.name": o.service})}
 }
 
-func (o *OTLP) startOptions(options SpanOptions) []trace.SpanStartOption {
-	opts := []trace.SpanStartOption{trace.WithAttributes(otelAttributes(options.Attributes)...)}
-	for _, link := range options.Links {
-		if link.Context == nil {
-			continue
+func (o *OTLP) tracePayload() map[string]any {
+	page, _ := o.FindTraces(TraceQuery{Limit: 100000})
+	out := make([]any, 0)
+	for _, trace := range page.Traces {
+		for _, span := range trace.Spans {
+			item := map[string]any{
+				"traceId":           span.TraceID,
+				"spanId":            span.ID,
+				"name":              span.Name,
+				"kind":              1,
+				"startTimeUnixNano": fmt.Sprintf("%d", int64(span.StartedMs*1e6)),
+				"endTimeUnixNano":   fmt.Sprintf("%d", int64(span.EndedMs*1e6)),
+			}
+			if span.ParentID != "" {
+				item["parentSpanId"] = span.ParentID
+			}
+			if attrs := otlpAttrs(span.Attributes); len(attrs) > 0 {
+				item["attributes"] = attrs
+			}
+			if len(span.Events) > 0 {
+				events := make([]any, 0, len(span.Events))
+				for _, event := range span.Events {
+					events = append(events, map[string]any{
+						"name":         event.Name,
+						"timeUnixNano": fmt.Sprintf("%d", int64((span.StartedMs+event.TimeMs)*1e6)),
+						"attributes":   otlpAttrs(event.Attributes),
+					})
+				}
+				item["events"] = events
+			}
+			status := map[string]any{"code": 1}
+			if span.Status.Status == SpanStatusError {
+				status["code"] = 2
+				if span.Status.Error != nil {
+					status["message"] = span.Status.Error.Message
+				}
+			}
+			item["status"] = status
+			out = append(out, item)
 		}
-		carrier, ok := o.inject(link.Context)
+	}
+	return map[string]any{"resourceSpans": []any{map[string]any{
+		"resource": o.resource(),
+		"scopeSpans": []any{map[string]any{
+			"scope": map[string]any{"name": "keel"},
+			"spans": out,
+		}},
+	}}}
+}
+
+func (o *OTLP) metricPayload() map[string]any {
+	type metricAgg struct {
+		kind   MetricKind
+		unit   string
+		points []any
+	}
+	order := make([]string, 0)
+	byName := map[string]*metricAgg{}
+	for _, measurement := range o.Measurements() {
+		key := string(measurement.Kind) + "\x00" + measurement.Name
+		agg, ok := byName[key]
 		if !ok {
-			continue
+			agg = &metricAgg{kind: measurement.Kind, unit: measurement.Unit}
+			byName[key] = agg
+			order = append(order, key)
 		}
-		linkCtx := o.prop.Extract(context.Background(), headerCarrier(carrier))
-		if sc := trace.SpanContextFromContext(linkCtx); sc.IsValid() {
-			opts = append(opts, trace.WithLinks(trace.Link{SpanContext: sc, Attributes: otelAttributes(link.Attributes)}))
+		point := map[string]any{
+			"timeUnixNano": fmt.Sprintf("%d", time.Now().UnixNano()),
+			"asDouble":     measurement.Value,
 		}
-	}
-	return opts
-}
-
-func headerCarrier(carrier Carrier) propagation.HeaderCarrier {
-	out := propagation.HeaderCarrier{}
-	for key, value := range carrier {
-		out[key] = []string{value}
-	}
-	return out
-}
-
-func (o *OTLP) Inject(ctx Context) (Carrier, bool) { return o.inject(ctx) }
-
-func (o *OTLP) inject(ctx Context) (Carrier, bool) {
-	if ctx == nil {
-		return nil, false
-	}
-	goCtx := context.Background()
-	if span, ok := ctx.(*otlpSpan); ok {
-		goCtx = span.ctx
-	}
-	carrier := propagation.HeaderCarrier{}
-	o.prop.Inject(goCtx, carrier)
-	if len(carrier) == 0 {
-		return nil, false
-	}
-	out := Carrier{}
-	for key, values := range carrier {
-		if len(values) > 0 {
-			out[key] = values[0]
+		if attrs := otlpAttrs(measurement.Attributes); len(attrs) > 0 {
+			point["attributes"] = attrs
 		}
-	}
-	return out, true
-}
-
-func (o *OTLP) Extract(carrier Carrier) Context {
-	goCtx := context.Background()
-	if len(carrier) > 0 {
-		headers := propagation.HeaderCarrier{}
-		for key, value := range carrier {
-			headers[key] = []string{value}
+		if measurement.Kind == MetricKindHistogram {
+			point = map[string]any{
+				"timeUnixNano":   fmt.Sprintf("%d", time.Now().UnixNano()),
+				"count":          "1",
+				"sum":            measurement.Value,
+				"bucketCounts":   []string{"1"},
+				"explicitBounds": []float64{},
+			}
+			if attrs := otlpAttrs(measurement.Attributes); len(attrs) > 0 {
+				point["attributes"] = attrs
+			}
 		}
-		goCtx = o.prop.Extract(goCtx, headers)
+		agg.points = append(agg.points, point)
 	}
-	return &otlpContext{owner: o, ctx: goCtx}
-}
-
-type otlpSpan struct {
-	owner *OTLP
-	ctx   context.Context
-	span  trace.Span
-}
-
-func (s *otlpSpan) Metrics() Metrics         { return &otlpMetrics{owner: s.owner} }
-func (s *otlpSpan) Propagation() Propagation { return s.owner }
-func (s *otlpSpan) StartSpan(options SpanOptions, callback func(Span) error) error {
-	return s.owner.startSpan(s.ctx, options, callback)
-}
-func (s *otlpSpan) StartManualSpan(options SpanOptions) (Span, func()) {
-	return s.owner.startManualSpan(s.ctx, options)
-}
-func (s *otlpSpan) AddLink(link SpanLink) {
-	if link.Context == nil {
-		return
-	}
-	carrier, ok := s.owner.inject(link.Context)
-	if !ok {
-		return
-	}
-	ctx := s.owner.prop.Extract(context.Background(), headerCarrier(carrier))
-	if sc := trace.SpanContextFromContext(ctx); sc.IsValid() {
-		s.span.AddLink(trace.Link{SpanContext: sc, Attributes: otelAttributes(link.Attributes)})
-	}
-}
-func (s *otlpSpan) AddEvent(name string, attributes SpanAttributes) {
-	s.span.AddEvent(name, trace.WithAttributes(otelAttributes(attributes)...))
-}
-func (s *otlpSpan) SetAttributes(attributes SpanAttributes) {
-	s.span.SetAttributes(otelAttributes(attributes)...)
-}
-func (s *otlpSpan) SetStatus(status SpanStatus) {
-	if status.Status == SpanStatusError {
-		message := ""
-		if status.Error != nil {
-			message = status.Error.Message
+	metrics := make([]any, 0, len(order))
+	for _, key := range order {
+		agg := byName[key]
+		name := strings.SplitN(key, "\x00", 2)[1]
+		metric := map[string]any{"name": name}
+		if agg.unit != "" {
+			metric["unit"] = agg.unit
 		}
-		s.span.SetStatus(codes.Error, message)
-		return
-	}
-	s.span.SetStatus(codes.Ok, "")
-}
-
-type otlpMetrics struct {
-	owner *OTLP
-}
-
-func (m *otlpMetrics) Counter(name string, options *InstrumentOptions) Counter {
-	var opts []otelmetric.Float64CounterOption
-	if options != nil {
-		if options.Description != "" {
-			opts = append(opts, otelmetric.WithDescription(options.Description))
+		if agg.kind == MetricKindHistogram {
+			metric["histogram"] = map[string]any{
+				"aggregationTemporality": 2,
+				"dataPoints":             agg.points,
+			}
+		} else {
+			metric["sum"] = map[string]any{
+				"aggregationTemporality": 2,
+				"isMonotonic":            agg.kind == MetricKindCounter,
+				"dataPoints":             agg.points,
+			}
 		}
-		if options.Unit != "" {
-			opts = append(opts, otelmetric.WithUnit(options.Unit))
-		}
+		metrics = append(metrics, metric)
 	}
-	inst, _ := m.owner.meter.Float64Counter(name, opts...)
-	return otlpCounter{inst: inst}
+	return map[string]any{"resourceMetrics": []any{map[string]any{
+		"resource": o.resource(),
+		"scopeMetrics": []any{map[string]any{
+			"scope":   map[string]any{"name": "keel"},
+			"metrics": metrics,
+		}},
+	}}}
 }
 
-func (m *otlpMetrics) UpDownCounter(name string, options *InstrumentOptions) UpDownCounter {
-	var opts []otelmetric.Float64UpDownCounterOption
-	if options != nil {
-		if options.Description != "" {
-			opts = append(opts, otelmetric.WithDescription(options.Description))
-		}
-		if options.Unit != "" {
-			opts = append(opts, otelmetric.WithUnit(options.Unit))
-		}
-	}
-	inst, _ := m.owner.meter.Float64UpDownCounter(name, opts...)
-	return otlpUpDownCounter{inst: inst}
-}
-
-func (m *otlpMetrics) Histogram(name string, options *HistogramOptions) Histogram {
-	var opts []otelmetric.Float64HistogramOption
-	if options != nil {
-		if options.Description != "" {
-			opts = append(opts, otelmetric.WithDescription(options.Description))
-		}
-		if options.Unit != "" {
-			opts = append(opts, otelmetric.WithUnit(options.Unit))
-		}
-	}
-	inst, _ := m.owner.meter.Float64Histogram(name, opts...)
-	return otlpHistogram{inst: inst}
-}
-
-type otlpCounter struct{ inst otelmetric.Float64Counter }
-
-func (c otlpCounter) Add(value float64, attributes SpanAttributes) {
-	if c.inst != nil {
-		c.inst.Add(context.Background(), value, otelmetric.WithAttributes(otelAttributes(attributes)...))
-	}
-}
-
-type otlpUpDownCounter struct {
-	inst otelmetric.Float64UpDownCounter
-}
-
-func (c otlpUpDownCounter) Add(value float64, attributes SpanAttributes) {
-	if c.inst != nil {
-		c.inst.Add(context.Background(), value, otelmetric.WithAttributes(otelAttributes(attributes)...))
-	}
-}
-
-type otlpHistogram struct{ inst otelmetric.Float64Histogram }
-
-func (h otlpHistogram) Record(value float64, attributes SpanAttributes, _ Context) {
-	if h.inst != nil {
-		h.inst.Record(context.Background(), value, otelmetric.WithAttributes(otelAttributes(attributes)...))
-	}
-}
-
-func otelAttributes(attributes SpanAttributes) []attribute.KeyValue {
-	if len(attributes) == 0 {
+func otlpAttrs(attrs SpanAttributes) []any {
+	if len(attrs) == 0 {
 		return nil
 	}
-	out := make([]attribute.KeyValue, 0, len(attributes))
-	for key, value := range attributes {
+	out := make([]any, 0, len(attrs))
+	for key, value := range attrs {
+		var encoded any
 		switch v := value.(type) {
 		case string:
-			out = append(out, attribute.String(key, v))
+			encoded = map[string]any{"stringValue": v}
 		case bool:
-			out = append(out, attribute.Bool(key, v))
+			encoded = map[string]any{"boolValue": v}
 		case int:
-			out = append(out, attribute.Int(key, v))
+			encoded = map[string]any{"intValue": fmt.Sprintf("%d", v)}
 		case int64:
-			out = append(out, attribute.Int64(key, v))
+			encoded = map[string]any{"intValue": fmt.Sprintf("%d", v)}
 		case float64:
-			out = append(out, attribute.Float64(key, v))
-		case []string:
-			out = append(out, attribute.StringSlice(key, v))
+			encoded = map[string]any{"doubleValue": v}
+		default:
+			continue
 		}
+		out = append(out, map[string]any{"key": key, "value": encoded})
 	}
 	return out
 }

@@ -1,7 +1,9 @@
 package telemetry
 
 import (
+	"bytes"
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -11,12 +13,15 @@ import (
 
 func TestOTLPExportsWhenEndpointConfigured(t *testing.T) {
 	var traces, metrics atomic.Int64
+	var traceBody, metricBody bytes.Buffer
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/v1/traces":
 			traces.Add(1)
+			_, _ = io.Copy(&traceBody, r.Body)
 		case "/v1/metrics":
 			metrics.Add(1)
+			_, _ = io.Copy(&metricBody, r.Body)
 		}
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -42,6 +47,12 @@ func TestOTLPExportsWhenEndpointConfigured(t *testing.T) {
 	}
 	if metrics.Load() == 0 {
 		t.Fatal("no metric export request")
+	}
+	if !bytes.Contains(traceBody.Bytes(), []byte("keel.agent.run")) || !bytes.Contains(traceBody.Bytes(), []byte("keel.agent.turn")) {
+		t.Fatalf("trace payload missing spans: %s", traceBody.String())
+	}
+	if !bytes.Contains(metricBody.Bytes(), []byte("keel.agent.turns")) {
+		t.Fatalf("metric payload missing turn counter: %s", metricBody.String())
 	}
 }
 

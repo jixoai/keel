@@ -1,0 +1,19 @@
+OTLP/HTTP JSON adapter — 2026-11-25
+===================================
+
+go test ./internal/telemetry -run 'TestOTLP' -v
+  --- PASS: TestOTLPExportsWhenEndpointConfigured
+  --- PASS: TestOTLPRequiresEndpoint
+
+Tests assert:
+  - POST /v1/traces carries keel.agent.run + keel.agent.turn
+  - POST /v1/metrics carries keel.agent.turns
+  - empty endpoint is rejected (host keeps memory adapter)
+
+Dependency/size:
+  - No OpenTelemetry SDK dependency: the adapter records into Memory and
+    serializes OTLP/HTTP JSON at Shutdown.
+  - scripts/binary-size.sh --base 6111aef (with ignored build assets removed):
+    keel   +52 KiB / +64 KiB
+    runtime +52 KiB / +64 KiB
+    binary-size: OK (budget 128 KiB)
