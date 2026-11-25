@@ -3,10 +3,13 @@ package telemetry
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -110,15 +113,15 @@ func (o *OTLP) tracePayload() map[string]any {
 	for _, trace := range page.Traces {
 		for _, span := range trace.Spans {
 			item := map[string]any{
-				"traceId":           span.TraceID,
-				"spanId":            span.ID,
+				"traceId":           otlpTraceID(span.TraceID),
+				"spanId":            otlpSpanID(span.ID),
 				"name":              span.Name,
 				"kind":              1,
 				"startTimeUnixNano": fmt.Sprintf("%d", int64(span.StartedMs*1e6)),
 				"endTimeUnixNano":   fmt.Sprintf("%d", int64(span.EndedMs*1e6)),
 			}
 			if span.ParentID != "" {
-				item["parentSpanId"] = span.ParentID
+				item["parentSpanId"] = otlpSpanID(span.ParentID)
 			}
 			if attrs := otlpAttrs(span.Attributes); len(attrs) > 0 {
 				item["attributes"] = attrs
@@ -220,6 +223,22 @@ func (o *OTLP) metricPayload() map[string]any {
 			"metrics": metrics,
 		}},
 	}}}
+}
+
+func otlpTraceID(id string) string {
+	sum := sha256.Sum256([]byte(id))
+	return hex.EncodeToString(sum[:16])
+}
+
+func otlpSpanID(id string) string {
+	if index := strings.LastIndexByte(id, ':'); index >= 0 {
+		id = id[index+1:]
+	}
+	if value, err := strconv.ParseUint(id, 10, 64); err == nil {
+		return fmt.Sprintf("%016x", value)
+	}
+	sum := sha256.Sum256([]byte(id))
+	return hex.EncodeToString(sum[:8])
 }
 
 func otlpAttrs(attrs SpanAttributes) []any {
