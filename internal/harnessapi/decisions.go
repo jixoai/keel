@@ -158,12 +158,24 @@ func (s *Server) answerDecision(w http.ResponseWriter, r *http.Request) {
 	}
 	bodyActor := body.Actor
 	recordedText := body.Text
+	// A plugin decision answered inside a run is still a plugin lifecycle
+	// approval: the same key and bot rules apply as at /v1/plugin-approvals.
+	actor, actorKind := "", ""
+	if pending, found := s.cfg.Decisions.Get(r.Context(), tenantID, sessionID, decisionID); found {
+		var allowed bool
+		actor, actorKind, allowed = s.authorizePluginDecisionAnswer(w, r, tenantID, pending)
+		if !allowed {
+			return
+		}
+	}
 	decision, duplicate, err := s.cfg.Decisions.Answer(r.Context(), harnessext.AnswerDecisionRequest{
 		TenantID:   tenantID,
 		SessionID:  sessionID,
 		DecisionID: decisionID,
 		OptionID:   body.OptionID,
 		Text:       body.Text,
+		Actor:      actor,
+		ActorKind:  actorKind,
 	})
 	if err != nil {
 		switch {

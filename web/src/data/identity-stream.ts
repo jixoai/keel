@@ -23,7 +23,7 @@ import { identityAccess } from "./identity-access";
 import { botAccess } from "./bots";
 import { shares } from "./shares";
 
-export type IdentityEventKind = "accounts" | "permissions" | "bots" | "teams" | "sessions";
+export type IdentityEventKind = "accounts" | "permissions" | "bots" | "teams" | "sessions" | "plugins";
 
 export type IdentityStreamState = "idle" | "connecting" | "open" | "reconnecting" | "closed";
 
@@ -33,6 +33,7 @@ const KINDS: ReadonlySet<string> = new Set<IdentityEventKind>([
   "bots",
   "teams",
   "sessions",
+  "plugins",
 ]);
 
 const isKind = (value: unknown): value is IdentityEventKind =>
@@ -301,6 +302,9 @@ class IdentityStream {
     ]);
     if (kinds.has("sessions")) {
       await safe(() => store.refreshSessions());
+    }
+    if (kinds.has("plugins")) {
+      await safe(() => store.loadPlugins());
     }
     // Losing app.read ends this stream's contract; reconnect would only 403.
     if (!can("app.read")) this.stop();

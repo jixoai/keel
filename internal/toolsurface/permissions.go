@@ -66,7 +66,8 @@ type ToolPermission struct {
 //     (prompt/choice), approval.write for a yes/no approval (confirm). Both are
 //     session-scoped.
 //   - notify push/ack write; list reads.
-//   - creation installs/validates/scaffolds plugin packages: plugin.invoke.
+//   - creation discovery/scaffold/validate/list are plugin.invoke; install and
+//     remove are high-risk lifecycle writes and need plugin.lifecycle.*.
 //   - media tools spend the deployment's provider credentials: media.invoke.
 //   - decision_ask spends the decision-model credential: decision.ask.
 var toolPermissionCatalog = []ToolPermission{
@@ -116,9 +117,9 @@ var toolPermissionCatalog = []ToolPermission{
 	{Tool: Creation, Action: ActionCatalog, Key: access.KeyPluginInvoke},
 	{Tool: Creation, Action: ActionScaffold, Key: access.KeyPluginInvoke},
 	{Tool: Creation, Action: ActionValidate, Key: access.KeyPluginInvoke},
-	{Tool: Creation, Action: ActionInstall, Key: access.KeyPluginInvoke},
+	{Tool: Creation, Action: ActionInstall, Key: access.KeyPluginLifecycleInstall},
 	{Tool: Creation, Action: ActionList, Key: access.KeyPluginInvoke},
-	{Tool: Creation, Action: ActionRemove, Key: access.KeyPluginInvoke},
+	{Tool: Creation, Action: ActionRemove, Key: access.KeyPluginLifecycleUninstall},
 
 	{Tool: ImageGenerate, Key: access.KeyMediaInvoke},
 	{Tool: VideoGenerate, Key: access.KeyMediaInvoke},

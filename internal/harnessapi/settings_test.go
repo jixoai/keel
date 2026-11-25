@@ -721,8 +721,11 @@ func TestSettingsPluginsInventory(t *testing.T) {
 	client := server.Client()
 
 	var raw json.RawMessage
-	if code := doSettingsJSON(t, client, http.MethodGet, server.URL+"/v1/settings/plugins", uuid.New(), nil, &raw); code != 200 {
+	if code := doSettingsJSON(t, client, http.MethodGet, server.URL+"/v1/settings/plugins", pluginTestTenant, nil, &raw); code != 200 {
 		t.Fatalf("plugins inventory = %d", code)
+	}
+	if code := doSettingsJSON(t, client, http.MethodGet, server.URL+"/v1/settings/plugins", uuid.New(), nil, nil); code != http.StatusNotFound {
+		t.Fatalf("foreign tenant settings inventory = %d, want 404", code)
 	}
 	var body settingsPluginsResponse
 	if err := json.Unmarshal(raw, &body); err != nil {
@@ -761,7 +764,7 @@ func TestSettingsPluginsStatesApprovalsUnwired(t *testing.T) {
 	manager := &fakePluginManager{inventory: harnessext.PluginInventory{Revision: 1, Plugins: []harnessext.PluginView{}}}
 	server := settingsServer(t, func(cfg *Config) { cfg.PluginManager = manager })
 	var body settingsPluginsResponse
-	if code := doSettingsJSON(t, server.Client(), http.MethodGet, server.URL+"/v1/settings/plugins", uuid.New(), nil, &body); code != 200 {
+	if code := doSettingsJSON(t, server.Client(), http.MethodGet, server.URL+"/v1/settings/plugins", pluginTestTenant, nil, &body); code != 200 {
 		t.Fatalf("plugins inventory = %d", code)
 	}
 	if !body.ApprovalRequired || body.ApprovalsWired {
@@ -775,7 +778,7 @@ func TestSettingsPluginsStatesApprovalsUnwired(t *testing.T) {
 func TestSettingsPluginsUnwired(t *testing.T) {
 	server := settingsServer(t, nil)
 	var body map[string]any
-	if code := doSettingsJSON(t, server.Client(), http.MethodGet, server.URL+"/v1/settings/plugins", uuid.New(), nil, &body); code != 501 {
+	if code := doSettingsJSON(t, server.Client(), http.MethodGet, server.URL+"/v1/settings/plugins", pluginTestTenant, nil, &body); code != 501 {
 		t.Fatalf("unwired plugins = %d %v, want 501", code, body)
 	}
 }

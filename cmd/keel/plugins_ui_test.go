@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -12,17 +13,25 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/jixoai/keel/internal/auth"
 	"github.com/jixoai/keel/internal/harnessext"
+	"github.com/jixoai/keel/internal/store"
 )
 
 // pluginUITestTenant is the tenant the test manager serves. The auth middleware
-// injects X-Tenant-ID on every request; a direct handler test must do the same.
+// injects the principal; a direct handler test attaches the same principal to
+// the request context instead of trusting a request header.
 const pluginUITestTenant = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 
 func pluginUIRequest(method, path, tenantID string) *http.Request {
 	req := httptest.NewRequest(method, path, nil)
 	if tenantID != "" {
-		req.Header.Set("X-Tenant-ID", tenantID)
+		tenantID, err := uuid.Parse(tenantID)
+		if err == nil {
+			req = req.WithContext(auth.WithPrincipal(req.Context(), auth.Principal{
+				Kind: auth.PrincipalHuman, TenantID: tenantID, AccountID: uuid.New(),
+			}))
+		}
 	}
 	return req
 }
@@ -161,14 +170,26 @@ func TestPluginUIHostsEnabledPluginOnly(t *testing.T) {
 	if rec.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("post = %d", rec.Code)
 	}
-	// A missing or foreign tenant is the same 404 an unknown plugin gets: the
-	// manager serves exactly one tenant and never confirms another's ids.
-	for _, tenant := range []string{"", uuid.NewString()} {
-		rec := httptest.NewRecorder()
-		handler.ServeHTTP(rec, pluginUIRequest(http.MethodGet, "/plugins/vendor.panel/", tenant))
-		if rec.Code != http.StatusNotFound {
-			t.Fatalf("tenant %q = %d %q", tenant, rec.Code, rec.Body.String())
-		}
+	// No principal is unauthenticated (the edge middleware answers this before
+	// the handler; the handler still fails closed). A foreign principal gets the
+	// same 404 an unknown plugin gets and never confirms another tenant's id.
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/plugins/vendor.panel/", nil))
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated = %d %q", rec.Code, rec.Body.String())
+	}
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, pluginUIRequest(http.MethodGet, "/plugins/vendor.panel/", uuid.NewString()))
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("foreign tenant = %d %q", rec.Code, rec.Body.String())
+	}
+	// A forged X-Tenant-ID without a principal is still unauthenticated.
+	forged := httptest.NewRequest(http.MethodGet, "/plugins/vendor.panel/", nil)
+	forged.Header.Set("X-Tenant-ID", pluginUITestTenant)
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, forged)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("forged tenant header = %d %q", rec.Code, rec.Body.String())
 	}
 }
 
@@ -328,6 +349,104 @@ contributes:
 	}
 	if rec := get("/plugins/demo.chunk/"); rec.Code != http.StatusNotFound {
 		t.Fatalf("chunk-only page = %d", rec.Code)
+	}
+}
+
+// TestPluginUIRequiresTheRealSession is the P0 control: /plugins/ is behind the
+// auth middleware, a module import authenticates with the login cookie alone
+// (no X-Tenant-ID header), and neither an anonymous request nor a forged tenant
+// header reaches an enabled plugin's asset.
+func TestPluginUIRequiresTheRealSession(t *testing.T) {
+	dsn := os.Getenv("KEEL_TEST_DSN")
+	if dsn == "" {
+		t.Skip("KEEL_TEST_DSN not set")
+	}
+	tenant := uuid.New()
+	var stForCleanup *store.Store
+	env := newAuthTestEnvWithMux(t, authModeRequired, tenant, func(mux *http.ServeMux, st *store.Store) {
+		stForCleanup = st
+		root := t.TempDir()
+		dir := filepath.Join(root, "vendor.panel")
+		if err := os.MkdirAll(filepath.Join(dir, "ui"), 0o755); err != nil {
+			t.Fatalf("plugin package: %v", err)
+		}
+		// A pure chunk package: the module lives at the package-relative entry the
+		// contribution declares, which is exactly what a runtime import requests.
+		manifest := `id: vendor.panel
+version: 1.0.0
+kind: webview
+description: chunk-only test package
+provides: {}
+contributes:
+  - slot: keel.ui.settings-section
+    form: chunk
+    entry: ui/settings.js
+`
+		if err := os.WriteFile(filepath.Join(dir, "plugin.yaml"), []byte(manifest), 0o644); err != nil {
+			t.Fatalf("manifest: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "ui", "settings.js"), []byte("export function render(){return null}\n"), 0o644); err != nil {
+			t.Fatalf("chunk: %v", err)
+		}
+		runtime := harnessext.NewRuntime(harnessext.RuntimeOptions{Logger: discardLogger()})
+		t.Cleanup(func() { runtime.Close(context.Background()) })
+		manager, err := harnessext.NewPluginManager(harnessext.ManagerOptions{
+			TenantID:    tenant,
+			Root:        root,
+			Runtime:     runtime,
+			Persistence: st,
+			KeelVersion: "0.2.0",
+			Logger:      discardLogger(),
+		})
+		if err != nil {
+			t.Fatalf("plugin manager: %v", err)
+		}
+		if err := manager.Boot(context.Background()); err != nil {
+			t.Fatalf("boot: %v", err)
+		}
+		if _, err := manager.Enable(context.Background(), "vendor.panel", harnessext.AuditContext{Actor: "test"}); err != nil {
+			t.Fatalf("enable: %v", err)
+		}
+		mux.Handle("/plugins/", newPluginUIHandler(manager, discardLogger()))
+	})
+	t.Cleanup(func() {
+		ctx := context.Background()
+		_, _ = stForCleanup.Pool().Exec(ctx, `DELETE FROM plugin_audit WHERE tenant_id = $1`, tenant)
+		_, _ = stForCleanup.Pool().Exec(ctx, `DELETE FROM plugins WHERE tenant_id = $1`, tenant)
+	})
+
+	asset := "/plugins/vendor.panel/ui/settings.js"
+	// Anonymous: 401 before the handler.
+	anon := env.newClient()
+	res, err := anon.Get(env.server.URL + asset)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("anonymous plugin asset = %d", res.StatusCode)
+	}
+	// A forged tenant header without a session is still unauthenticated.
+	req, _ := http.NewRequest(http.MethodGet, env.server.URL+asset, nil)
+	req.Header.Set("X-Tenant-ID", tenant.String())
+	res, err = anon.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("forged tenant header = %d", res.StatusCode)
+	}
+	// Real login cookie, no custom header: the module is served.
+	env.bootstrapAdmin("admin-password-123")
+	res, err = env.client.Get(env.server.URL + asset)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(res.Body)
+	res.Body.Close()
+	if res.StatusCode != http.StatusOK || !strings.Contains(string(body), "export function render") {
+		t.Fatalf("authenticated plugin asset = %d %q", res.StatusCode, body)
 	}
 }
 

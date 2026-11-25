@@ -324,6 +324,9 @@ func runServe(parent context.Context, opts serveOptions) error {
 		// the tenant role out of band; KEEL_RLS=off is the explicit switch for
 		// that deployment. The default is on, because RLS is the schema contract.
 		DisableRLS: strings.EqualFold(strings.TrimSpace(os.Getenv("KEEL_RLS")), "off"),
+		// An upgrade from the deployment-level plugin inventory adopts those rows
+		// into the serving tenant (one process = one tenant).
+		PluginTenant: opts.TenantID,
 	})
 	if err != nil {
 		return fmt.Errorf("open store: %w", err)
@@ -1678,6 +1681,10 @@ func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, 
 			return runControl.Status(kernel.Scope{TenantID: tenantID, SessionID: sessionID})
 		},
 	})
+	// A lifecycle write (API or creation tool) invalidates the tenant's plugin
+	// inventory over the same SSE tail the identity pages use; the client
+	// re-reads GET /v1/plugins, never a row from the event.
+	manager.SetChangeSink(api.PublishPluginChange)
 	auth, err := newAuthController(authConfig{
 		Mode:       opts.AuthMode,
 		Store:      st,

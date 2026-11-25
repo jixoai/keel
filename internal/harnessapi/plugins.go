@@ -143,6 +143,9 @@ type installPluginRequest struct {
 	// Path is a local package directory. Its content is validated, hashed and
 	// copied into the managed plugins root.
 	Path string `json:"path"`
+	// ExpectedHash binds the approval to the package content the client read.
+	// The manager refuses a package whose hash no longer matches.
+	ExpectedHash string `json:"expectedHash,omitempty"`
 	// The durable approval of this install (see plugin_approval.go): without a
 	// decisionId the call answers 202 with the question it opened.
 	pluginApprovalRequest
@@ -154,11 +157,11 @@ func (s *Server) installPlugin(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err)
 		return
 	}
-	manager, audit, ok := s.pluginWriteContext(w, r, installApprovalAsk(body.Path), body.pluginApprovalRequest)
+	manager, audit, ok := s.pluginWriteContext(w, r, installApprovalAsk(body.Path, body.ExpectedHash), body.pluginApprovalRequest)
 	if !ok {
 		return
 	}
-	view, err := manager.Install(r.Context(), harnessext.InstallRequest{Path: body.Path}, audit)
+	view, err := manager.Install(r.Context(), harnessext.InstallRequest{Path: body.Path, ExpectedHash: body.ExpectedHash}, audit)
 	if err != nil {
 		s.writePluginError(w, err)
 		return
@@ -370,6 +373,9 @@ func (s *Server) writePluginError(w http.ResponseWriter, err error) {
 	case errors.Is(err, harnessext.ErrPluginTenant):
 		// A cross-tenant lifecycle fact is indistinguishable from an unknown id.
 		status = http.StatusNotFound
+	case errors.Is(err, harnessext.ErrPluginHashMismatch):
+		// The approved content is not the package on disk: ask again.
+		status = http.StatusConflict
 	case errors.Is(err, harnessext.ErrPluginInvalid), errors.Is(err, harnessext.ErrPluginPath):
 		status = http.StatusBadRequest
 		if pluginErr != nil && pluginErr.Op != "" && pluginErr.Op != "install" && pluginErr.Op != "update" {

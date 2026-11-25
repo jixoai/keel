@@ -263,7 +263,51 @@ func (s *Store) AppendPluginAudit(ctx context.Context, entry PluginAuditEntry) (
 	return entry, nil
 }
 
-// ListPluginAudit returns one tenant's audit rows in chronological order
+// adoptLegacyPluginRowsTx moves deployment-level plugin inventory and audit
+// rows into the serving tenant and converts the old id-only key to the
+// tenant-scoped key. It runs inside the schema migration transaction (same
+// advisory lock), so an upgrade is atomic and replica-safe.
+//
+// It never runs for a store opened without a PluginTenant: old NULL rows stay
+// inert (new code only reads a tenant scope) rather than being guessed into a
+// tenant. `keel serve` passes its KEEL_SERVE_TENANT.
+func (s *Store) adoptLegacyPluginRowsTx(ctx context.Context, tx pgx.Tx) error {
+	if s.pluginTenant == uuid.Nil {
+		return nil
+	}
+	if _, err := tx.Exec(ctx, `UPDATE plugins SET tenant_id = $1 WHERE tenant_id IS NULL`, s.pluginTenant); err != nil {
+		return fmt.Errorf("store: adopt legacy plugin rows: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `UPDATE plugin_audit SET tenant_id = $1 WHERE tenant_id IS NULL`, s.pluginTenant); err != nil {
+		return fmt.Errorf("store: adopt legacy plugin audit rows: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `DO $$
+DECLARE
+    pk_def text;
+BEGIN
+    SELECT pg_get_constraintdef(oid) INTO pk_def
+      FROM pg_constraint
+     WHERE conrelid = 'public.plugins'::regclass AND contype = 'p';
+    IF pk_def IS NULL OR pk_def NOT LIKE '%tenant_id%' THEN
+        ALTER TABLE public.plugins DROP CONSTRAINT IF EXISTS plugins_pkey;
+        ALTER TABLE public.plugins ADD CONSTRAINT plugins_pkey PRIMARY KEY (tenant_id, id);
+    END IF;
+END
+$$;`); err != nil {
+		return fmt.Errorf("store: adopt plugin primary key: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `DROP INDEX IF EXISTS public.plugins_tenant_id_uidx`); err != nil {
+		return fmt.Errorf("store: drop plugin tenant index: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `ALTER TABLE plugins ALTER COLUMN tenant_id SET NOT NULL`); err != nil {
+		return fmt.Errorf("store: tighten plugin tenant: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `ALTER TABLE plugin_audit ALTER COLUMN tenant_id SET NOT NULL`); err != nil {
+		return fmt.Errorf("store: tighten plugin audit tenant: %w", err)
+	}
+	return nil
+}
+
 // (audit_id > after), optionally narrowed to one plugin. There is no
 // deployment-wide read: a caller that does not name a tenant has no
 // cross-tenant view.

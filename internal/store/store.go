@@ -49,6 +49,11 @@ type Config struct {
 	// non-owner RLS role and serve per-request tenant transactions. Zero uses the
 	// default (8). The pool is created only when RLS is applied.
 	TenantConns int32
+	// PluginTenant, when set, adopts legacy deployment-level plugin rows into
+	// this tenant during Migrate. `keel serve` passes its KEEL_SERVE_TENANT so an
+	// upgrade moves the old inventory into the tenant view instead of failing.
+	// A store without a tenant leaves old NULL rows inert and never assigns them.
+	PluginTenant uuid.UUID
 }
 
 func (c *Config) applyDefaults() {
@@ -89,6 +94,9 @@ type Store struct {
 	tenantPool *pgxpool.Pool
 	// skipRLS keeps Migrate from applying the RLS migration (see Config).
 	skipRLS bool
+	// pluginTenant is the tenant legacy deployment-level plugin rows are adopted
+	// into during Migrate (zero: no adoption).
+	pluginTenant uuid.UUID
 }
 
 // Open connects, tunes the session, and applies the schema (idempotent).
@@ -145,7 +153,8 @@ func Open(ctx context.Context, cfg Config) (*Store, error) {
 		pool.Close()
 		return nil, fmt.Errorf("store: lock pool: %w", err)
 	}
-	s := &Store{pool: pool, acquireTimeout: cfg.AcquireTimeout, lockPool: lockPool, skipRLS: cfg.DisableRLS}
+	s := &Store{pool: pool, acquireTimeout: cfg.AcquireTimeout, lockPool: lockPool, skipRLS: cfg.DisableRLS,
+		pluginTenant: cfg.PluginTenant}
 	if err := s.Migrate(ctx); err != nil {
 		lockPool.Close()
 		pool.Close()
@@ -288,6 +297,12 @@ func (s *Store) migrateOnce(ctx context.Context, sql string) error {
 	}
 	if _, err := tx.Exec(ctx, sql); err != nil {
 		return fmt.Errorf("store: migrate: %w", err)
+	}
+	// Alpha upgrade: adopt deployment-level plugin rows/audit into the serving
+	// tenant under the same advisory lock as the schema, so an upgrade is one
+	// atomic step and two replicas cannot adopt differently.
+	if err := s.adoptLegacyPluginRowsTx(ctx, tx); err != nil {
+		return err
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("store: migrate commit: %w", err)

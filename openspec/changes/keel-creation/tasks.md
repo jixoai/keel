@@ -13,10 +13,12 @@
       不写第二套路径。
   - `plugins(tenant_id,id)` PK、`plugin_audit.tenant_id NOT NULL`；Manager 绑定
     `ManagerOptions.TenantID`；单租户部署就是这一个 tenant，无部署级分支。
-- [x] 1.3 迁移/启动拒绝旧部署级状态，不保留双读；补跨租户负控。
-  - schema 尾部迁移：空旧表原地升级；仍有部署级行的旧表启动即 `RAISE EXCEPTION`；
-    旧 NULL-tenant 审计行删除后列收紧为 NOT NULL。负控见
-    `TestPluginManagerTenantIsolation`、`TestCreationRefusesAnotherTenant`、
+- [x] 1.3 迁移旧部署级状态；不保留双读；补跨租户负控。
+  - `store.Config.PluginTenant`（serve 传 `KEEL_SERVE_TENANT`）在 schema 迁移事务内把旧
+    `plugins`/`plugin_audit` NULL-tenant 行 adopt 到该 tenant，保留审计历史，并把 old `id` 主键
+    换成 `(tenant_id,id)`；无 tenant 的 store 不猜测归属，旧行 inert。真 PG 升级测试
+    `TestLegacyPluginInventoryAdoptsIntoPluginTenant`。
+  - 负控见 `TestPluginManagerTenantIsolation`、`TestCreationRefusesAnotherTenant`、
     `TestPluginAPIRefusesAnotherTenant`、`TestPluginUIHostsEnabledPluginOnly`（foreign tenant 404）。
 
 ## 2. Creation 闭环
@@ -43,10 +45,12 @@
   - 后端闭环测试 `TestCreationScaffoldValidateInstallListRemove`；chunk-only 托管
     `TestPluginUIHostsDeclaredChunkEntries`；web 槽位同步沿用 W12 `syncPluginInventory`。
 - [x] 3.2 web 插件页/槽位五态；TUI/headless 不可用形态显式标注。
-  - 插件页 loading/empty/error/no-permission/success；终端显示
-    「只渲染 chunk/data；页面/iframe/package 需浏览器」；槽位沿用 loading/failure/unavailable。
+  - 插件页 loading/empty/error/no-permission/success；终端明确「只渲染随应用构建的 chunk/data；
+    页面/iframe/签名包与运行时 chunk 需浏览器」；槽位沿用 loading/failure/unavailable。
 - [x] 3.3 权限门：`plugin.invoke` / `plugin.lifecycle.*`；无权限 403/隐藏动作。
-  - HTTP matrix 已有 key；creation 工具经 `plugin.invoke`；UI `can()` 隐藏入口并显示缺权提示。
+  - catalog/scaffold/validate/list → `plugin.invoke`；install → `plugin.lifecycle.install`；
+    remove → `plugin.lifecycle.uninstall`；UI `can()` 隐藏入口并显示缺权提示；
+    `TestCreationInstallNeedsLifecycleKey`、`TestPluginApprovalRequiresLifecycleKey`。
 
 ## 4. 验收
 
@@ -60,3 +64,25 @@
   - 已完成：`go test -race`（harnessext/harnessapi/cmd/keel/pluginpkg/architecture/fileplugin/
     store）、`nsh check`、`nsh test --target tui`（409 passed）、`openspec validate keel-creation --strict`。
   - 未完成：独立 reviewer、HTML 报告公网链接、archive。
+
+## 5. 独立复核整改（2026-11-26）
+
+- [x] P0-1 `/plugins/<id>/...` 走真实会话鉴权：auth 中间件保护 `/plugins/`，未登录 401；
+  插件 UI handler 只从 principal 取 tenant，不再信任 `X-Tenant-ID`；真实 authController +
+  登录 cookie 的 E2E：`TestPluginUIRequiresTheRealSession`（匿名/伪造头 401，cookie 200）。
+- [x] P1-1 idempotent install 不再在审批前 enable disabled 插件：返回 `status=disabled` 与
+  enable 审批提示；`TestCreationInstallDoesNotEnableADisabledPlugin`。
+- [x] P1-2 creation 权限拆分（catalog/scaffold/validate/list→invoke，install/remove→lifecycle.*）；
+  `TestCreationInstallNeedsLifecycleKey`、`TestPluginApprovalRequiresLifecycleKey`。
+- [x] P1-3 审批人门：bot 不能回答（self-approval 负控），按 action 要求 lifecycle key，
+  decision answer/audit 记录 `answeredBy/answeredByKind`；`TestPluginApprovalBotCannotAnswer`、
+  `TestSessionDecisionPluginApprovalUsesTheSameGate`。
+- [x] P1-4 内容绑定：`InstallRequest.ExpectedHash` 复制前校验；API decision requestID 含
+  hash/version；creation decision 绑定 hash+version；`TestPluginManagerInstallRefusesUnapprovedContent`、
+  `TestCreationInstallBindsApprovalToPackageContent`、`TestPluginApprovalBindsInstallToContent`。
+- [x] P1-5 `creation.validate` 成功/失败审计（字段路径），remove 的 disable/uninstall/staging
+  失败分支审计；`TestCreationValidateReportsFieldErrors`。
+- [x] P1-6 旧库 adopt：见 1.3；`plugin_audit` 旧行保留并 adopt，不 DELETE。
+- [x] P2 `GET /v1/settings/plugins` tenant 门；插件 inventory SSE `kind=plugins`（web
+  `identity-stream` 触发 `loadPlugins`）；插件页安装/创建文案与 TUI loader 行为对齐；
+  remove bundled 先拒绝不再 disable；相关测试随包通过。

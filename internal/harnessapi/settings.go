@@ -1071,7 +1071,8 @@ type settingsAuditRef struct {
 // settingsPlugins implements GET /v1/settings/plugins: the settings page's one
 // request for the plugin section.
 func (s *Server) settingsPlugins(w http.ResponseWriter, r *http.Request) {
-	if _, ok := tenantFrom(w, r); !ok {
+	tenantID, ok := tenantFrom(w, r)
+	if !ok {
 		return
 	}
 	if s.cfg.PluginManager == nil {
@@ -1079,6 +1080,10 @@ func (s *Server) settingsPlugins(w http.ResponseWriter, r *http.Request) {
 		// manager (a host that only compiles plugins in) has nothing live to report
 		// here — GET /v1/plugins still answers its assembled snapshot.
 		notWired(w, "the plugin manager is not wired in this deployment")
+		return
+	}
+	if tenantID != s.cfg.PluginManager.TenantID() {
+		writeErr(w, http.StatusNotFound, errors.New("plugin management is not available for this tenant"))
 		return
 	}
 	inventory := s.cfg.PluginManager.Snapshot()

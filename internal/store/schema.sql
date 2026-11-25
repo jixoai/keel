@@ -672,12 +672,13 @@ CREATE TABLE IF NOT EXISTS plugin_audit (
 CREATE INDEX IF NOT EXISTS plugin_audit_tenant ON plugin_audit (tenant_id, audit_id);
 CREATE INDEX IF NOT EXISTS plugin_audit_plugin ON plugin_audit (plugin_id, audit_id);
 
--- Alpha zero compatibility for the pre-keel-creation shape. An empty old table
--- is migrated in place; a table that still holds deployment-level rows refuses
--- startup (there is no second read path and no way to guess which tenant owned
--- a deployment-wide install). Old NULL-tenant audit rows are retired: they
--- described the retired deployment-level mode and would otherwise create a
--- second, cross-tenant read path.
+-- Compatibility for the pre-keel-creation shape. The schema only makes the new
+-- columns addressable: it must not assign a tenant to an old deployment-level
+-- row (only the serving process knows that tenant) and it must not retire audit
+-- history. Store.Migrate adopts the rows to Config.PluginTenant when one is
+-- configured; a store opened without a tenant leaves old NULL rows inert (new
+-- manager reads are tenant-scoped) and refuses only when it is asked to manage
+-- plugin state.
 DO $$
 DECLARE
     pk_def text;
@@ -688,17 +689,16 @@ BEGIN
                           AND column_name = 'tenant_id') THEN
             ALTER TABLE public.plugins ADD COLUMN tenant_id uuid;
         END IF;
-        IF EXISTS (SELECT 1 FROM public.plugins WHERE tenant_id IS NULL) THEN
-            RAISE EXCEPTION 'plugins: the deployment-level plugin inventory still holds rows; this build stores plugin state per tenant and has no migration path. Back up the database, drop the plugins table (or recreate the database), and install plugins under a tenant';
-        END IF;
         SELECT pg_get_constraintdef(oid) INTO pk_def
           FROM pg_constraint
          WHERE conrelid = 'public.plugins'::regclass AND contype = 'p';
+        -- The old id-only primary key would collide the same plugin across
+        -- tenants. Replace it with a tenant-scoped unique index (NULL rows stay
+        -- distinct until adoption) so ON CONFLICT (tenant_id,id) works.
         IF pk_def IS NULL OR pk_def NOT LIKE '%tenant_id%' THEN
             ALTER TABLE public.plugins DROP CONSTRAINT IF EXISTS plugins_pkey;
-            ALTER TABLE public.plugins ADD CONSTRAINT plugins_pkey PRIMARY KEY (tenant_id, id);
+            CREATE UNIQUE INDEX IF NOT EXISTS plugins_tenant_id_uidx ON public.plugins (tenant_id, id);
         END IF;
-        ALTER TABLE public.plugins ALTER COLUMN tenant_id SET NOT NULL;
     END IF;
     IF to_regclass('public.plugin_audit') IS NOT NULL THEN
         IF NOT EXISTS (SELECT 1 FROM information_schema.columns
@@ -706,8 +706,6 @@ BEGIN
                           AND column_name = 'tenant_id') THEN
             ALTER TABLE public.plugin_audit ADD COLUMN tenant_id uuid;
         END IF;
-        DELETE FROM public.plugin_audit WHERE tenant_id IS NULL;
-        ALTER TABLE public.plugin_audit ALTER COLUMN tenant_id SET NOT NULL;
     END IF;
 END
 $$;

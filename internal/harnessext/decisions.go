@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -45,11 +46,15 @@ type DecisionOption struct {
 }
 
 // DecisionAnswer is the recorded answer: an option for a menu, free text for a
-// clarify question, or both when the decision allows free text.
+// clarify question, or both when the decision allows free text. AnsweredBy*
+// names the authenticated approver (account id or the operator label) and its
+// principal kind; it is the audit attribution of "who answered".
 type DecisionAnswer struct {
-	OptionID string    `json:"optionId,omitempty"`
-	Text     string    `json:"text,omitempty"`
-	At       time.Time `json:"at"`
+	OptionID       string    `json:"optionId,omitempty"`
+	Text           string    `json:"text,omitempty"`
+	At             time.Time `json:"at"`
+	AnsweredBy     string    `json:"answeredBy,omitempty"`
+	AnsweredByKind string    `json:"answeredByKind,omitempty"`
 }
 
 // Decision is the wire/state document of one approval question.
@@ -112,6 +117,11 @@ type AnswerDecisionRequest struct {
 	DecisionID uuid.UUID
 	OptionID   string
 	Text       string
+	// Actor is the authenticated approver (an account id or operator label) and
+	// ActorKind its principal kind. They are recorded on the answer, never used
+	// to authorize.
+	Actor     string
+	ActorKind string
 }
 
 // DecisionRow is the durable projection of one decision. Events is the answer
@@ -329,7 +339,8 @@ func (b *DecisionBroker) Answer(ctx context.Context, req AnswerDecisionRequest) 
 		return rowToDecision(row), false, ErrDecisionClosed
 	}
 
-	answer := DecisionAnswer{OptionID: req.OptionID, Text: req.Text, At: b.now()}
+	answer := DecisionAnswer{OptionID: req.OptionID, Text: req.Text, At: b.now(),
+		AnsweredBy: strings.TrimSpace(req.Actor), AnsweredByKind: strings.TrimSpace(req.ActorKind)}
 	if answer.OptionID == "" && answer.Text == "" {
 		return rowToDecision(row), false, fmt.Errorf("%w: optionId or text is required", ErrInvalidDecision)
 	}

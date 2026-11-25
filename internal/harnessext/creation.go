@@ -185,9 +185,10 @@ The three kinds:
 The generated package also carries the extension documents:
   contributes: [{slot, form: chunk, entry: ui/settings.js}]   # Native chunk
   extensibility: { doc: EXTENSIBILITY.md, schema: extensibility.json }
-The chunk is imported into the host tree (same VM, host theme tokens, web/
-native/TUI); extensibility.json and EXTENSIBILITY.md describe the same surface
-and are validated against plugin.yaml (drift is refused).
+The chunk is imported into the host tree (same VM, host theme tokens, web and
+native; the TUI only loads chunks bundled with the app). extensibility.json and
+EXTENSIBILITY.md describe the same surface and are validated against
+plugin.yaml (drift is refused).
 
 Published tool names must be wire safe: the host joins <id>.<local tool> and
 replaces every character outside [A-Za-z0-9_-] with '_', so plugin "demo.panel"
@@ -629,11 +630,48 @@ func (c *creationPlugin) validate(ctx context.Context, _ string, raw json.RawMes
 	id := strings.TrimSpace(args.ID)
 	dir, failure := c.resolveStaged(manager, id, args.Path)
 	if failure != nil {
+		detail := map[string]any{"stage": "resolve"}
+		if reason, _ := (*failure)["error"].(string); reason != "" {
+			detail["reason"] = reason
+		}
+		c.audit(ctx, manager, id, "", "creation.validate", store.PluginResultFailed, detail)
 		return creationResult(*failure, true), nil
 	}
 	document := c.validationDocument(manager, id, dir)
 	ok, _ := document["ok"].(bool)
+	result := store.PluginResultFailed
+	detail := map[string]any{
+		"status": document["status"],
+		"hash":   document["hash"],
+		"fields": auditFieldPaths(document["problems"]),
+	}
+	if ok {
+		result = store.PluginResultOK
+	}
+	c.audit(ctx, manager, id, fmt.Sprint(document["version"]), "creation.validate", result, detail)
 	return creationResult(document, !ok), nil
+}
+
+// auditFieldPaths keeps only the field paths of a validation problem set: the
+// audit names where a package failed, never its body.
+func auditFieldPaths(value any) []string {
+	out := []string{}
+	switch fields := value.(type) {
+	case []pluginpkg.FieldError:
+		for _, field := range fields {
+			if field.Field != "" {
+				out = append(out, field.Field)
+			}
+		}
+	case []any:
+		for _, raw := range fields {
+			entry, _ := raw.(map[string]any)
+			if field, _ := entry["field"].(string); field != "" {
+				out = append(out, field)
+			}
+		}
+	}
+	return out
 }
 
 // validationDocument runs the real validator plus the structural checks a
@@ -733,16 +771,21 @@ func (c *creationPlugin) install(ctx context.Context, _ string, raw json.RawMess
 		return creationResult(failureDocument("creation mode needs a tenant: call it inside a turn, or configure the deployment tenant", nil), true), nil
 	}
 	// Idempotent replay: the same package (id + version + content hash) is already
-	// installed and enabled. A repeated call — including a retry with the same
-	// requestId — returns the same view and writes no second state. A different
-	// package under the same id is a conflict (update is the explicit action).
+	// installed and ENABLED. A repeated call — including a retry with the same
+	// requestId — returns the same view and writes no second state. A disabled or
+	// otherwise inactive plugin is NOT enabled here: enabling is a lifecycle
+	// write that needs its own durable approval.
 	if existing, found := pluginViewOf(manager, id); found {
 		if existing.ContentHash == pkg.Hash && existing.Version == pkg.Version() {
 			if existing.State != LifecycleEnabled {
-				if _, err := manager.Enable(ctx, id, AuditContext{TenantID: &tenant, Actor: "plugin:" + CreationPluginID + "/install"}); err != nil {
-					return creationResult(failureDocument("enable: "+err.Error(), nil), true), nil
-				}
-				existing, _ = pluginViewOf(manager, id)
+				c.audit(ctx, manager, id, pkg.Version(), "creation.install", store.PluginResultRefused,
+					map[string]any{"reason": "plugin is installed but not enabled", "state": string(existing.State)})
+				document := failureDocument(fmt.Sprintf(
+					"plugin %s %s is %s; enabling is a separate lifecycle write: call POST /v1/plugins/%s/enable with its own durable approval",
+					id, existing.Version, existing.State, id), nil)
+				document["status"] = "disabled"
+				document["action"] = "enable"
+				return creationResult(document, true), nil
 			}
 			c.audit(ctx, manager, id, pkg.Version(), "creation.install", store.PluginResultOK,
 				map[string]any{"idempotent": true, "hash": pkg.Hash, "decisionId": args.DecisionID})
@@ -754,7 +797,7 @@ func (c *creationPlugin) install(ctx context.Context, _ string, raw json.RawMess
 			"plugin %s %s is already installed with a different package; remove it first or change its version", id, existing.Version), nil), true), nil
 	}
 	approved, approval, err := c.approve(ctx, tenant, store.PluginActionInstall, id,
-		installationPrompt(pkg, dir), args)
+		"content="+pkg.Hash+":version="+pkg.Version(), installationPrompt(pkg, dir), args)
 	if err != nil {
 		return creationResult(failureDocument(err.Error(), nil), true), nil
 	}
@@ -765,8 +808,9 @@ func (c *creationPlugin) install(ctx context.Context, _ string, raw json.RawMess
 		}
 		return creationResult(approval, stateIsError(approval)), nil
 	}
-	audit := AuditContext{TenantID: &tenant, Actor: "plugin:" + CreationPluginID + "/install"}
-	view, err := manager.Install(ctx, InstallRequest{Path: dir}, audit)
+	audit := AuditContext{TenantID: &tenant,
+		Actor: approvalActor("plugin:"+CreationPluginID+"/install", approval)}
+	view, err := manager.Install(ctx, InstallRequest{Path: dir, ExpectedHash: pkg.Hash}, audit)
 	if err != nil {
 		c.cleanupStaged(manager, id)
 		c.audit(ctx, manager, id, pkg.Version(), "creation.install", store.PluginResultFailed,
@@ -958,11 +1002,24 @@ func (c *creationPlugin) remove(ctx context.Context, _ string, raw json.RawMessa
 	if installed {
 		version = view.Version
 	}
+	// A bundled plugin is not a creation artifact: refuse before any lifecycle
+	// write. Disabling it first would leave the built-in plugin off even though
+	// the uninstall could never succeed.
+	if installed && view.Bundled {
+		c.audit(ctx, manager, id, version, "creation.remove", store.PluginResultRefused,
+			map[string]any{"reason": "bundled plugin cannot be removed"})
+		return creationResult(failureDocument(
+			"plugin "+id+" is bundled with the binary and cannot be removed; disable it through the plugin lifecycle if it must be off", nil), true), nil
+	}
 	tenant, ok := c.tenant(ctx)
 	if !ok {
 		return creationResult(failureDocument("creation mode needs a tenant: call it inside a turn, or configure the deployment tenant", nil), true), nil
 	}
-	approved, approval, err := c.approve(ctx, tenant, store.PluginActionUninstall, id,
+	binding := "version=" + version
+	if installed && view.ContentHash != "" {
+		binding += ":content=" + view.ContentHash
+	}
+	approved, approval, err := c.approve(ctx, tenant, store.PluginActionUninstall, id, binding,
 		fmt.Sprintf("Remove the generated plugin %s%s? The plugin is uninstalled (if installed) and its staged package is deleted.", id, versionSuffix(version)),
 		args)
 	if err != nil {
@@ -975,15 +1032,20 @@ func (c *creationPlugin) remove(ctx context.Context, _ string, raw json.RawMessa
 		}
 		return creationResult(approval, stateIsError(approval)), nil
 	}
-	audit := AuditContext{TenantID: &tenant, Actor: "plugin:" + CreationPluginID + "/remove"}
+	audit := AuditContext{TenantID: &tenant,
+		Actor: approvalActor("plugin:"+CreationPluginID+"/remove", approval)}
 	uninstalled := false
 	if installed {
 		if view.State == LifecycleEnabled {
 			if _, err := manager.Disable(ctx, id, audit); err != nil {
+				c.audit(ctx, manager, id, version, "creation.remove", store.PluginResultFailed,
+					map[string]any{"stage": "disable", "reason": err.Error()})
 				return creationResult(failureDocument("disable before removal: "+err.Error(), nil), true), nil
 			}
 		}
 		if _, err := manager.Uninstall(ctx, id, audit); err != nil {
+			c.audit(ctx, manager, id, version, "creation.remove", store.PluginResultFailed,
+				map[string]any{"stage": "uninstall", "reason": err.Error()})
 			return creationResult(failureDocument("uninstall: "+err.Error(), nil), true), nil
 		}
 		uninstalled = true
@@ -991,6 +1053,8 @@ func (c *creationPlugin) remove(ctx context.Context, _ string, raw json.RawMessa
 	stagingRemoved := false
 	if staged != "" {
 		if err := os.RemoveAll(staged); err != nil {
+			c.audit(ctx, manager, id, version, "creation.remove", store.PluginResultFailed,
+				map[string]any{"stage": "staging", "reason": err.Error()})
 			return creationResult(failureDocument("delete the staged package: "+err.Error(), nil), true), nil
 		}
 		stagingRemoved = true
@@ -1010,7 +1074,7 @@ func (c *creationPlugin) remove(ctx context.Context, _ string, raw json.RawMessa
 // approvalDocument is the answer while a question is not answered yet (or was
 // refused): the client answers at answerUrl, then repeats the call with
 // decisionId.
-func (c *creationPlugin) approve(ctx context.Context, tenant uuid.UUID, action, id, prompt string, args creationApprovalArgs) (bool, map[string]any, error) {
+func (c *creationPlugin) approve(ctx context.Context, tenant uuid.UUID, action, id, binding, prompt string, args creationApprovalArgs) (bool, map[string]any, error) {
 	broker := c.decisions()
 	if broker == nil {
 		return false, nil, fmt.Errorf("creation %s requires the durable approval primitive, but decisions are not wired in this deployment", action)
@@ -1022,6 +1086,9 @@ func (c *creationPlugin) approve(ctx context.Context, tenant uuid.UUID, action, 
 		answerInSession = true
 	}
 	requestID := "creation." + action + ":" + id
+	if binding = strings.TrimSpace(binding); binding != "" {
+		requestID += ":" + binding
+	}
 	if key := strings.TrimSpace(args.RequestID); key != "" {
 		if len(key) > 128 {
 			return false, nil, errors.New("requestId is too long")
@@ -1068,7 +1135,7 @@ func (c *creationPlugin) approve(ctx context.Context, tenant uuid.UUID, action, 
 	case decision.Status == DecisionOpen:
 		return false, approvalDocument("pending", decision, answerURL(decision.DecisionID), id, action), nil
 	case decision.Status == DecisionAnswered && decision.Answer != nil && decision.Answer.OptionID == creationAllowOption:
-		return true, nil, nil
+		return true, approvalDocument("approved", decision, answerURL(decision.DecisionID), id, action), nil
 	default:
 		reason := "the approval decision is " + string(decision.Status)
 		if decision.Answer != nil && decision.Answer.OptionID != "" {
@@ -1083,7 +1150,7 @@ func (c *creationPlugin) approve(ctx context.Context, tenant uuid.UUID, action, 
 
 // approvalDocument renders the not-yet-authorized answer.
 func approvalDocument(status string, decision Decision, answerURL, id, action string) map[string]any {
-	return map[string]any{
+	document := map[string]any{
 		"status":           status,
 		"id":               id,
 		"action":           action,
@@ -1093,6 +1160,24 @@ func approvalDocument(status string, decision Decision, answerURL, id, action st
 		"answerUrl":        answerURL,
 		"next":             "answer the question at answerUrl, then repeat the call with the same decisionId",
 	}
+	if decision.Answer != nil && decision.Answer.AnsweredBy != "" {
+		document["answeredBy"] = decision.Answer.AnsweredBy
+		document["answeredByKind"] = decision.Answer.AnsweredByKind
+	}
+	return document
+}
+
+// approvalActor is the audit actor of an approved lifecycle write: the recorded
+// approver when the decision names one, otherwise the plugin flow itself.
+func approvalActor(fallback string, approval map[string]any) string {
+	if answeredBy, _ := approval["answeredBy"].(string); answeredBy != "" {
+		actor := "approver:" + answeredBy
+		if len(actor) > 128 {
+			actor = actor[:128]
+		}
+		return actor
+	}
+	return fallback
 }
 
 // stateIsError marks approval_required/pending as non-errors (the flow is on

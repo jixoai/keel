@@ -191,9 +191,15 @@ func (a *authController) serve(w http.ResponseWriter, r *http.Request, next http
 		writeAuthError(w, http.StatusForbidden, "loopback_only", "auth="+string(a.cfg.Mode)+" only answers loopback requests")
 		return
 	}
-	// Probes and the static app do not require a session: the login form must be
-	// able to load. /metrics follows the pre-existing operator contract.
-	if path == "/v1/health" || path == "/v1/ready" || path == "/metrics" || !strings.HasPrefix(path, "/v1") {
+	// /plugins/<id>/... is a plugin's hosted UI, not the public static app. It
+	// carries code and state, so it needs the same session as /v1 and the
+	// middleware (not a client header) decides the tenant. A browser's module
+	// import sends cookies automatically; it cannot send X-Tenant-ID.
+	protectedPluginUI := strings.HasPrefix(path, "/plugins/")
+	// Probes and the public static app do not require a session: the login form
+	// must be able to load. /metrics follows the pre-existing operator contract.
+	if !protectedPluginUI &&
+		(path == "/v1/health" || path == "/v1/ready" || path == "/metrics" || !strings.HasPrefix(path, "/v1")) {
 		next.ServeHTTP(w, r)
 		return
 	}
@@ -226,6 +232,14 @@ func (a *authController) serve(w http.ResponseWriter, r *http.Request, next http
 
 	if a.cfg.Mode == authModeRequired {
 		if !anonymousAuthRoute(path) {
+			// A plugin UI is an authenticated resource even when the deployment
+			// still needs bootstrap: answer 401, never a bootstrap page that cannot
+			// authenticate a module import.
+			if protectedPluginUI {
+				w.Header().Set("WWW-Authenticate", `Cookie realm="keel"`)
+				writeAuthError(w, http.StatusUnauthorized, "authentication_required", "authentication required")
+				return
+			}
 			required, err := a.service.BootstrapRequired(r.Context())
 			if err != nil {
 				writeAuthError(w, http.StatusServiceUnavailable, "auth_unavailable", "authentication is not ready")

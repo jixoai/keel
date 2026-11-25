@@ -151,6 +151,7 @@ func TestAuthorizeKeysUseThePermissionRegistry(t *testing.T) {
 		{"approve", call("approve", `{"action":"confirm","prompt":"ok?"}`), access.KeyApprovalWrite, "session", testSession.String()},
 		{"notify", call("notify", `{"action":"push","text":"x"}`), access.KeyNotificationWrite, "session", testSession.String()},
 		{"creation", call("creation", `{"action":"catalog"}`), access.KeyPluginInvoke, "session", testSession.String()},
+		{"creation-install", call("creation", `{"action":"install","id":"demo.panel"}`), access.KeyPluginLifecycleInstall, "session", testSession.String()},
 		{"media", call("image_generate", `{"prompt":"x"}`), access.KeyMediaInvoke, "session", testSession.String()},
 		{"decision", call("decision_ask", `{}`), access.KeyDecisionAsk, "session", testSession.String()},
 		{"plugin-tool", call("vendor_tool", `{}`), access.KeyPluginInvoke, "session", testSession.String()},
@@ -176,6 +177,27 @@ func TestAuthorizeKeysUseThePermissionRegistry(t *testing.T) {
 				t.Fatalf("principal = %+v", got.Principal)
 			}
 		})
+	}
+}
+
+func TestCreationInstallNeedsLifecycleKey(t *testing.T) {
+	denied := access.KeyPluginLifecycleInstall + "/" + testSession.String()
+	fake := &fakeAccess{
+		principal: access.Principal{TenantID: testTenant, AccountID: testAccount},
+		decisions: map[string]access.Decision{
+			denied: {Allow: false, Key: access.KeyPluginLifecycleInstall, Reason: access.ReasonMissingKey,
+				Detail: "harness holds plugin.invoke but not plugin.lifecycle.install"},
+		},
+	}
+	auth := newTestAuthorizer(t, fake)
+	if err := auth.AuthorizeToolCall(context.Background(), testScope,
+		call("creation", `{"action":"catalog"}`)); err != nil {
+		t.Fatalf("catalog with plugin.invoke: %v", err)
+	}
+	refusal := wantAccessError(t, auth.AuthorizeToolCall(context.Background(), testScope,
+		call("creation", `{"action":"install","id":"demo.panel"}`)), agent.ToolAccessPermissionDenied)
+	if refusal.Key != access.KeyPluginLifecycleInstall || refusal.Reason != "missing_key" {
+		t.Fatalf("install refusal = %+v", refusal)
 	}
 }
 

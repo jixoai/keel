@@ -75,6 +75,13 @@ var builtinGroups = []BuiltinGroup{
 		{Key: KeyModelInvoke, Scope: ScopeTenant},
 		{Key: KeyPluginRead, Scope: ScopeTenant},
 		{Key: KeyPluginInvoke, Scope: ScopeTenant},
+		// Creation install/remove are the lifecycle writes; the preset carries
+		// them so a bot can ask, while only a human may answer (a bot key is
+		// refused at the approval handler).
+		{Key: KeyPluginLifecycleInstall, Scope: ScopeTenant},
+		{Key: KeyPluginLifecycleEnable, Scope: ScopeTenant},
+		{Key: KeyPluginLifecycleDisable, Scope: ScopeTenant},
+		{Key: KeyPluginLifecycleUninstall, Scope: ScopeTenant},
 		{Key: KeySecretReadMetadata, Scope: ScopeTenant},
 		{Key: KeyAppRead, Scope: ScopeTenant},
 		{Key: KeyFileRead, Scope: ScopeTenant},

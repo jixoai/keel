@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jixoai/keel/internal/auth"
 	"github.com/jixoai/keel/internal/harnessext"
 	"github.com/jixoai/keel/internal/pluginpkg"
 	"github.com/jixoai/keel/internal/store"
@@ -20,6 +21,10 @@ import (
 // pluginTestTenant is the tenant the fake manager owns. The manager is bound to
 // one tenant; tests that exercise a foreign caller use another uuid explicitly.
 var pluginTestTenant = uuid.MustParse("12345678-1234-1234-1234-123456789abc")
+
+// pluginTestAccount is the authenticated human principal the plugin API tests
+// attach (the production edge middleware does this).
+var pluginTestAccount = uuid.MustParse("12345678-1234-1234-1234-123456789abd")
 
 // fakePluginManager is the API-side double: it records the calls and answers
 // canned views/errors, so the HTTP contract (status codes, bodies, audit
@@ -172,6 +177,15 @@ type pluginAPITest struct {
 
 func newPluginAPITest(t *testing.T, manager PluginManager, tune ...func(*Config)) *pluginAPITest {
 	t.Helper()
+	return newPluginAPITestAs(t, manager, auth.Principal{
+		Kind: auth.PrincipalHuman, AccountID: pluginTestAccount, TenantID: pluginTestTenant,
+	}, tune...)
+}
+
+// newPluginAPITestAs builds the same harness with an explicit edge principal
+// (the bot-approver negative control needs a bot identity).
+func newPluginAPITestAs(t *testing.T, manager PluginManager, principal auth.Principal, tune ...func(*Config)) *pluginAPITest {
+	t.Helper()
 	broker := harnessext.NewDecisionBroker(harnessext.DecisionBrokerOptions{Logger: testLogger()})
 	t.Cleanup(broker.Close)
 	audit := &fakePluginAuditWriter{}
@@ -180,12 +194,16 @@ func newPluginAPITest(t *testing.T, manager PluginManager, tune ...func(*Config)
 		PluginManager:     manager,
 		PluginAuditWriter: audit,
 		Decisions:         broker,
+		Access:            permitAllAccess(),
 		Logger:            testLogger(),
 	}
 	for _, fn := range tune {
 		fn(&cfg)
 	}
-	server := httptest.NewServer(New(cfg))
+	api := New(cfg)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		api.ServeHTTP(w, r.WithContext(auth.WithPrincipal(r.Context(), principal)))
+	}))
 	t.Cleanup(server.Close)
 	harness := &pluginAPITest{server: server, audit: audit, broker: broker}
 	if fake, ok := manager.(*fakePluginManager); ok {
@@ -314,7 +332,7 @@ func TestPluginAPILifecycleRoutesAndAuditAttribution(t *testing.T) {
 		t.Fatalf("enable = %d", res.StatusCode)
 	}
 	audit := manager.lastAudit(t)
-	if audit.Actor != "owner@example.com" || audit.TenantID == nil || *audit.TenantID != tenant {
+	if audit.Actor != "approver:"+pluginTestAccount.String() || audit.TenantID == nil || *audit.TenantID != tenant {
 		t.Fatalf("audit context = %+v", audit)
 	}
 	for _, call := range []string{"install:/tmp/task-site/package", "enable:vendor.panel"} {

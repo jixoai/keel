@@ -21,6 +21,12 @@ import (
 // the page reaches the `keel.plugin.*` bridge (internal/harnessapi/plugin_bridge.go)
 // without CORS.
 //
+// Authentication: /plugins/ is not the public static app. The auth middleware
+// resolves the session cookie, replaces client identity headers and injects the
+// principal; an unauthenticated request is 401 before this handler runs. The
+// handler reads the tenant from that principal (never from X-Tenant-ID), so a
+// forged header cannot reach another tenant's package.
+//
 // The gate is the lifecycle state, and only the enabled state opens it:
 //
 //   - not installed            → 404 (the id is not a fact of this deployment);
@@ -63,10 +69,16 @@ func (h *pluginUIHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, http.StatusNotFound, "plugin management is not wired in this deployment")
 		return
 	}
-	if !h.tenantAllowed(r) {
-		// The manager serves exactly one tenant. Another tenant's request must not
-		// learn whether this id exists, so the answer is the same 404 an unknown
-		// plugin gets.
+	// The tenant is a fact of the authenticated session, never a request header:
+	// the edge middleware injected the principal and replaced any client identity
+	// header. A missing principal is 401; a foreign tenant gets the same 404 an
+	// unknown plugin gets.
+	principal, authenticated := principalFrom(r.Context())
+	if !authenticated || principal.TenantID == uuid.Nil {
+		h.fail(w, r, http.StatusUnauthorized, "authentication required")
+		return
+	}
+	if principal.TenantID != h.manager.TenantID() {
 		h.fail(w, r, http.StatusNotFound, "plugin is not installed")
 		return
 	}
@@ -148,24 +160,6 @@ func (h *pluginUIHandler) plugin(id string) *harnessext.PluginView {
 		}
 	}
 	return nil
-}
-
-// tenantAllowed reports whether the request names the manager's tenant. The
-// auth middleware injects X-Tenant-ID for every authenticated request; an
-// absent or foreign value is refused (fail closed), never guessed.
-func (h *pluginUIHandler) tenantAllowed(r *http.Request) bool {
-	if h == nil || h.manager == nil {
-		return false
-	}
-	raw := strings.TrimSpace(r.Header.Get("X-Tenant-ID"))
-	if raw == "" {
-		return false
-	}
-	tenantID, err := uuid.Parse(raw)
-	if err != nil {
-		return false
-	}
-	return tenantID == h.manager.TenantID()
 }
 
 // chunkEntryTarget resolves a request remainder to a declared chunk/package

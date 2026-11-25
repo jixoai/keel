@@ -27,6 +27,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jixoai/keel/internal/pluginpkg"
 	"github.com/jixoai/keel/internal/pluginpkg/builtin"
+	"github.com/jixoai/keel/internal/store"
 )
 
 // creationHarness owns the pieces a creation test drives.
@@ -524,12 +525,131 @@ contributes:
 	if len(fields) == 0 {
 		t.Fatalf("no field-level errors: %+v", document)
 	}
+	// The failed validation is audited with the field paths, not the package body.
+	var audited bool
+	for _, entry := range c.harness.store.auditEntries() {
+		if entry.Action != "creation.validate" || entry.Result != store.PluginResultFailed {
+			continue
+		}
+		var detail map[string]any
+		if err := json.Unmarshal(entry.Detail, &detail); err != nil {
+			t.Fatalf("validate audit detail: %v (%s)", err, entry.Detail)
+		}
+		names, _ := detail["fields"].([]any)
+		if len(names) == 0 {
+			t.Fatalf("validate audit has no fields: %s", entry.Detail)
+		}
+		audited = true
+	}
+	if !audited {
+		t.Fatalf("creation.validate wrote no audit row: %v", c.harness.store.auditActions(t))
+	}
 	document, isError = c.call(t, CreationToolInstall, map[string]any{"id": "demo.broken"})
 	if !isError || c.status(t, CreationToolInstall, document) != "invalid" {
 		t.Fatalf("invalid package install = %+v", document)
 	}
 	if _, installed := pluginViewOf(c.harness.manager, "demo.broken"); installed {
 		t.Fatal("an invalid package was installed")
+	}
+}
+
+// TestCreationInstallDoesNotEnableADisabledPlugin: repeating install of the same
+// package is idempotent only while it is enabled. A disabled plugin is a
+// lifecycle fact; creation refuses instead of performing an unapproved enable.
+func TestCreationInstallDoesNotEnableADisabledPlugin(t *testing.T) {
+	c := newCreationHarness(t)
+	ctx := context.Background()
+	if _, err := c.harness.manager.Enable(ctx, CreationPluginID, AuditContext{Actor: "test"}); err != nil {
+		t.Fatalf("enable creation: %v", err)
+	}
+	if _, isError := c.call(t, CreationToolScaffold, map[string]any{"id": "demo.panel", "purpose": "p"}); isError {
+		t.Fatal("scaffold failed")
+	}
+	document, _ := c.call(t, CreationToolInstall, map[string]any{"id": "demo.panel"})
+	decisionID, _ := document["decisionId"].(string)
+	c.answer(t, decisionID, creationAllowOption)
+	if document, isError := c.call(t, CreationToolInstall, map[string]any{"id": "demo.panel", "decisionId": decisionID}); isError {
+		t.Fatalf("install failed: %+v", document)
+	}
+	if _, err := c.harness.manager.Disable(ctx, "demo.panel", AuditContext{Actor: "operator"}); err != nil {
+		t.Fatalf("disable: %v", err)
+	}
+	before := len(c.harness.store.auditActions(t))
+
+	document, isError := c.call(t, CreationToolInstall, map[string]any{"id": "demo.panel"})
+	if !isError || c.status(t, CreationToolInstall, document) != "disabled" {
+		t.Fatalf("install of a disabled plugin = %+v", document)
+	}
+	if document["action"] != "enable" {
+		t.Fatalf("the refusal must point at enable: %+v", document)
+	}
+	view, installed := pluginViewOf(c.harness.manager, "demo.panel")
+	if !installed || view.State != LifecycleDisabled {
+		t.Fatalf("the refusal changed the plugin state: %+v", view)
+	}
+	if after := len(c.harness.store.auditActions(t)); after != before {
+		for _, action := range c.harness.store.auditActions(t)[before:] {
+			// The refusal is creation's own audit row, not a manager lifecycle
+			// write (no enable/disable/install row may appear).
+			if action != "creation.install:refused" {
+				t.Fatalf("creation install performed a lifecycle write: %s", action)
+			}
+		}
+	}
+}
+
+// TestCreationRemoveBundledPluginHasNoSideEffects: a bundled plugin is refused
+// before disable, so the failed remove does not leave it off.
+func TestCreationRemoveBundledPluginHasNoSideEffects(t *testing.T) {
+	c := newCreationHarness(t)
+	ctx := context.Background()
+	if _, err := c.harness.manager.Enable(ctx, CreationPluginID, AuditContext{Actor: "test"}); err != nil {
+		t.Fatalf("enable creation: %v", err)
+	}
+	document, isError := c.call(t, CreationToolRemove, map[string]any{"id": CreationPluginID})
+	if !isError {
+		t.Fatalf("bundled remove = %+v", document)
+	}
+	if view, installed := pluginViewOf(c.harness.manager, CreationPluginID); !installed || view.State != LifecycleEnabled {
+		t.Fatalf("a failed bundled remove changed state: %+v", view)
+	}
+	for _, action := range c.harness.store.auditActions(t) {
+		if strings.HasPrefix(action, "disable:") {
+			t.Fatalf("a failed bundled remove disabled the plugin: %v", c.harness.store.auditActions(t))
+		}
+	}
+}
+
+// TestCreationInstallBindsApprovalToPackageContent: the allow is bound to the
+// hash/version the question showed. Editing the staged package after approval
+// invalidates the decisionId and nothing is installed.
+func TestCreationInstallBindsApprovalToPackageContent(t *testing.T) {
+	c := newCreationHarness(t)
+	ctx := context.Background()
+	if _, err := c.harness.manager.Enable(ctx, CreationPluginID, AuditContext{Actor: "test"}); err != nil {
+		t.Fatalf("enable creation: %v", err)
+	}
+	document, isError := c.call(t, CreationToolScaffold, map[string]any{"id": "demo.panel", "purpose": "p"})
+	if isError {
+		t.Fatalf("scaffold: %+v", document)
+	}
+	dir, _ := document["dir"].(string)
+	document, _ = c.call(t, CreationToolInstall, map[string]any{"id": "demo.panel"})
+	decisionID, _ := document["decisionId"].(string)
+	if decisionID == "" {
+		t.Fatalf("no approval opened: %+v", document)
+	}
+	// Change the package after the approver saw its hash.
+	if err := os.WriteFile(filepath.Join(dir, "ui", "settings.js"), []byte("// changed after approval\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	c.answer(t, decisionID, creationAllowOption)
+	document, isError = c.call(t, CreationToolInstall, map[string]any{"id": "demo.panel", "decisionId": decisionID})
+	if !isError || !strings.Contains(asString(document["error"]), "does not authorize") {
+		t.Fatalf("changed package with the old decisionId = %+v", document)
+	}
+	if _, installed := pluginViewOf(c.harness.manager, "demo.panel"); installed {
+		t.Fatal("a package changed after approval was installed")
 	}
 }
 

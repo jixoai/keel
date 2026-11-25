@@ -729,7 +729,7 @@ function Inventory() {
                 >
                   <Icon name="alert" size={iconSize.sm} tint={color.warning} />
                   <Text style={{ fontSize: typeScale.xs, color: color.mutedForeground }}>
-                    终端只渲染 chunk / data 贡献；插件页面、iframe 与签名包需在浏览器中打开。
+                    终端只渲染随应用构建的 chunk / data；插件页面、iframe、签名包与运行时未打包的 chunk 需在浏览器中打开。
                   </Text>
                 </View>
               </If>
@@ -759,11 +759,32 @@ function Inventory() {
               <NoPermission action="安装插件" key="plugin.lifecycle.install" />
             </If>
             <If when={can("plugin.lifecycle.install")}>
-              <Empty accessibilityLabel="可装与更新">
-                <EmptyMedia icon="layers" />
-                <EmptyTitle label="暂时没有可安装或可更新的插件" />
-                <EmptyDescription label="安装与更新能力接入后，这里会列出可用的插件条目。" />
-              </Empty>
+              <View style={{ gap: space.sm }}>
+                <Text
+                  style={{
+                    fontSize: typeScale.sm,
+                    lineHeight: Math.round(typeScale.sm * lineHeight.normal),
+                    color: color.mutedForeground,
+                  }}
+                >
+                  安装/更新走服务端生命周期（durable 审批）；客户端不扫描本机目录。需要新插件时，
+                  用创造模式生成并安装。
+                </Text>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: space.md, flexWrap: "wrap" }}>
+                  <Button
+                    testID="plugins-available-create"
+                    variant="outline"
+                    size="sm"
+                    icon="spark"
+                    label="去创造模式"
+                    accessibilityLabel="打开创造模式并预填插件需求"
+                    onPress={startCreation}
+                  />
+                  <Text style={{ fontSize: typeScale.xs, color: color.mutedForeground }}>
+                    已安装插件与更新状态以服务端清单为准。
+                  </Text>
+                </View>
+              </View>
             </If>
           </CardContent>
         </Card>
@@ -785,8 +806,12 @@ function Inventory() {
                   color: color.mutedForeground,
                 }}
               >
-                安装能力尚未接入；这里只帮你把需求整理成对话，不执行安装。
+                生成、校验与安装都在对话里完成：catalog → scaffold → validate → 审批 → install；
+                安装与卸载需要 plugin.lifecycle.* 权限。
               </Text>
+              <If when={!can("plugin.lifecycle.install")}>
+                <NoPermission action="安装生成的插件" key="plugin.lifecycle.install" />
+              </If>
               <View style={{ flexDirection: "row", alignItems: "center", gap: space.md, flexWrap: "wrap" }}>
                 <Button
                   testID="plugins-create-start"

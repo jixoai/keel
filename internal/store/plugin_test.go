@@ -4,11 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/url"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 )
 
 // Plugin inventory and lifecycle audit rows (changes keel-plugin-core and
@@ -28,6 +31,129 @@ func pluginTestStore(t *testing.T) *Store {
 	}
 	t.Cleanup(st.Close)
 	return st
+}
+
+// TestLegacyPluginInventoryAdoptsIntoPluginTenant is the real-PG upgrade test:
+// an old deployment-level inventory (bundled row) and old NULL-tenant audit rows
+// become the serving tenant's rows, the old id-only key becomes
+// (tenant_id,id), and the audit history is retained (not deleted).
+func TestLegacyPluginInventoryAdoptsIntoPluginTenant(t *testing.T) {
+	baseDSN := os.Getenv("KEEL_TEST_DSN")
+	if baseDSN == "" {
+		t.Skip("KEEL_TEST_DSN not set")
+	}
+	ctx := context.Background()
+	adminCfg, err := pgx.ParseConfig(baseDSN)
+	if err != nil {
+		t.Fatalf("parse dsn: %v", err)
+	}
+	adminCfg.Database = "postgres"
+	admin, err := pgx.ConnectConfig(ctx, adminCfg)
+	if err != nil {
+		t.Skipf("no maintenance connection for a temporary database: %v", err)
+	}
+	defer admin.Close(ctx)
+	dbName := "keel_legacy_plugins_" + uuid.NewString()[:8]
+	if _, err := admin.Exec(ctx, "CREATE DATABASE "+pgx.Identifier{dbName}.Sanitize()); err != nil {
+		t.Skipf("cannot create a temporary database: %v", err)
+	}
+	t.Cleanup(func() {
+		cleanup, err := pgx.ConnectConfig(context.Background(), adminCfg)
+		if err != nil {
+			return
+		}
+		defer cleanup.Close(context.Background())
+		_, _ = cleanup.Exec(context.Background(), "DROP DATABASE IF EXISTS "+pgx.Identifier{dbName}.Sanitize()+" WITH (FORCE)")
+	})
+
+	legacyCfg := *adminCfg
+	legacyCfg.Database = dbName
+	legacy, err := pgx.ConnectConfig(ctx, &legacyCfg)
+	if err != nil {
+		t.Fatalf("connect legacy database: %v", err)
+	}
+	legacyDDL := `
+CREATE TABLE plugins (
+    id text PRIMARY KEY,
+    version text NOT NULL,
+    kind text NOT NULL,
+    state text NOT NULL DEFAULT 'installed',
+    bundled boolean NOT NULL DEFAULT false,
+    source jsonb NOT NULL DEFAULT '{}'::jsonb,
+    manifest jsonb NOT NULL DEFAULT '{}'::jsonb,
+    content_hash text NOT NULL DEFAULT '',
+    path text NOT NULL DEFAULT '',
+    diagnostics jsonb NOT NULL DEFAULT '[]'::jsonb,
+    installed_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    enabled_at timestamptz,
+    disabled_at timestamptz
+);
+CREATE TABLE plugin_audit (
+    audit_id bigserial PRIMARY KEY,
+    ts timestamptz NOT NULL DEFAULT now(),
+    tenant_id uuid,
+    actor text NOT NULL DEFAULT '',
+    plugin_id text NOT NULL,
+    version text NOT NULL DEFAULT '',
+    action text NOT NULL,
+    result text NOT NULL,
+    detail jsonb NOT NULL DEFAULT '{}'::jsonb
+);
+INSERT INTO plugins (id, version, kind, state, bundled)
+VALUES ('keel.creation', '1.0.0', 'in-process', 'enabled', true);
+INSERT INTO plugin_audit (tenant_id, actor, plugin_id, version, action, result)
+VALUES (NULL, 'boot', 'keel.creation', '1.0.0', 'discover', 'ok');
+`
+	if _, err := legacy.Exec(ctx, legacyDDL); err != nil {
+		legacy.Close(ctx)
+		t.Fatalf("legacy schema: %v", err)
+	}
+	legacy.Close(ctx)
+
+	tenant := uuid.New()
+	legacyURL, err := url.Parse(baseDSN)
+	if err != nil {
+		t.Fatalf("parse dsn url: %v", err)
+	}
+	legacyURL.Path = "/" + dbName
+	legacyDSN := legacyURL.String()
+	st, err := Open(ctx, Config{DSN: legacyDSN, DisableRLS: true, PluginTenant: tenant})
+	if err != nil {
+		t.Fatalf("upgrade with PluginTenant: %v", err)
+	}
+	t.Cleanup(st.Close)
+	if row, found, err := st.GetPlugin(ctx, tenant, "keel.creation"); err != nil || !found {
+		t.Fatalf("adopted plugin = %+v found=%v err=%v", row, found, err)
+	} else if !row.Bundled || row.State != PluginStateEnabled {
+		t.Fatalf("adopted row lost its facts: %+v", row)
+	}
+	entries, err := st.ListPluginAudit(ctx, tenant, "keel.creation", 0, 10)
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("adopted audit = %+v err=%v (history must be retained)", entries, err)
+	}
+	if entries[0].TenantID != tenant {
+		t.Fatalf("audit not adopted: %+v", entries[0])
+	}
+	var pkDef, pluginNullable, auditNullable string
+	if err := st.Pool().QueryRow(ctx, `SELECT pg_get_constraintdef(oid) FROM pg_constraint
+	    WHERE conrelid = 'public.plugins'::regclass AND contype = 'p'`).Scan(&pkDef); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(pkDef, "tenant_id") || !strings.Contains(pkDef, "id") {
+		t.Fatalf("plugins primary key = %q, want (tenant_id,id)", pkDef)
+	}
+	if err := st.Pool().QueryRow(ctx, `SELECT is_nullable FROM information_schema.columns
+	    WHERE table_schema = 'public' AND table_name = 'plugins' AND column_name = 'tenant_id'`).Scan(&pluginNullable); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Pool().QueryRow(ctx, `SELECT is_nullable FROM information_schema.columns
+	    WHERE table_schema = 'public' AND table_name = 'plugin_audit' AND column_name = 'tenant_id'`).Scan(&auditNullable); err != nil {
+		t.Fatal(err)
+	}
+	if pluginNullable != "NO" || auditNullable != "NO" {
+		t.Fatalf("tenant columns nullable: plugins=%s audit=%s", pluginNullable, auditNullable)
+	}
 }
 
 func TestPluginInventoryRoundTrip(t *testing.T) {

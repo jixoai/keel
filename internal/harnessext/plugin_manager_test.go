@@ -111,6 +111,12 @@ func (f *fakePluginStore) ListPluginAudit(_ context.Context, tenantID uuid.UUID,
 	return out, nil
 }
 
+func (f *fakePluginStore) auditEntries() []store.PluginAuditEntry {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]store.PluginAuditEntry(nil), f.audit...)
+}
+
 func (f *fakePluginStore) row(t *testing.T, tenantID uuid.UUID, id string) store.PluginRecord {
 	t.Helper()
 	f.mu.Lock()
@@ -517,6 +523,47 @@ provides:
 		if entry.AuditID == 0 || entry.TS.IsZero() || entry.Actor != "tester" || entry.Version != "1.0.0" {
 			t.Fatalf("audit entry = %+v", entry)
 		}
+	}
+}
+
+// TestPluginManagerInstallRefusesUnapprovedContent: ExpectedHash is checked
+// after the package is validated/hashed and before it is copied.
+func TestPluginManagerInstallRefusesUnapprovedContent(t *testing.T) {
+	harness := newManagerHarness(t, t.TempDir(), nil)
+	ctx := context.Background()
+	if err := harness.manager.Boot(ctx); err != nil {
+		t.Fatal(err)
+	}
+	source := writePluginPackage(t, t.TempDir(), map[string]string{
+		"plugin.yaml": `id: vendor.approved
+version: 1.0.0
+kind: webview
+description: approved content
+provides:
+  ui:
+    entry: ui/index.html
+    title: Approved
+`,
+		"ui/index.html": "<html>approved</html>",
+	})
+	pkg := pluginpkg.LoadDir(source, harness.manager.environment())
+	if !pkg.Usable() {
+		t.Fatalf("package: %+v", pkg.Problem)
+	}
+	if _, err := harness.manager.Install(ctx, InstallRequest{Path: source, ExpectedHash: strings.Repeat("0", 64)},
+		AuditContext{Actor: "tester"}); !errors.Is(err, ErrPluginHashMismatch) {
+		t.Fatalf("wrong expected hash = %v", err)
+	}
+	if _, found, err := harness.store.GetPlugin(ctx, testTenantID, "vendor.approved"); err != nil || found {
+		t.Fatalf("a mismatched package was persisted: found=%v err=%v", found, err)
+	}
+	view, err := harness.manager.Install(ctx, InstallRequest{Path: source, ExpectedHash: pkg.Hash},
+		AuditContext{Actor: "tester"})
+	if err != nil {
+		t.Fatalf("matching expected hash: %v", err)
+	}
+	if view.ContentHash != pkg.Hash {
+		t.Fatalf("installed hash = %q, want %q", view.ContentHash, pkg.Hash)
 	}
 }
 

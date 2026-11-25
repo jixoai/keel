@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jixoai/keel/internal/access"
+	"github.com/jixoai/keel/internal/auth"
 	"github.com/jixoai/keel/internal/harnessext"
 	"github.com/jixoai/keel/internal/store"
 )
@@ -155,7 +157,9 @@ func TestPluginApprovalGrantedActsOnce(t *testing.T) {
 	manager := &fakePluginManager{}
 	harness := newPluginAPITest(t, manager)
 	tenant := pluginTestTenant
-	code, body := harness.approveWrite(t, http.MethodPost, "/v1/plugins/vendor.panel/enable", tenant, nil, pluginApprovalAllow)
+	var answered harnessext.Decision
+	code, body := harness.approveWriteAs(t, http.MethodPost, "/v1/plugins/vendor.panel/enable", tenant, nil,
+		pluginApprovalAllow, func(decision harnessext.Decision) { answered = decision })
 	if code != http.StatusOK {
 		t.Fatalf("granted enable = %d %+v", code, body)
 	}
@@ -167,6 +171,142 @@ func TestPluginApprovalGrantedActsOnce(t *testing.T) {
 	}
 	if rows := harness.audit.list(); len(rows) != 0 {
 		t.Fatalf("a granted write is audited by the manager, not by the gate: %+v", rows)
+	}
+	// The answer names the authenticated approver, and the lifecycle row is
+	// attributed to that approver rather than an anonymous caller.
+	if answered.Answer == nil || answered.Answer.AnsweredBy != pluginTestAccount.String() ||
+		answered.Answer.AnsweredByKind != auth.PrincipalHuman {
+		t.Fatalf("answered decision = %+v", answered.Answer)
+	}
+	if got := manager.lastAudit(t); got.Actor != "approver:"+pluginTestAccount.String() {
+		t.Fatalf("lifecycle audit actor = %q", got.Actor)
+	}
+}
+
+// TestPluginApprovalBindsInstallToContent: the expectedHash is part of the
+// question's identity. A decision opened for hash A cannot authorize hash B.
+func TestPluginApprovalBindsInstallToContent(t *testing.T) {
+	manager := &fakePluginManager{}
+	harness := newPluginAPITest(t, manager)
+	var first, second struct {
+		Decision harnessext.Decision `json:"decision"`
+	}
+	hashA, hashB := strings.Repeat("a", 64), strings.Repeat("b", 64)
+	if code := harness.write(t, http.MethodPost, "/v1/plugins/install", pluginTestTenant,
+		map[string]any{"path": "/tmp/panel", "expectedHash": hashA}, &first); code != http.StatusAccepted {
+		t.Fatalf("ask A = %d", code)
+	}
+	if code := harness.write(t, http.MethodPost, "/v1/plugins/install", pluginTestTenant,
+		map[string]any{"path": "/tmp/panel", "expectedHash": hashB}, &second); code != http.StatusAccepted {
+		t.Fatalf("ask B = %d", code)
+	}
+	if first.Decision.DecisionID == second.Decision.DecisionID {
+		t.Fatal("two content hashes share one approval question")
+	}
+	// Answering the A question and replaying with B's content is refused before
+	// the manager runs.
+	if _, _, err := harness.broker.Answer(context.Background(), harnessext.AnswerDecisionRequest{
+		TenantID: pluginTestTenant, SessionID: pluginApprovalSession(pluginTestTenant),
+		DecisionID: uuid.MustParse(first.Decision.DecisionID), OptionID: pluginApprovalAllow,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	code := harness.write(t, http.MethodPost, "/v1/plugins/install", pluginTestTenant,
+		map[string]any{"path": "/tmp/panel", "expectedHash": hashB, "decisionId": first.Decision.DecisionID}, nil)
+	if code != http.StatusBadRequest {
+		t.Fatalf("reused decision for another hash = %d, want 400", code)
+	}
+	if len(manager.calls) != 0 {
+		t.Fatalf("the mismatched decision reached the manager: %v", manager.calls)
+	}
+}
+
+// TestSessionDecisionPluginApprovalUsesTheSameGate: a creation approval opened
+// inside a run (session decisions route) is still a plugin lifecycle approval —
+// a bot cannot answer it and the lifecycle key is required.
+func TestSessionDecisionPluginApprovalUsesTheSameGate(t *testing.T) {
+	manager := &fakePluginManager{}
+	bot := auth.Principal{
+		Kind: auth.PrincipalBot, AccountID: pluginTestAccount, BotID: "bot-1", TenantID: pluginTestTenant,
+	}
+	harness := newPluginAPITestAs(t, manager, bot)
+	sessionID := uuid.New()
+	decision, _, err := harness.broker.Open(context.Background(), harnessext.OpenDecisionRequest{
+		TenantID: pluginTestTenant, SessionID: sessionID, RequestID: "creation.install:demo.panel",
+		Kind: "plugin.install",
+		Options: []harnessext.DecisionOption{
+			{ID: pluginApprovalAllow}, {ID: pluginApprovalDeny},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	code := harness.write(t, http.MethodPost,
+		"/v1/sessions/"+sessionID.String()+"/decisions/"+decision.DecisionID,
+		pluginTestTenant, map[string]any{"optionId": pluginApprovalAllow}, nil)
+	if code != http.StatusForbidden {
+		t.Fatalf("bot session answer = %d, want 403", code)
+	}
+	pending, found := harness.broker.Get(context.Background(), pluginTestTenant, sessionID, uuid.MustParse(decision.DecisionID))
+	if !found || pending.Status != harnessext.DecisionOpen {
+		t.Fatalf("bot session answer changed the decision: %+v", pending)
+	}
+}
+
+// TestPluginApprovalBotCannotAnswer: a bot key may open a plugin question but
+// never answer it (no self-approval).
+func TestPluginApprovalBotCannotAnswer(t *testing.T) {
+	manager := &fakePluginManager{}
+	bot := auth.Principal{
+		Kind: auth.PrincipalBot, AccountID: pluginTestAccount, BotID: "bot-1", TenantID: pluginTestTenant,
+	}
+	harness := newPluginAPITestAs(t, manager, bot)
+	var asked struct {
+		Decision harnessext.Decision `json:"decision"`
+	}
+	if code := harness.write(t, http.MethodPost, "/v1/plugins/install", pluginTestTenant,
+		map[string]any{"path": "/tmp/panel"}, &asked); code != http.StatusAccepted {
+		t.Fatalf("bot opened the question = %d", code)
+	}
+	code := harness.write(t, http.MethodPost, "/v1/plugin-approvals/"+asked.Decision.DecisionID,
+		pluginTestTenant, map[string]any{"optionId": pluginApprovalAllow}, nil)
+	if code != http.StatusForbidden {
+		t.Fatalf("bot answer = %d, want 403", code)
+	}
+	pending, found := harness.broker.Get(context.Background(), pluginTestTenant,
+		pluginApprovalSession(pluginTestTenant), uuid.MustParse(asked.Decision.DecisionID))
+	if !found || pending.Status != harnessext.DecisionOpen {
+		t.Fatalf("a bot answer changed the decision: %+v", pending)
+	}
+	if len(manager.calls) != 0 {
+		t.Fatalf("the bot answer reached the manager: %v", manager.calls)
+	}
+}
+
+// TestPluginApprovalRequiresLifecycleKey: answering an install approval needs
+// plugin.lifecycle.install even when the caller can invoke plugin tools.
+func TestPluginApprovalRequiresLifecycleKey(t *testing.T) {
+	manager := &fakePluginManager{}
+	denied := permitAllAccess()
+	denied.decisions = map[string]access.Decision{
+		access.KeyPluginLifecycleInstall: {Allow: false, Key: access.KeyPluginLifecycleInstall,
+			Reason: access.ReasonMissingKey, Detail: "the account does not hold the lifecycle key"},
+	}
+	harness := newPluginAPITest(t, manager, func(cfg *Config) { cfg.Access = denied })
+	var asked struct {
+		Decision harnessext.Decision `json:"decision"`
+	}
+	if code := harness.write(t, http.MethodPost, "/v1/plugins/install", pluginTestTenant,
+		map[string]any{"path": "/tmp/panel"}, &asked); code != http.StatusAccepted {
+		t.Fatalf("install question = %d", code)
+	}
+	code := harness.write(t, http.MethodPost, "/v1/plugin-approvals/"+asked.Decision.DecisionID,
+		pluginTestTenant, map[string]any{"optionId": pluginApprovalAllow}, nil)
+	if code != http.StatusForbidden {
+		t.Fatalf("answer without plugin.lifecycle.install = %d, want 403", code)
+	}
+	if len(manager.calls) != 0 {
+		t.Fatalf("the refused answer reached the manager: %v", manager.calls)
 	}
 }
 

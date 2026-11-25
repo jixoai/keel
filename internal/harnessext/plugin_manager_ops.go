@@ -303,7 +303,7 @@ func (m *Manager) reconcileLocked(ctx context.Context) error {
 			return err
 		}
 	}
-	m.revision++
+	m.bumpRevisionLocked()
 	return nil
 }
 
@@ -509,6 +509,10 @@ type InstallRequest struct {
 	// validated, hashed and copied into the managed root; the stored plugin never
 	// points at the source directory.
 	Path string
+	// ExpectedHash binds the install to the package content that was approved.
+	// Empty means "no content binding" (legacy callers); creation always passes
+	// the hash the decision was opened with.
+	ExpectedHash string
 }
 
 // Install validates a package and copies it into the managed root. Repeating an
@@ -527,6 +531,17 @@ func (m *Manager) Install(ctx context.Context, req InstallRequest, audit AuditCo
 			id = packageID(req.Path)
 		}
 		m.auditLocked(ctx, audit, id, pkg.Version(), store.PluginActionInstall, store.PluginResultFailed, detailOf(err))
+		return PluginView{}, err
+	}
+	// The approval names a content hash; a package edited between approval and
+	// install is a different package and must not be adopted.
+	if expected := strings.TrimSpace(req.ExpectedHash); expected != "" && expected != pkg.Hash {
+		err := &PluginError{Op: "install", ID: entry.id, Message: "the package content changed since approval",
+			Fields: []pluginpkg.FieldError{{Field: "hash", Message: fmt.Sprintf(
+				"expected %s, got %s; validate and ask for a new approval", expected, pkg.Hash)}},
+			cause: ErrPluginHashMismatch}
+		m.auditLocked(ctx, audit, entry.id, pkg.Version(), store.PluginActionInstall, store.PluginResultRefused,
+			map[string]any{"reason": "content hash mismatch", "expectedHash": expected, "actualHash": pkg.Hash})
 		return PluginView{}, err
 	}
 	if existing, ok := m.entries[entry.id]; ok {
@@ -556,7 +571,7 @@ func (m *Manager) Install(ctx context.Context, req InstallRequest, audit AuditCo
 	}
 	m.auditLocked(ctx, audit, entry.id, entry.manifestVersion(), store.PluginActionInstall, store.PluginResultOK,
 		map[string]any{"path": entry.dir, "hash": entry.hash, "source": req.Path, "bundled": false})
-	m.revision++
+	m.bumpRevisionLocked()
 	m.log.Info("plugin installed", "plugin", entry.id, "version", entry.manifestVersion(), "hash", shortHash(entry.hash), "actor", audit.Actor)
 	return m.viewLocked(entry), nil
 }
@@ -742,7 +757,7 @@ func (m *Manager) Enable(ctx context.Context, id string, audit AuditContext) (Pl
 			return m.viewLocked(entry), err
 		}
 		m.auditLocked(ctx, audit, id, entry.manifestVersion(), store.PluginActionEnable, store.PluginResultFailed, detailOf(failure))
-		m.revision++
+		m.bumpRevisionLocked()
 		return m.viewLocked(entry), failure
 	}
 	if !uiOnly && (!loaded || status.State != PluginActive) {
@@ -778,7 +793,7 @@ func (m *Manager) Enable(ctx context.Context, id string, audit AuditContext) (Pl
 		}
 		m.auditLocked(ctx, audit, id, entry.manifestVersion(), store.PluginActionEnable, store.PluginResultFailed,
 			map[string]any{"state": string(state), "diagnostics": diagnostics})
-		m.revision++
+		m.bumpRevisionLocked()
 		return m.viewLocked(entry), failure
 	}
 	entry.enabledAt = timePointer(m.now())
@@ -794,7 +809,7 @@ func (m *Manager) Enable(ctx context.Context, id string, audit AuditContext) (Pl
 	}
 	m.auditLocked(ctx, audit, id, entry.manifestVersion(), store.PluginActionEnable, store.PluginResultOK,
 		map[string]any{"surface": surface, "generation": m.runtime.Generation()})
-	m.revision++
+	m.bumpRevisionLocked()
 	m.log.Info("plugin enabled", "plugin", id, "surface", surface, "generation", m.runtime.Generation(), "actor", audit.Actor)
 	return m.viewLocked(entry), nil
 }
@@ -834,7 +849,7 @@ func (m *Manager) Disable(ctx context.Context, id string, audit AuditContext) (P
 		return m.viewLocked(entry), err
 	}
 	m.auditLocked(ctx, audit, id, entry.manifestVersion(), store.PluginActionDisable, store.PluginResultOK, nil)
-	m.revision++
+	m.bumpRevisionLocked()
 	m.log.Info("plugin disabled", "plugin", id, "generation", m.runtime.Generation(), "actor", audit.Actor)
 	return m.viewLocked(entry), nil
 }
@@ -908,7 +923,7 @@ func (m *Manager) Uninstall(ctx context.Context, id string, audit AuditContext) 
 	}
 	m.auditLocked(ctx, audit, id, view.Version, store.PluginActionUninstall, store.PluginResultOK,
 		map[string]any{"removed": entry.dir != ""})
-	m.revision++
+	m.bumpRevisionLocked()
 	m.log.Info("plugin uninstalled", "plugin", id, "actor", audit.Actor)
 	return view, nil
 }
@@ -1108,7 +1123,7 @@ func (m *Manager) Update(ctx context.Context, id string, req UpdateRequest, audi
 	}
 	m.auditLocked(ctx, audit, id, entry.manifestVersion(), store.PluginActionUpdate, store.PluginResultOK,
 		map[string]any{"from": previous.manifestVersion(), "to": entry.manifestVersion(), "hash": entry.hash, "enabled": entry.state == LifecycleEnabled})
-	m.revision++
+	m.bumpRevisionLocked()
 	m.log.Info("plugin updated", "plugin", id, "from", previous.manifestVersion(), "to", entry.manifestVersion(), "actor", audit.Actor)
 	return m.viewLocked(entry), nil
 }
@@ -1250,7 +1265,7 @@ func (m *Manager) restoreLocked(ctx context.Context, entry *managerEntry, previo
 	if err := m.persistLocked(ctx, entry); err != nil {
 		return m.viewLocked(entry), err
 	}
-	m.revision++
+	m.bumpRevisionLocked()
 	return m.viewLocked(entry), nil
 }
 

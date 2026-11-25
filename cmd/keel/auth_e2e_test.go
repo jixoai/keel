@@ -51,6 +51,17 @@ func newAuthTestEnv(t *testing.T, mode authMode, tenantID uuid.UUID) *authTestEn
 // routes are registered first and the product sees the remaining paths.
 func newAuthTestEnvWithProduct(t *testing.T, mode authMode, tenantID uuid.UUID, product func(*store.Store) http.Handler) *authTestEnv {
 	t.Helper()
+	return newAuthTestEnvWithMux(t, mode, tenantID, func(mux *http.ServeMux, st *store.Store) {
+		if product != nil {
+			mux.Handle("/v1/", product(st))
+		}
+	})
+}
+
+// newAuthTestEnvWithMux builds the real auth controller and lets the caller
+// mount extra handlers (for example /plugins/) behind the same middleware.
+func newAuthTestEnvWithMux(t *testing.T, mode authMode, tenantID uuid.UUID, mount func(*http.ServeMux, *store.Store)) *authTestEnv {
+	t.Helper()
 	dsn := os.Getenv("KEEL_TEST_DSN")
 	if dsn == "" {
 		t.Skip("KEEL_TEST_DSN not set")
@@ -107,8 +118,8 @@ func newAuthTestEnvWithProduct(t *testing.T, mode authMode, tenantID uuid.UUID, 
 			"pathId":    r.PathValue("id"),
 		})
 	})
-	if product != nil {
-		mux.Handle("/v1/", product(st))
+	if mount != nil {
+		mount(mux, st)
 	}
 	server := httptest.NewUnstartedServer(ctl.wrap(mux))
 	server.StartTLS()

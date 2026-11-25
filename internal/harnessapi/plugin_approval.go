@@ -39,6 +39,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jixoai/keel/internal/access"
+	"github.com/jixoai/keel/internal/auth"
 	"github.com/jixoai/keel/internal/harnessext"
 	"github.com/jixoai/keel/internal/pluginpkg"
 	"github.com/jixoai/keel/internal/store"
@@ -106,6 +108,10 @@ type pluginApprovalAsk struct {
 	PluginID string
 	// Version is the currently installed version, when known.
 	Version string
+	// ContentHash binds the question to the package/plugin content being
+	// approved. The derived decision id includes it, so a different package (or
+	// a different installed version) cannot reuse the allow.
+	ContentHash string
 }
 
 // pluginWriteContext is the single entrance of every approval-gated lifecycle
@@ -117,21 +123,27 @@ func (s *Server) pluginWriteContext(w http.ResponseWriter, r *http.Request, ask 
 	if !ok {
 		return nil, harnessext.AuditContext{}, false
 	}
-	if !s.gatePluginApproval(w, r, audit, ask, approval) {
+	decision, allowed := s.gatePluginApproval(w, r, audit, ask, approval)
+	if !allowed {
 		return nil, harnessext.AuditContext{}, false
+	}
+	// The lifecycle row names the approver, not an anonymous "api" actor: the
+	// answered decision is the authority that let the write happen.
+	if decision.Answer != nil && decision.Answer.AnsweredBy != "" {
+		audit.Actor = trimActor("approver:" + decision.Answer.AnsweredBy)
 	}
 	return manager, audit, true
 }
 
 // gatePluginApproval applies the durable approval rule. When it answers false
 // the response is already written and the action must not proceed.
-func (s *Server) gatePluginApproval(w http.ResponseWriter, r *http.Request, audit harnessext.AuditContext, ask pluginApprovalAsk, req pluginApprovalRequest) bool {
+func (s *Server) gatePluginApproval(w http.ResponseWriter, r *http.Request, audit harnessext.AuditContext, ask pluginApprovalAsk, req pluginApprovalRequest) (harnessext.Decision, bool) {
 	if s.cfg.Decisions == nil {
 		// Fail closed: a deployment without the decision primitive cannot ask the
 		// durable question, so it must not perform the action.
 		writeErr(w, http.StatusServiceUnavailable,
 			errors.New("plugin lifecycle writes require the durable approval primitive, but decisions are not wired in this deployment"))
-		return false
+		return harnessext.Decision{}, false
 	}
 	requestID, err := pluginApprovalRequestID(ask, req)
 	if err != nil {
@@ -141,15 +153,15 @@ func (s *Server) gatePluginApproval(w http.ResponseWriter, r *http.Request, audi
 		var askErr *harnessext.PluginError
 		if errors.As(err, &askErr) {
 			s.writePluginError(w, askErr)
-			return false
+			return harnessext.Decision{}, false
 		}
 		writeErr(w, http.StatusBadRequest, err)
-		return false
+		return harnessext.Decision{}, false
 	}
 	timeout, err := pluginApprovalTimeout(req)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, err)
-		return false
+		return harnessext.Decision{}, false
 	}
 	tenantID := *audit.TenantID
 	sessionID := pluginApprovalSession(tenantID)
@@ -159,7 +171,7 @@ func (s *Server) gatePluginApproval(w http.ResponseWriter, r *http.Request, audi
 		given, err := uuid.Parse(strings.TrimSpace(req.DecisionID))
 		if err != nil {
 			writeErr(w, http.StatusBadRequest, errors.New("decisionId must be a UUID"))
-			return false
+			return harnessext.Decision{}, false
 		}
 		if given != expectedID {
 			// A decision opened for another action, another plugin or another
@@ -169,19 +181,19 @@ func (s *Server) gatePluginApproval(w http.ResponseWriter, r *http.Request, audi
 			writeErr(w, http.StatusBadRequest, errors.New(
 				"decisionId does not authorize this request: repeat it with the same requestId it was asked with "+
 					"(or with no requestId at all), and drop decisionId to ask again"))
-			return false
+			return harnessext.Decision{}, false
 		}
 		decision, found := s.cfg.Decisions.Get(r.Context(), tenantID, sessionID, expectedID)
 		if !found {
 			writeErr(w, http.StatusNotFound, errors.New("approval decision not found"))
-			return false
+			return harnessext.Decision{}, false
 		}
 		switch {
 		case isPluginApprovalGrant(decision):
-			return true
+			return decision, true
 		case decision.Status == harnessext.DecisionOpen:
 			writeJSON(w, http.StatusConflict, pluginApprovalPendingBody(decision))
-			return false
+			return harnessext.Decision{}, false
 		default:
 			reason := "the approval decision is " + string(decision.Status)
 			if decision.Answer != nil && decision.Answer.OptionID != "" {
@@ -189,7 +201,7 @@ func (s *Server) gatePluginApproval(w http.ResponseWriter, r *http.Request, audi
 			}
 			s.refusePluginAction(r.Context(), audit, ask, decision, reason)
 			writeJSON(w, http.StatusConflict, pluginApprovalRefusedBody(decision, reason))
-			return false
+			return harnessext.Decision{}, false
 		}
 	}
 
@@ -208,19 +220,91 @@ func (s *Server) gatePluginApproval(w http.ResponseWriter, r *http.Request, audi
 	if err != nil {
 		if errors.Is(err, harnessext.ErrInvalidDecision) {
 			writeErr(w, http.StatusBadRequest, err)
-			return false
+			return harnessext.Decision{}, false
 		}
 		writeErr(w, http.StatusInternalServerError, err)
-		return false
+		return harnessext.Decision{}, false
 	}
 	writeJSON(w, http.StatusAccepted, pluginApprovalPendingBody(decision))
-	return false
+	return harnessext.Decision{}, false
+}
+
+// trimActor bounds an audit actor to the stored column.
+func trimActor(actor string) string {
+	if len(actor) > 128 {
+		return actor[:128]
+	}
+	return actor
 }
 
 // isPluginApprovalGrant reports whether an answered decision allows the action.
 func isPluginApprovalGrant(decision harnessext.Decision) bool {
 	return decision.Status == harnessext.DecisionAnswered &&
 		decision.Answer != nil && decision.Answer.OptionID == pluginApprovalAllow
+}
+
+// pluginDecisionKey maps a plugin decision kind to the key its approver needs.
+// A bot key never answers any of these. An unknown plugin kind keeps the
+// invoke boundary rather than inventing a weaker rule.
+func pluginDecisionKey(kind string) (string, bool) {
+	if !strings.HasPrefix(kind, "plugin.") {
+		return "", false
+	}
+	switch strings.TrimPrefix(kind, "plugin.") {
+	case store.PluginActionInstall, store.PluginActionUpdate:
+		return access.KeyPluginLifecycleInstall, true
+	case store.PluginActionEnable:
+		return access.KeyPluginLifecycleEnable, true
+	case store.PluginActionDisable:
+		return access.KeyPluginLifecycleDisable, true
+	case store.PluginActionUninstall:
+		return access.KeyPluginLifecycleUninstall, true
+	}
+	return access.KeyPluginInvoke, true
+}
+
+// authorizePluginDecisionAnswer enforces "who may answer": a plugin decision is
+// a lifecycle approval, so the approver must be an authenticated human holding
+// the action's plugin.lifecycle.* key. A bot key is refused outright (a bot can
+// otherwise answer the question it opened). On success the returned actor/kind
+// are recorded on the answer.
+func (s *Server) authorizePluginDecisionAnswer(w http.ResponseWriter, r *http.Request, tenantID uuid.UUID, decision harnessext.Decision) (string, string, bool) {
+	key, pluginDecision := pluginDecisionKey(decision.Kind)
+	if !pluginDecision {
+		return "", "", true
+	}
+	edge, ok := auth.PrincipalFromContext(r.Context())
+	if !ok || edge.AccountID == uuid.Nil {
+		writeErr(w, http.StatusUnauthorized, errors.New("authentication required to answer a plugin approval"))
+		return "", "", false
+	}
+	if edge.IsBot() {
+		writeErr(w, http.StatusForbidden, errors.New("a bot key cannot approve plugin lifecycle actions"))
+		return "", "", false
+	}
+	if s.cfg.Access == nil {
+		writeErr(w, http.StatusServiceUnavailable, errors.New("the authorization surface is not wired"))
+		return "", "", false
+	}
+	principal, err := s.cfg.Access.Principal(r.Context(), tenantID)
+	if err != nil {
+		writeErr(w, http.StatusUnauthorized, errors.New("authentication required to answer a plugin approval"))
+		return "", "", false
+	}
+	granted, err := s.cfg.Access.Authorize(r.Context(), principal, key, access.Resource{TenantID: tenantID})
+	if err != nil {
+		writeErr(w, http.StatusServiceUnavailable, errors.New("authorization is unavailable"))
+		return "", "", false
+	}
+	if granted.Denied() {
+		writeErr(w, http.StatusForbidden, fmt.Errorf("answering this plugin approval requires %s", key))
+		return "", "", false
+	}
+	actor := edge.AccountID.String()
+	if header := strings.TrimSpace(r.Header.Get("X-Keel-Actor")); header != "" {
+		actor = header
+	}
+	return trimActor(actor), edge.Kind, true
 }
 
 // pluginApprovalPendingBody is the 202/409 answer while the question is open.
@@ -269,7 +353,17 @@ func pluginApprovalRequestID(ask pluginApprovalAsk, req pluginApprovalRequest) (
 	} else if len(key) > pluginApprovalRequestIDMax {
 		return "", errors.New("requestId is too long")
 	}
-	return ask.Action + ":" + key, nil
+	requestID := ask.Action + ":" + key
+	// The content is part of the question's identity: an allow for package A can
+	// never authorize package B, and an enable/update allow dies if the installed
+	// content/version moved.
+	if ask.ContentHash != "" {
+		requestID += ":content=" + ask.ContentHash
+	}
+	if ask.Version != "" {
+		requestID += ":version=" + ask.Version
+	}
+	return requestID, nil
 }
 
 // pluginApprovalTimeout resolves the question's deadline.
@@ -309,7 +403,8 @@ func pluginApprovalPrompt(ask pluginApprovalAsk) string {
 // and the audit row is attributed to the package directory name. An empty path
 // keeps an empty target, which the gate reports as the manager's own field
 // error instead of asking anyone to approve "the current directory".
-func installApprovalAsk(path string) pluginApprovalAsk {
+func installApprovalAsk(path, contentHash string) pluginApprovalAsk {
+	contentHash = strings.TrimSpace(contentHash)
 	target := strings.TrimSpace(path)
 	if target == "" {
 		return pluginApprovalAsk{
@@ -322,20 +417,22 @@ func installApprovalAsk(path string) pluginApprovalAsk {
 	}
 	id := filepath.Base(filepath.FromSlash(target))
 	return pluginApprovalAsk{
-		Action:   store.PluginActionInstall,
-		Target:   target,
-		Label:    target,
-		PluginID: id,
+		Action:      store.PluginActionInstall,
+		Target:      target,
+		Label:       target,
+		PluginID:    id,
+		ContentHash: contentHash,
 	}
 }
 
 // pluginIDApprovalAsk builds the ask of an enable or update.
 func (s *Server) pluginIDApprovalAsk(action, id string) pluginApprovalAsk {
-	version := ""
+	version, contentHash := "", ""
 	if s.cfg.PluginManager != nil {
 		for _, view := range s.cfg.PluginManager.Snapshot().Plugins {
 			if view.ID == id {
 				version = view.Version
+				contentHash = view.ContentHash
 				break
 			}
 		}
@@ -344,7 +441,8 @@ func (s *Server) pluginIDApprovalAsk(action, id string) pluginApprovalAsk {
 	if version != "" {
 		label = id + " " + version
 	}
-	return pluginApprovalAsk{Action: action, Target: id, Label: label, PluginID: id, Version: version}
+	return pluginApprovalAsk{Action: action, Target: id, Label: label, PluginID: id,
+		Version: version, ContentHash: contentHash}
 }
 
 // pluginApprovalSession is the session namespace plugin approvals live in.
@@ -366,6 +464,10 @@ func (s *Server) refusePluginAction(ctx context.Context, audit harnessext.AuditC
 	}
 	if decision.Answer != nil && decision.Answer.OptionID != "" {
 		detail["optionId"] = decision.Answer.OptionID
+	}
+	if decision.Answer != nil && decision.Answer.AnsweredBy != "" {
+		detail["answeredBy"] = decision.Answer.AnsweredBy
+		detail["answeredByKind"] = decision.Answer.AnsweredByKind
 	}
 	if ask.Target != "" {
 		detail["target"] = ask.Target
@@ -460,12 +562,23 @@ func (s *Server) answerPluginApproval(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err)
 		return
 	}
+	pending, found := s.cfg.Decisions.Get(r.Context(), tenantID, pluginApprovalSession(tenantID), decisionID)
+	if !found {
+		writeErr(w, http.StatusNotFound, errors.New("approval decision not found"))
+		return
+	}
+	actor, actorKind, allowed := s.authorizePluginDecisionAnswer(w, r, tenantID, pending)
+	if !allowed {
+		return
+	}
 	decision, duplicate, err := s.cfg.Decisions.Answer(r.Context(), harnessext.AnswerDecisionRequest{
 		TenantID:   tenantID,
 		SessionID:  pluginApprovalSession(tenantID),
 		DecisionID: decisionID,
 		OptionID:   body.OptionID,
 		Text:       body.Text,
+		Actor:      actor,
+		ActorKind:  actorKind,
 	})
 	if err != nil {
 		switch {

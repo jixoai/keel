@@ -16,6 +16,7 @@
 //	bots         Bot rows, Harness, archive state and keys
 //	teams        TeamBot rows, Mission/Roster and archive state
 //	sessions     session visibility/list (shares, archive, bot invocation)
+//	plugins      plugin inventory/lifecycle (install, enable, disable, uninstall)
 //
 // Publishing happens after the business write (and its mandatory audit row)
 // succeeded. A refused or failed write publishes nothing, so a 4xx/5xx never
@@ -43,6 +44,7 @@ const (
 	IdentityEventBots        IdentityEventKind = "bots"
 	IdentityEventTeams       IdentityEventKind = "teams"
 	IdentityEventSessions    IdentityEventKind = "sessions"
+	IdentityEventPlugins     IdentityEventKind = "plugins"
 )
 
 // validIdentityEventKind keeps a programming mistake out of the wire: the
@@ -51,10 +53,20 @@ const (
 func validIdentityEventKind(kind IdentityEventKind) bool {
 	switch kind {
 	case IdentityEventAccounts, IdentityEventPermissions, IdentityEventBots,
-		IdentityEventTeams, IdentityEventSessions:
+		IdentityEventTeams, IdentityEventSessions, IdentityEventPlugins:
 		return true
 	}
 	return false
+}
+
+// PublishPluginChange tells the tenant's clients that the plugin inventory
+// changed. The manager's change sink calls it after a lifecycle write; the web
+// client re-reads GET /v1/plugins (never a row from the event).
+func (s *Server) PublishPluginChange(tenantID uuid.UUID) {
+	if s == nil || s.identityEvents == nil {
+		return
+	}
+	s.identityEvents.Publish(tenantID, IdentityEventPlugins)
 }
 
 // IdentityEvent is one invalidation fact. It carries no ids, names, grants or

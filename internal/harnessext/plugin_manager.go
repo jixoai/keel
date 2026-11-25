@@ -74,6 +74,10 @@ var (
 	// ErrPluginTenant reports a lifecycle action whose caller names a tenant
 	// other than the manager's. It is a cross-tenant refusal, never a lookup.
 	ErrPluginTenant = errors.New("harnessext: plugin lifecycle belongs to another tenant")
+	// ErrPluginHashMismatch reports a package whose content changed after the
+	// approval was granted (or a caller-supplied expected hash that does not
+	// match).
+	ErrPluginHashMismatch = errors.New("harnessext: plugin package content does not match the approved hash")
 )
 
 // PluginError is the structured failure of a plugin action: a sentinel for the
@@ -253,6 +257,27 @@ type Manager struct {
 	mu       sync.Mutex
 	entries  map[string]*managerEntry
 	revision int64
+	// changeSink, when set, is told that the tenant's inventory changed. It is
+	// the product's invalidation seam (GET /v1/identity/events kind=plugins); the
+	// manager never blocks on it and never sends rows.
+	changeSink func(uuid.UUID)
+}
+
+// SetChangeSink installs the product invalidation sink. It is set once at boot,
+// after the API server exists; a nil sink is valid (tests, hosts without SSE).
+func (m *Manager) SetChangeSink(sink func(uuid.UUID)) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.changeSink = sink
+}
+
+// bumpRevisionLocked advances the inventory revision and publishes the
+// invalidation fact. The caller holds m.mu; the sink is a non-blocking publish.
+func (m *Manager) bumpRevisionLocked() {
+	m.revision++
+	if m.changeSink != nil {
+		m.changeSink(m.tenantID)
+	}
 }
 
 // TenantID is the tenant this manager owns. It is the same value the store
