@@ -24,7 +24,7 @@ import (
 func TestPluginApprovalAskingDoesNotAct(t *testing.T) {
 	manager := &fakePluginManager{}
 	harness := newPluginAPITest(t, manager)
-	tenant := uuid.New()
+	tenant := pluginTestTenant
 	writes := []struct {
 		method string
 		path   string
@@ -84,7 +84,7 @@ func TestPluginApprovalAskingDoesNotAct(t *testing.T) {
 func TestPluginApprovalQuestionIsIdempotent(t *testing.T) {
 	manager := &fakePluginManager{}
 	harness := newPluginAPITest(t, manager)
-	tenant := uuid.New()
+	tenant := pluginTestTenant
 	var first, second struct {
 		Decision harnessext.Decision `json:"decision"`
 	}
@@ -106,7 +106,7 @@ func TestPluginApprovalQuestionIsIdempotent(t *testing.T) {
 func TestPluginApprovalDeniedIsRefusedAndAudited(t *testing.T) {
 	manager := &fakePluginManager{}
 	harness := newPluginAPITest(t, manager)
-	tenant := uuid.New()
+	tenant := pluginTestTenant
 	var answered harnessext.Decision
 	code, body := harness.approveWriteAs(t, http.MethodPost, "/v1/plugins/install", tenant,
 		map[string]any{"path": "/tmp/panel"}, pluginApprovalDeny,
@@ -137,7 +137,7 @@ func TestPluginApprovalDeniedIsRefusedAndAudited(t *testing.T) {
 	if row.PluginID != "panel" {
 		t.Fatalf("the refusal must name the package: %+v", row)
 	}
-	if row.TenantID == nil || *row.TenantID != tenant || row.Actor == "" {
+	if row.TenantID != tenant || row.Actor == "" {
 		t.Fatalf("the refusal must carry its attribution: %+v", row)
 	}
 	var detail map[string]any
@@ -154,7 +154,7 @@ func TestPluginApprovalDeniedIsRefusedAndAudited(t *testing.T) {
 func TestPluginApprovalGrantedActsOnce(t *testing.T) {
 	manager := &fakePluginManager{}
 	harness := newPluginAPITest(t, manager)
-	tenant := uuid.New()
+	tenant := pluginTestTenant
 	code, body := harness.approveWrite(t, http.MethodPost, "/v1/plugins/vendor.panel/enable", tenant, nil, pluginApprovalAllow)
 	if code != http.StatusOK {
 		t.Fatalf("granted enable = %d %+v", code, body)
@@ -175,7 +175,7 @@ func TestPluginApprovalGrantedActsOnce(t *testing.T) {
 func TestPluginApprovalPendingRetryIsRefusedNotExecuted(t *testing.T) {
 	manager := &fakePluginManager{}
 	harness := newPluginAPITest(t, manager)
-	tenant := uuid.New()
+	tenant := pluginTestTenant
 	var asked struct {
 		Decision harnessext.Decision `json:"decision"`
 	}
@@ -201,7 +201,7 @@ func TestPluginApprovalPendingRetryIsRefusedNotExecuted(t *testing.T) {
 func TestPluginApprovalDecisionIsBoundToItsRequest(t *testing.T) {
 	manager := &fakePluginManager{}
 	harness := newPluginAPITest(t, manager)
-	tenant := uuid.New()
+	tenant := pluginTestTenant
 	var asked struct {
 		Decision harnessext.Decision `json:"decision"`
 	}
@@ -229,7 +229,7 @@ func TestPluginApprovalDecisionIsBoundToItsRequest(t *testing.T) {
 func TestPluginApprovalFailsClosedWithoutDecisions(t *testing.T) {
 	manager := &fakePluginManager{}
 	harness := newPluginAPITest(t, manager, func(cfg *Config) { cfg.Decisions = nil; cfg.PluginAuditWriter = nil })
-	tenant := uuid.New()
+	tenant := pluginTestTenant
 	for _, path := range []string{"/v1/plugins/install", "/v1/plugins/vendor.panel/enable", "/v1/plugins/vendor.panel/update"} {
 		body := map[string]any{}
 		if strings.HasSuffix(path, "/install") {
@@ -259,7 +259,7 @@ func TestPluginApprovalFailsClosedWithoutDecisions(t *testing.T) {
 func TestPluginApprovalBounds(t *testing.T) {
 	manager := &fakePluginManager{}
 	harness := newPluginAPITest(t, manager)
-	tenant := uuid.New()
+	tenant := pluginTestTenant
 	var body map[string]any
 	if code := harness.write(t, http.MethodPost, "/v1/plugins/vendor.panel/enable", tenant,
 		map[string]any{"approvalTimeoutMs": 10}, &body); code != http.StatusBadRequest {
@@ -301,7 +301,7 @@ func TestPluginApprovalQuestionSurvivesRestart(t *testing.T) {
 	harness := newPluginAPITest(t, manager, func(cfg *Config) {
 		cfg.Decisions = harnessext.NewDecisionBroker(harnessext.DecisionBrokerOptions{Store: memory, Logger: testLogger()})
 	})
-	tenant := uuid.New()
+	tenant := pluginTestTenant
 	var asked struct {
 		Decision harnessext.Decision `json:"decision"`
 	}

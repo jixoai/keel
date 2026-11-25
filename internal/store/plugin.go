@@ -11,10 +11,11 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// Plugin inventory and lifecycle audit (change keel-plugin-core). The inventory
-// is deployment-scoped: one plugins root, one assembled tool surface, so a
-// plugin's state is not a per-tenant fact. The audit is tenant-scoped, because
-// "who asked for this" is.
+// Plugin inventory and lifecycle audit (changes keel-plugin-core and
+// keel-creation). Both are tenant-scoped: a plugin install is a fact of the
+// tenant that installed it, and the manager that owns it is bound to one
+// tenant. A single-tenant deployment is still exactly one tenant, so there is
+// no deployment-level branch or second write path.
 //
 // The manifest and source documents are opaque JSON here (their vocabulary
 // lives in internal/pluginpkg); the state string is the lifecycle state machine
@@ -51,6 +52,8 @@ const (
 
 // PluginRecord is one row of the plugin inventory.
 type PluginRecord struct {
+	// TenantID is the owning tenant (required).
+	TenantID uuid.UUID
 	// ID is the plugin id (the manifest id, or the directory name for a package
 	// whose manifest never parsed).
 	ID string
@@ -79,11 +82,12 @@ type PluginRecord struct {
 	DisabledAt  *time.Time
 }
 
-// PluginAuditEntry is one audit row.
+// PluginAuditEntry is one audit row. TenantID is always the owning tenant; the
+// retired deployment-level form (nil tenant) is not representable.
 type PluginAuditEntry struct {
 	AuditID  int64           `json:"auditId"`
 	TS       time.Time       `json:"ts"`
-	TenantID *uuid.UUID      `json:"tenantId,omitempty"`
+	TenantID uuid.UUID       `json:"tenantId"`
 	Actor    string          `json:"actor"`
 	PluginID string          `json:"pluginId"`
 	Version  string          `json:"version,omitempty"`
@@ -93,8 +97,12 @@ type PluginAuditEntry struct {
 }
 
 // UpsertPlugin writes the inventory row, preserving installed_at (the age of an
-// installation is not reset by a state change).
+// installation is not reset by a state change). The row is keyed by
+// (tenant_id, id).
 func (s *Store) UpsertPlugin(ctx context.Context, record PluginRecord) error {
+	if record.TenantID == uuid.Nil {
+		return errors.New("store: plugin tenant id is required")
+	}
 	if record.ID == "" {
 		return errors.New("store: plugin id is required")
 	}
@@ -119,10 +127,10 @@ func (s *Store) UpsertPlugin(ctx context.Context, record PluginRecord) error {
 		updatedAt = installedAt
 	}
 	_, err = s.execRetry(ctx,
-		`INSERT INTO plugins (id, version, kind, state, bundled, source, manifest, content_hash, path, diagnostics,
+		`INSERT INTO plugins (tenant_id, id, version, kind, state, bundled, source, manifest, content_hash, path, diagnostics,
 		                      installed_at, updated_at, enabled_at, disabled_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
-		 ON CONFLICT (id) DO UPDATE SET
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+		 ON CONFLICT (tenant_id, id) DO UPDATE SET
 		     version = EXCLUDED.version,
 		     kind = EXCLUDED.kind,
 		     state = EXCLUDED.state,
@@ -135,7 +143,7 @@ func (s *Store) UpsertPlugin(ctx context.Context, record PluginRecord) error {
 		     updated_at = EXCLUDED.updated_at,
 		     enabled_at = EXCLUDED.enabled_at,
 		     disabled_at = EXCLUDED.disabled_at`,
-		record.ID, record.Version, record.Kind, record.State, record.Bundled, source, manifest,
+		record.TenantID, record.ID, record.Version, record.Kind, record.State, record.Bundled, source, manifest,
 		record.ContentHash, record.Path, diagnostics, installedAt, updatedAt, record.EnabledAt, record.DisabledAt)
 	if err != nil {
 		return fmt.Errorf("store: upsert plugin: %w", err)
@@ -143,9 +151,13 @@ func (s *Store) UpsertPlugin(ctx context.Context, record PluginRecord) error {
 	return nil
 }
 
-// GetPlugin reads one inventory row. found=false means the id is unknown.
-func (s *Store) GetPlugin(ctx context.Context, id string) (PluginRecord, bool, error) {
-	row := s.pool.QueryRow(ctx, `SELECT `+pluginColumns+` FROM plugins WHERE id = $1`, id)
+// GetPlugin reads one inventory row of a tenant. found=false means the id is
+// unknown to that tenant (the same answer a cross-tenant caller gets).
+func (s *Store) GetPlugin(ctx context.Context, tenantID uuid.UUID, id string) (PluginRecord, bool, error) {
+	if tenantID == uuid.Nil {
+		return PluginRecord{}, false, errors.New("store: plugin tenant id is required")
+	}
+	row := s.pool.QueryRow(ctx, `SELECT `+pluginColumns+` FROM plugins WHERE tenant_id = $1 AND id = $2`, tenantID, id)
 	record, err := scanPlugin(row)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return PluginRecord{}, false, nil
@@ -156,9 +168,12 @@ func (s *Store) GetPlugin(ctx context.Context, id string) (PluginRecord, bool, e
 	return record, true, nil
 }
 
-// ListPlugins returns the whole inventory, ordered by id.
-func (s *Store) ListPlugins(ctx context.Context) ([]PluginRecord, error) {
-	rows, err := s.pool.Query(ctx, `SELECT `+pluginColumns+` FROM plugins ORDER BY id`)
+// ListPlugins returns one tenant's inventory, ordered by id.
+func (s *Store) ListPlugins(ctx context.Context, tenantID uuid.UUID) ([]PluginRecord, error) {
+	if tenantID == uuid.Nil {
+		return nil, errors.New("store: plugin tenant id is required")
+	}
+	rows, err := s.pool.Query(ctx, `SELECT `+pluginColumns+` FROM plugins WHERE tenant_id = $1 ORDER BY id`, tenantID)
 	if err != nil {
 		return nil, fmt.Errorf("store: list plugins: %w", err)
 	}
@@ -174,16 +189,20 @@ func (s *Store) ListPlugins(ctx context.Context) ([]PluginRecord, error) {
 	return out, rows.Err()
 }
 
-// DeletePlugin removes an inventory row. found=false means it was already gone.
-func (s *Store) DeletePlugin(ctx context.Context, id string) (bool, error) {
-	tag, err := s.execRetry(ctx, `DELETE FROM plugins WHERE id = $1`, id)
+// DeletePlugin removes one tenant's inventory row. found=false means it was
+// already gone (or belongs to another tenant).
+func (s *Store) DeletePlugin(ctx context.Context, tenantID uuid.UUID, id string) (bool, error) {
+	if tenantID == uuid.Nil {
+		return false, errors.New("store: plugin tenant id is required")
+	}
+	tag, err := s.execRetry(ctx, `DELETE FROM plugins WHERE tenant_id = $1 AND id = $2`, tenantID, id)
 	if err != nil {
 		return false, fmt.Errorf("store: delete plugin: %w", err)
 	}
 	return tag.RowsAffected() == 1, nil
 }
 
-const pluginColumns = `id, version, kind, state, bundled, source, manifest, content_hash, path, diagnostics,
+const pluginColumns = `tenant_id, id, version, kind, state, bundled, source, manifest, content_hash, path, diagnostics,
 	installed_at, updated_at, enabled_at, disabled_at`
 
 // rowScanner is the shared surface of pgx.Row and pgx.Rows.
@@ -198,8 +217,8 @@ func scanPlugin(row rowScanner) (PluginRecord, error) {
 		manifest    []byte
 		diagnostics []byte
 	)
-	if err := row.Scan(&record.ID, &record.Version, &record.Kind, &record.State, &record.Bundled, &source, &manifest,
-		&record.ContentHash, &record.Path, &diagnostics, &record.InstalledAt, &record.UpdatedAt,
+	if err := row.Scan(&record.TenantID, &record.ID, &record.Version, &record.Kind, &record.State, &record.Bundled,
+		&source, &manifest, &record.ContentHash, &record.Path, &diagnostics, &record.InstalledAt, &record.UpdatedAt,
 		&record.EnabledAt, &record.DisabledAt); err != nil {
 		return PluginRecord{}, err
 	}
@@ -213,8 +232,12 @@ func scanPlugin(row rowScanner) (PluginRecord, error) {
 	return record, nil
 }
 
-// AppendPluginAudit writes one audit row and returns it with its cursor.
+// AppendPluginAudit writes one audit row and returns it with its cursor. The
+// tenant is required: every lifecycle fact belongs to exactly one tenant.
 func (s *Store) AppendPluginAudit(ctx context.Context, entry PluginAuditEntry) (PluginAuditEntry, error) {
+	if entry.TenantID == uuid.Nil {
+		return PluginAuditEntry{}, errors.New("store: audit tenant id is required")
+	}
 	if entry.PluginID == "" {
 		return PluginAuditEntry{}, errors.New("store: audit plugin id is required")
 	}
@@ -240,23 +263,26 @@ func (s *Store) AppendPluginAudit(ctx context.Context, entry PluginAuditEntry) (
 	return entry, nil
 }
 
-// ListPluginAudit returns audit rows in chronological order (audit_id >
-// after), optionally narrowed to one plugin and scoped to a tenant. A nil
-// tenant reads the deployment-wide trail; the product API always passes the
-// caller's tenant.
-func (s *Store) ListPluginAudit(ctx context.Context, tenantID *uuid.UUID, pluginID string, after int64, limit int) ([]PluginAuditEntry, error) {
+// ListPluginAudit returns one tenant's audit rows in chronological order
+// (audit_id > after), optionally narrowed to one plugin. There is no
+// deployment-wide read: a caller that does not name a tenant has no
+// cross-tenant view.
+func (s *Store) ListPluginAudit(ctx context.Context, tenantID uuid.UUID, pluginID string, after int64, limit int) ([]PluginAuditEntry, error) {
+	if tenantID == uuid.Nil {
+		return nil, errors.New("store: audit tenant id is required")
+	}
 	if limit <= 0 || limit > 500 {
 		limit = 100
 	}
 	rows, err := s.pool.Query(ctx,
 		`SELECT audit_id, ts, tenant_id, actor, plugin_id, version, action, result, detail
 		 FROM plugin_audit
-		 WHERE audit_id > $1
-		   AND ($2::uuid IS NULL OR tenant_id IS NULL OR tenant_id = $2)
+		 WHERE tenant_id = $1
+		   AND audit_id > $2
 		   AND ($3 = '' OR plugin_id = $3)
 		 ORDER BY audit_id
 		 LIMIT $4`,
-		after, tenantID, pluginID, limit)
+		tenantID, after, pluginID, limit)
 	if err != nil {
 		return nil, fmt.Errorf("store: list plugin audit: %w", err)
 	}

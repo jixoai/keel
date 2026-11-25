@@ -37,6 +37,7 @@
 // function the JSX calls — nothing is copied into a local at the top.
 import { cleanup, effect, host, openUrl, platform, signal, Text, View, WebView } from "nsh";
 import type { PluginStatusView, TriggerSpecView, TriggerStatusView } from "../data/contract";
+import { can, permissionHint } from "../data/permissions";
 import { store } from "../data/store";
 import { displayNameOf, formatTime, pluginStateLabel } from "../data/wire";
 import { Icon } from "../ui/icons";
@@ -301,6 +302,38 @@ function InventorySkeleton() {
         <Skeleton lines={3} height={12} />
       </View>
     </View>
+  );
+}
+
+/** The permission face: what is missing, not a blank panel. The server remains
+ * the authority (403); this only stops the UI from offering an action that
+ * cannot succeed. */
+function NoPermission(props: { action: string; key: string }) {
+  return (
+    <Card
+      testID="plugins-no-permission"
+      accessibilityLabel={`没有权限${props.action}`}
+      style={{
+        gap: space.sm,
+        padding: space.md,
+        backgroundColor: color.warningTint,
+        borderColor: alpha(color.warning, 0.3),
+      }}
+    >
+      <View style={{ flexDirection: "row", alignItems: "center", gap: space.md, flexWrap: "wrap" }}>
+        <Icon name="lock" size={iconSize.sm} tint={color.warning} />
+        <Text
+          style={{
+            flex: 1,
+            fontSize: typeScale.sm,
+            lineHeight: Math.round(typeScale.sm * lineHeight.normal),
+            color: color.foreground,
+          }}
+        >
+          {`没有权限${props.action}。${permissionHint(props.key)}`}
+        </Text>
+      </View>
+    </Card>
   );
 }
 
@@ -626,6 +659,11 @@ function PluginCard(props: { plugin: () => PluginStatusView }) {
 function Inventory() {
   const plugins = () => store.plugins()?.plugins ?? [];
   const tools = () => store.plugins()?.tools ?? [];
+  // The display half of the server's authority: a missing key means the UI
+  // offers no action (the server would answer 403); a 403 from the read itself
+  // is the same state, not a generic load error.
+  const canRead = () => can("plugin.read");
+  const readForbidden = () => store.pluginsErrorStatus() === 403;
   return (
     <ScrollArea
       testID="plugins-scroll"
@@ -659,21 +697,42 @@ function Inventory() {
             }
           />
           <CardContent>
-            <If when={!store.plugins() && !store.pluginsError()}>
+            <If when={!canRead()}>
+              <NoPermission action="读取插件" key="plugin.read" />
+            </If>
+            <If when={canRead() && readForbidden()}>
+              <NoPermission action="读取插件" key="plugin.read" />
+            </If>
+            <If when={canRead() && !readForbidden() && !store.plugins() && !store.pluginsError()}>
               <InventorySkeleton />
             </If>
-            <If when={!!store.pluginsError()}>
+            <If when={canRead() && !readForbidden() && !!store.pluginsError()}>
               <LoadFailure
                 text={store.pluginsError() ?? ""}
                 onRetry={() => void store.loadPlugins()}
               />
             </If>
-            <If when={!!store.plugins()}>
+            <If when={canRead() && !readForbidden() && !!store.plugins()}>
               <View style={{ flexDirection: "row", alignItems: "center", gap: space.md, flexWrap: "wrap" }}>
                 <Text style={{ fontSize: typeScale.xs, color: color.mutedForeground }}>
                   {`${plugins().length} 个插件 · ${tools().length} 个工具`}
                 </Text>
               </View>
+              {/* Terminal degradation is explicit: the terminal renders chunk/data
+                  contributions only; a plugin page, iframe or package surface needs
+                  the browser. */}
+              <If when={platform.idiom === "terminal"}>
+                <View
+                  testID="plugins-tui-note"
+                  accessibilityLabel="终端渲染范围"
+                  style={{ flexDirection: "row", alignItems: "center", gap: space.sm, flexWrap: "wrap" }}
+                >
+                  <Icon name="alert" size={iconSize.sm} tint={color.warning} />
+                  <Text style={{ fontSize: typeScale.xs, color: color.mutedForeground }}>
+                    终端只渲染 chunk / data 贡献；插件页面、iframe 与签名包需在浏览器中打开。
+                  </Text>
+                </View>
+              </If>
               <If when={plugins().length === 0}>
                 <Empty testID="plugins-empty" accessibilityLabel="没有已装配的插件">
                   <EmptyMedia icon="layers" />
@@ -696,11 +755,16 @@ function Inventory() {
             description="这里列出可以安装或更新的插件。"
           />
           <CardContent>
-            <Empty accessibilityLabel="可装与更新">
-              <EmptyMedia icon="layers" />
-              <EmptyTitle label="暂时没有可安装或可更新的插件" />
-              <EmptyDescription label="安装与更新能力接入后，这里会列出可用的插件条目。" />
-            </Empty>
+            <If when={!can("plugin.lifecycle.install")}>
+              <NoPermission action="安装插件" key="plugin.lifecycle.install" />
+            </If>
+            <If when={can("plugin.lifecycle.install")}>
+              <Empty accessibilityLabel="可装与更新">
+                <EmptyMedia icon="layers" />
+                <EmptyTitle label="暂时没有可安装或可更新的插件" />
+                <EmptyDescription label="安装与更新能力接入后，这里会列出可用的插件条目。" />
+              </Empty>
+            </If>
           </CardContent>
         </Card>
 
@@ -710,27 +774,32 @@ function Inventory() {
             description="用对话描述需要的插件：能力、依赖与触发方式先说清楚，再由对话产出清单与安装步骤。"
           />
           <CardContent>
-            <Text
-              style={{
-                fontSize: typeScale.sm,
-                lineHeight: Math.round(typeScale.sm * lineHeight.normal),
-                color: color.mutedForeground,
-              }}
-            >
-              安装能力尚未接入；这里只帮你把需求整理成对话，不执行安装。
-            </Text>
-            <View style={{ flexDirection: "row", alignItems: "center", gap: space.md, flexWrap: "wrap" }}>
-              <Button
-                testID="plugins-create-start"
-                icon="spark"
-                label="打开对话并预填"
-                accessibilityLabel="打开对话并预填插件需求"
-                onPress={startCreation}
-              />
-              <Text style={{ fontSize: typeScale.xs, color: color.mutedForeground }}>
-                只预填，不发送。
+            <If when={!can("plugin.invoke")}>
+              <NoPermission action="创建插件" key="plugin.invoke" />
+            </If>
+            <If when={can("plugin.invoke")}>
+              <Text
+                style={{
+                  fontSize: typeScale.sm,
+                  lineHeight: Math.round(typeScale.sm * lineHeight.normal),
+                  color: color.mutedForeground,
+                }}
+              >
+                安装能力尚未接入；这里只帮你把需求整理成对话，不执行安装。
               </Text>
-            </View>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: space.md, flexWrap: "wrap" }}>
+                <Button
+                  testID="plugins-create-start"
+                  icon="spark"
+                  label="打开对话并预填"
+                  accessibilityLabel="打开对话并预填插件需求"
+                  onPress={startCreation}
+                />
+                <Text style={{ fontSize: typeScale.xs, color: color.mutedForeground }}>
+                  只预填，不发送。
+                </Text>
+              </View>
+            </If>
           </CardContent>
         </Card>
       </View>

@@ -13,6 +13,16 @@ provides:
 permissions:
   tools:
     - {{tool}}
+# A Native chunk contribution (same VM, host tree) alongside the page. The
+# creation flow accepts at least one chunk so install → render is verifiable
+# without an iframe or a second design system.
+contributes:
+  - slot: keel.ui.settings-section
+    form: chunk
+    entry: ui/settings.js
+extensibility:
+  doc: EXTENSIBILITY.md
+  schema: extensibility.json
 entry:
   command: [node, backend/server.mjs]
 source:

@@ -54,8 +54,8 @@ func TestRenderProducesAnInstallablePackage(t *testing.T) {
 		}
 	}
 	for _, want := range []string{
-		"plugin.yaml", "README.md",
-		"ui/index.html", "ui/app.js", "ui/app.jsx", "ui/theme.css", "ui/package.json",
+		"plugin.yaml", "README.md", "EXTENSIBILITY.md", "extensibility.json",
+		"ui/index.html", "ui/app.js", "ui/app.jsx", "ui/settings.js", "ui/theme.css", "ui/package.json",
 		"backend/server.mjs",
 	} {
 		if !paths[want] {
@@ -76,6 +76,13 @@ func TestRenderProducesAnInstallablePackage(t *testing.T) {
 	}
 	if pkg.Manifest.Kind != pluginpkg.KindWebview || len(pkg.Manifest.Entry.Command) == 0 {
 		t.Fatalf("kind/entry = %s / %v, want a webview with a sidecar backend", pkg.Manifest.Kind, pkg.Manifest.Entry.Command)
+	}
+	if len(pkg.Manifest.Contributes) != 1 || pkg.Manifest.Contributes[0].Form != pluginpkg.SlotFormChunk ||
+		pkg.Manifest.Contributes[0].Entry != "ui/settings.js" {
+		t.Fatalf("contributes = %+v, want one Native chunk", pkg.Manifest.Contributes)
+	}
+	if pkg.Manifest.Extensibility == nil || pkg.Manifest.Extensibility.Schema != "extensibility.json" {
+		t.Fatalf("extensibility = %+v", pkg.Manifest.Extensibility)
 	}
 	if got := pkg.Manifest.PublishedTools()[0].Published; got != "demo_panel_refresh" {
 		t.Fatalf("published tool = %q", got)

@@ -572,15 +572,16 @@ CREATE TABLE IF NOT EXISTS mcp_oauth_credentials (
 );
 
 
--- Plugin inventory (change keel-plugin-core): one row per plugin id known to
--- this deployment. Plugin enablement is a property of the process, not of a
--- tenant (one plugins root, one assembled tool surface), so the table carries
--- no tenant_id; the lifecycle *audit* below does, because "who did it" is a
--- tenant-scoped fact. path is always inside the managed plugins root; a row
--- whose package is missing or invalid keeps its state so the reason is
--- visible instead of the plugin silently disappearing.
+-- Plugin inventory (change keel-plugin-core; tenant-scoped by keel-creation):
+-- one row per (tenant, plugin id). User-created/installed plugin state belongs
+-- to the tenant that installed it; bundled plugins are seeded per tenant, so a
+-- single-tenant deployment is still exactly one tenant and there is no
+-- deployment-level second write path. path is always inside the managed
+-- plugins root; a row whose package is missing or invalid keeps its state so
+-- the reason is visible instead of the plugin silently disappearing.
 CREATE TABLE IF NOT EXISTS plugins (
-    id           text PRIMARY KEY,
+    tenant_id    uuid NOT NULL,
+    id           text NOT NULL,
     version      text NOT NULL,
     kind         text NOT NULL,
     state        text NOT NULL DEFAULT 'installed',
@@ -593,17 +594,20 @@ CREATE TABLE IF NOT EXISTS plugins (
     installed_at timestamptz NOT NULL DEFAULT now(),
     updated_at   timestamptz NOT NULL DEFAULT now(),
     enabled_at   timestamptz,
-    disabled_at  timestamptz
+    disabled_at  timestamptz,
+    PRIMARY KEY (tenant_id, id)
 );
 
 -- Plugin lifecycle audit: one row per state-changing action (install / enable /
 -- disable / uninstall / update) and per refused action, written before the HTTP
 -- response. audit_id is the keyset cursor of GET /v1/plugins/audit: it orders
--- identically to ts and never repeats.
+-- identically to ts and never repeats. tenant_id is NOT NULL: every row names
+-- the tenant whose lifecycle it describes, including boot/discovery rows (the
+-- manager is bound to one tenant).
 CREATE TABLE IF NOT EXISTS plugin_audit (
     audit_id  bigserial PRIMARY KEY,
     ts        timestamptz NOT NULL DEFAULT now(),
-    tenant_id uuid,
+    tenant_id uuid NOT NULL,
     actor     text NOT NULL DEFAULT '',
     plugin_id text NOT NULL,
     version   text NOT NULL DEFAULT '',
@@ -614,6 +618,46 @@ CREATE TABLE IF NOT EXISTS plugin_audit (
 
 CREATE INDEX IF NOT EXISTS plugin_audit_tenant ON plugin_audit (tenant_id, audit_id);
 CREATE INDEX IF NOT EXISTS plugin_audit_plugin ON plugin_audit (plugin_id, audit_id);
+
+-- Alpha zero compatibility for the pre-keel-creation shape. An empty old table
+-- is migrated in place; a table that still holds deployment-level rows refuses
+-- startup (there is no second read path and no way to guess which tenant owned
+-- a deployment-wide install). Old NULL-tenant audit rows are retired: they
+-- described the retired deployment-level mode and would otherwise create a
+-- second, cross-tenant read path.
+DO $$
+DECLARE
+    pk_def text;
+BEGIN
+    IF to_regclass('public.plugins') IS NOT NULL THEN
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                        WHERE table_schema = 'public' AND table_name = 'plugins'
+                          AND column_name = 'tenant_id') THEN
+            ALTER TABLE public.plugins ADD COLUMN tenant_id uuid;
+        END IF;
+        IF EXISTS (SELECT 1 FROM public.plugins WHERE tenant_id IS NULL) THEN
+            RAISE EXCEPTION 'plugins: the deployment-level plugin inventory still holds rows; this build stores plugin state per tenant and has no migration path. Back up the database, drop the plugins table (or recreate the database), and install plugins under a tenant';
+        END IF;
+        SELECT pg_get_constraintdef(oid) INTO pk_def
+          FROM pg_constraint
+         WHERE conrelid = 'public.plugins'::regclass AND contype = 'p';
+        IF pk_def IS NULL OR pk_def NOT LIKE '%tenant_id%' THEN
+            ALTER TABLE public.plugins DROP CONSTRAINT IF EXISTS plugins_pkey;
+            ALTER TABLE public.plugins ADD CONSTRAINT plugins_pkey PRIMARY KEY (tenant_id, id);
+        END IF;
+        ALTER TABLE public.plugins ALTER COLUMN tenant_id SET NOT NULL;
+    END IF;
+    IF to_regclass('public.plugin_audit') IS NOT NULL THEN
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                        WHERE table_schema = 'public' AND table_name = 'plugin_audit'
+                          AND column_name = 'tenant_id') THEN
+            ALTER TABLE public.plugin_audit ADD COLUMN tenant_id uuid;
+        END IF;
+        DELETE FROM public.plugin_audit WHERE tenant_id IS NULL;
+        ALTER TABLE public.plugin_audit ALTER COLUMN tenant_id SET NOT NULL;
+    END IF;
+END
+$$;
 
 -- MCP App audit (change feat-mcp-apps-events, P3.7): one row per bridged app
 -- action and per refusal (document fetch/validation, tools/call,

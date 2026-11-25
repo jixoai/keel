@@ -24,7 +24,7 @@ func TestPluginManagerJunkDirectoryIsNotPersisted(t *testing.T) {
 	if !found {
 		t.Fatal("the broken package must be listed as invalid")
 	}
-	rows, err := harness.store.ListPlugins(t.Context())
+	rows, err := harness.store.ListPlugins(t.Context(), testTenantID)
 	if err != nil {
 		t.Fatal(err)
 	}

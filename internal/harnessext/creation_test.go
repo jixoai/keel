@@ -17,6 +17,7 @@ package harnessext
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -85,6 +86,7 @@ func newCreationHarnessWith(t *testing.T, withDecisions bool) *creationHarness {
 	loader := &fakeLoader{perVersion: map[string]error{}}
 	persistence := newFakePluginStore()
 	built, err := NewPluginManager(ManagerOptions{
+		TenantID:    tenant,
 		Root:        root,
 		Runtime:     runtime,
 		Persistence: persistence,
@@ -118,11 +120,17 @@ func newCreationHarnessWith(t *testing.T, withDecisions bool) *creationHarness {
 // returns the structured document plus the tool's isError flag.
 func (c *creationHarness) call(t *testing.T, tool string, args map[string]any) (map[string]any, bool) {
 	t.Helper()
+	return c.callCtx(t, context.Background(), tool, args)
+}
+
+// callCtx is call with an explicit ambient run scope (cross-tenant controls).
+func (c *creationHarness) callCtx(t *testing.T, ctx context.Context, tool string, args map[string]any) (map[string]any, bool) {
+	t.Helper()
 	raw, err := json.Marshal(args)
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := c.harness.manager.InvokePluginTool(context.Background(), CreationPluginID, tool, raw)
+	result, err := c.harness.manager.InvokePluginTool(ctx, CreationPluginID, tool, raw)
 	if err != nil {
 		t.Fatalf("%s: %v", tool, err)
 	}
@@ -225,7 +233,12 @@ func TestCreationScaffoldValidateInstallListRemove(t *testing.T) {
 	if published, _ := document["publishedTool"].(string); published != "demo_panel_refresh" {
 		t.Fatalf("publishedTool = %q", published)
 	}
-	for _, name := range []string{"plugin.yaml", "ui/index.html", "ui/app.js", "backend/server.mjs", "README.md"} {
+	scaffoldHash, _ := document["hash"].(string)
+	if scaffoldHash == "" {
+		t.Fatal("scaffold returned no content hash")
+	}
+	for _, name := range []string{"plugin.yaml", "ui/index.html", "ui/app.js", "ui/settings.js",
+		"extensibility.json", "EXTENSIBILITY.md", "backend/server.mjs", "README.md"} {
 		if _, err := os.Stat(filepath.Join(dir, filepath.FromSlash(name))); err != nil {
 			t.Fatalf("scaffolded package is missing %s: %v", name, err)
 		}
@@ -255,6 +268,14 @@ func TestCreationScaffoldValidateInstallListRemove(t *testing.T) {
 	answerURL, _ := document["answerUrl"].(string)
 	if decisionID == "" || !strings.HasPrefix(answerURL, "/v1/plugin-approvals/") {
 		t.Fatalf("approval document = %+v", document)
+	}
+	// The approver sees identity, provenance, hash, permissions and contributions.
+	decision, _ := document["decision"].(map[string]any)
+	promptText, _ := decision["prompt"].(string)
+	for _, want := range []string{"demo.panel", scaffoldHash, "tools=refresh", "keel.ui.settings-section/chunk", "Source:"} {
+		if !strings.Contains(promptText, want) {
+			t.Fatalf("approval prompt does not mention %q:\n%s", want, promptText)
+		}
 	}
 
 	// 4. Refusal: nothing is installed, and the refusal is audited.
@@ -294,6 +315,28 @@ func TestCreationScaffoldValidateInstallListRemove(t *testing.T) {
 	if !installed || view.State != LifecycleEnabled {
 		t.Fatalf("inventory = %+v (installed=%v)", view, installed)
 	}
+	// The Native chunk is a fact of the same view the client syncs from.
+	if len(view.Contributes) != 1 || view.Contributes[0].Form != "chunk" ||
+		view.Contributes[0].Entry != "ui/settings.js" || view.Contributes[0].Slot != "keel.ui.settings-section" {
+		t.Fatalf("installed contributes = %+v", view.Contributes)
+	}
+	if view.Extensibility == nil || !view.Extensibility.Usable {
+		t.Fatalf("extensibility = %+v", view.Extensibility)
+	}
+	if chunk, _ := document["chunkEntry"].(string); chunk != "/plugins/demo.panel/ui/settings.js" {
+		t.Fatalf("install chunkEntry = %q (%+v)", chunk, document)
+	}
+	// Replaying the same install request is idempotent: same state, no second
+	// row, no second install audit fact for a new package.
+	document, isError = c.call(t, CreationToolInstall, map[string]any{
+		"id": "demo.panel", "requestId": "retry-1", "decisionId": decisionID,
+	})
+	if isError || document["idempotent"] != true {
+		t.Fatalf("repeated install = %+v (isError=%v)", document, isError)
+	}
+	if row := c.harness.store.row(t, c.tenant, "demo.panel"); row.Version != view.Version {
+		t.Fatalf("repeated install changed the row: %+v", row)
+	}
 
 	// 6. List reports the artifact as installed.
 	document, _ = c.call(t, CreationToolList, map[string]any{})
@@ -304,6 +347,12 @@ func TestCreationScaffoldValidateInstallListRemove(t *testing.T) {
 	artifact, _ := artifacts[0].(map[string]any)
 	if artifact["id"] != "demo.panel" || artifact["installed"] != true || artifact["valid"] != true {
 		t.Fatalf("artifact = %+v", artifact)
+	}
+	if chunk, _ := artifact["chunkEntry"].(string); chunk != "/plugins/demo.panel/ui/settings.js" {
+		t.Fatalf("list chunkEntry = %q (%+v)", chunk, artifact)
+	}
+	if contributes, _ := artifact["contributes"].([]any); len(contributes) != 1 {
+		t.Fatalf("list contributes = %+v", artifact["contributes"])
 	}
 
 	// 7. Remove: approval, then uninstall + delete the staged package.
@@ -322,6 +371,23 @@ func TestCreationScaffoldValidateInstallListRemove(t *testing.T) {
 	}
 	if _, installed := pluginViewOf(c.harness.manager, "demo.panel"); installed {
 		t.Fatal("the plugin is still in the inventory after removal")
+	}
+	if row, found, err := c.harness.store.GetPlugin(context.Background(), c.tenant, "demo.panel"); err != nil {
+		t.Fatalf("read removed plugin row: %v", err)
+	} else if found {
+		t.Fatalf("the plugin row survived removal: %+v", row)
+	}
+	for _, listed := range c.harness.manager.Snapshot().Plugins {
+		if listed.ID == "demo.panel" {
+			t.Fatalf("the removed plugin is still in the snapshot: %+v", listed)
+		}
+	}
+	// Zero residue on the assembled surface: the published tool and the chunk
+	// contribution are gone with the plugin.
+	for _, tool := range c.harness.manager.Snapshot().Tools {
+		if strings.HasPrefix(tool, "demo_panel_") {
+			t.Fatalf("the removed plugin's tool is still published: %s", tool)
+		}
 	}
 	if _, err := os.Stat(wantDir); !os.IsNotExist(err) {
 		t.Fatalf("the staged package still exists: %v", err)
@@ -385,6 +451,85 @@ func TestCreationInstallRequiresTheApprovalPrimitive(t *testing.T) {
 	}
 	if _, installed := pluginViewOf(c.harness.manager, "demo.panel"); installed {
 		t.Fatal("the plugin was installed without the approval primitive")
+	}
+}
+
+// TestCreationRefusesAnotherTenant is the cross-tenant control: a tool call
+// whose ambient run belongs to another tenant cannot read, scaffold, install or
+// remove, and the manager refuses a lifecycle write attributed to that tenant.
+func TestCreationRefusesAnotherTenant(t *testing.T) {
+	c := newCreationHarness(t)
+	ctx := context.Background()
+	if _, err := c.harness.manager.Enable(ctx, CreationPluginID, AuditContext{Actor: "test"}); err != nil {
+		t.Fatalf("enable creation: %v", err)
+	}
+	other := uuid.New()
+	foreign := WithRunScope(ctx, RunScope{TenantID: other, SessionID: uuid.New(), RunID: "run-foreign"})
+
+	for _, tool := range []string{CreationToolCatalog, CreationToolScaffold, CreationToolValidate, CreationToolList} {
+		args := map[string]any{"id": "demo.panel", "purpose": "cross-tenant"}
+		document, isError := c.callCtx(t, foreign, tool, args)
+		if !isError {
+			t.Fatalf("%s served another tenant: %+v", tool, document)
+		}
+		if !strings.Contains(asString(document["error"]), "another tenant") {
+			t.Fatalf("%s error = %+v", tool, document)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(c.harness.root, CreationStagingDir, "demo.panel")); !os.IsNotExist(err) {
+		t.Fatalf("a cross-tenant scaffold wrote a package: %v", err)
+	}
+
+	// The manager itself refuses a write attributed to the other tenant.
+	if _, err := c.harness.manager.Install(ctx, InstallRequest{Path: c.harness.root},
+		AuditContext{TenantID: &other, Actor: "foreign"}); !errors.Is(err, ErrPluginTenant) {
+		t.Fatalf("cross-tenant install = %v", err)
+	}
+	if _, err := c.harness.manager.Enable(ctx, CreationPluginID,
+		AuditContext{TenantID: &other, Actor: "foreign"}); !errors.Is(err, ErrPluginTenant) {
+		t.Fatalf("cross-tenant enable = %v", err)
+	}
+}
+
+// TestCreationValidateReportsFieldErrors covers the fail-closed validator on a
+// tampered staged package: the call reports the field path, does not install,
+// and leaves the package (and the inventory) untouched.
+func TestCreationValidateReportsFieldErrors(t *testing.T) {
+	c := newCreationHarness(t)
+	ctx := context.Background()
+	if _, err := c.harness.manager.Enable(ctx, CreationPluginID, AuditContext{Actor: "test"}); err != nil {
+		t.Fatalf("enable creation: %v", err)
+	}
+	dir := filepath.Join(c.harness.root, CreationStagingDir, "demo.broken")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Missing version and a non-namespaced slot are field-level errors.
+	manifest := `id: demo.broken
+kind: webview
+description: broken
+contributes:
+  - slot: route
+    form: chunk
+    entry: ui/panel.js
+`
+	if err := os.WriteFile(filepath.Join(dir, "plugin.yaml"), []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	document, isError := c.call(t, CreationToolValidate, map[string]any{"id": "demo.broken"})
+	if !isError || document["ok"] == true {
+		t.Fatalf("invalid package validated: %+v", document)
+	}
+	fields, _ := document["fields"].([]any)
+	if len(fields) == 0 {
+		t.Fatalf("no field-level errors: %+v", document)
+	}
+	document, isError = c.call(t, CreationToolInstall, map[string]any{"id": "demo.broken"})
+	if !isError || c.status(t, CreationToolInstall, document) != "invalid" {
+		t.Fatalf("invalid package install = %+v", document)
+	}
+	if _, installed := pluginViewOf(c.harness.manager, "demo.broken"); installed {
+		t.Fatal("an invalid package was installed")
 	}
 }
 

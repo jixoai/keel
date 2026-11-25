@@ -98,6 +98,10 @@ func (s *Server) bridgePluginFrom(w http.ResponseWriter, r *http.Request) (bridg
 		writeErr(w, http.StatusServiceUnavailable, errors.New("plugin management is not wired"))
 		return bridgePlugin{}, false
 	}
+	if tenantID != s.cfg.PluginManager.TenantID() {
+		writeErr(w, http.StatusNotFound, errors.New("plugin is not installed"))
+		return bridgePlugin{}, false
+	}
 	id := r.PathValue("id")
 	if !pluginNameValid(id) || strings.ContainsAny(id, "/\\") {
 		writeErr(w, http.StatusBadRequest, errors.New("plugin id is malformed"))
@@ -328,7 +332,7 @@ func (s *Server) refuseBridgeCall(r *http.Request, bridge bridgePlugin, tool, re
 	}
 	entry := store.PluginAuditEntry{
 		TS:       time.Now().UTC(),
-		TenantID: &bridge.TenantID,
+		TenantID: bridge.TenantID,
 		Actor:    "plugin:" + bridge.View.ID,
 		PluginID: bridge.View.ID,
 		Version:  bridge.View.Version,

@@ -74,6 +74,7 @@ func TestShellPluginEndToEnd(t *testing.T) {
 	runtime := NewRuntime(RuntimeOptions{Hooks: hooks, Triggers: triggers, Logger: testLogger()})
 	defer runtime.Close(context.Background())
 	manager, err := NewPluginManager(ManagerOptions{
+		TenantID:    tenant,
 		Root:        t.TempDir(),
 		Runtime:     runtime,
 		Persistence: newFakePluginStore(),

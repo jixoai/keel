@@ -134,7 +134,7 @@ func timePtr(at time.Time) *time.Time { return &at }
 // own row and the host theme tokens, and nothing host-private.
 func TestPluginBridgeStateIsAnAllowlist(t *testing.T) {
 	harness := newBridgeHarness(t, nil, bridgePluginView())
-	tenant := uuid.New()
+	tenant := pluginTestTenant
 	res := harness.getRaw(t, "/v1/plugins/vendor.panel/bridge/state", tenant)
 	defer res.Body.Close()
 	raw, err := io.ReadAll(res.Body)
@@ -181,7 +181,7 @@ func TestPluginBridgeStateGate(t *testing.T) {
 	disabled := bridgePluginView()
 	disabled.State = harnessext.LifecycleDisabled
 	harness := newBridgeHarness(t, nil, disabled)
-	tenant := uuid.New()
+	tenant := pluginTestTenant
 	for _, tc := range []struct {
 		name string
 		path string
@@ -209,7 +209,7 @@ func TestPluginBridgeStateGate(t *testing.T) {
 // refused with an audit row.
 func TestPluginBridgeCallOwnTools(t *testing.T) {
 	harness := newBridgeHarness(t, nil, bridgePluginView())
-	tenant := uuid.New()
+	tenant := pluginTestTenant
 
 	var ok struct {
 		Tool   string          `json:"tool"`
@@ -264,7 +264,7 @@ func TestPluginBridgeCallOwnTools(t *testing.T) {
 // plugin observes the answer; the question is namespaced per plugin.
 func TestPluginBridgeApproveRoundTrip(t *testing.T) {
 	harness := newBridgeHarness(t, nil, bridgePluginView())
-	tenant := uuid.New()
+	tenant := pluginTestTenant
 	var asked struct {
 		Decision    harnessext.Decision `json:"decision"`
 		Status      string              `json:"status"`
@@ -334,7 +334,7 @@ func TestPluginBridgeApproveRoundTrip(t *testing.T) {
 // events, and only those.
 func TestPluginBridgeSubscribeAttribute(t *testing.T) {
 	harness := newBridgeHarness(t, nil, bridgePluginView())
-	tenant := uuid.New()
+	tenant := pluginTestTenant
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

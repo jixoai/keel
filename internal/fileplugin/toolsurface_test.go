@@ -25,6 +25,7 @@ func TestReadWriteEditThroughTheKeelFilePlugin(t *testing.T) {
 	runtime := harnessext.NewRuntime(harnessext.RuntimeOptions{})
 	t.Cleanup(func() { runtime.Close(context.Background()) })
 	manager, err := harnessext.NewPluginManager(harnessext.ManagerOptions{
+		TenantID:    h.scope.TenantID,
 		Runtime:     runtime,
 		KeelVersion: "0.1.0",
 		Builtins: []harnessext.Builtin{{

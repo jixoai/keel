@@ -182,12 +182,20 @@ The three kinds:
 - webview: a UI resource package hosted at /plugins/<id>/...; it may declare an
   optional sidecar backend in entry, which is how a panel gets tools.
 
+The generated package also carries the extension documents:
+  contributes: [{slot, form: chunk, entry: ui/settings.js}]   # Native chunk
+  extensibility: { doc: EXTENSIBILITY.md, schema: extensibility.json }
+The chunk is imported into the host tree (same VM, host theme tokens, web/
+native/TUI); extensibility.json and EXTENSIBILITY.md describe the same surface
+and are validated against plugin.yaml (drift is refused).
+
 Published tool names must be wire safe: the host joins <id>.<local tool> and
 replaces every character outside [A-Za-z0-9_-] with '_', so plugin "demo.panel"
 with tool "refresh" is published as "demo_panel_refresh". A name that is already
 safe is unchanged. An in-process plugin's declared name is its published name.
 
-The template (webview + React panel + host theme tokens + one backend tool):
+The template (webview + React panel + host theme tokens + one backend tool +
+one Native chunk contribution):
   plugins/templates/webview-react-solidglass/
 
 Workflow, in order:
@@ -195,12 +203,16 @@ Workflow, in order:
    complete package to the staging directory and validates it with the real
    validator.
 2. Edit the staged package when the purpose needs more than the template:
-   backend/server.mjs for the tool, ui/app.jsx (+ rebuild ui/app.js) for the panel.
+   backend/server.mjs for the tool, ui/app.jsx (+ rebuild ui/app.js) for the panel,
+   ui/settings.js for the Native chunk contribution. Keep extensibility.json in
+   step with plugin.yaml.
 3. creation {action:"validate", id} returns field-level problems. Fix them; do not ignore.
 4. creation {action:"install", id} asks for a durable approval and answers
    approval_required with a decisionId and an answerUrl. Have it answered, then
-   call creation {action:"install", id, decisionId} again. A refusal changes nothing.
-5. The success document carries deepLink: /plugins/<id>/ — open that.
+   call creation {action:"install", id, decisionId} again. A refusal changes nothing;
+   repeating the same requestId is idempotent.
+5. The success document carries deepLink: /plugins/<id>/ and chunkEntry:
+   /plugins/<id>/ui/settings.js — those are what the client renders.
 
 creation {action:"catalog"} is the read-only aggregate of installed plugins.
 creation {action:"list"} shows the staged artifacts and their state;
@@ -384,23 +396,28 @@ type creationApprovalArgs struct {
 
 // catalog is the read-only aggregate of the machine's installed plugins. It is
 // deliberately a projection of the manager's inventory (identity, lifecycle,
-// declared surface, live tools), not a second registry: a plugin's own
-// extensibility document can be added later without moving this contract.
-func (c *creationPlugin) catalog(_ context.Context, _ string, _ json.RawMessage, _ agentcore.ToolUpdateFunc) (agentcore.AgentToolResult, error) {
+// declared surface, live tools), not a second registry. The extension fields
+// (slots, contributions, extensibility) come from the same view the UI syncs
+// from, so the catalog cannot drift from what is assembled.
+func (c *creationPlugin) catalog(ctx context.Context, _ string, _ json.RawMessage, _ agentcore.ToolUpdateFunc) (agentcore.AgentToolResult, error) {
 	manager := c.manager()
 	if manager == nil {
 		return creationResult(failureDocument("the plugin manager is not wired in this deployment", nil), true), nil
+	}
+	if failure := c.tenantFailure(ctx, manager); failure != nil {
+		return creationResult(*failure, true), nil
 	}
 	inventory := manager.Snapshot()
 	plugins := make([]map[string]any, 0, len(inventory.Plugins))
 	for _, plugin := range inventory.Plugins {
 		entry := map[string]any{
-			"id":       plugin.ID,
-			"version":  plugin.Version,
-			"kind":     plugin.Kind,
-			"state":    string(plugin.State),
-			"bundled":  plugin.Bundled,
-			"provides": plugin.Provides,
+			"id":          plugin.ID,
+			"version":     plugin.Version,
+			"kind":        plugin.Kind,
+			"state":       string(plugin.State),
+			"bundled":     plugin.Bundled,
+			"provides":    plugin.Provides,
+			"permissions": plugin.Permissions,
 		}
 		if plugin.Description != "" {
 			entry["description"] = plugin.Description
@@ -408,9 +425,25 @@ func (c *creationPlugin) catalog(_ context.Context, _ string, _ json.RawMessage,
 		if len(plugin.Tools) > 0 {
 			entry["tools"] = plugin.Tools
 		}
+		if len(plugin.Requires) > 0 {
+			entry["requires"] = plugin.Requires
+		}
+		if plugin.Layer != "" {
+			entry["layer"] = plugin.Layer
+		}
+		if len(plugin.Slots) > 0 {
+			entry["slots"] = plugin.Slots
+		}
+		if len(plugin.Contributes) > 0 {
+			entry["contributes"] = plugin.Contributes
+		}
+		if plugin.Extensibility != nil {
+			entry["extensibility"] = plugin.Extensibility
+		}
 		plugins = append(plugins, entry)
 	}
 	document := map[string]any{
+		"tenant":     manager.TenantID().String(),
 		"plugins":    plugins,
 		"enabled":    inventory.Enabled,
 		"tools":      inventory.Tools,
@@ -418,6 +451,23 @@ func (c *creationPlugin) catalog(_ context.Context, _ string, _ json.RawMessage,
 		"generation": inventory.Generation,
 	}
 	return creationResult(document, false), nil
+}
+
+// tenantFailure refuses a creation action whose ambient tenant is not the
+// manager's. A tool call inside a turn always names a tenant; a bridge-style
+// call may not, in which case the manager's tenant is the deployment's one
+// tenant. There is no cross-tenant creation path.
+func (c *creationPlugin) tenantFailure(ctx context.Context, manager *Manager) *map[string]any {
+	tenant, ok := c.tenant(ctx)
+	if !ok {
+		document := failureDocument("creation mode needs a tenant: call it inside a turn, or configure the deployment tenant", nil)
+		return &document
+	}
+	if tenant != manager.TenantID() {
+		document := failureDocument("creation mode belongs to another tenant; this process serves exactly one tenant", nil)
+		return &document
+	}
+	return nil
 }
 
 // --- scaffold -------------------------------------------------------------
@@ -430,6 +480,9 @@ func (c *creationPlugin) scaffold(ctx context.Context, _ string, raw json.RawMes
 	manager := c.manager()
 	if manager == nil {
 		return creationResult(failureDocument("the plugin manager is not wired in this deployment", nil), true), nil
+	}
+	if failure := c.tenantFailure(ctx, manager); failure != nil {
+		return creationResult(*failure, true), nil
 	}
 	root := manager.Root()
 	if root == "" {
@@ -561,7 +614,7 @@ func (c *creationPlugin) stagingDir(root, id string) string {
 
 // --- validate -------------------------------------------------------------
 
-func (c *creationPlugin) validate(_ context.Context, _ string, raw json.RawMessage, _ agentcore.ToolUpdateFunc) (agentcore.AgentToolResult, error) {
+func (c *creationPlugin) validate(ctx context.Context, _ string, raw json.RawMessage, _ agentcore.ToolUpdateFunc) (agentcore.AgentToolResult, error) {
 	var args creationValidateArgs
 	if err := json.Unmarshal(raw, &args); err != nil {
 		return creationResult(failureDocument("invalid arguments: "+err.Error(), nil), true), nil
@@ -569,6 +622,9 @@ func (c *creationPlugin) validate(_ context.Context, _ string, raw json.RawMessa
 	manager := c.manager()
 	if manager == nil {
 		return creationResult(failureDocument("the plugin manager is not wired in this deployment", nil), true), nil
+	}
+	if failure := c.tenantFailure(ctx, manager); failure != nil {
+		return creationResult(*failure, true), nil
 	}
 	id := strings.TrimSpace(args.ID)
 	dir, failure := c.resolveStaged(manager, id, args.Path)
@@ -656,6 +712,9 @@ func (c *creationPlugin) install(ctx context.Context, _ string, raw json.RawMess
 	if manager == nil {
 		return creationResult(failureDocument("the plugin manager is not wired in this deployment", nil), true), nil
 	}
+	if failure := c.tenantFailure(ctx, manager); failure != nil {
+		return creationResult(*failure, true), nil
+	}
 	id := strings.TrimSpace(args.ID)
 	dir, failure := c.resolveStaged(manager, id, "")
 	if failure != nil {
@@ -673,9 +732,29 @@ func (c *creationPlugin) install(ctx context.Context, _ string, raw json.RawMess
 	if !ok {
 		return creationResult(failureDocument("creation mode needs a tenant: call it inside a turn, or configure the deployment tenant", nil), true), nil
 	}
+	// Idempotent replay: the same package (id + version + content hash) is already
+	// installed and enabled. A repeated call — including a retry with the same
+	// requestId — returns the same view and writes no second state. A different
+	// package under the same id is a conflict (update is the explicit action).
+	if existing, found := pluginViewOf(manager, id); found {
+		if existing.ContentHash == pkg.Hash && existing.Version == pkg.Version() {
+			if existing.State != LifecycleEnabled {
+				if _, err := manager.Enable(ctx, id, AuditContext{TenantID: &tenant, Actor: "plugin:" + CreationPluginID + "/install"}); err != nil {
+					return creationResult(failureDocument("enable: "+err.Error(), nil), true), nil
+				}
+				existing, _ = pluginViewOf(manager, id)
+			}
+			c.audit(ctx, manager, id, pkg.Version(), "creation.install", store.PluginResultOK,
+				map[string]any{"idempotent": true, "hash": pkg.Hash, "decisionId": args.DecisionID})
+			return creationResult(installationDocument(existing, args.DecisionID, true), false), nil
+		}
+		c.audit(ctx, manager, id, pkg.Version(), "creation.install", store.PluginResultRefused,
+			map[string]any{"reason": "a different package is already installed", "installedHash": existing.ContentHash, "hash": pkg.Hash})
+		return creationResult(failureDocument(fmt.Sprintf(
+			"plugin %s %s is already installed with a different package; remove it first or change its version", id, existing.Version), nil), true), nil
+	}
 	approved, approval, err := c.approve(ctx, tenant, store.PluginActionInstall, id,
-		fmt.Sprintf("Install the generated plugin package %s %s? Installing adopts its code into this deployment and lets it run.", id, pkg.Version()),
-		args)
+		installationPrompt(pkg, dir), args)
 	if err != nil {
 		return creationResult(failureDocument(err.Error(), nil), true), nil
 	}
@@ -706,29 +785,89 @@ func (c *creationPlugin) install(ctx context.Context, _ string, raw json.RawMess
 	c.audit(ctx, manager, id, pkg.Version(), "creation.install", store.PluginResultOK,
 		map[string]any{"hash": pkg.Hash, "decisionId": args.DecisionID, "staging": c.stagingDir(manager.Root(), id)})
 	// The enable view is read from the live inventory once more: it is the same
-	// projection GET /v1/plugins serves, so the document names the tools the
-	// model will actually see.
-	published := view.Tools
-	if refreshed, found := pluginViewOf(manager, id); found {
-		published = refreshed.Tools
+	// projection GET /v1/plugins serves, so the document names the tools and the
+	// UI contributions the model/client will actually see.
+	refreshed := view
+	if current, found := pluginViewOf(manager, id); found {
+		refreshed = current
 	}
-	return creationResult(map[string]any{
+	return creationResult(installationDocument(refreshed, args.DecisionID, false), false), nil
+}
+
+// installationDocument is the success body of creation.install. It carries the
+// render metadata from the same view GET /v1/plugins serves, so a client does
+// not have to guess where the plugin appears.
+func installationDocument(view PluginView, decisionID string, idempotent bool) map[string]any {
+	document := map[string]any{
 		"status":         "enabled",
-		"id":             id,
+		"id":             view.ID,
 		"version":        view.Version,
-		"deepLink":       "/plugins/" + id + "/",
 		"bundlePath":     view.Path,
-		"publishedTools": published,
-		"decisionId":     args.DecisionID,
-	}, false), nil
+		"publishedTools": view.Tools,
+		"contributes":    view.Contributes,
+		"slots":          view.Slots,
+		"decisionId":     decisionID,
+	}
+	if idempotent {
+		document["idempotent"] = true
+	}
+	if view.Extensibility != nil {
+		document["extensibility"] = view.Extensibility
+	}
+	if view.Provides.UI != nil && strings.TrimSpace(view.Provides.UI.Entry) != "" {
+		document["deepLink"] = "/plugins/" + view.ID + "/"
+	}
+	for _, contribution := range view.Contributes {
+		if contribution.Form == "chunk" && contribution.Entry != "" {
+			document["chunkEntry"] = "/plugins/" + view.ID + "/" + strings.TrimPrefix(contribution.Entry, "./")
+			break
+		}
+	}
+	return document
+}
+
+// installationPrompt is what a human approves: identity, provenance, content
+// hash, the permissions the plugin requests and the slots it will contribute.
+// It carries names only — never a secret value or a package body.
+func installationPrompt(pkg pluginpkg.Package, source string) string {
+	manifest := pkg.Manifest
+	var permissions []string
+	if len(manifest.Permissions.FS) > 0 {
+		permissions = append(permissions, "fs="+strings.Join(manifest.Permissions.FS, ","))
+	}
+	if len(manifest.Permissions.Net) > 0 {
+		permissions = append(permissions, "net="+strings.Join(manifest.Permissions.Net, ","))
+	}
+	if len(manifest.Permissions.Secrets) > 0 {
+		permissions = append(permissions, "secrets="+strings.Join(manifest.Permissions.Secrets, ","))
+	}
+	if len(manifest.Permissions.Tools) > 0 {
+		permissions = append(permissions, "tools="+strings.Join(manifest.Permissions.Tools, ","))
+	}
+	if len(permissions) == 0 {
+		permissions = append(permissions, "none")
+	}
+	var contributions []string
+	for _, contribution := range manifest.Contributes {
+		contributions = append(contributions, contribution.Slot+"/"+string(contribution.Form))
+	}
+	if len(contributions) == 0 {
+		contributions = append(contributions, "none")
+	}
+	return fmt.Sprintf(
+		"Install the generated plugin %s %s?\nSource: %s\nContent hash: %s\nRequested permissions: %s\nContributed slots: %s\nInstalling adopts its code into this deployment and lets it run.",
+		pkg.ID(), pkg.Version(), source, pkg.Hash, strings.Join(permissions, " "), strings.Join(contributions, ", "))
 }
 
 // --- list -----------------------------------------------------------------
 
-func (c *creationPlugin) list(_ context.Context, _ string, _ json.RawMessage, _ agentcore.ToolUpdateFunc) (agentcore.AgentToolResult, error) {
+func (c *creationPlugin) list(ctx context.Context, _ string, _ json.RawMessage, _ agentcore.ToolUpdateFunc) (agentcore.AgentToolResult, error) {
 	manager := c.manager()
 	if manager == nil {
 		return creationResult(failureDocument("the plugin manager is not wired in this deployment", nil), true), nil
+	}
+	if failure := c.tenantFailure(ctx, manager); failure != nil {
+		return creationResult(*failure, true), nil
 	}
 	root := manager.Root()
 	if root == "" {
@@ -761,7 +900,21 @@ func (c *creationPlugin) list(_ context.Context, _ string, _ json.RawMessage, _ 
 		if view, installed := pluginViewOf(manager, id); installed {
 			artifact["installed"] = true
 			artifact["state"] = view.State
-			artifact["deepLink"] = "/plugins/" + id + "/"
+			artifact["tools"] = view.Tools
+			artifact["slots"] = view.Slots
+			artifact["contributes"] = view.Contributes
+			if view.Extensibility != nil {
+				artifact["extensibility"] = view.Extensibility
+			}
+			if view.Provides.UI != nil && strings.TrimSpace(view.Provides.UI.Entry) != "" {
+				artifact["deepLink"] = "/plugins/" + id + "/"
+			}
+			for _, contribution := range view.Contributes {
+				if contribution.Form == "chunk" && contribution.Entry != "" {
+					artifact["chunkEntry"] = "/plugins/" + id + "/" + strings.TrimPrefix(contribution.Entry, "./")
+					break
+				}
+			}
 		} else {
 			artifact["installed"] = false
 		}
@@ -781,6 +934,9 @@ func (c *creationPlugin) remove(ctx context.Context, _ string, raw json.RawMessa
 	manager := c.manager()
 	if manager == nil {
 		return creationResult(failureDocument("the plugin manager is not wired in this deployment", nil), true), nil
+	}
+	if failure := c.tenantFailure(ctx, manager); failure != nil {
+		return creationResult(*failure, true), nil
 	}
 	id := strings.TrimSpace(args.ID)
 	if !pluginpkg.ValidatePluginID(id) {

@@ -41,6 +41,9 @@ import (
 type PluginManager interface {
 	// Snapshot renders the inventory and the effective tool surface.
 	Snapshot() harnessext.PluginInventory
+	// TenantID is the tenant the inventory belongs to. The manager is bound to
+	// one tenant; a request naming another tenant is not served by it.
+	TenantID() uuid.UUID
 	Install(ctx context.Context, req harnessext.InstallRequest, audit harnessext.AuditContext) (harnessext.PluginView, error)
 	Enable(ctx context.Context, id string, audit harnessext.AuditContext) (harnessext.PluginView, error)
 	Disable(ctx context.Context, id string, audit harnessext.AuditContext) (harnessext.PluginView, error)
@@ -87,11 +90,18 @@ type pluginInventoryResponse struct {
 // pluginsInventory implements GET /v1/plugins. Without a manager it answers the
 // assembled snapshot exactly as before (a host that only compiles plugins in).
 func (s *Server) pluginsInventory(w http.ResponseWriter, r *http.Request) {
-	if _, ok := tenantFrom(w, r); !ok {
+	tenantID, ok := tenantFrom(w, r)
+	if !ok {
 		return
 	}
 	if s.cfg.PluginManager == nil {
 		s.listPlugins(w, r)
+		return
+	}
+	if tenantID != s.cfg.PluginManager.TenantID() {
+		// The manager owns exactly one tenant. Answering another tenant's read (or
+		// serving its inventory) would be a cross-tenant leak.
+		writeErr(w, http.StatusNotFound, errors.New("plugin management is not available for this tenant"))
 		return
 	}
 	inventory := s.cfg.PluginManager.Snapshot()
@@ -262,6 +272,12 @@ func (s *Server) pluginAudit(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusServiceUnavailable, errors.New("plugin management is not wired"))
 		return
 	}
+	if tenantID != s.cfg.PluginManager.TenantID() {
+		// Cross-tenant read: answer exactly as an unknown deployment would, so a
+		// caller cannot probe another tenant's plugin lifecycle.
+		writeErr(w, http.StatusNotFound, errors.New("plugin management is not available for this tenant"))
+		return
+	}
 	limit, err := queryInt(r, "limit", 50, 1, pluginAuditMaxLimit)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, err)
@@ -308,6 +324,12 @@ func (s *Server) pluginCallContext(w http.ResponseWriter, r *http.Request) (Plug
 		writeErr(w, http.StatusServiceUnavailable, errors.New("plugin management is not wired"))
 		return nil, harnessext.AuditContext{}, false
 	}
+	if tenantID != s.cfg.PluginManager.TenantID() {
+		// Cross-tenant lifecycle write: the id is not a fact of the caller's
+		// tenant, and no state is touched.
+		writeErr(w, http.StatusNotFound, errors.New("plugin management is not available for this tenant"))
+		return nil, harnessext.AuditContext{}, false
+	}
 	actor := strings.TrimSpace(r.Header.Get("X-Keel-Actor"))
 	if actor == "" {
 		actor = "tenant:" + tenantID.String()
@@ -345,6 +367,9 @@ func (s *Server) writePluginError(w http.ResponseWriter, err error) {
 		errors.Is(err, harnessext.ErrPluginBundled),
 		errors.Is(err, harnessext.ErrPluginGate):
 		status = http.StatusConflict
+	case errors.Is(err, harnessext.ErrPluginTenant):
+		// A cross-tenant lifecycle fact is indistinguishable from an unknown id.
+		status = http.StatusNotFound
 	case errors.Is(err, harnessext.ErrPluginInvalid), errors.Is(err, harnessext.ErrPluginPath):
 		status = http.StatusBadRequest
 		if pluginErr != nil && pluginErr.Op != "" && pluginErr.Op != "install" && pluginErr.Op != "update" {

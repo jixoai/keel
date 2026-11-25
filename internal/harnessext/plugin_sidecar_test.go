@@ -989,6 +989,7 @@ func newSidecarHarness(t *testing.T, root string, loader PluginLoader) *managerH
 	})
 	persistence := newFakePluginStore()
 	manager, err := NewPluginManager(ManagerOptions{
+		TenantID:    testTenantID,
 		Root:        root,
 		Runtime:     runtime,
 		Persistence: persistence,

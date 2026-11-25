@@ -109,7 +109,7 @@ type PluginRuntimeView struct {
 	StoppedAt *time.Time `json:"stoppedAt,omitempty"`
 }
 
-// PluginInventory is the GET /v1/plugins body: every plugin the deployment
+// PluginInventory is the GET /v1/plugins body: every plugin the owning tenant
 // knows, the effective tool surface and two change identities — the runtime
 // generation and the manager revision. A client that only needs "did anything
 // change" compares those two numbers.

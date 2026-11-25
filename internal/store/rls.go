@@ -51,9 +51,9 @@ const RLSRoleName = "keel_app"
 // resolve names). The auth lookup that runs before a tenant is known uses the
 // bypass marker, so this policy never blocks sign-in.
 //
-// `plugins` is excluded on purpose: plugin enablement is a property of the
-// process, not of a tenant (see schema.sql), so a tenant-scoped policy there
-// would be a lie. The tenant role gets no grant on it at all.
+// `plugins` and `plugin_audit` are tenant-scoped (keel-creation): user-created
+// plugin state belongs to the installing tenant, and bundled rows are seeded
+// per tenant, so the policy is precise rather than a lie.
 var rlsTenantTables = []string{
 	"tenants",
 	"sessions",
@@ -81,6 +81,8 @@ var rlsTenantTables = []string{
 	"session_snapshot",
 	"mcp_app_audit",
 	"mcp_app_contexts",
+	"plugins",
+	"plugin_audit",
 	"groups",
 	"session_placement",
 	"run_duration_samples",

@@ -256,8 +256,11 @@ import；Rust + gRPC 传输与「service 只经 gRPC」的强约束见 §8 defer
 - RSS 采样器（`scripts/acceptance-rss.sh`，≤500MB 协议）。
   （W0 RSS 切片已交付：`scripts/acceptance-rss.sh` + `scripts/lib/rss_sampler.py`，
   证据 `openspec/changes/keel-harness-v2/evidence/w0-rss.md`；本 W0.5 契约文本不再变更。）
-- 多租户 `plugin_state(tenant_id, ...)` 与 `/v1/plugins` 租户过滤。
 - layerfs Rust + gRPC（含 proto、健康检查、端口、SIGKILL sweep）。
+
+已由后续 change `keel-creation` 落地、不再属于 defer：plugin install/state/audit 的
+`tenant_id` 过滤（`plugins(tenant_id,id)`、`plugin_audit.tenant_id NOT NULL`，manager 绑定一个
+tenant，跨租户 404；单租户部署仍是一个 tenant，无第二套代码路径）。
 
 ## 9. 校验入口
 

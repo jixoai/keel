@@ -17,6 +17,10 @@ import (
 	"github.com/jixoai/keel/internal/store"
 )
 
+// pluginTestTenant is the tenant the fake manager owns. The manager is bound to
+// one tenant; tests that exercise a foreign caller use another uuid explicitly.
+var pluginTestTenant = uuid.MustParse("12345678-1234-1234-1234-123456789abc")
+
 // fakePluginManager is the API-side double: it records the calls and answers
 // canned views/errors, so the HTTP contract (status codes, bodies, audit
 // attribution) is tested without a plugins root.
@@ -37,6 +41,8 @@ type fakePluginManager struct {
 	reqs    []harnessext.InstallRequest
 	updates []harnessext.UpdateRequest
 }
+
+func (f *fakePluginManager) TenantID() uuid.UUID { return pluginTestTenant }
 
 func (f *fakePluginManager) record(call string, audit harnessext.AuditContext) {
 	f.mu.Lock()
@@ -254,7 +260,7 @@ func TestPluginAPILifecycleRoutesAndAuditAttribution(t *testing.T) {
 		Enabled: []string{"keel.example"},
 	}}
 	server := newPluginAPITest(t, manager)
-	tenant := uuid.New()
+	tenant := pluginTestTenant
 
 	// GET /v1/plugins: the managed inventory, not the boot snapshot.
 	var inventory struct {
@@ -337,7 +343,7 @@ func TestPluginAPILifecycleRoutesAndAuditAttribution(t *testing.T) {
 func TestPluginAPIErrorMapping(t *testing.T) {
 	manager := &fakePluginManager{}
 	harness := newPluginAPITest(t, manager)
-	tenant := uuid.New()
+	tenant := pluginTestTenant
 	cases := []struct {
 		name       string
 		set        func()
@@ -439,6 +445,37 @@ func TestPluginAPIErrorMapping(t *testing.T) {
 	}
 }
 
+// TestPluginAPIRefusesAnotherTenant: the manager is bound to one tenant; every
+// plugin route answers a foreign tenant exactly as an unknown deployment (404),
+// for reads, writes, audit and the bridge.
+func TestPluginAPIRefusesAnotherTenant(t *testing.T) {
+	manager := &fakePluginManager{}
+	harness := newPluginAPITest(t, manager)
+	foreign := uuid.New()
+	for _, tc := range []struct{ method, path string }{
+		{http.MethodGet, "/v1/plugins"},
+		{http.MethodGet, "/v1/plugins/audit"},
+		{http.MethodPost, "/v1/plugins/install"},
+		{http.MethodPost, "/v1/plugins/x.y/enable"},
+		{http.MethodPost, "/v1/plugins/x.y/disable"},
+		{http.MethodPost, "/v1/plugins/x.y/uninstall"},
+		{http.MethodGet, "/v1/plugins/x.y/bridge/state"},
+	} {
+		code := harness.write(t, tc.method, tc.path, foreign, map[string]any{}, nil)
+		if code != http.StatusNotFound {
+			t.Fatalf("%s %s for a foreign tenant = %d, want 404", tc.method, tc.path, code)
+		}
+	}
+	if len(manager.calls) != 0 {
+		t.Fatalf("a foreign tenant reached the manager: %v", manager.calls)
+	}
+	// The owner still gets the inventory.
+	var inventory pluginInventoryResponse
+	if code := harness.write(t, http.MethodGet, "/v1/plugins", pluginTestTenant, nil, &inventory); code != http.StatusOK {
+		t.Fatalf("owner inventory = %d", code)
+	}
+}
+
 func TestPluginAPIRequiresTenantAndManager(t *testing.T) {
 	// No manager: the read route falls back to the assembled snapshot and the
 	// write routes answer 503.
@@ -447,7 +484,7 @@ func TestPluginAPIRequiresTenantAndManager(t *testing.T) {
 		Logger:  testLogger(),
 	}))
 	defer server.Close()
-	tenant := uuid.New()
+	tenant := pluginTestTenant
 	var body struct {
 		Plugins   []harnessext.PluginStatus `json:"plugins"`
 		Lifecycle string                    `json:"lifecycle"`
@@ -478,7 +515,7 @@ func TestPluginAPIAuditPaginationAndCapabilities(t *testing.T) {
 	}}
 	manager.inventory = harnessext.PluginInventory{Revision: 9, Enabled: []string{"vendor.panel"}}
 	server := newPluginAPIServer(t, manager)
-	tenant := uuid.New()
+	tenant := pluginTestTenant
 
 	var page struct {
 		Entries []store.PluginAuditEntry `json:"entries"`
@@ -521,7 +558,7 @@ func TestPluginAPIAuditPaginationAndCapabilities(t *testing.T) {
 func TestPluginAPIInstallRejectsUnknownFields(t *testing.T) {
 	manager := &fakePluginManager{}
 	server := newPluginAPIServer(t, manager)
-	tenant := uuid.New()
+	tenant := pluginTestTenant
 	raw := strings.NewReader(`{"path":"/tmp/x","source":"git"}`)
 	req, err := http.NewRequest(http.MethodPost, server.URL+"/v1/plugins/install", raw)
 	if err != nil {
@@ -576,7 +613,7 @@ func (f *fakePluginManager) count(call string) int {
 func TestPluginAPIPluginErrorsAreNotWrapped(t *testing.T) {
 	manager := &fakePluginManager{enableErr: errors.New("boom")}
 	harness := newPluginAPITest(t, manager)
-	if code, body := harness.approveWrite(t, http.MethodPost, "/v1/plugins/x.y/enable", uuid.New(), nil, pluginApprovalAllow); code != http.StatusInternalServerError {
+	if code, body := harness.approveWrite(t, http.MethodPost, "/v1/plugins/x.y/enable", pluginTestTenant, nil, pluginApprovalAllow); code != http.StatusInternalServerError {
 		t.Fatalf("plain error = %d %+v", code, body)
 	}
 }
@@ -598,7 +635,7 @@ func TestPluginsInventoryCarriesEffectivePrompt(t *testing.T) {
 		Enabled: []string{"keel.creation"},
 	}}
 	server := newPluginAPIServer(t, manager)
-	tenant := uuid.New()
+	tenant := pluginTestTenant
 	var inventory struct {
 		Prompt []harnessext.PromptSection `json:"prompt"`
 	}

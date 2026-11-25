@@ -510,6 +510,7 @@ func (m *Manager) recordDenial(denial Denial) {
 	detail := mustJSON(map[string]any{"kind": denial.Kind, "target": denial.Target, "reason": denial.Reason})
 	entry := store.PluginAuditEntry{
 		TS:       at,
+		TenantID: m.tenantID,
 		Actor:    "plugin-gate",
 		PluginID: denial.PluginID,
 		Version:  denial.Version,
@@ -542,6 +543,7 @@ func (m *Manager) recordRuntimeFailure(pluginID, version, reason string) {
 	}
 	entry := store.PluginAuditEntry{
 		TS:       m.now(),
+		TenantID: m.tenantID,
 		Actor:    "plugin-runtime",
 		PluginID: pluginID,
 		Version:  version,

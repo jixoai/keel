@@ -16,13 +16,24 @@ import (
 	"github.com/jixoai/keel/internal/store"
 )
 
-// AuditContext is who performed a lifecycle action (the audit row's tenant and
-// actor).
+// AuditContext is who performed a lifecycle action (the audit row's actor).
+// TenantID is optional for callers inside the owning process: nil means "the
+// manager's tenant". A non-nil value that differs from the manager's tenant is
+// a cross-tenant refusal, never a lookup.
 type AuditContext struct {
-	// TenantID is the calling tenant (nil for a boot-time action).
+	// TenantID is the calling tenant (nil for boot/internal actions).
 	TenantID *uuid.UUID
 	// Actor is the operator label ("api", a user id, "boot").
 	Actor string
+}
+
+// checkTenant refuses a lifecycle action whose caller names another tenant.
+// The manager owns exactly one tenant; there is no deployment-level action.
+func (m *Manager) checkTenant(op, id string, audit AuditContext) error {
+	if audit.TenantID != nil && *audit.TenantID != m.tenantID {
+		return pluginErrf(ErrPluginTenant, op, id, "plugin lifecycle belongs to another tenant")
+	}
+	return nil
 }
 
 // Boot reconciles the inventory with what is on disk and assembles the plugin
@@ -33,7 +44,7 @@ func (m *Manager) Boot(ctx context.Context) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.store != nil {
-		rows, err := m.store.ListPlugins(ctx)
+		rows, err := m.store.ListPlugins(ctx, m.tenantID)
 		if err != nil {
 			return fmt.Errorf("harnessext: read plugin inventory: %w", err)
 		}
@@ -315,7 +326,7 @@ func (m *Manager) rowLocked(ctx context.Context, id string) (store.PluginRecord,
 	if m.store == nil {
 		return store.PluginRecord{}, false
 	}
-	row, found, err := m.store.GetPlugin(ctx, id)
+	row, found, err := m.store.GetPlugin(ctx, m.tenantID, id)
 	if err != nil {
 		m.log.Warn("plugin inventory read failed", "plugin", id, "err", err)
 		return store.PluginRecord{}, false
@@ -500,8 +511,13 @@ type InstallRequest struct {
 	Path string
 }
 
-// Install validates a package and copies it into the managed root.
+// Install validates a package and copies it into the managed root. Repeating an
+// install of the same package (same id, version and content hash) is
+// idempotent: the existing view is returned and no second row is written.
 func (m *Manager) Install(ctx context.Context, req InstallRequest, audit AuditContext) (PluginView, error) {
+	if err := m.checkTenant("install", "", audit); err != nil {
+		return PluginView{}, err
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	entry, pkg, err := m.stagePackageLocked(req.Path, "")
@@ -514,6 +530,11 @@ func (m *Manager) Install(ctx context.Context, req InstallRequest, audit AuditCo
 		return PluginView{}, err
 	}
 	if existing, ok := m.entries[entry.id]; ok {
+		if existing.hash == entry.hash && existing.manifestVersion() == entry.manifestVersion() {
+			m.auditLocked(ctx, audit, entry.id, pkg.Version(), store.PluginActionInstall, store.PluginResultOK,
+				map[string]any{"idempotent": true, "hash": entry.hash, "state": string(existing.state)})
+			return m.viewLocked(existing), nil
+		}
 		err := pluginErrf(ErrPluginExists, "install", entry.id,
 			"plugin %s %s is already installed (%s); use update to replace it", entry.id, existing.manifestVersion(), existing.state)
 		m.auditLocked(ctx, audit, entry.id, pkg.Version(), store.PluginActionInstall, store.PluginResultRefused, detailOf(err))
@@ -652,8 +673,11 @@ func (m *Manager) commitPackageLocked(entry *managerEntry, pkg pluginpkg.Package
 
 // Enable loads a plugin through the runtime's dependency topology. A failure
 // leaves the previous assembly untouched (no half-loaded plugin) and records
-// why.
+// why. Enabling an already-enabled, healthy plugin is idempotent.
 func (m *Manager) Enable(ctx context.Context, id string, audit AuditContext) (PluginView, error) {
+	if err := m.checkTenant("enable", id, audit); err != nil {
+		return PluginView{}, err
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	entry, ok := m.entries[id]
@@ -667,7 +691,9 @@ func (m *Manager) Enable(ctx context.Context, id string, audit AuditContext) (Pl
 		if reason, failed := m.runtimeFailure(entry); failed {
 			m.log.Warn("plugin enable reconnects a failed runtime", "plugin", id, "reason", reason)
 		} else {
-			return m.viewLocked(entry), pluginErrf(ErrPluginState, "enable", id, "plugin is already enabled")
+			m.auditLocked(ctx, audit, id, entry.manifestVersion(), store.PluginActionEnable, store.PluginResultOK,
+				map[string]any{"idempotent": true})
+			return m.viewLocked(entry), nil
 		}
 	}
 	if entry.manifest == nil {
@@ -776,6 +802,9 @@ func (m *Manager) Enable(ctx context.Context, id string, audit AuditContext) (Pl
 // Disable unloads a plugin and every registration it made. It refuses when an
 // enabled plugin depends on it, so nothing is left pending by a disable.
 func (m *Manager) Disable(ctx context.Context, id string, audit AuditContext) (PluginView, error) {
+	if err := m.checkTenant("disable", id, audit); err != nil {
+		return PluginView{}, err
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	entry, ok := m.entries[id]
@@ -815,6 +844,9 @@ func (m *Manager) Disable(ctx context.Context, id string, audit AuditContext) (P
 // explicit about the order, and a live plugin must not be deleted underneath
 // the runtime).
 func (m *Manager) Uninstall(ctx context.Context, id string, audit AuditContext) (PluginView, error) {
+	if err := m.checkTenant("uninstall", id, audit); err != nil {
+		return PluginView{}, err
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	entry, ok := m.entries[id]
@@ -860,7 +892,7 @@ func (m *Manager) Uninstall(ctx context.Context, id string, audit AuditContext) 
 		}
 	}
 	if m.store != nil {
-		found, err := m.store.DeletePlugin(ctx, id)
+		found, err := m.store.DeletePlugin(ctx, m.tenantID, id)
 		if err != nil {
 			return view, err
 		}
@@ -985,6 +1017,9 @@ type UpdateRequest struct {
 // Update replaces a plugin's version: disable, swap the package, enable.
 // A failure restores the previous version and its state.
 func (m *Manager) Update(ctx context.Context, id string, req UpdateRequest, audit AuditContext) (PluginView, error) {
+	if err := m.checkTenant("update", id, audit); err != nil {
+		return PluginView{}, err
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	entry, ok := m.entries[id]
@@ -1232,6 +1267,7 @@ func (m *Manager) persistLocked(ctx context.Context, entry *managerEntry) error 
 		entry.updatedAt = m.now()
 	}
 	record := store.PluginRecord{
+		TenantID:    m.tenantID,
 		ID:          entry.id,
 		Version:     entry.manifestVersion(),
 		Kind:        entry.kind(),
@@ -1263,7 +1299,7 @@ func (m *Manager) auditLocked(ctx context.Context, audit AuditContext, id, versi
 	}
 	entry := store.PluginAuditEntry{
 		TS:       m.now(),
-		TenantID: audit.TenantID,
+		TenantID: m.tenantID,
 		Actor:    actor,
 		PluginID: id,
 		Version:  version,
@@ -1280,12 +1316,16 @@ func (m *Manager) auditLocked(ctx context.Context, audit AuditContext, id, versi
 	}
 }
 
-// Audit returns lifecycle audit rows in chronological order.
+// Audit returns the owning tenant's lifecycle audit rows in chronological
+// order. tenantID is optional and may only name the manager's own tenant.
 func (m *Manager) Audit(ctx context.Context, tenantID *uuid.UUID, pluginID string, after int64, limit int) ([]store.PluginAuditEntry, error) {
+	if tenantID != nil && *tenantID != m.tenantID {
+		return nil, pluginErrf(ErrPluginTenant, "audit", "", "plugin audit belongs to another tenant")
+	}
 	if m.store == nil {
 		return []store.PluginAuditEntry{}, nil
 	}
-	return m.store.ListPluginAudit(ctx, tenantID, pluginID, after, limit)
+	return m.store.ListPluginAudit(ctx, m.tenantID, pluginID, after, limit)
 }
 
 // RecordAudit appends one lifecycle audit row on behalf of a product flow that

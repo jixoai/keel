@@ -10,7 +10,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/google/uuid"
 	"github.com/jixoai/keel/internal/harnessext"
 )
 
@@ -30,7 +29,7 @@ func bridgeViewWithContributes(capabilities ...string) harnessext.PluginView {
 
 func TestPluginBridgeStateCarriesTheDeclaration(t *testing.T) {
 	harness := newBridgeHarness(t, nil, bridgeViewWithContributes("state", "call"))
-	tenant := uuid.New()
+	tenant := pluginTestTenant
 	var state pluginBridgeStateResponse
 	if code := harness.write(t, http.MethodGet, "/v1/plugins/vendor.panel/bridge/state", tenant, nil, &state); code != http.StatusOK {
 		t.Fatalf("state = %d", code)
@@ -51,7 +50,7 @@ func TestPluginBridgeStateCarriesTheDeclaration(t *testing.T) {
 
 func TestPluginBridgeGatesUndeclaredVerbs(t *testing.T) {
 	harness := newBridgeHarness(t, nil, bridgeViewWithContributes("state"))
-	tenant := uuid.New()
+	tenant := pluginTestTenant
 	cases := []struct {
 		name string
 		path string
@@ -84,7 +83,7 @@ func TestPluginBridgeDeclaredCallStillOwnsItsTool(t *testing.T) {
 	view.Provides.Tools = []string{"example_status"}
 	view.Tools = []string{"example_status"}
 	harness := newBridgeHarness(t, nil, view)
-	tenant := uuid.New()
+	tenant := pluginTestTenant
 	var body map[string]any
 	code := harness.write(t, http.MethodPost, "/v1/plugins/vendor.panel/bridge/call", tenant,
 		map[string]any{"tool": "example_status", "args": map[string]any{}}, &body)
@@ -98,7 +97,7 @@ func TestPluginBridgeDeclaredCallStillOwnsItsTool(t *testing.T) {
 
 func TestPluginBridgeLegacyViewKeepsTheFullBridge(t *testing.T) {
 	harness := newBridgeHarness(t, nil, bridgePluginView()) // no contributes
-	tenant := uuid.New()
+	tenant := pluginTestTenant
 	var state pluginBridgeStateResponse
 	if code := harness.write(t, http.MethodGet, "/v1/plugins/vendor.panel/bridge/state", tenant, nil, &state); code != http.StatusOK {
 		t.Fatalf("state = %d", code)
@@ -110,7 +109,7 @@ func TestPluginBridgeLegacyViewKeepsTheFullBridge(t *testing.T) {
 
 func TestPluginBridgeUndeclaredToolKeepsItsCode(t *testing.T) {
 	harness := newBridgeHarness(t, nil, bridgeViewWithContributes("state", "call"))
-	tenant := uuid.New()
+	tenant := pluginTestTenant
 	var body map[string]any
 	code := harness.write(t, http.MethodPost, "/v1/plugins/vendor.panel/bridge/call", tenant,
 		map[string]any{"tool": "other_plugin_tool", "args": map[string]any{}}, &body)
@@ -125,7 +124,7 @@ func TestPluginBridgeUndeclaredToolKeepsItsCode(t *testing.T) {
 // The response type is the allowlist; a declaration is not a host secret.
 func TestPluginBridgeStateJSONHasNoPackagePath(t *testing.T) {
 	harness := newBridgeHarness(t, nil, bridgeViewWithContributes("state"))
-	tenant := uuid.New()
+	tenant := pluginTestTenant
 	var raw json.RawMessage
 	if code := harness.write(t, http.MethodGet, "/v1/plugins/vendor.panel/bridge/state", tenant, nil, &raw); code != http.StatusOK {
 		t.Fatalf("state = %d", code)

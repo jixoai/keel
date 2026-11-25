@@ -10,8 +10,22 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/google/uuid"
+
 	"github.com/jixoai/keel/internal/harnessext"
 )
+
+// pluginUITestTenant is the tenant the test manager serves. The auth middleware
+// injects X-Tenant-ID on every request; a direct handler test must do the same.
+const pluginUITestTenant = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+
+func pluginUIRequest(method, path, tenantID string) *http.Request {
+	req := httptest.NewRequest(method, path, nil)
+	if tenantID != "" {
+		req.Header.Set("X-Tenant-ID", tenantID)
+	}
+	return req
+}
 
 // Plugin UI hosting (change keel-plugin-core, W1): /plugins/<id>/* serves an
 // ENABLED plugin's UI package and nothing else.
@@ -54,7 +68,8 @@ func pluginUITestManager(t *testing.T, mutate func(root string)) (*harnessext.Ma
 		mutate(root)
 	}
 	manager, err := harnessext.NewPluginManager(harnessext.ManagerOptions{
-		Root: root,
+		TenantID: uuid.MustParse(pluginUITestTenant),
+		Root:     root,
 		Runtime: harnessext.NewRuntime(harnessext.RuntimeOptions{
 			Logger: discardLogger(),
 		}),
@@ -78,7 +93,7 @@ func TestPluginUIHostsEnabledPluginOnly(t *testing.T) {
 		t.Fatal("handler should be available")
 	}
 	get := func(path string) *httptest.ResponseRecorder {
-		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req := pluginUIRequest(http.MethodGet, path, pluginUITestTenant)
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, req)
 		return rec
@@ -140,11 +155,20 @@ func TestPluginUIHostsEnabledPluginOnly(t *testing.T) {
 		t.Fatalf("missing file = %d", rec.Code)
 	}
 	// Only reads are served.
-	req := httptest.NewRequest(http.MethodPost, "/plugins/vendor.panel/", nil)
+	req := pluginUIRequest(http.MethodPost, "/plugins/vendor.panel/", pluginUITestTenant)
 	rec = httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("post = %d", rec.Code)
+	}
+	// A missing or foreign tenant is the same 404 an unknown plugin gets: the
+	// manager serves exactly one tenant and never confirms another's ids.
+	for _, tenant := range []string{"", uuid.NewString()} {
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, pluginUIRequest(http.MethodGet, "/plugins/vendor.panel/", tenant))
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("tenant %q = %d %q", tenant, rec.Code, rec.Body.String())
+		}
 	}
 }
 
@@ -165,7 +189,7 @@ func TestPluginUIRefusesTraversalAndSymlinkEscape(t *testing.T) {
 		t.Logf("enable refused by the package validator: %v", err)
 	}
 	get := func(path string) *httptest.ResponseRecorder {
-		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req := pluginUIRequest(http.MethodGet, path, pluginUITestTenant)
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, req)
 		return rec
@@ -245,6 +269,65 @@ func TestPluginUIContentTypeMap(t *testing.T) {
 	// An unknown extension falls through to the platform table (or sniffing).
 	if got := pluginUIContentType("data.bin"); strings.HasPrefix(got, "text/html") {
 		t.Fatalf("unknown extension = %q", got)
+	}
+}
+
+// TestPluginUIHostsDeclaredChunkEntries: a pure chunk package (no provides.ui
+// page) still serves the exact entry its contributes[] declares, and nothing
+// else, so the slot loader can import it from /plugins/<id>/.
+func TestPluginUIHostsDeclaredChunkEntries(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "demo.chunk")
+	if err := os.MkdirAll(filepath.Join(dir, "ui"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	manifest := `id: demo.chunk
+version: 1.0.0
+kind: webview
+description: a chunk-only package
+provides: {}
+contributes:
+  - slot: keel.ui.settings-section
+    form: chunk
+    entry: ui/panel.js
+`
+	if err := os.WriteFile(filepath.Join(dir, "plugin.yaml"), []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "ui", "panel.js"), []byte("export function render(){return null}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	manager, err := harnessext.NewPluginManager(harnessext.ManagerOptions{
+		TenantID:    uuid.MustParse(pluginUITestTenant),
+		Root:        root,
+		Runtime:     harnessext.NewRuntime(harnessext.RuntimeOptions{Logger: discardLogger()}),
+		KeelVersion: "0.2.0",
+		Logger:      discardLogger(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.Boot(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.Enable(context.Background(), "demo.chunk", harnessext.AuditContext{Actor: "test"}); err != nil {
+		t.Fatalf("enable chunk plugin: %v", err)
+	}
+	handler := newPluginUIHandler(manager, discardLogger())
+	get := func(path string) *httptest.ResponseRecorder {
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, pluginUIRequest(http.MethodGet, path, pluginUITestTenant))
+		return rec
+	}
+	if rec := get("/plugins/demo.chunk/ui/panel.js"); rec.Code != http.StatusOK ||
+		!strings.Contains(rec.Body.String(), "export function render") {
+		t.Fatalf("declared chunk = %d %q", rec.Code, rec.Body.String())
+	}
+	if rec := get("/plugins/demo.chunk/ui/other.js"); rec.Code != http.StatusNotFound {
+		t.Fatalf("undeclared chunk = %d", rec.Code)
+	}
+	if rec := get("/plugins/demo.chunk/"); rec.Code != http.StatusNotFound {
+		t.Fatalf("chunk-only page = %d", rec.Code)
 	}
 }
 

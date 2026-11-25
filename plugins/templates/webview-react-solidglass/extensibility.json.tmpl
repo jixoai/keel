@@ -1,0 +1,25 @@
+{
+  "schema": "keel.plugin-extensibility/1",
+  "plugin": "{{id}}",
+  "version": "{{version}}",
+  "summary": "A generated plugin: one {{tool}} tool and a Native chunk contribution.",
+  "slots": [],
+  "contributes": [
+    {
+      "slot": "keel.ui.settings-section",
+      "form": "chunk",
+      "entry": "ui/settings.js"
+    }
+  ],
+  "configuration": [],
+  "hooks": [],
+  "providers": [],
+  "examples": [
+    {
+      "title": "Call the generated tool",
+      "description": "Invoke the backend tool through the host tool surface.",
+      "snippet": "{\"action\":\"{{tool}}\"}"
+    }
+  ],
+  "limits": []
+}

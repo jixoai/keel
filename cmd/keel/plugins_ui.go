@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/google/uuid"
+
 	"github.com/jixoai/keel/internal/harnessext"
 	"github.com/jixoai/keel/internal/pluginpkg"
 )
@@ -61,6 +63,13 @@ func (h *pluginUIHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, http.StatusNotFound, "plugin management is not wired in this deployment")
 		return
 	}
+	if !h.tenantAllowed(r) {
+		// The manager serves exactly one tenant. Another tenant's request must not
+		// learn whether this id exists, so the answer is the same 404 an unknown
+		// plugin gets.
+		h.fail(w, r, http.StatusNotFound, "plugin is not installed")
+		return
+	}
 	rest := strings.TrimPrefix(r.URL.Path, pluginUIPrefix)
 	if rest == "" {
 		h.fail(w, r, http.StatusNotFound, "a plugin id is required: /plugins/<id>/")
@@ -87,9 +96,25 @@ func (h *pluginUIHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			"plugin "+id+" is "+string(view.State)+": only an enabled plugin's UI is hosted")
 		return
 	}
+	// A declared chunk entry is served from the package root first: a pure chunk
+	// package has no page of its own, and a webview package may keep its chunk
+	// outside the UI entry's directory.
+	if target, ok := chunkEntryTarget(view, sub); ok {
+		if view.Path == "" {
+			h.fail(w, r, http.StatusNotFound, "plugin "+id+" has no managed package directory")
+			return
+		}
+		file := filepath.Join(view.Path, filepath.FromSlash(target))
+		if !pluginpkg.IsInside(view.Path, file) {
+			h.fail(w, r, http.StatusForbidden, "the path escapes the plugin package")
+			return
+		}
+		h.serveFile(w, r, file, view.Path, file)
+		return
+	}
 	ui := view.Provides.UI
 	if ui == nil || strings.TrimSpace(ui.Entry) == "" {
-		h.fail(w, r, http.StatusNotFound, "plugin "+id+" declares no UI")
+		h.fail(w, r, http.StatusNotFound, "plugin "+id+" declares no UI page; load one of its declared chunk entries")
 		return
 	}
 	if view.Path == "" {
@@ -123,6 +148,49 @@ func (h *pluginUIHandler) plugin(id string) *harnessext.PluginView {
 		}
 	}
 	return nil
+}
+
+// tenantAllowed reports whether the request names the manager's tenant. The
+// auth middleware injects X-Tenant-ID for every authenticated request; an
+// absent or foreign value is refused (fail closed), never guessed.
+func (h *pluginUIHandler) tenantAllowed(r *http.Request) bool {
+	if h == nil || h.manager == nil {
+		return false
+	}
+	raw := strings.TrimSpace(r.Header.Get("X-Tenant-ID"))
+	if raw == "" {
+		return false
+	}
+	tenantID, err := uuid.Parse(raw)
+	if err != nil {
+		return false
+	}
+	return tenantID == h.manager.TenantID()
+}
+
+// chunkEntryTarget resolves a request remainder to a declared chunk/package
+// entry (package-relative). Only the exact declared entries are exposed: a
+// chunk that needs siblings must be bundled into one file, so the hosting
+// surface stays the declaration, not the package tree.
+func chunkEntryTarget(view *harnessext.PluginView, sub string) (string, bool) {
+	if view == nil {
+		return "", false
+	}
+	clean := path.Clean("/" + sub)
+	if clean == "/" {
+		return "", false
+	}
+	requested := strings.TrimPrefix(clean, "/")
+	for _, contribution := range view.Contributes {
+		if contribution.Form != "chunk" && contribution.Form != "package" {
+			continue
+		}
+		entry := path.Clean(strings.TrimPrefix(filepath.ToSlash(contribution.Entry), "./"))
+		if entry == requested {
+			return entry, true
+		}
+	}
+	return "", false
 }
 
 // resolvePluginUI resolves the declared entry to a file and its hosting root.

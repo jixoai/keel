@@ -21,52 +21,70 @@ import (
 
 // --- fakes ---------------------------------------------------------------
 
-// fakePluginStore is the in-memory PluginPersistence: rows plus the audit
-// trail, with the same shapes the PG store uses.
+// testTenantID is the tenant every harness in this package owns. Tests that
+// assert cross-tenant isolation create a second manager with another tenant.
+var testTenantID = uuid.MustParse("0f0f0f0f-1111-2222-3333-444444444444")
+
+// fakePluginStore is the in-memory PluginPersistence: tenant-keyed rows plus
+// the audit trail, with the same shapes the PG store uses.
 type fakePluginStore struct {
 	mu    sync.Mutex
-	rows  map[string]store.PluginRecord
+	rows  map[pluginRowKey]store.PluginRecord
 	audit []store.PluginAuditEntry
 }
 
+type pluginRowKey struct {
+	tenant uuid.UUID
+	id     string
+}
+
 func newFakePluginStore() *fakePluginStore {
-	return &fakePluginStore{rows: map[string]store.PluginRecord{}}
+	return &fakePluginStore{rows: map[pluginRowKey]store.PluginRecord{}}
 }
 
 func (f *fakePluginStore) UpsertPlugin(_ context.Context, record store.PluginRecord) error {
+	if record.TenantID == uuid.Nil {
+		return fmt.Errorf("fake store: tenant id is required")
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.rows[record.ID] = record
+	f.rows[pluginRowKey{tenant: record.TenantID, id: record.ID}] = record
 	return nil
 }
 
-func (f *fakePluginStore) GetPlugin(_ context.Context, id string) (store.PluginRecord, bool, error) {
+func (f *fakePluginStore) GetPlugin(_ context.Context, tenantID uuid.UUID, id string) (store.PluginRecord, bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	row, ok := f.rows[id]
+	row, ok := f.rows[pluginRowKey{tenant: tenantID, id: id}]
 	return row, ok, nil
 }
 
-func (f *fakePluginStore) ListPlugins(context.Context) ([]store.PluginRecord, error) {
+func (f *fakePluginStore) ListPlugins(_ context.Context, tenantID uuid.UUID) ([]store.PluginRecord, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	out := make([]store.PluginRecord, 0, len(f.rows))
-	for _, row := range f.rows {
-		out = append(out, row)
+	for key, row := range f.rows {
+		if key.tenant == tenantID {
+			out = append(out, row)
+		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out, nil
 }
 
-func (f *fakePluginStore) DeletePlugin(_ context.Context, id string) (bool, error) {
+func (f *fakePluginStore) DeletePlugin(_ context.Context, tenantID uuid.UUID, id string) (bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	_, ok := f.rows[id]
-	delete(f.rows, id)
+	key := pluginRowKey{tenant: tenantID, id: id}
+	_, ok := f.rows[key]
+	delete(f.rows, key)
 	return ok, nil
 }
 
 func (f *fakePluginStore) AppendPluginAudit(_ context.Context, entry store.PluginAuditEntry) (store.PluginAuditEntry, error) {
+	if entry.TenantID == uuid.Nil {
+		return store.PluginAuditEntry{}, fmt.Errorf("fake store: audit tenant id is required")
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	entry.AuditID = int64(len(f.audit) + 1)
@@ -74,15 +92,12 @@ func (f *fakePluginStore) AppendPluginAudit(_ context.Context, entry store.Plugi
 	return entry, nil
 }
 
-func (f *fakePluginStore) ListPluginAudit(_ context.Context, tenantID *uuid.UUID, pluginID string, after int64, limit int) ([]store.PluginAuditEntry, error) {
+func (f *fakePluginStore) ListPluginAudit(_ context.Context, tenantID uuid.UUID, pluginID string, after int64, limit int) ([]store.PluginAuditEntry, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	out := make([]store.PluginAuditEntry, 0)
 	for _, entry := range f.audit {
-		if entry.AuditID <= after {
-			continue
-		}
-		if tenantID != nil && entry.TenantID != nil && *entry.TenantID != *tenantID {
+		if entry.AuditID <= after || entry.TenantID != tenantID {
 			continue
 		}
 		if pluginID != "" && entry.PluginID != pluginID {
@@ -96,13 +111,13 @@ func (f *fakePluginStore) ListPluginAudit(_ context.Context, tenantID *uuid.UUID
 	return out, nil
 }
 
-func (f *fakePluginStore) row(t *testing.T, id string) store.PluginRecord {
+func (f *fakePluginStore) row(t *testing.T, tenantID uuid.UUID, id string) store.PluginRecord {
 	t.Helper()
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	row, ok := f.rows[id]
+	row, ok := f.rows[pluginRowKey{tenant: tenantID, id: id}]
 	if !ok {
-		t.Fatalf("no plugin row for %s", id)
+		t.Fatalf("no plugin row for %s in tenant %s", id, tenantID)
 	}
 	return row
 }
@@ -271,6 +286,7 @@ func newManagerHarness(t *testing.T, root string, builtins []Builtin) *managerHa
 	loader := &fakeLoader{perVersion: map[string]error{}}
 	persistence := newFakePluginStore()
 	manager, err := NewPluginManager(ManagerOptions{
+		TenantID:    testTenantID,
 		Root:        root,
 		Runtime:     runtime,
 		Persistence: persistence,
@@ -353,7 +369,7 @@ func TestPluginManagerBootDisableEnableRoundTrip(t *testing.T) {
 	if got := harness.tools.list(); len(got) != 1 || got[0] != "example_status" {
 		t.Fatalf("published tools = %v", got)
 	}
-	if row := harness.store.row(t, "keel.example"); row.State != store.PluginStateEnabled || !row.Bundled {
+	if row := harness.store.row(t, testTenantID, "keel.example"); row.State != store.PluginStateEnabled || !row.Bundled {
 		t.Fatalf("row = %+v", row)
 	}
 
@@ -446,9 +462,27 @@ func TestPluginManagerInstallEnableDisableUninstall(t *testing.T) {
 	if view.State != LifecycleEnabled || view.Runtime != nil {
 		t.Fatalf("enabled view = %+v", view)
 	}
-	// A second install of the same id is a conflict.
-	if _, err := harness.manager.Install(ctx, InstallRequest{Path: source}, AuditContext{Actor: "tester"}); !errors.Is(err, ErrPluginExists) {
-		t.Fatalf("duplicate install err = %v", err)
+	// A second install of the SAME package is idempotent: same row, same state.
+	if duplicate, err := harness.manager.Install(ctx, InstallRequest{Path: source}, AuditContext{Actor: "tester"}); err != nil {
+		t.Fatalf("idempotent install err = %v", err)
+	} else if duplicate.ID != "vendor.panel" || duplicate.State != LifecycleEnabled {
+		t.Fatalf("idempotent install view = %+v", duplicate)
+	}
+	// A DIFFERENT package under an installed id is a conflict (update is explicit).
+	conflict := writePluginPackage(t, t.TempDir(), map[string]string{
+		"plugin.yaml": `id: vendor.panel
+version: 1.0.0
+kind: webview
+description: "a different package"
+provides:
+  ui:
+    entry: ui/index.html
+    title: Panel
+`,
+		"ui/index.html": "<!doctype html><title>different</title>",
+	})
+	if _, err := harness.manager.Install(ctx, InstallRequest{Path: conflict}, AuditContext{Actor: "tester"}); !errors.Is(err, ErrPluginExists) {
+		t.Fatalf("different-package install err = %v", err)
 	}
 	// Uninstall of an enabled plugin is refused: disable first.
 	if _, err := harness.manager.Uninstall(ctx, "vendor.panel", AuditContext{Actor: "tester"}); !errors.Is(err, ErrPluginState) {
@@ -467,12 +501,12 @@ func TestPluginManagerInstallEnableDisableUninstall(t *testing.T) {
 		t.Fatalf("inventory after uninstall = %+v", harness.manager.Snapshot().Plugins)
 	}
 	actions := harness.store.auditActions(t)
-	want := []string{"install:ok", "enable:ok", "install:refused", "uninstall:refused", "disable:ok", "uninstall:ok"}
+	want := []string{"install:ok", "enable:ok", "install:ok", "install:refused", "uninstall:refused", "disable:ok", "uninstall:ok"}
 	if strings.Join(actions, ",") != strings.Join(want, ",") {
 		t.Fatalf("audit = %v, want %v", actions, want)
 	}
 	// The audit trail is queryable by plugin and cursor.
-	entries, err := harness.manager.Audit(ctx, nil, "vendor.panel", 4, 10)
+	entries, err := harness.manager.Audit(ctx, nil, "vendor.panel", 5, 10)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -483,6 +517,74 @@ func TestPluginManagerInstallEnableDisableUninstall(t *testing.T) {
 		if entry.AuditID == 0 || entry.TS.IsZero() || entry.Actor != "tester" || entry.Version != "1.0.0" {
 			t.Fatalf("audit entry = %+v", entry)
 		}
+	}
+}
+
+// TestPluginManagerTenantIsolation is the cross-tenant negative control at the
+// manager/store seam: a second manager bound to another tenant never sees the
+// first tenant's install, and a write attributed to the wrong tenant is refused
+// before any state changes.
+func TestPluginManagerTenantIsolation(t *testing.T) {
+	harness := newManagerHarness(t, t.TempDir(), nil)
+	ctx := context.Background()
+	if err := harness.manager.Boot(ctx); err != nil {
+		t.Fatal(err)
+	}
+	source := writePluginPackage(t, t.TempDir(), map[string]string{
+		"plugin.yaml": `id: vendor.tenant
+version: 1.0.0
+kind: webview
+description: tenant-scoped
+provides:
+  ui:
+    entry: ui/index.html
+    title: Tenant
+`,
+		"ui/index.html": "<html>tenant</html>",
+	})
+	if _, err := harness.manager.Install(ctx, InstallRequest{Path: source}, AuditContext{Actor: "a"}); err != nil {
+		t.Fatalf("install for tenant A: %v", err)
+	}
+
+	other := uuid.New()
+	otherRuntime := NewRuntime(RuntimeOptions{Logger: testLogger()})
+	t.Cleanup(func() { otherRuntime.Close(context.Background()) })
+	otherManager, err := NewPluginManager(ManagerOptions{
+		TenantID:    other,
+		Root:        t.TempDir(),
+		Runtime:     otherRuntime,
+		Persistence: harness.store,
+		KeelVersion: "0.1.0",
+		Logger:      testLogger(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := otherManager.Boot(ctx); err != nil {
+		t.Fatal(err)
+	}
+	for _, view := range otherManager.Snapshot().Plugins {
+		if view.ID == "vendor.tenant" {
+			t.Fatalf("tenant B sees tenant A's plugin: %+v", view)
+		}
+	}
+	if _, found, err := harness.store.GetPlugin(ctx, other, "vendor.tenant"); err != nil || found {
+		t.Fatalf("cross-tenant store read = found %v err %v", found, err)
+	}
+	if _, err := otherManager.Enable(ctx, "vendor.tenant", AuditContext{Actor: "b"}); !errors.Is(err, ErrPluginNotFound) {
+		t.Fatalf("tenant B enable = %v", err)
+	}
+	// A write that names tenant B on tenant A's manager is refused, and the row
+	// is untouched.
+	if _, err := harness.manager.Disable(ctx, "vendor.tenant", AuditContext{TenantID: &other, Actor: "b"}); !errors.Is(err, ErrPluginTenant) {
+		t.Fatalf("cross-tenant disable = %v", err)
+	}
+	if row := harness.store.row(t, testTenantID, "vendor.tenant"); row.State != store.PluginStateInstalled {
+		t.Fatalf("cross-tenant write changed the owner's row: %+v", row)
+	}
+	// Tenant A still owns the install.
+	if _, found, err := harness.store.GetPlugin(ctx, testTenantID, "vendor.tenant"); err != nil || !found {
+		t.Fatalf("owner read = found %v err %v", found, err)
 	}
 }
 
@@ -579,7 +681,7 @@ func TestPluginManagerUpdateSwapsAndRollsBack(t *testing.T) {
 	if _, err := harness.manager.Enable(ctx, "vendor.panel", AuditContext{Actor: "tester"}); err != nil {
 		t.Fatal(err)
 	}
-	firstHash := harness.store.row(t, "vendor.panel").ContentHash
+	firstHash := harness.store.row(t, testTenantID, "vendor.panel").ContentHash
 
 	// A failing loader must leave the previous version installed and enabled.
 	upgrade := writePluginPackage(t, filepath.Join(t.TempDir(), "pkg-2"), map[string]string{
@@ -593,7 +695,7 @@ func TestPluginManagerUpdateSwapsAndRollsBack(t *testing.T) {
 	if _, err := harness.manager.Update(ctx, "vendor.panel", UpdateRequest{Path: upgrade}, AuditContext{Actor: "tester"}); err == nil {
 		t.Fatal("a failed update must report an error")
 	}
-	entry := harness.store.row(t, "vendor.panel")
+	entry := harness.store.row(t, testTenantID, "vendor.panel")
 	if entry.Version != "1.0.0" || entry.State != store.PluginStateEnabled || entry.ContentHash != firstHash {
 		t.Fatalf("rollback row = %+v", entry)
 	}
@@ -799,7 +901,8 @@ func newManagerHarnessWithStore(t *testing.T, root string, builtins []Builtin, p
 	runtime := NewRuntime(RuntimeOptions{Hooks: hooks, Triggers: triggers, Tools: recorder.sink, Logger: testLogger(), Now: clock.tick})
 	loader := &fakeLoader{perVersion: map[string]error{}}
 	manager, err := NewPluginManager(ManagerOptions{
-		Root: root, Runtime: runtime, Persistence: persistence, Builtins: builtins,
+		TenantID: testTenantID,
+		Root:     root, Runtime: runtime, Persistence: persistence, Builtins: builtins,
 		Loaders:     map[pluginpkg.Kind]PluginLoader{pluginpkg.KindWebview: loader},
 		KeelVersion: "0.1.0", Logger: testLogger(), Now: clock.tick,
 	})

@@ -378,9 +378,16 @@ func (s *Server) refusePluginAction(ctx context.Context, audit harnessext.AuditC
 	if pluginID == "" {
 		pluginID = "unknown"
 	}
+	// The refusal always belongs to the caller's tenant: pluginCallContext has
+	// already resolved it, and a nil here would be a wiring bug rather than a
+	// deployment-level row.
+	tenantID := uuid.Nil
+	if audit.TenantID != nil {
+		tenantID = *audit.TenantID
+	}
 	entry := store.PluginAuditEntry{
 		TS:       time.Now().UTC(),
-		TenantID: audit.TenantID,
+		TenantID: tenantID,
 		Actor:    audit.Actor,
 		PluginID: pluginID,
 		Version:  ask.Version,

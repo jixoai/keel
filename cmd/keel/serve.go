@@ -1777,6 +1777,10 @@ func newPluginSurface(ctx context.Context, rt *servicehost.Runtime, persistence 
 	toolIndex := newProductToolIndex()
 	plugins := newPluginRuntime(rt, toolIndex, hooks, triggers, decisions, subagents, partials, log)
 	manager, err := harnessext.NewPluginManager(harnessext.ManagerOptions{
+		// Plugin install/state/audit is tenant-scoped (keel-creation). `keel serve`
+		// is a single-tenant process, so this is the one tenant and the only code
+		// path.
+		TenantID:    opts.TenantID,
 		Root:        opts.PluginsRoot,
 		Runtime:     plugins,
 		Persistence: persistence,

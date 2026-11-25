@@ -71,6 +71,9 @@ var (
 	ErrPluginBundled = errors.New("harnessext: bundled plugin")
 	// ErrPluginPath reports a package location the manager refuses to touch.
 	ErrPluginPath = errors.New("harnessext: plugin package path is not allowed")
+	// ErrPluginTenant reports a lifecycle action whose caller names a tenant
+	// other than the manager's. It is a cross-tenant refusal, never a lookup.
+	ErrPluginTenant = errors.New("harnessext: plugin lifecycle belongs to another tenant")
 )
 
 // PluginError is the structured failure of a plugin action: a sentinel for the
@@ -166,18 +169,24 @@ type FailureSink interface {
 }
 
 // PluginPersistence is the persistence seam. *store.Store satisfies it
-// verbatim; tests use an in-memory fake.
+// verbatim; tests use an in-memory fake. Every inventory and audit operation is
+// tenant-scoped: the manager is bound to one tenant and passes it explicitly,
+// so a missed predicate cannot read another tenant's plugin state.
 type PluginPersistence interface {
 	UpsertPlugin(ctx context.Context, record store.PluginRecord) error
-	GetPlugin(ctx context.Context, id string) (store.PluginRecord, bool, error)
-	ListPlugins(ctx context.Context) ([]store.PluginRecord, error)
-	DeletePlugin(ctx context.Context, id string) (bool, error)
+	GetPlugin(ctx context.Context, tenantID uuid.UUID, id string) (store.PluginRecord, bool, error)
+	ListPlugins(ctx context.Context, tenantID uuid.UUID) ([]store.PluginRecord, error)
+	DeletePlugin(ctx context.Context, tenantID uuid.UUID, id string) (bool, error)
 	AppendPluginAudit(ctx context.Context, entry store.PluginAuditEntry) (store.PluginAuditEntry, error)
-	ListPluginAudit(ctx context.Context, tenantID *uuid.UUID, pluginID string, after int64, limit int) ([]store.PluginAuditEntry, error)
+	ListPluginAudit(ctx context.Context, tenantID uuid.UUID, pluginID string, after int64, limit int) ([]store.PluginAuditEntry, error)
 }
 
 // ManagerOptions wires the plugin manager.
 type ManagerOptions struct {
+	// TenantID is the tenant this manager owns (required). A single-tenant
+	// deployment passes its one tenant; the manager never has a
+	// deployment-level mode.
+	TenantID uuid.UUID
 	// Root is the plugins root (the managed tree). Bundled plugins do not need
 	// one, but install/enable of discovered kinds do; an empty root disables
 	// installation and discovery.
@@ -231,6 +240,7 @@ type managerEntry struct {
 // Manager is the plugin lifecycle authority: discovery, install, enable,
 // disable, uninstall, update, audit — all through the harnessext Runtime.
 type Manager struct {
+	tenantID  uuid.UUID
 	root      string
 	runtime   *Runtime
 	store     PluginPersistence
@@ -245,11 +255,18 @@ type Manager struct {
 	revision int64
 }
 
+// TenantID is the tenant this manager owns. It is the same value the store
+// filters by, so callers compare against it before serving a request.
+func (m *Manager) TenantID() uuid.UUID { return m.tenantID }
+
 // NewPluginManager builds the manager. It does not touch disk or the runtime:
 // Boot does.
 func NewPluginManager(opts ManagerOptions) (*Manager, error) {
 	if opts.Runtime == nil {
 		return nil, errors.New("harnessext: plugin manager needs the plugin runtime")
+	}
+	if opts.TenantID == uuid.Nil {
+		return nil, errors.New("harnessext: plugin manager needs the owning tenant")
 	}
 	if opts.Logger == nil {
 		opts.Logger = slog.Default()
@@ -276,6 +293,7 @@ func NewPluginManager(opts ManagerOptions) (*Manager, error) {
 	}
 
 	manager := &Manager{
+		tenantID:  opts.TenantID,
 		root:      root,
 		runtime:   opts.Runtime,
 		store:     opts.Persistence,
