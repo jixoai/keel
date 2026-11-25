@@ -125,12 +125,10 @@ func TestEventsListenSupervisorResubscribesAndRecomputes(t *testing.T) {
 	events.Start(context.Background())
 	defer events.Stop()
 
-	if !waitForCondition(t, 2*time.Second, func() bool { return fixture.count() >= 3 }) {
-		t.Fatalf("listen requests = %d, want at least 3", fixture.count())
-	}
-	// Every subscription establishment recomputes the catalogue once.
-	if fleet.calls() < 3 {
-		t.Fatalf("catalogue recomputes = %d, want at least 3", fleet.calls())
+	if !waitForCondition(t, 2*time.Second, func() bool {
+		return fixture.count() >= 3 && fleet.calls() >= 3
+	}) {
+		t.Fatalf("listen requests = %d, catalogue recomputes = %d; want at least 3 of each", fixture.count(), fleet.calls())
 	}
 	// Reconnects are counted (the first subscription is not a reconnect).
 	if got := counterValue(t, metricsReg, "mcp_listen_reconnects_total"); got < 2 {
