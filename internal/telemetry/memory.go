@@ -122,6 +122,23 @@ func (m *Memory) StartSpan(options SpanOptions, callback func(Span) error) error
 	return m.startSpan(nil, options, callback)
 }
 
+// StartManualSpan opens a root manual span (see ManualStarter).
+func (m *Memory) StartManualSpan(options SpanOptions) (Span, func()) {
+	return m.startManualSpan(nil, options)
+}
+
+func (m *Memory) startManualSpan(parent *spanParent, options SpanOptions) (Span, func()) {
+	record, ok := m.createSpan(parent, options, m.now())
+	if !ok {
+		return &inertSpan{memory: m}, func() {}
+	}
+	span := &memorySpan{memory: m, record: record}
+	var once sync.Once
+	return span, func() {
+		once.Do(func() { m.settle(record, nil, nil) })
+	}
+}
+
 func (m *Memory) startSpan(parent *spanParent, options SpanOptions, callback func(Span) error) (err error) {
 	started := m.now()
 	record, ok := m.createSpan(parent, options, started)
@@ -261,6 +278,17 @@ func (s *memorySpan) StartSpan(options SpanOptions, callback func(Span) error) e
 	}, options, callback)
 }
 
+// StartManualSpan opens a child span and returns its end function. End is
+// idempotent; the span settles OK unless SetStatus was called first.
+func (s *memorySpan) StartManualSpan(options SpanOptions) (Span, func()) {
+	id := s.record.id
+	return s.memory.startManualSpan(&spanParent{
+		carrier: s.record.context,
+		localID: &id,
+		record:  s.record,
+	}, options)
+}
+
 func (s *memorySpan) AddLink(link SpanLink) {
 	s.memory.mu.Lock()
 	defer s.memory.mu.Unlock()
@@ -319,6 +347,9 @@ func (s *inertSpan) Metrics() Metrics         { return s.memory }
 func (s *inertSpan) Propagation() Propagation { return s.memory }
 func (s *inertSpan) StartSpan(_ SpanOptions, callback func(Span) error) error {
 	return callback(s)
+}
+func (s *inertSpan) StartManualSpan(SpanOptions) (Span, func()) {
+	return s, func() {}
 }
 func (s *inertSpan) AddLink(SpanLink)                {}
 func (s *inertSpan) AddEvent(string, SpanAttributes) {}

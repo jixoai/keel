@@ -613,6 +613,8 @@ func (r *Runner) ResolveCapturePolicy(ctx context.Context, scope kernel.Scope) (
 
 func (r *Runner) run(ctx context.Context, lease kernel.Lease, span telemetry.Span) (RunResult, error) {
 	var res RunResult
+	spans := newRunSpanTracker(span)
+	defer spans.close()
 	events, cursor, err := r.loadEvents(ctx, lease.Scope)
 	// The load high-water mark: everything the transcript was built from.
 	// Input committed after it was not seen and must re-queue the run.
@@ -1100,6 +1102,7 @@ func (r *Runner) run(ctx context.Context, lease kernel.Lease, span telemetry.Spa
 	}
 	stream := loop.StartRun(loopCtx, agentCtx, cfg)
 	for ev := range stream.Events() {
+		spans.observe(ev)
 		r.emitHookNotification(ctx, ev)
 		if ctx.Err() != nil {
 			res.Cursor = cursor

@@ -521,13 +521,20 @@ func TestRunnerRecordsTelemetry(t *testing.T) {
 		t.Fatal(err)
 	}
 	spans := memory.Spans()
-	if len(spans) != 1 || spans[0].Name != "keel.agent.run" {
-		t.Fatalf("spans = %#v, want one keel.agent.run", spans)
+	var runSpan *telemetry.RecordedSpan
+	for i := range spans {
+		if spans[i].Name == "keel.agent.run" {
+			runSpan = &spans[i]
+			break
+		}
 	}
-	if got := spans[0].Attributes["tenant"]; got != tenant.String() {
+	if runSpan == nil {
+		t.Fatalf("spans = %#v, want a keel.agent.run root", spans)
+	}
+	if got := runSpan.Attributes["tenant"]; got != tenant.String() {
 		t.Errorf("span tenant = %v", got)
 	}
-	if got := spans[0].Attributes["session"]; got != session.String() {
+	if got := runSpan.Attributes["session"]; got != session.String() {
 		t.Errorf("span session = %v", got)
 	}
 	foundRunCounter, foundDuration := false, false

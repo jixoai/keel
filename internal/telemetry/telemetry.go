@@ -204,6 +204,14 @@ type Context interface {
 	StartSpan(options SpanOptions, callback func(Span) error) error
 }
 
+// ManualStarter is an optional Go extension for hosts that observe lifecycle
+// events and need to open a child span before its end event arrives. The
+// callback-scoped Span model cannot express that shape; adapters that do not
+// implement it are simply skipped by the host's span tracker.
+type ManualStarter interface {
+	StartManualSpan(options SpanOptions) (Span, func())
+}
+
 // Span is a live recording scope that is also a Context for child spans
 // (index.ts:109-114). Mutating calls after settlement are inert.
 type Span interface {

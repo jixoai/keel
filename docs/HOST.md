@@ -135,8 +135,9 @@ filesystem:
    （`upto_seq`=事件 seq、`kept_from_seq`=保留段首个事件 seq；投影，不覆盖事件）。
    保存失败只记日志、不回滚事件；新 run 以最新 checkpoint 的摘要 + `seq >= kept_from_seq`
    重建，未锚定或无 checkpoint 时回退全量事件。
-5. **Telemetry**：run = span；provider 请求 span 已存在。turn/tool/compaction 子 span 与
-   `message_*` span event 尚未接线（当前只有 run span + provider span）。`run.finished`
+5. **Telemetry**：run = span；turn/tool/compaction 作为 run 的子 span，`message_*` 作为
+   当前 turn span 的 event（通过 `telemetry.ManualStarter` 的事件驱动 tracker）。
+   provider 请求 span 已存在；turns/tool/context 指标与 OTLP 仍待接。`run.finished`
    作为业务汇总事件追加。
 6. **System prompt**：按 PI 的 section 形态拼装（`<preamble>`、`<skills>`、`<tenant>`），
    不再用单一字符串硬编码。

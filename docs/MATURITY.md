@@ -34,7 +34,7 @@
 | 智能体执行 | v2 主链已交付（loop/事件/工具）；G2/G3/G4 缺口见 audit | G5 | G2 混沌、G3 span 树/指标、G4 真实 MCP、G5 规模 |
 | 可恢复性 | v2：runs/lease + checkpoint + 模型/工具 kill；缺压缩 kill 格与 nightly chaos | G5 | 压缩 kill 格、10min 混沌 CI |
 | 上下文压缩 | v2 已接线（`internal/servicehost/services.go:46`、`:468`；`internal/compaction`） | G5 | 剩余见归档 evidence |
-| 可观测 | v2：`run.finished` + run span；turn/tool/compaction 子 span 未接线 | G5 | span 树、turns/tool/context 指标、OTLP |
+| 可观测 | v2：run/turn/tool/compaction span 树已接（事件驱动）；`message_*` 为 turn event | G5 | turns/tool/context 指标、OTLP、指标 exporter |
 | Skills | v2 已交付加载/渐进披露/租户库/不可变版本 | G5 | `allowed-tools` 执行期交集、文件监听、`.gitignore`/project-trust |
 | MCP | v2 已交付 client/stdio/Streamable HTTP/OAuth/Apps | G5 | 真实 server E2E、连接池/健康检查、模型路径破坏性审批 |
 | Hooks | 已接线（tool gate/context/compact cancel/通知；`internal/hooks` 进出货依赖） | G5 | turn_end/settle 边界、审计落账本 |
