@@ -148,10 +148,10 @@ type Config struct {
 	// answer with enabled=false so a client can still show existing work.
 	// Nil omits the block and reports collab.modes=false.
 	CollabModes func() []collab.ModeView
-	// Superagent is the read-only ticket board / attention inbox of the
-	// super-agent queue (change keel-collab-superagent). Nil answers 503 on the
-	// two projection routes and reports superagent.board=false.
-	Superagent SuperagentReader
+	// Superagent is the super-agent queue's board/inbox plus the worker and
+	// operator write loop (change keel-collab-superagent). Nil answers 503 on
+	// every route and reports superagent.board=false.
+	Superagent SuperagentService
 	// Hooks is the hook bus (detailed subscription stats on GET /v1/plugins).
 	Hooks *harnessext.HookBus
 	// Parents optionally resolves sub-agent parent links; defaults to Subagents.

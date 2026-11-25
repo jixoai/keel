@@ -1516,9 +1516,9 @@ func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, 
 	sessionQuery := harnessapi.NewPGSessionQuery(st)
 	// A typed nil *superagent.Orchestrator in an interface would advertise the
 	// board as wired; keep the interface nil unless the queue is assembled.
-	var superagentReader harnessapi.SuperagentReader
+	var superagentService harnessapi.SuperagentService
 	if superagentRuntime != nil {
-		superagentReader = superagentRuntime
+		superagentService = superagentRuntime
 	}
 	api := harnessapi.New(harnessapi.Config{
 		Sessions: harnessapi.NewPGSessionLister(st),
@@ -1600,7 +1600,7 @@ func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, 
 		CollabModes: collabModes.List,
 		// The read-only super-agent ticket board / attention inbox. Nil keeps
 		// both routes at 503 and superagent.board=false.
-		Superagent: superagentReader,
+		Superagent: superagentService,
 		Hooks:      hooks,
 		ModelsLive: func() harnessapi.ModelCatalog {
 			if rt.Models() == nil {

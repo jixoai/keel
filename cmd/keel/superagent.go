@@ -160,6 +160,16 @@ func newSuperagentRuntime(ctx context.Context, tenantID uuid.UUID, st *store.Sto
 	} else if err := st.SetState(ctx, tenantID, sessionID, collab.SessionActive); err != nil {
 		return nil, fmt.Errorf("super-agent session state: %w", err)
 	}
+	// A restart kills the previous process's worker runners and watchers. Mark
+	// their durable index rows interrupted before Recover so a stale "active"
+	// row cannot hold a slot forever. The orchestrator root is excluded.
+	interrupted, err := st.InterruptActiveCollabSessions(ctx, tenantID, superagentModeID, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("super-agent interrupt stale workers: %w", err)
+	}
+	if interrupted > 0 {
+		log.Info("super-agent marked stale worker sessions interrupted", "count", interrupted)
+	}
 
 	var source collab.Source
 	var channel collab.Channel
@@ -220,6 +230,8 @@ func newSuperagentRuntime(ctx context.Context, tenantID uuid.UUID, st *store.Sto
 		Source: source, Channel: channel, Policy: policy, Inputs: inputs,
 		Sessions: st, Audit: audit, Outbox: outbox,
 		WorkerWatcher:       superagentWorkerWatcher{ctx: ctx, store: st, runner: subagents, log: log},
+		WorkerInspector:     superagentWorkerInspector{runs: storeSessions{Store: st}, runner: subagents},
+		WorkerTreeCanceller: superagentTreeCanceller{runner: subagents},
 		Slots:               superagent.NewSlots(st, superagent.SlotPolicy{Max: cfg.Slots, HumanReserved: cfg.HumanSlots}),
 		OrchestratorSession: sessionID,
 		OrchestratorBot:     cfg.OrchestratorBot,
@@ -273,6 +285,98 @@ func (w superagentWorkerWatcher) Watch(_ context.Context, tenantID, sessionID uu
 			w.log.Warn("super-agent worker state projection failed", "session", sessionID, "error", err)
 		}
 	}()
+}
+
+// superagentOperator is the independent operator seam for console resume/stop
+// and answers. It requires the caller's own task.write grant; the answer body
+// never supplies the acting identity.
+type superagentOperator struct {
+	bridge *accesswire.Bridge
+}
+
+func (o superagentOperator) AuthorizeOperator(ctx context.Context, tenantID, ticketID uuid.UUID, actor, action string) error {
+	if o.bridge == nil {
+		return superagent.ErrOperatorUnavailable
+	}
+	principal, err := o.bridge.Principal(ctx, tenantID)
+	if err != nil {
+		return fmt.Errorf("%w: operator authentication required", collab.ErrPermissionDenied)
+	}
+	effective, err := o.bridge.Effective(ctx, principal)
+	if err != nil {
+		return err
+	}
+	scope, held := effective.ScopeOf(access.KeyTaskWrite)
+	if !held || !scope.Covers(access.ScopeTenant) {
+		return fmt.Errorf("%w: operator action %s needs task.write at tenant scope on ticket %s", collab.ErrPermissionDenied, action, ticketID)
+	}
+	return nil
+}
+
+// superagentTreeCanceller stops a worker's bare sub-agent descendants through
+// the runner's own tree. The core Host cancels the worker session; the two
+// seams together cover every descendant.
+type superagentTreeCanceller struct {
+	runner *harnessext.SubagentRunner
+}
+
+func (c superagentTreeCanceller) CancelTree(ctx context.Context, tenantID, sessionID uuid.UUID, reason string) error {
+	if c.runner == nil {
+		return nil
+	}
+	result, err := c.runner.CancelTree(ctx, tenantID, sessionID, reason)
+	if err != nil {
+		return err
+	}
+	if len(result.Failed) > 0 {
+		return fmt.Errorf("superagent: %d worker descendants refused cancellation", len(result.Failed))
+	}
+	return nil
+}
+
+// superagentWorkerInspector resolves the product run truth for a worker
+// session. The in-process runner record is the freshest source while the
+// process lives; the durable run row is the fallback after a restart.
+type superagentWorkerInspector struct {
+	runs   harnessext.RunStatusReader
+	runner *harnessext.SubagentRunner
+}
+
+func (i superagentWorkerInspector) WorkerState(ctx context.Context, tenantID, sessionID uuid.UUID) (superagent.WorkerState, error) {
+	if i.runner != nil {
+		if record, ok := i.runner.Get(sessionID); ok {
+			switch record.Status {
+			case "done":
+				return superagent.WorkerDone, nil
+			case "failed", "budget_exhausted":
+				return superagent.WorkerFailed, nil
+			case "cancelled":
+				return superagent.WorkerCancelled, nil
+			case "running":
+				return superagent.WorkerActive, nil
+			}
+		}
+	}
+	if i.runs == nil {
+		return superagent.WorkerMissing, nil
+	}
+	state, err := i.runs.RunState(ctx, tenantID, sessionID)
+	if errors.Is(err, harnessext.ErrNoRun) {
+		return superagent.WorkerMissing, nil
+	}
+	if err != nil {
+		return "", err
+	}
+	switch state.Status {
+	case "queued", "pending", "running":
+		return superagent.WorkerActive, nil
+	case "done":
+		return superagent.WorkerDone, nil
+	case "failed":
+		return superagent.WorkerFailed, nil
+	default:
+		return superagent.WorkerMissing, nil
+	}
 }
 
 // superagentPrincipal builds the service principal the orchestrator uses for

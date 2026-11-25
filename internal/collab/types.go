@@ -390,9 +390,12 @@ type AttentionOption struct {
 // AttentionAnswer is the recorded decision: an option, free text, or both when
 // the request allowed free text.
 type AttentionAnswer struct {
-	OptionID string    `json:"optionId,omitempty"`
-	Text     string    `json:"text,omitempty"`
-	At       time.Time `json:"at"`
+	OptionID string `json:"optionId,omitempty"`
+	Text     string `json:"text,omitempty"`
+	// Actor is the authenticated human/operator who answered. It is recorded
+	// with the answer so provenance does not depend on an audit row alone.
+	Actor string    `json:"actor,omitempty"`
+	At    time.Time `json:"at"`
 }
 
 // Attention is a structured human decision request attached to a WorkItem.

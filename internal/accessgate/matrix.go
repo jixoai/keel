@@ -221,6 +221,13 @@ var rules = []Rule{
 	// paths, not these routes.
 	route(http.MethodGet, "/v1/superagent/tickets", ModeHeldKey, access.KeyTaskRead),
 	route(http.MethodGet, "/v1/superagent/attention", ModeHeldKey, access.KeyTaskRead),
+	// Worker and operator writes are task writes. Operator semantics are
+	// enforced again by the orchestrator's OperatorAuthorizer seam.
+	route(http.MethodPost, "/v1/superagent/tickets/{id}/report", ModeHeldKey, access.KeyTaskWrite),
+	route(http.MethodPost, "/v1/superagent/tickets/{id}/ask", ModeHeldKey, access.KeyTaskWrite),
+	route(http.MethodPost, "/v1/superagent/tickets/{id}/resume", ModeHeldKey, access.KeyTaskWrite),
+	route(http.MethodPost, "/v1/superagent/tickets/{id}/stop", ModeHeldKey, access.KeyTaskWrite),
+	route(http.MethodPost, "/v1/superagent/attention/{id}/answer", ModeHeldKey, access.KeyTaskWrite),
 
 	// --- realtime voice bridge ---------------------------------------------
 	resource(http.MethodGet, "/v1/realtime", access.KeySessionRead, "session", "query:session_id"),

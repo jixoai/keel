@@ -1488,11 +1488,19 @@ CREATE TABLE IF NOT EXISTS collab_work_items (
     scope            jsonb NOT NULL DEFAULT '{}'::jsonb,
     limits           jsonb NOT NULL DEFAULT '{}'::jsonb,
     status           text NOT NULL,
+    owner_session_id uuid,
     idempotency_key  text NOT NULL DEFAULT '',
     created_at       timestamptz NOT NULL DEFAULT now(),
     updated_at       timestamptz NOT NULL DEFAULT now(),
     PRIMARY KEY (tenant_id, work_item_id)
 );
+-- Alpha schema evolution: a pre-existing collab_work_items table keeps its rows
+-- and gains the owner membership column. A work item without an owner has no
+-- session that can create its first assignment.
+ALTER TABLE collab_work_items ADD COLUMN IF NOT EXISTS owner_session_id uuid;
+CREATE INDEX IF NOT EXISTS collab_work_items_by_owner
+    ON collab_work_items (tenant_id, owner_session_id)
+    WHERE owner_session_id IS NOT NULL;
 
 CREATE UNIQUE INDEX IF NOT EXISTS collab_work_items_idempotent
     ON collab_work_items (tenant_id, mode_id, idempotency_key)

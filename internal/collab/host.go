@@ -176,6 +176,9 @@ type AttentionRequest struct {
 type AttentionAnswerRequest struct {
 	OptionID string `json:"optionId,omitempty"`
 	Text     string `json:"text,omitempty"`
+	// Actor is the authenticated operator/human identity. The product adapter
+	// resolves it from the caller, never from the answer body.
+	Actor string `json:"actor,omitempty"`
 }
 
 // WorkItemRequest asks the Host to open one WorkItem.
@@ -1277,7 +1280,7 @@ func (c *Coordinator) AnswerAttention(ctx context.Context, tenantID, workItemID,
 		return Attention{}, c.rejectWith(ctx, refusal)
 	}
 	attention.Status = AttentionAnswered
-	attention.Answer = &AttentionAnswer{OptionID: optionID, Text: text, At: now}
+	attention.Answer = &AttentionAnswer{OptionID: optionID, Text: text, Actor: strings.TrimSpace(req.Actor), At: now}
 	updated, err := c.work.UpdateAttention(ctx, attention)
 	if err != nil {
 		return Attention{}, err

@@ -115,11 +115,29 @@ func (o *Outbox) Enqueue(ctx context.Context, message OutboxMessage) (OutboxMess
 	if message.TenantID == uuid.Nil {
 		return OutboxMessage{}, fmt.Errorf("%w: tenant is required", collab.ErrTenantRequired)
 	}
-	if message.ChannelID == "" {
-		return OutboxMessage{}, fmt.Errorf("superagent: channel id is required")
-	}
 	if message.Text == "" {
 		return OutboxMessage{}, fmt.Errorf("superagent: message text is required")
+	}
+	if message.WorkItemID != uuid.Nil {
+		// A Ticket-bound message may only go back to the Ticket's own thread. A
+		// caller-chosen channel is a leak vector; the Thread is the destination.
+		item, err := o.store.GetWorkItem(ctx, message.TenantID, message.WorkItemID)
+		if err != nil {
+			return OutboxMessage{}, err
+		}
+		ticket := TicketFromWorkItem(item)
+		if !ticket.Thread.Valid() {
+			return OutboxMessage{}, fmt.Errorf("superagent: ticket %s has no channel thread", message.WorkItemID)
+		}
+		if message.ChannelID == "" {
+			message.ChannelID = ticket.Thread.ID
+		} else if message.ChannelID != ticket.Thread.ID {
+			return OutboxMessage{}, fmt.Errorf("superagent: channel %q is not the ticket thread %q", message.ChannelID, ticket.Thread.ID)
+		}
+		message.Thread = ticket.Thread
+	}
+	if message.ChannelID == "" {
+		return OutboxMessage{}, fmt.Errorf("superagent: channel id is required")
 	}
 	if message.Status == "" {
 		message.Status = OutboxPending
@@ -174,8 +192,16 @@ func (o *Outbox) Flush(ctx context.Context, tenantID uuid.UUID, limit int) (int,
 	}
 	now := o.now()
 	sent := 0
+	blocked := make(map[string]bool)
 	for _, message := range messages {
+		threadKey := message.ChannelID
+		if blocked[threadKey] {
+			// Per-Ticket/thread ordering: a failed or not-yet-due message holds
+			// every later message for the same thread in this pass.
+			continue
+		}
 		if message.NextAttemptAt.After(now) {
+			blocked[threadKey] = true
 			continue
 		}
 		// Mark sending first so a crash leaves a visible attempt. A retry
@@ -218,6 +244,7 @@ func (o *Outbox) Flush(ctx context.Context, tenantID uuid.UUID, limit int) (int,
 				return sent, updateErr
 			}
 			o.record(ctx, message, "failed", err.Error())
+			blocked[threadKey] = true
 			continue
 		}
 		message.Status = OutboxSent

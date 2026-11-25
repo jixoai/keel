@@ -24,6 +24,8 @@ type FixtureSource struct {
 	messages []FixtureMessage
 	// failSends makes the next n Send calls fail (retry tests).
 	failSends int
+	// failPolls makes the next n Poll calls fail (housekeeping tests).
+	failPolls int
 }
 
 // FixtureMessage is one observed outbound message.
@@ -87,6 +89,13 @@ func (f *FixtureSource) PushEvent(tenantID uuid.UUID, event Event) error {
 // limit. A cursor from another source/tenant is treated as stale and starts at
 // zero; the orchestrator's seen-event log makes the replay harmless.
 func (f *FixtureSource) Poll(_ context.Context, tenantID uuid.UUID, cursor string, limit int) (collab.SourcePage, error) {
+	f.mu.Lock()
+	if f.failPolls > 0 {
+		f.failPolls--
+		f.mu.Unlock()
+		return collab.SourcePage{}, fmt.Errorf("fixture: source is unavailable")
+	}
+	f.mu.Unlock()
 	if limit <= 0 {
 		limit = 50
 	}
@@ -135,6 +144,13 @@ func (f *FixtureSource) Send(_ context.Context, tenantID uuid.UUID, channelID st
 	}
 	f.messages = append(f.messages, FixtureMessage{TenantID: tenantID, ChannelID: channelID, Message: message, At: f.now()})
 	return nil
+}
+
+// FailPolls makes the next n Poll calls fail.
+func (f *FixtureSource) FailPolls(n int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.failPolls = n
 }
 
 // FailSends makes the next n Send calls fail.

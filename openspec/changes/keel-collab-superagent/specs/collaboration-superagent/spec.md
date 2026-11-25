@@ -2,6 +2,17 @@
 
 ## ADDED Requirements
 
+> **First-slice boundary (explicit).** The production write surface in this
+> change is HTTP: `POST /v1/superagent/tickets/{id}/report`, `.../ask`,
+> `.../resume`, `.../stop`, and `POST /v1/superagent/attention/{id}/answer`.
+> Operator actions require `task.write` plus the independent
+> `OperatorAuthorizer` seam; policy-allowed Source comments may answer one
+> unambiguous open Attention. A model-facing worker `Report`/`Ask` tool
+> adapter is **deferred**; the worker API exists but no builtin tool calls it.
+> Web/TUI boards, GitHub CI status, Feishu and auto-merge remain out of scope.
+> This change MUST NOT be reported as a complete worker-tool closed loop until
+> that adapter lands.
+
 ### Requirement: super-agent 是工单/调度模式
 
 系统 SHALL 提供 `superagent` 协作模式：orchestrator Bot 从 Source 接收事件，创建/更新

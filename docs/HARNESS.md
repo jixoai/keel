@@ -71,7 +71,8 @@ keel version
 | GET | `/v1/triggers`、POST `/v1/triggers/{id}/fire` | 触发器审计与手动/签名触发（幂等键；签名头见 §3.3）；fire 以 trigger 的 `botId` 创建 Bot-owned Session，`created_by` = 调用者 |
 | GET | `/v1/subagents`、`/v1/subagents/{id}` | 子代理列表/详情 |
 | POST | `/v1/sessions/{id}/subagents` | 派生子代理（`wait:true` 同步等待；断线不再取消子代理） |
-| GET | `/v1/superagent/tickets`、`/v1/superagent/attention` | super-agent 工单看板 / Attention 收件箱只读投影（需 `task.read`；未装配 503，`superagent.board=false`） |
+| GET | `/v1/superagent/tickets`、`/v1/superagent/attention` | super-agent 工单看板 / Attention 收件箱（需 `task.read`；未装配 503，`superagent.board=false`） |
+| POST | `/v1/superagent/tickets/{id}/report`、`…/ask`、`…/resume`、`…/stop`、`/v1/superagent/attention/{id}/answer` | worker report/ask（需 sessionId）与 operator answer/resume/stop（需 `task.write` + `OperatorAuthorizer`）；worker 模型工具适配未接线 |
 
 ### 身份与 Bot API（`internal/harnessapi`，A2–A4）
 
@@ -218,9 +219,16 @@ mode：
 - `KEEL_SUPERAGENT_ORCHESTRATOR_SESSION`（可选；空=按 tenant+Bot 派生稳定 session id）
 
 工单、派工、订阅、Source 游标、Outbox 与 Host 的 session index 落在 `collab_*` 表（全部带
-`tenant_id` 并启用 RLS）。Worker 仍通过 subagent Host 创建自己的 Session；Ticket/Assignment
-层级不消耗 sub-agent depth。首版只实现 GitHub Issue/PR/评论（CI 状态留给后续适配器），
-Feishu、自动 merge、市场与完整 web 看板不在本切片。
+`tenant_id` 并启用 RLS）；`owner_session_id` 是 WorkItem 的持久列，重启后仍可派工。启动时
+会把上一进程遗留的 active worker 标记中断，`Recover` 依据 collab index + runner/run 实际状态
+失败旧 Assignment 并重派。Worker 仍通过 subagent Host 创建自己的 Session；Ticket/Assignment
+层级不消耗 sub-agent depth。
+
+首版生产写入口是 HTTP：worker report/ask 与 operator answer/resume/stop。Source 评论在
+policy 允许且恰好一个 open Attention 时按选项/自由文本作答；不可信评论只能作为 thread context，
+不能 resume blocked Ticket 或启动 worker。**模型侧 `Report`/`Ask` builtin tool 尚未接线**，
+因此不得把本切片描述为完整 worker-tool 闭环。CI 状态、Feishu、自动 merge、市场与完整 web
+看板不在本切片。
 
 ## 4. 与内核的接缝
 

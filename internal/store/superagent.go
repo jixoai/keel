@@ -43,14 +43,14 @@ func (s *Store) CreateWorkItem(ctx context.Context, item collab.WorkItem) (colla
 	row, err := scanWorkItem(s.pool.QueryRow(ctx, `
 		INSERT INTO collab_work_items
 		    (tenant_id, work_item_id, mode_id, title, input, source, scope, limits,
-		     status, idempotency_key, created_at, updated_at)
-		VALUES ($1,$2,$3,$4,$5::jsonb,$6::jsonb,$7::jsonb,$8::jsonb,$9,$10,$11,$12)
+		     status, owner_session_id, idempotency_key, created_at, updated_at)
+		VALUES ($1,$2,$3,$4,$5::jsonb,$6::jsonb,$7::jsonb,$8::jsonb,$9,$10,$11,$12,$13)
 		ON CONFLICT (tenant_id, mode_id, idempotency_key)
 		    WHERE idempotency_key <> '' DO NOTHING
 		RETURNING tenant_id, work_item_id, mode_id, title, input, source, scope, limits,
-		          status, idempotency_key, created_at, updated_at`,
+		          status, owner_session_id, idempotency_key, created_at, updated_at`,
 		item.TenantID, item.ID, item.ModeID, item.Title, rawInput(item.Input), source, scope, limits,
-		string(item.Status), item.IdempotencyKey, item.CreatedAt, item.UpdatedAt))
+		string(item.Status), nullableUUID(item.OwnerSessionID), item.IdempotencyKey, item.CreatedAt, item.UpdatedAt))
 	if errors.Is(err, pgx.ErrNoRows) && item.IdempotencyKey != "" {
 		return s.workItemByIdempotency(ctx, item.TenantID, item.ModeID, item.IdempotencyKey)
 	}
@@ -63,7 +63,7 @@ func (s *Store) CreateWorkItem(ctx context.Context, item collab.WorkItem) (colla
 func (s *Store) workItemByIdempotency(ctx context.Context, tenantID uuid.UUID, modeID, key string) (collab.WorkItem, error) {
 	row, err := scanWorkItem(s.pool.QueryRow(ctx, `
 		SELECT tenant_id, work_item_id, mode_id, title, input, source, scope, limits,
-		       status, idempotency_key, created_at, updated_at
+		       status, owner_session_id, idempotency_key, created_at, updated_at
 		  FROM collab_work_items
 		 WHERE tenant_id = $1 AND mode_id = $2 AND idempotency_key = $3`, tenantID, modeID, key))
 	if err != nil {
@@ -76,7 +76,7 @@ func (s *Store) workItemByIdempotency(ctx context.Context, tenantID uuid.UUID, m
 func (s *Store) GetWorkItem(ctx context.Context, tenantID, workItemID uuid.UUID) (collab.WorkItem, error) {
 	row, err := scanWorkItem(s.pool.QueryRow(ctx, `
 		SELECT tenant_id, work_item_id, mode_id, title, input, source, scope, limits,
-		       status, idempotency_key, created_at, updated_at
+		       status, owner_session_id, idempotency_key, created_at, updated_at
 		  FROM collab_work_items WHERE tenant_id = $1 AND work_item_id = $2`, tenantID, workItemID))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return collab.WorkItem{}, collabError(collab.ErrWorkItemNotFound, collab.CodeWorkItemNotFound, "get_work_item", "work item not found")
@@ -91,7 +91,7 @@ func (s *Store) GetWorkItem(ctx context.Context, tenantID, workItemID uuid.UUID)
 func (s *Store) ListWorkItems(ctx context.Context, tenantID uuid.UUID, filter collab.WorkFilter) ([]collab.WorkItem, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT tenant_id, work_item_id, mode_id, title, input, source, scope, limits,
-		       status, idempotency_key, created_at, updated_at
+		       status, owner_session_id, idempotency_key, created_at, updated_at
 		  FROM collab_work_items
 		 WHERE tenant_id = $1
 		   AND ($2 = '' OR mode_id = $2)
@@ -122,11 +122,12 @@ func (s *Store) UpdateWorkItem(ctx context.Context, item collab.WorkItem) (colla
 	row, err := scanWorkItem(s.pool.QueryRow(ctx, `
 		UPDATE collab_work_items
 		   SET title = $3, input = $4::jsonb, source = $5::jsonb, scope = $6::jsonb,
-		       limits = $7::jsonb, status = $8, updated_at = now()
+		       limits = $7::jsonb, status = $8, owner_session_id = $9, updated_at = now()
 		 WHERE tenant_id = $1 AND work_item_id = $2
 		RETURNING tenant_id, work_item_id, mode_id, title, input, source, scope, limits,
-		          status, idempotency_key, created_at, updated_at`,
-		item.TenantID, item.ID, item.Title, rawInput(item.Input), source, scope, limits, string(item.Status)))
+		          status, owner_session_id, idempotency_key, created_at, updated_at`,
+		item.TenantID, item.ID, item.Title, rawInput(item.Input), source, scope, limits, string(item.Status),
+		nullableUUID(item.OwnerSessionID)))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return collab.WorkItem{}, collabError(collab.ErrWorkItemNotFound, collab.CodeWorkItemNotFound, "update_work_item", "work item not found")
 	}
@@ -144,11 +145,15 @@ func scanWorkItem(row workItemScanner) (collab.WorkItem, error) {
 	var item collab.WorkItem
 	var input, source, scope, limits []byte
 	var status string
+	var ownerSessionID uuid.NullUUID
 	if err := row.Scan(&item.TenantID, &item.ID, &item.ModeID, &item.Title, &input, &source, &scope, &limits,
-		&status, &item.IdempotencyKey, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		&status, &ownerSessionID, &item.IdempotencyKey, &item.CreatedAt, &item.UpdatedAt); err != nil {
 		return collab.WorkItem{}, err
 	}
 	item.Status = collab.WorkItemStatus(status)
+	if ownerSessionID.Valid {
+		item.OwnerSessionID = ownerSessionID.UUID
+	}
 	item.Input = append(json.RawMessage(nil), input...)
 	_ = json.Unmarshal(source, &item.Source)
 	_ = json.Unmarshal(scope, &item.Scope)
@@ -971,6 +976,27 @@ func (s *Store) Children(ctx context.Context, tenantID, parentSessionID uuid.UUI
 		out = append(out, ref)
 	}
 	return out, rows.Err()
+}
+
+// InterruptActiveCollabSessions marks every active worker session of one mode
+// as cancelled at boot. A restart kills the previous process's worker runners
+// and watchers, so their durable index rows are stale; the orchestrator's
+// Recover then fails those assignments and redispatches them. The orchestrator
+// root session is excluded (its ModeID is empty, and keep is belt-and-braces).
+func (s *Store) InterruptActiveCollabSessions(ctx context.Context, tenantID uuid.UUID, modeID string, keepSessionID uuid.UUID) (int, error) {
+	if tenantID == uuid.Nil || modeID == "" {
+		return 0, collabError(collab.ErrTenantRequired, collab.CodeTenantRequired, "interrupt_collab_sessions", "tenant and mode are required")
+	}
+	tag, err := s.pool.Exec(ctx, `
+		UPDATE collab_session_index
+		   SET state = 'cancelled', updated_at = now()
+		 WHERE tenant_id = $1 AND mode_id = $2 AND state = 'active'
+		   AND session_id <> $3`,
+		tenantID, modeID, nullableUUID(keepSessionID))
+	if err != nil {
+		return 0, fmt.Errorf("store: interrupt active collab sessions: %w", err)
+	}
+	return int(tag.RowsAffected()), nil
 }
 
 // ActiveChildren counts one parent's active children.

@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"os"
 	"testing"
 	"time"
 
@@ -179,5 +180,195 @@ func TestCollabSuperagentStoreRoundTrip(t *testing.T) {
 	children, err := st.ActiveChildren(ctx, tenant, ref.ParentSessionID)
 	if err != nil || children != 0 {
 		t.Fatalf("active children = %d, err=%v", children, err)
+	}
+}
+
+type pgFakeLauncher struct{}
+
+func (pgFakeLauncher) Launch(_ context.Context, req collab.LaunchRequest) (collab.SessionRef, error) {
+	return collab.SessionRef{
+		TenantID: req.TenantID, SessionID: uuid.New(), ParentSessionID: req.ParentSessionID,
+		BotID: req.BotID, ModeID: req.ModeID, WorkItemID: req.WorkItemID, Depth: req.Depth,
+		State: collab.SessionActive, CreatedAt: time.Now().UTC(),
+	}, nil
+}
+
+func (pgFakeLauncher) CancelSession(context.Context, uuid.UUID, uuid.UUID, string) error { return nil }
+
+type pgFakePermissions struct{}
+
+func (pgFakePermissions) CheckBotInvoke(context.Context, uuid.UUID, collab.SessionRef, string) error {
+	return nil
+}
+
+type pgFakeAudit struct{}
+
+func (pgFakeAudit) Record(context.Context, collab.AuditEvent) error { return nil }
+
+func pgModeRegistry(t *testing.T, tenant uuid.UUID) *collab.ModeRegistry {
+	t.Helper()
+	registry, err := collab.NewModeRegistry(tenant, collab.Limits{
+		Depth: collab.LimitedDepth(8), MaxChildren: 32, MaxConcurrent: 16,
+		MaxTurns: 100, MaxTokens: 100_000, MaxDurationMs: 3_600_000,
+	})
+	if err != nil {
+		t.Fatalf("NewModeRegistry: %v", err)
+	}
+	if err := registry.Register(collab.SuperagentMode()); err != nil {
+		t.Fatalf("Register superagent: %v", err)
+	}
+	if err := registry.SetEnabled(collab.ModeSuperagent, true); err != nil {
+		t.Fatalf("enable superagent: %v", err)
+	}
+	return registry
+}
+
+func pgHost(t *testing.T, st *Store, registry *collab.ModeRegistry) *collab.Coordinator {
+	t.Helper()
+	host, err := collab.NewHost(collab.HostOptions{
+		TenantID: registry.TenantID(), Modes: registry, Work: st, Sessions: st,
+		Permissions: pgFakePermissions{}, Audit: pgFakeAudit{}, Launcher: pgFakeLauncher{},
+	})
+	if err != nil {
+		t.Fatalf("NewHost: %v", err)
+	}
+	return host
+}
+
+// TestCollabOwnerSessionSurvivesPGRestart pins P0-1: OwnerSessionID is a
+// durable WorkItem column, so the owner can Assign after a store reopen. A
+// memory-only field would have made the first PG Assign permission-denied.
+func TestCollabOwnerSessionSurvivesPGRestart(t *testing.T) {
+	st := readyTestStore(t)
+	ctx := context.Background()
+	tenant := uuid.New()
+	if err := st.CreateTenant(ctx, tenant, "owner-"+tenant.String()[:8]); err != nil {
+		t.Fatalf("CreateTenant: %v", err)
+	}
+	registry := pgModeRegistry(t, tenant)
+	owner := collab.SessionRef{
+		TenantID: tenant, SessionID: uuid.New(), BotID: "orchestrator",
+		State: collab.SessionActive, CreatedAt: time.Now().UTC(),
+	}
+	if err := st.Put(ctx, owner); err != nil {
+		t.Fatalf("Put owner: %v", err)
+	}
+	item := collab.WorkItem{
+		ID: uuid.New(), TenantID: tenant, ModeID: collab.ModeSuperagent,
+		Title: "owner membership", Status: collab.WorkItemOpen, OwnerSessionID: owner.SessionID,
+		IdempotencyKey: "owner-pg", CreatedAt: time.Now().UTC(),
+	}
+	if _, err := st.CreateWorkItem(ctx, item); err != nil {
+		t.Fatalf("CreateWorkItem: %v", err)
+	}
+	host := pgHost(t, st, registry)
+	if _, err := host.Assign(ctx, tenant, item.ID, "worker", collab.AssignmentRequest{
+		CallerSessionID: owner.SessionID, IdempotencyKey: "owner-assign-1",
+	}); err != nil {
+		t.Fatalf("first Assign: %v", err)
+	}
+
+	// Reopen the store (same database) and re-read the work item. The owner is
+	// still the persisted membership bootstrap.
+	dsn := os.Getenv("KEEL_TEST_DSN")
+	reopened, err := Open(ctx, Config{DSN: dsn})
+	if err != nil {
+		t.Fatalf("reopen store: %v", err)
+	}
+	t.Cleanup(reopened.Close)
+	stored, err := reopened.GetWorkItem(ctx, tenant, item.ID)
+	if err != nil {
+		t.Fatalf("GetWorkItem after reopen: %v", err)
+	}
+	if stored.OwnerSessionID != owner.SessionID {
+		t.Fatalf("owner session = %s, want %s", stored.OwnerSessionID, owner.SessionID)
+	}
+	host2 := pgHost(t, reopened, registry)
+	if _, err := host2.Assign(ctx, tenant, item.ID, "worker", collab.AssignmentRequest{
+		CallerSessionID: owner.SessionID, IdempotencyKey: "owner-assign-2",
+	}); err != nil {
+		t.Fatalf("Assign after reopen: %v", err)
+	}
+}
+
+// TestCollabRestartInterruptsStaleWorkerAndRedispatch pins P0-2: boot marks the
+// previous process's active worker rows cancelled, and Recover fails the old
+// assignment with a recovery note, dispatches a new one and releases the slot.
+func TestCollabRestartInterruptsStaleWorkerAndRedispatch(t *testing.T) {
+	st := readyTestStore(t)
+	ctx := context.Background()
+	tenant := uuid.New()
+	if err := st.CreateTenant(ctx, tenant, "restart-"+tenant.String()[:8]); err != nil {
+		t.Fatalf("CreateTenant: %v", err)
+	}
+	registry := pgModeRegistry(t, tenant)
+	owner := collab.SessionRef{
+		TenantID: tenant, SessionID: uuid.New(), BotID: "orchestrator",
+		State: collab.SessionActive, CreatedAt: time.Now().UTC(),
+	}
+	if err := st.Put(ctx, owner); err != nil {
+		t.Fatalf("Put owner: %v", err)
+	}
+	item := collab.WorkItem{
+		ID: uuid.New(), TenantID: tenant, ModeID: collab.ModeSuperagent,
+		Title: "restart ticket", Status: collab.WorkItemActive, OwnerSessionID: owner.SessionID,
+		IdempotencyKey: "restart-pg", CreatedAt: time.Now().UTC(),
+	}
+	if _, err := st.CreateWorkItem(ctx, item); err != nil {
+		t.Fatalf("CreateWorkItem: %v", err)
+	}
+	workerID := uuid.New()
+	if err := st.Put(ctx, collab.SessionRef{
+		TenantID: tenant, SessionID: workerID, ParentSessionID: owner.SessionID,
+		BotID: "worker", ModeID: collab.ModeSuperagent, WorkItemID: item.ID,
+		Depth: 1, State: collab.SessionActive, CreatedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("Put worker: %v", err)
+	}
+	old, err := st.CreateAssignment(ctx, collab.Assignment{
+		ID: uuid.New(), TenantID: tenant, WorkItemID: item.ID, ModeID: collab.ModeSuperagent,
+		BotID: "worker", SessionID: workerID, CallerSessionID: owner.SessionID,
+		Status: collab.AssignmentActive, IdempotencyKey: "old-assignment",
+	})
+	if err != nil {
+		t.Fatalf("CreateAssignment: %v", err)
+	}
+	interrupted, err := st.InterruptActiveCollabSessions(ctx, tenant, collab.ModeSuperagent, owner.SessionID)
+	if err != nil || interrupted != 1 {
+		t.Fatalf("InterruptActiveCollabSessions = %d, err=%v", interrupted, err)
+	}
+	host := pgHost(t, st, registry)
+	orchestrator, err := superagent.NewOrchestrator(superagent.Config{
+		TenantID: tenant, Store: st, Host: host, Policy: &superagent.AllowlistPolicy{},
+		Inputs: superagent.NoopInputSink{}, Sessions: st, Audit: pgFakeAudit{},
+		OrchestratorSession: owner.SessionID, OrchestratorBot: "orchestrator", WorkerBot: "worker",
+	})
+	if err != nil {
+		t.Fatalf("NewOrchestrator: %v", err)
+	}
+	if _, err := orchestrator.Recover(ctx); err != nil {
+		t.Fatalf("Recover: %v", err)
+	}
+	assignments, err := st.ListAssignments(ctx, tenant, item.ID)
+	if err != nil {
+		t.Fatalf("ListAssignments: %v", err)
+	}
+	var oldRow, replacement *collab.Assignment
+	for i := range assignments {
+		if assignments[i].ID == old.ID {
+			oldRow = &assignments[i]
+		} else {
+			replacement = &assignments[i]
+		}
+	}
+	if oldRow == nil || oldRow.Status != collab.AssignmentFailed || oldRow.Error == "" {
+		t.Fatalf("old assignment = %+v, want failed with recovery note", oldRow)
+	}
+	if replacement == nil || replacement.Status != collab.AssignmentActive {
+		t.Fatalf("replacement = %+v, want active", replacement)
+	}
+	active, err := st.ListAssignmentsByStatus(ctx, tenant, collab.AssignmentActive)
+	if err != nil || len(active) != 1 {
+		t.Fatalf("active slots = %d, err=%v", len(active), err)
 	}
 }

@@ -103,10 +103,15 @@ func TestGitHubSourceBaselineCursor(t *testing.T) {
 func TestGitHubChannelWritesCommentWithMarker(t *testing.T) {
 	var path, body string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		path = r.URL.Path
 		if r.Header.Get("Authorization") != "Bearer secret-token" {
 			t.Errorf("authorization = %q", r.Header.Get("Authorization"))
 		}
+		if r.Method == http.MethodGet {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `[]`)
+			return
+		}
+		path = r.URL.Path
 		raw, _ := io.ReadAll(r.Body)
 		body = string(raw)
 		w.WriteHeader(http.StatusCreated)
@@ -129,6 +134,47 @@ func TestGitHubChannelWritesCommentWithMarker(t *testing.T) {
 	}
 	if !strings.Contains(body, "fixing now") || !strings.Contains(body, "keel-message:m-1") {
 		t.Fatalf("body = %q", body)
+	}
+}
+
+func TestGitHubChannelSkipsCommentWhenMarkerExists(t *testing.T) {
+	var posted bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `[{"id":1,"body":"old\n\n<!-- keel-message:m-1 -->","issue_url":"https://api.github.com/repos/acme/repo/issues/7"}]`)
+			return
+		}
+		posted = true
+		w.WriteHeader(http.StatusCreated)
+		_, _ = io.WriteString(w, `{}`)
+	}))
+	defer server.Close()
+	tenant := uuid.New()
+	source, err := superagent.NewGitHubSource(superagent.GitHubConfig{
+		TenantID: tenant, Repo: "acme/repo", BaseURL: server.URL, Token: "secret-token",
+	})
+	if err != nil {
+		t.Fatalf("NewGitHubSource: %v", err)
+	}
+	if err := source.Send(context.Background(), tenant, "acme/repo#7", collabMessage("retry", "m-1")); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	if posted {
+		t.Fatal("a marker-bearing retry must not POST a second comment")
+	}
+}
+
+func TestGitHubChannelRejectsOtherRepo(t *testing.T) {
+	tenant := uuid.New()
+	source, err := superagent.NewGitHubSource(superagent.GitHubConfig{
+		TenantID: tenant, Repo: "acme/repo", BaseURL: "http://example.invalid",
+	})
+	if err != nil {
+		t.Fatalf("NewGitHubSource: %v", err)
+	}
+	if err := source.Send(context.Background(), tenant, "other/repo#7", collabMessage("x", "m")); err == nil {
+		t.Fatal("Send to another repository must fail")
 	}
 }
 

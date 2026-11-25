@@ -300,10 +300,18 @@ func (g *GitHubSource) Send(ctx context.Context, tenantID uuid.UUID, channelID s
 		return err
 	}
 	body := message.Text
-	if messageID := messageIDFromData(message.Data); messageID != "" {
-		// GitHub has no idempotency key. The hidden marker lets a later adapter
-		// detect its own comment instead of double-posting after an ambiguous
-		// network failure.
+	messageID := messageIDFromData(message.Data)
+	if messageID != "" {
+		// GitHub has no idempotency key. Before an ambiguous retry, look for our
+		// own hidden marker; a found marker means the previous attempt actually
+		// landed. A failed read refuses the write rather than risking a duplicate.
+		exists, err := g.commentWithMarkerExists(ctx, repo, number, messageID)
+		if err != nil {
+			return err
+		}
+		if exists {
+			return nil
+		}
 		body += "\n\n<!-- keel-message:" + messageID + " -->"
 	}
 	payload, err := json.Marshal(map[string]string{"body": body})
@@ -346,10 +354,34 @@ func (g *GitHubSource) parseChannel(channelID string) (string, string, error) {
 		}
 		number = strings.TrimSpace(parts[1])
 	}
+	if repo != g.cfg.Repo {
+		// The adapter is configured for one repository. A comment must never be
+		// written to a thread from another repo, even if a caller names it.
+		return "", "", fmt.Errorf("superagent: github channel %q is outside the configured repository", channelID)
+	}
 	if _, err := strconv.Atoi(number); err != nil {
 		return "", "", fmt.Errorf("superagent: github channel %q has no issue number", channelID)
 	}
 	return repo, number, nil
+}
+
+func (g *GitHubSource) commentWithMarkerExists(ctx context.Context, repo, number, messageID string) (bool, error) {
+	endpoint := fmt.Sprintf("%s/repos/%s/issues/%s/comments", g.base.String(), repo, number)
+	values := url.Values{}
+	values.Set("sort", "created")
+	values.Set("direction", "desc")
+	values.Set("per_page", "100")
+	var comments []githubComment
+	if err := g.getJSON(ctx, endpoint+"?"+values.Encode(), &comments); err != nil {
+		return false, fmt.Errorf("superagent: check github comment marker: %w", err)
+	}
+	marker := "keel-message:" + messageID
+	for _, comment := range comments {
+		if strings.Contains(comment.Body, marker) {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func githubStatusError(operation string, response *http.Response) error {

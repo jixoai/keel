@@ -18,12 +18,16 @@ type fakeLauncher struct {
 	mu        sync.Mutex
 	launches  []collab.LaunchRequest
 	cancelled []uuid.UUID
+	launchErr error
 }
 
 func (f *fakeLauncher) Launch(_ context.Context, req collab.LaunchRequest) (collab.SessionRef, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.launches = append(f.launches, req)
+	if f.launchErr != nil {
+		return collab.SessionRef{}, f.launchErr
+	}
 	return collab.SessionRef{
 		TenantID:        req.TenantID,
 		SessionID:       uuid.New(),
@@ -41,6 +45,21 @@ func (f *fakeLauncher) CancelSession(_ context.Context, _, sessionID uuid.UUID, 
 	defer f.mu.Unlock()
 	f.cancelled = append(f.cancelled, sessionID)
 	return nil
+}
+
+func (f *fakeLauncher) setLaunchErr(err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.launchErr = err
+}
+
+func (f *fakeLauncher) lastLaunch() collab.LaunchRequest {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.launches) == 0 {
+		return collab.LaunchRequest{}
+	}
+	return f.launches[len(f.launches)-1]
 }
 
 func (f *fakeLauncher) count() int {
@@ -100,6 +119,41 @@ func (allowOperator) AuthorizeOperator(context.Context, uuid.UUID, uuid.UUID, st
 	return nil
 }
 
+type fixedPolicy struct {
+	verdict superagent.Verdict
+}
+
+func (p fixedPolicy) Evaluate(context.Context, uuid.UUID, superagent.Event) (superagent.Verdict, error) {
+	return p.verdict, nil
+}
+
+type fixedInspector struct {
+	state superagent.WorkerState
+	err   error
+}
+
+func (i fixedInspector) WorkerState(context.Context, uuid.UUID, uuid.UUID) (superagent.WorkerState, error) {
+	return i.state, i.err
+}
+
+type recordingTreeCanceller struct {
+	mu       sync.Mutex
+	sessions []uuid.UUID
+}
+
+func (c *recordingTreeCanceller) CancelTree(_ context.Context, _, sessionID uuid.UUID, _ string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.sessions = append(c.sessions, sessionID)
+	return nil
+}
+
+func (c *recordingTreeCanceller) count() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return len(c.sessions)
+}
+
 type recordingSink struct {
 	mu        sync.Mutex
 	delivered []superagent.InputRequest
@@ -131,6 +185,9 @@ type envOpts struct {
 	slots         int
 	humanReserved int
 	noOperator    bool
+	policy        superagent.Policy
+	inspector     superagent.WorkerInspector
+	tree          superagent.WorkerTreeCanceller
 }
 
 type testEnv struct {
@@ -213,15 +270,28 @@ func (e *testEnv) newOrchestrator(t *testing.T, opts envOpts) *superagent.Orches
 	if opts.noOperator {
 		operator = nil
 	}
+	policy := opts.policy
+	if policy == nil {
+		policy = &superagent.AllowlistPolicy{
+			Actors: map[string]bool{"alice": true}, WorkerBot: "worker", PolicyVersion: "test-v1",
+		}
+	}
 	orch, err := superagent.NewOrchestrator(superagent.Config{
 		TenantID: e.tenant, Store: e.store, Host: e.host, Source: e.source, Channel: e.source,
-		Policy: &superagent.AllowlistPolicy{
-			Actors: map[string]bool{"alice": true}, WorkerBot: "worker", PolicyVersion: "test-v1",
-		},
-		Inputs: e.sink, Sessions: e.sessions, Audit: e.audit, Outbox: e.outbox, Slots: slots,
+		Policy:              policy,
+		Inputs:              e.sink,
+		Sessions:            e.sessions,
+		Audit:               e.audit,
+		Outbox:              e.outbox,
+		Slots:               slots,
 		Operator:            operator,
-		OrchestratorSession: e.orchestratorSession.SessionID, OrchestratorBot: "orchestrator",
-		WorkerBot: "worker", MaxPoll: 20, Now: func() time.Time { return *e.clock },
+		WorkerInspector:     opts.inspector,
+		WorkerTreeCanceller: opts.tree,
+		OrchestratorSession: e.orchestratorSession.SessionID,
+		OrchestratorBot:     "orchestrator",
+		WorkerBot:           "worker",
+		MaxPoll:             20,
+		Now:                 func() time.Time { return *e.clock },
 	})
 	if err != nil {
 		t.Fatalf("NewOrchestrator: %v", err)
@@ -840,6 +910,318 @@ func TestOperatorActionsRequireSeam(t *testing.T) {
 	}
 	if _, err := env.orchestrator.ResumeTicket(context.Background(), env.tenant, ticket.ID, "alice", "resume"); !errors.Is(err, superagent.ErrOperatorUnavailable) {
 		t.Fatalf("ResumeTicket err = %v, want operator unavailable", err)
+	}
+}
+
+func TestDuplicateAnswerDoesNotReopenOrDispatch(t *testing.T) {
+	env := newEnv(t, envOpts{})
+	acceptEvent(t, env, issueEvent("e1", "issue#1"))
+	board, _ := env.orchestrator.Board(context.Background(), env.tenant, superagent.BoardFilter{})
+	ticket := board.Tickets[0]
+	attention, err := env.orchestrator.Ask(context.Background(), ticket.ID, ticket.ActiveAssignment.ID, collab.AttentionRequest{
+		Prompt: "Which branch?", Options: []collab.AttentionOption{{ID: "main"}, {ID: "next"}},
+	})
+	if err != nil {
+		t.Fatalf("Ask: %v", err)
+	}
+	if _, err := env.orchestrator.AnswerAttention(context.Background(), env.tenant, attention.ID, "next", "", "alice"); err != nil {
+		t.Fatalf("first answer: %v", err)
+	}
+	// Mark the ticket done and retry the same answer: it must return the
+	// original result without reopening or dispatching another worker.
+	item, _ := env.store.GetWorkItem(context.Background(), env.tenant, ticket.ID)
+	item.Status = collab.WorkItemDone
+	if _, err := env.store.UpdateWorkItem(context.Background(), item); err != nil {
+		t.Fatalf("mark done: %v", err)
+	}
+	launches := env.launcher.count()
+	if _, err := env.orchestrator.AnswerAttention(context.Background(), env.tenant, attention.ID, "next", "", "alice"); err != nil {
+		t.Fatalf("duplicate answer: %v", err)
+	}
+	stored, _ := env.store.GetWorkItem(context.Background(), env.tenant, ticket.ID)
+	if stored.Status != collab.WorkItemDone {
+		t.Fatalf("status = %s, want done (duplicate answer must not reopen)", stored.Status)
+	}
+	if env.launcher.count() != launches {
+		t.Fatalf("launches = %d, want %d", env.launcher.count(), launches)
+	}
+}
+
+func TestUntrustedCommentDoesNotResumeBlockedTicket(t *testing.T) {
+	env := newEnv(t, envOpts{})
+	acceptEvent(t, env, issueEvent("e1", "issue#1"))
+	board, _ := env.orchestrator.Board(context.Background(), env.tenant, superagent.BoardFilter{})
+	ticket := board.Tickets[0]
+	attention, err := env.orchestrator.Ask(context.Background(), ticket.ID, ticket.ActiveAssignment.ID, collab.AttentionRequest{
+		Prompt: "Which branch?", Options: []collab.AttentionOption{{ID: "main"}, {ID: "next"}},
+	})
+	if err != nil {
+		t.Fatalf("Ask: %v", err)
+	}
+	if err := env.orchestrator.Report(context.Background(), superagent.ReportRequest{
+		TenantID: env.tenant, WorkItemID: ticket.ID, AssignmentID: ticket.ActiveAssignment.ID,
+		State: superagent.ReportWaiting, AttentionID: attention.ID,
+	}); err != nil {
+		t.Fatalf("Report waiting: %v", err)
+	}
+	// Simulate no live worker.
+	assignment := *ticket.ActiveAssignment
+	assignment.Status = collab.AssignmentFailed
+	if _, err := env.store.UpdateAssignment(context.Background(), assignment); err != nil {
+		t.Fatalf("fail assignment: %v", err)
+	}
+	untrusted := superagent.Event{
+		SourceID: "fixture", EventID: "c-untrusted", Kind: superagent.EventIssueComment,
+		Actor:  superagent.Actor{ID: "u2", Login: "mallory"},
+		Thread: superagent.ThreadRef{Source: "fixture", Kind: "issue", ID: "issue#1"},
+		Body:   "please continue",
+	}
+	if _, err := env.orchestrator.HandleSourceEvent(context.Background(), fixtureEvent(t, untrusted)); err != nil {
+		t.Fatalf("untrusted comment: %v", err)
+	}
+	blocked, _ := env.orchestrator.Board(context.Background(), env.tenant, superagent.BoardFilter{})
+	if blocked.Tickets[0].Status != collab.WorkItemBlocked {
+		t.Fatalf("status = %s, want blocked", blocked.Tickets[0].Status)
+	}
+	if env.launcher.count() != 1 {
+		t.Fatalf("launches = %d, want 1 (untrusted comment must not start a worker)", env.launcher.count())
+	}
+	trusted := untrusted
+	trusted.EventID = "c-trusted"
+	trusted.Actor = alice()
+	if _, err := env.orchestrator.HandleSourceEvent(context.Background(), fixtureEvent(t, trusted)); err != nil {
+		t.Fatalf("trusted follow-up: %v", err)
+	}
+	active, _ := env.orchestrator.Board(context.Background(), env.tenant, superagent.BoardFilter{})
+	if active.Tickets[0].Status != collab.WorkItemActive {
+		t.Fatalf("status = %s, want active after trusted follow-up", active.Tickets[0].Status)
+	}
+	if env.launcher.count() != 2 {
+		t.Fatalf("launches = %d, want 2 after trusted follow-up", env.launcher.count())
+	}
+}
+
+func TestSourceCommentAnswersOpenAttention(t *testing.T) {
+	env := newEnv(t, envOpts{})
+	acceptEvent(t, env, issueEvent("e1", "issue#1"))
+	board, _ := env.orchestrator.Board(context.Background(), env.tenant, superagent.BoardFilter{})
+	ticket := board.Tickets[0]
+	attention, err := env.orchestrator.Ask(context.Background(), ticket.ID, ticket.ActiveAssignment.ID, collab.AttentionRequest{
+		Prompt: "Which branch?", Options: []collab.AttentionOption{{ID: "main", Label: "main"}, {ID: "next", Label: "next"}},
+	})
+	if err != nil {
+		t.Fatalf("Ask: %v", err)
+	}
+	comment := superagent.Event{
+		SourceID: "fixture", EventID: "answer-1", Kind: superagent.EventIssueComment,
+		Actor: alice(), Thread: superagent.ThreadRef{Source: "fixture", Kind: "issue", ID: "issue#1"},
+		Body: "next",
+	}
+	if _, err := env.orchestrator.HandleSourceEvent(context.Background(), fixtureEvent(t, comment)); err != nil {
+		t.Fatalf("answer comment: %v", err)
+	}
+	stored, err := env.store.GetAttention(context.Background(), env.tenant, attention.ID)
+	if err != nil || stored.Status != collab.AttentionAnswered {
+		t.Fatalf("attention = %+v, err=%v", stored, err)
+	}
+	if stored.Answer == nil || stored.Answer.OptionID != "next" || stored.Answer.Actor != "alice" {
+		t.Fatalf("answer = %+v", stored.Answer)
+	}
+	if env.sink.count() != 1 || env.sink.last().Kind != "attention_answer" {
+		t.Fatalf("deliveries = %+v", env.sink.delivered)
+	}
+	assignments, _ := env.store.ListAssignments(context.Background(), env.tenant, ticket.ID)
+	if len(assignments) != 1 {
+		t.Fatalf("assignments = %d, want the original worker only", len(assignments))
+	}
+}
+
+func TestWorkerInspectorFailsOverStaleActiveSession(t *testing.T) {
+	env := newEnv(t, envOpts{inspector: fixedInspector{state: superagent.WorkerFailed}})
+	acceptEvent(t, env, issueEvent("e1", "issue#1"))
+	board, _ := env.orchestrator.Board(context.Background(), env.tenant, superagent.BoardFilter{})
+	ticket := board.Tickets[0]
+	if _, err := env.orchestrator.Recover(context.Background()); err != nil {
+		t.Fatalf("Recover: %v", err)
+	}
+	assignments, _ := env.store.ListAssignments(context.Background(), env.tenant, ticket.ID)
+	var failed, active int
+	for _, assignment := range assignments {
+		if assignment.Status == collab.AssignmentFailed {
+			failed++
+		}
+		if assignment.Status == collab.AssignmentActive {
+			active++
+		}
+	}
+	if failed != 1 || active != 1 {
+		t.Fatalf("failed=%d active=%d, want one interrupted + one replacement: %+v", failed, active, assignments)
+	}
+}
+
+func TestOutboxPerThreadOrderingAndTicketBinding(t *testing.T) {
+	env := newEnv(t, envOpts{})
+	if _, err := env.outbox.Enqueue(context.Background(), superagent.OutboxMessage{
+		TenantID: env.tenant, ChannelID: "thread-1", Text: "first", IdempotencyKey: "m1",
+	}); err != nil {
+		t.Fatalf("enqueue first: %v", err)
+	}
+	*env.clock = env.clock.Add(time.Millisecond)
+	if _, err := env.outbox.Enqueue(context.Background(), superagent.OutboxMessage{
+		TenantID: env.tenant, ChannelID: "thread-1", Text: "second", IdempotencyKey: "m2",
+	}); err != nil {
+		t.Fatalf("enqueue second: %v", err)
+	}
+	env.source.FailSends(1)
+	if _, err := env.outbox.Flush(context.Background(), env.tenant, 10); err != nil {
+		t.Fatalf("first flush: %v", err)
+	}
+	if got := len(env.source.Messages()); got != 0 {
+		t.Fatalf("messages after failed first = %d, want 0 (later message must wait)", got)
+	}
+	*env.clock = env.clock.Add(2 * time.Second)
+	if _, err := env.outbox.Flush(context.Background(), env.tenant, 10); err != nil {
+		t.Fatalf("second flush: %v", err)
+	}
+	messages := env.source.Messages()
+	if len(messages) != 2 || messages[0].Message.Text != "first" || messages[1].Message.Text != "second" {
+		t.Fatalf("messages = %+v, want first then second", messages)
+	}
+
+	acceptEvent(t, env, issueEvent("e1", "issue#1"))
+	board, _ := env.orchestrator.Board(context.Background(), env.tenant, superagent.BoardFilter{})
+	if _, err := env.outbox.Enqueue(context.Background(), superagent.OutboxMessage{
+		TenantID: env.tenant, WorkItemID: board.Tickets[0].ID, ChannelID: "another-thread",
+		Text: "leak", IdempotencyKey: "leak",
+	}); err == nil {
+		t.Fatal("a ticket-bound outbox message must be refused on a different channel")
+	}
+}
+
+func TestStopCancelsWorkerSubtree(t *testing.T) {
+	tree := &recordingTreeCanceller{}
+	env := newEnv(t, envOpts{tree: tree})
+	acceptEvent(t, env, issueEvent("e1", "issue#1"))
+	board, _ := env.orchestrator.Board(context.Background(), env.tenant, superagent.BoardFilter{})
+	ticket := board.Tickets[0]
+	stop := superagent.Event{
+		SourceID: "fixture", EventID: "stop-tree", Kind: superagent.EventIssueComment,
+		Actor: alice(), Thread: superagent.ThreadRef{Source: "fixture", Kind: "issue", ID: "issue#1"},
+		Body: "/keel stop",
+	}
+	if _, err := env.orchestrator.HandleSourceEvent(context.Background(), fixtureEvent(t, stop)); err != nil {
+		t.Fatalf("stop: %v", err)
+	}
+	if tree.count() != 1 {
+		t.Fatalf("tree cancels = %d, want 1", tree.count())
+	}
+	if tree.sessions[0] != ticket.ActiveAssignment.SessionID {
+		t.Fatalf("tree cancel session = %s, want %s", tree.sessions[0], ticket.ActiveAssignment.SessionID)
+	}
+}
+
+func TestObserveMandateDoesNotDispatch(t *testing.T) {
+	env := newEnv(t, envOpts{policy: fixedPolicy{verdict: superagent.Verdict{
+		Action: superagent.ActionAccept, Strength: superagent.MandateObserve,
+	}}})
+	acceptEvent(t, env, issueEvent("e1", "issue#1"))
+	board, _ := env.orchestrator.Board(context.Background(), env.tenant, superagent.BoardFilter{})
+	if len(board.Tickets) != 1 || board.Tickets[0].Status != collab.WorkItemBlocked {
+		t.Fatalf("tickets = %+v, want one observe-blocked ticket", board.Tickets)
+	}
+	assignments, _ := env.store.ListAssignments(context.Background(), env.tenant, board.Tickets[0].ID)
+	if len(assignments) != 0 || env.launcher.count() != 0 {
+		t.Fatalf("assignments=%d launches=%d, want observe-only without a worker", len(assignments), env.launcher.count())
+	}
+}
+
+func TestHousekeepingRunsWhenPollFails(t *testing.T) {
+	env := newEnv(t, envOpts{})
+	if _, err := env.outbox.Enqueue(context.Background(), superagent.OutboxMessage{
+		TenantID: env.tenant, ChannelID: "thread-1", Text: "pending", IdempotencyKey: "pending-1",
+	}); err != nil {
+		t.Fatalf("enqueue: %v", err)
+	}
+	env.source.FailPolls(1)
+	if _, err := env.orchestrator.PollOnce(context.Background()); err == nil {
+		t.Fatal("PollOnce should surface the source failure")
+	}
+	if got := len(env.source.Messages()); got != 1 {
+		t.Fatalf("messages = %d, want outbox flushed despite poll failure", got)
+	}
+}
+
+func TestResumeCarriesFollowUpTextToWorkerTask(t *testing.T) {
+	env := newEnv(t, envOpts{})
+	acceptEvent(t, env, issueEvent("e1", "issue#1"))
+	board, _ := env.orchestrator.Board(context.Background(), env.tenant, superagent.BoardFilter{})
+	ticket := board.Tickets[0]
+	if err := env.orchestrator.Report(context.Background(), superagent.ReportRequest{
+		TenantID: env.tenant, WorkItemID: ticket.ID, AssignmentID: ticket.ActiveAssignment.ID,
+		State: superagent.ReportReady, Summary: "done",
+	}); err != nil {
+		t.Fatalf("Report ready: %v", err)
+	}
+	if _, err := env.orchestrator.ResumeTicket(context.Background(), env.tenant, ticket.ID, "alice", "please add regression tests"); err != nil {
+		t.Fatalf("ResumeTicket: %v", err)
+	}
+	launch := env.launcher.lastLaunch()
+	if !strings.Contains(launch.Task, "please add regression tests") {
+		t.Fatalf("worker task = %q, want the follow-up text", launch.Task)
+	}
+}
+
+func TestDispatchFailureClosesAssignmentAndRetries(t *testing.T) {
+	env := newEnv(t, envOpts{})
+	env.launcher.setLaunchErr(errors.New("launcher unavailable"))
+	acceptEvent(t, env, issueEvent("e1", "issue#1"))
+	board, _ := env.orchestrator.Board(context.Background(), env.tenant, superagent.BoardFilter{})
+	if len(board.Tickets) != 1 || board.Tickets[0].Status != collab.WorkItemOpen {
+		t.Fatalf("tickets = %+v, want one open ticket after launch failure", board.Tickets)
+	}
+	assignments, _ := env.store.ListAssignments(context.Background(), env.tenant, board.Tickets[0].ID)
+	if len(assignments) != 1 || assignments[0].Status != collab.AssignmentFailed {
+		t.Fatalf("assignments = %+v, want one failed assignment (no open orphan)", assignments)
+	}
+	env.launcher.setLaunchErr(nil)
+	if _, err := env.orchestrator.DispatchQueued(context.Background()); err != nil {
+		t.Fatalf("DispatchQueued retry: %v", err)
+	}
+	ready, _ := env.orchestrator.Board(context.Background(), env.tenant, superagent.BoardFilter{})
+	if ready.Tickets[0].Status != collab.WorkItemActive || ready.Tickets[0].ActiveAssignment == nil {
+		t.Fatalf("ticket = %+v, want active after retry", ready.Tickets[0])
+	}
+}
+
+func TestAnswerWithoutLiveWorkerCarriesAnswerText(t *testing.T) {
+	env := newEnv(t, envOpts{})
+	acceptEvent(t, env, issueEvent("e1", "issue#1"))
+	board, _ := env.orchestrator.Board(context.Background(), env.tenant, superagent.BoardFilter{})
+	ticket := board.Tickets[0]
+	attention, err := env.orchestrator.Ask(context.Background(), ticket.ID, ticket.ActiveAssignment.ID, collab.AttentionRequest{
+		Prompt: "What next?", AllowFreeText: true,
+	})
+	if err != nil {
+		t.Fatalf("Ask: %v", err)
+	}
+	assignment := *ticket.ActiveAssignment
+	assignment.Status = collab.AssignmentFailed
+	if _, err := env.store.UpdateAssignment(context.Background(), assignment); err != nil {
+		t.Fatalf("fail assignment: %v", err)
+	}
+	if _, err := env.orchestrator.AnswerAttention(context.Background(), env.tenant, attention.ID, "", "use the staging branch", "alice"); err != nil {
+		t.Fatalf("answer: %v", err)
+	}
+	launch := env.launcher.lastLaunch()
+	if !strings.Contains(launch.Task, "use the staging branch") {
+		t.Fatalf("worker task = %q, want the answer text", launch.Task)
+	}
+}
+
+func acceptEvent(t *testing.T, env *testEnv, event superagent.Event) {
+	t.Helper()
+	if _, err := env.orchestrator.HandleSourceEvent(context.Background(), fixtureEvent(t, event)); err != nil {
+		t.Fatalf("accept event %s: %v", event.EventID, err)
 	}
 }
 
