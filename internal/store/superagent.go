@@ -921,6 +921,58 @@ func (s *Store) SetState(ctx context.Context, tenantID, sessionID uuid.UUID, sta
 	return nil
 }
 
+// SetWorkItem binds an existing tracked session to a work item (manual
+// takeover of a pre-existing worker session).
+func (s *Store) SetWorkItem(ctx context.Context, tenantID, sessionID, workItemID uuid.UUID) error {
+	tag, err := s.pool.Exec(ctx, `
+		UPDATE collab_session_index SET work_item_id = $3, updated_at = now()
+		 WHERE tenant_id = $1 AND session_id = $2`,
+		tenantID, sessionID, nullableUUID(workItemID))
+	if err != nil {
+		return fmt.Errorf("store: set collab session work item: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return collabError(collab.ErrSessionNotFound, collab.CodeSessionNotFound, "set_session_work_item", "session not found")
+	}
+	return nil
+}
+
+// Children lists a tracked session's direct children, oldest first. The cancel
+// path resolves each child's live state with Session before acting.
+func (s *Store) Children(ctx context.Context, tenantID, parentSessionID uuid.UUID) ([]collab.SessionRef, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT tenant_id, session_id, parent_session_id, bot_id, mode_id, work_item_id, depth, state, created_at
+		  FROM collab_session_index
+		 WHERE tenant_id = $1 AND parent_session_id = $2
+		 ORDER BY created_at, session_id`,
+		tenantID, parentSessionID)
+	if err != nil {
+		return nil, fmt.Errorf("store: list collab session children: %w", err)
+	}
+	defer rows.Close()
+	out := make([]collab.SessionRef, 0)
+	for rows.Next() {
+		var (
+			ref                  collab.SessionRef
+			parentID, workItemID uuid.NullUUID
+			state                string
+		)
+		if err := rows.Scan(&ref.TenantID, &ref.SessionID, &parentID, &ref.BotID, &ref.ModeID,
+			&workItemID, &ref.Depth, &state, &ref.CreatedAt); err != nil {
+			return nil, fmt.Errorf("store: scan collab session child: %w", err)
+		}
+		if parentID.Valid {
+			ref.ParentSessionID = parentID.UUID
+		}
+		if workItemID.Valid {
+			ref.WorkItemID = workItemID.UUID
+		}
+		ref.State = collab.SessionState(state)
+		out = append(out, ref)
+	}
+	return out, rows.Err()
+}
+
 // ActiveChildren counts one parent's active children.
 func (s *Store) ActiveChildren(ctx context.Context, tenantID, parentSessionID uuid.UUID) (int, error) {
 	var count int

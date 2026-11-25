@@ -349,6 +349,7 @@ func (o *Orchestrator) acceptLocked(ctx context.Context, event Event, verdict Ve
 		workerBot = o.cfg.WorkerBot
 	}
 	ticket := NewTicket(o.cfg.TenantID, o.cfg.ModeID, event, verdict, workerBot, now)
+	ticket.OwnerSessionID = o.cfg.OrchestratorSession
 	ticket.Mandate.AcceptedBy = o.cfg.OrchestratorBot
 	ticket.Limits = o.cfg.TicketLimits
 	ticket.IdempotencyKey = event.IdempotencyKey()

@@ -312,63 +312,6 @@ func (p superagentPermissions) CheckBotInvoke(ctx context.Context, tenantID uuid
 	return nil
 }
 
-// collabAuditSink writes collaboration audit rows to the durable auth_events
-// ledger. Detail is ids/outcomes only: no prompt, body or credential.
-type collabAuditSink struct {
-	store *store.Store
-	log   *slog.Logger
-}
-
-func (s collabAuditSink) Record(ctx context.Context, event collab.AuditEvent) error {
-	if s.store == nil {
-		return errors.New("collab audit: store is not configured")
-	}
-	detail := map[string]any{
-		"operation": event.Operation,
-		"modeId":    event.ModeID,
-	}
-	if event.WorkItemID != uuid.Nil {
-		detail["workItemId"] = event.WorkItemID.String()
-	}
-	if event.AssignmentID != uuid.Nil {
-		detail["assignmentId"] = event.AssignmentID.String()
-	}
-	if event.SessionID != uuid.Nil {
-		detail["sessionId"] = event.SessionID.String()
-	}
-	if event.ParentSessionID != uuid.Nil {
-		detail["parentSessionId"] = event.ParentSessionID.String()
-	}
-	if event.BotID != "" {
-		detail["botId"] = event.BotID
-	}
-	if event.Field != "" {
-		detail["field"] = event.Field
-	}
-	if event.Limit != 0 {
-		detail["limit"] = event.Limit
-	}
-	if event.Actual != 0 {
-		detail["actual"] = event.Actual
-	}
-	if event.Detail != "" {
-		detail["detail"] = event.Detail
-	}
-	result := event.Result
-	if result == "" {
-		result = "accepted"
-	}
-	if _, err := s.store.RecordAuthEvent(ctx, store.AuthEvent{
-		TenantID: event.TenantID, Kind: event.Kind, Result: result, Detail: detail,
-	}); err != nil {
-		if s.log != nil {
-			s.log.Warn("collab audit write failed", "kind", event.Kind, "error", err)
-		}
-		return err
-	}
-	return nil
-}
-
 func splitCSV(raw string) map[string]bool {
 	out := make(map[string]bool)
 	for _, item := range strings.Split(raw, ",") {
