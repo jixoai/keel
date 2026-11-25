@@ -637,7 +637,10 @@ func TestSidecarLoaderTimeoutAndCancellation(t *testing.T) {
 	dir := t.TempDir()
 	pkg := sidecarPackage(t, filepath.Join(dir, "demo.sidecar"),
 		sidecarManifest(t, "demo.sidecar", "1.0.0", []string{"greet", "slowme"}, []string{"greet", "slowme"}))
-	loader := newTestSidecarLoader(t, SidecarOptions{RequestTimeout: 400 * time.Millisecond})
+	// The request budget also bounds the handshake. Keep it generous enough
+	// that a loaded CI runner can start the fixture, while still well below the
+	// test's 5s upper bound for the intentionally slow call.
+	loader := newTestSidecarLoader(t, SidecarOptions{RequestTimeout: 2 * time.Second})
 
 	plugin, err := loader.Load(ctx, pkg, pkg.Manifest)
 	if err != nil {
