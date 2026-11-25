@@ -823,8 +823,8 @@ func TestModelServicePickerRequiresAResolvableCredential(t *testing.T) {
 // TestModelServiceAllHiddenProvidersGetTheirOwnDiagnostic: a configuration
 // whose providers are all hidden is not "no provider configuration is loaded".
 func TestModelServiceAllHiddenProvidersGetTheirOwnDiagnostic(t *testing.T) {
-	hidden := make([]string, 0, 7)
-	for _, id := range []string{"s2api", "a6api", "deepseek", "anthropic", "openai", "openrouter", "ollama"} {
+	hidden := make([]string, 0, 8)
+	for _, id := range []string{"s2api", "a6api", "magpie", "deepseek", "anthropic", "openai", "openrouter", "ollama"} {
 		hidden = append(hidden, `{"id":"`+id+`","visibility":"hidden"}`)
 	}
 	doc := json.RawMessage(`{"providers":[` + strings.Join(hidden, ",") + `]}`)
