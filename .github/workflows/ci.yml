@@ -50,7 +50,11 @@ jobs:
       - name: go test -race
         env:
           KEEL_TEST_DSN: postgres://postgres:runtime@127.0.0.1:5432/runtime?sslmode=disable
-        run: go test -race ./...
+        # Every integration package opens the same PostgreSQL service. Several
+        # suites exercise schema migrations and legacy-table refusal, so package
+        # binaries must not open it concurrently; `-p 1` is the supported
+        # integration mode (tests within a package still run normally).
+        run: go test -race -p 1 ./...
       - name: go build
         run: go build ./...
       # The VmRSS gate is shell/Python, not covered by `go test`: run its

@@ -22,10 +22,15 @@ var kernelPackages = []string{
 
 // productPackages are the layers above the kernel: the product API, its
 // extensions (plugins/triggers/sub-agents/hooks), the service host and the CLI.
+//
+// internal/collab is deliberately not listed here: it is a pure port
+// vocabulary (standard library + uuid only; TestCollabCoreStaysIndependent
+// pins that), so the store may implement its persistence ports without pulling
+// product behavior into the kernel. The Host and mode implementations live in
+// the product packages below.
 var productPackages = []string{
 	"github.com/jixoai/keel/internal/harnessapi",
 	"github.com/jixoai/keel/internal/harnessext",
-	"github.com/jixoai/keel/internal/collab",
 	"github.com/jixoai/keel/internal/access",
 	"github.com/jixoai/keel/internal/auth",
 	"github.com/jixoai/keel/internal/botteam",
