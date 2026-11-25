@@ -55,8 +55,8 @@ v0.2.0 发布后仍开的口子（归档板 41 项，按去向分组）：
    `$KEEL_HOME/dev-pg`，仅回环、随机 0600 密码、PG18 门、reset 防护）；`keel serve`/`keel admin`
    在无 `KEEL_DSN` 时自动初始化/启动本地库（`--no-auto-db`/`KEEL_NO_AUTO_DB=1` 可关闭）；
    README/RUNBOOK/官网已改为自动初始化优先，`scripts/dev-pg.sh` 删除。
-7. **客户端产品化（进行中：壳/编辑器/通知已交付，updater/perf 未开始）**：`nsh/updater`
-   自更新、签名 OTA、1000 条消息长会话性能与离屏增量创建。
+7. **客户端产品化（进行中：壳/编辑器/通知/1000 条长会话已交付；updater 未开始）**：`nsh/updater`
+   自更新与签名 OTA（依赖签名环境）。
 8. **冻结 backlog（未开始/部分）**：插件生态（checkpoint、super-agent、creation 聚合、
    attachment/commands/permission/feedback、subprocess/terminal、bundles/presets、
    telemetry OTLP、testkit、credentials/storage/identity、keel.oar、ui-* 槽位内容、
