@@ -98,6 +98,16 @@ function Harness() {
                 <Text style={{ fontSize: typeScale.sm }}>完成</Text>
               </Td>
             </TableBodyRow>
+            {[2, 3, 4, 5, 6, 7, 8].map((row) => (
+              <TableBodyRow testID={`table-row-${row}`}>
+                <Td>
+                  <Text style={{ fontSize: typeScale.sm }}>运行记录 {row}</Text>
+                </Td>
+                <Td>
+                  <Text style={{ fontSize: typeScale.sm }}>完成</Text>
+                </Td>
+              </TableBodyRow>
+            ))}
           </TableBody>
         </Table>
       </ScrollArea>

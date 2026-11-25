@@ -31,6 +31,8 @@ test("TUI: C3 Accordion 展开与 Tabs 切换面板", async () => {
 });
 
 test("TUI: C3 Table 表头与表体渲染与 ScrollArea 滚动", async () => {
+  // The harness rows overflow the ScrollArea's 120pt cap in every host, so the
+  // scroll path is exercised rather than skipped by a taller phone viewport.
   const app = await open("./harness-container.tsx");
   expect(app.shows("id:table-scroll")).toBe(true);
   await app.scroll("id:table-scroll", 16);

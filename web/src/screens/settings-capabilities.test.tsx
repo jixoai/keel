@@ -82,7 +82,7 @@ test("TUI: 能力分区——网络不可达时给出可重试的中性提示，
 });
 
 test("TUI: 能力分区——媒体网关 503 是「未配置」而非错误，实时语音已配置即可用", async () => {
-  const app = await open(HARNESS, { host: { params: { scenario: "media-unconfigured" } } });
+  const app = await open(HARNESS, { width: 1440, host: { params: { scenario: "media-unconfigured" } } });
 
   await app.waitFor("id:capability-row-chat");
   const joined = joinedTexts(app);
