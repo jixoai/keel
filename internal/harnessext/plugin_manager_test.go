@@ -526,6 +526,37 @@ provides:
 	}
 }
 
+// TestPluginManagerPublishesInventoryChanges: every successful lifecycle write
+// reaches the product invalidation sink (SSE kind=plugins); a failed one does
+// not.
+func TestPluginManagerPublishesInventoryChanges(t *testing.T) {
+	harness := newManagerHarness(t, t.TempDir(), nil)
+	ctx := context.Background()
+	if err := harness.manager.Boot(ctx); err != nil {
+		t.Fatal(err)
+	}
+	var tenants []uuid.UUID
+	harness.manager.SetChangeSink(func(tenant uuid.UUID) { tenants = append(tenants, tenant) })
+	source := writePluginPackage(t, t.TempDir(), map[string]string{
+		"plugin.yaml": `id: vendor.push
+version: 1.0.0
+kind: webview
+description: pushes inventory
+provides:
+  ui:
+    entry: ui/index.html
+    title: Push
+`,
+		"ui/index.html": "<html>push</html>",
+	})
+	if _, err := harness.manager.Install(ctx, InstallRequest{Path: source}, AuditContext{Actor: "t"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(tenants) != 1 || tenants[0] != testTenantID {
+		t.Fatalf("change sink calls = %v", tenants)
+	}
+}
+
 // TestPluginManagerInstallRefusesUnapprovedContent: ExpectedHash is checked
 // after the package is validated/hashed and before it is copied.
 func TestPluginManagerInstallRefusesUnapprovedContent(t *testing.T) {

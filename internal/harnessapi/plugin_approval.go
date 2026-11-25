@@ -415,6 +415,15 @@ func installApprovalAsk(path, contentHash string) pluginApprovalAsk {
 	if absolute, err := filepath.Abs(target); err == nil && absolute != "" {
 		target = filepath.Clean(absolute)
 	}
+	// Bind the question to the package content even when the client did not
+	// send expectedHash: HashTree is the same tree hash the manager verifies
+	// before copying. An unreadable path has no hash; the manager then reports
+	// the field error instead of asking a content-blind question.
+	if contentHash == "" {
+		if hash, err := pluginpkg.HashTree(target); err == nil {
+			contentHash = hash
+		}
+	}
 	id := filepath.Base(filepath.FromSlash(target))
 	return pluginApprovalAsk{
 		Action:      store.PluginActionInstall,
