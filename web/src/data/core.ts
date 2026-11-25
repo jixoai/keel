@@ -30,7 +30,10 @@ export interface CoreEngine extends UiEngine {
 }
 
 export function createCoreEngine(sessionId: string): CoreEngine {
-  const core = createSurfaceEngine({ sessionId });
+  // The P2 long-conversation target is 1000 messages (500 user/assistant
+  // turns); the projection's default 200-turn window would drop the first
+  // 300 turns before the list ever saw them.
+  const core = createSurfaceEngine({ sessionId, windowTurns: 500 });
   const attachmentsByRequest = new Map<string, AttachmentRef[]>();
   /** The complete tool.result payload per call: the core's frozen
    * `ToolCallView` keeps one `result` value, and the MCP Apps host needs the

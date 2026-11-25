@@ -508,6 +508,8 @@ class KeelStore {
    * one external session, its records and its projection. Same rule — the
    * default sample stays unchanged. */
   private oarFixtures = false;
+  /** `?fixture=1&stress=N`: the long-list sample (development transport only). */
+  private stressMessages = 0;
   /** The web page's query as read for the dev launch (`?fixture=1`). */
   private devSearch = "";
   private devRequest: Promise<boolean> | null = null;
@@ -558,6 +560,8 @@ class KeelStore {
       this.dev = true;
       this.pluginFixtures = host.params?.plugins === true;
       this.oarFixtures = host.params?.oar === true;
+      const stress = Number(host.params?.stress ?? 0);
+      this.stressMessages = Number.isFinite(stress) && stress > 0 ? Math.floor(stress) : 0;
       return true;
     }
     const page = await this.pageRoute();
@@ -566,6 +570,8 @@ class KeelStore {
     this.dev = params.get("fixture") === "1";
     this.pluginFixtures = params.get("plugins") === "1";
     this.oarFixtures = params.get("oar") === "1";
+    const stress = Number(params.get("stress") ?? 0);
+    this.stressMessages = Number.isFinite(stress) && stress > 0 ? Math.floor(stress) : 0;
     return this.dev;
   }
 
@@ -580,7 +586,7 @@ class KeelStore {
     // The product never reaches this branch — it is asked for at launch.
     if (await this.devLaunch()) {
       if (token !== this.detectToken) return;
-      if (!this.fixture) this.fixture = new FixtureClient(undefined, this.pluginFixtures, this.oarFixtures);
+      if (!this.fixture) this.fixture = new FixtureClient(undefined, this.pluginFixtures, this.oarFixtures, this.stressMessages);
       this.http = null;
       this.client = this.fixture;
       resetPermissions();

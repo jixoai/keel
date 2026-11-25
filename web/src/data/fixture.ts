@@ -492,8 +492,12 @@ export class FixtureClient implements SettingsApi {
     /** Include the OAR external-run sample (`?oar=1` / `host.params.oar`):
      * one external session, its three records and its projection. */
     private readonly oarFixtures = false,
+    /** `?fixture=1&stress=1000`: a 1000-message conversation for the long-list
+     * check. Development transport only; the default fixture is unchanged. */
+    private readonly stressMessages = 0,
   ) {
     this.seed();
+    if (this.stressMessages > 0) this.seedStress(this.stressMessages);
   }
 
   async probe(): Promise<"ok" | "auth" | "down"> {
@@ -1836,6 +1840,41 @@ export class FixtureClient implements SettingsApi {
       subscribers: [],
       drainPaused: false,
     };
+  }
+
+  /** A long conversation: half the count in user messages and half in
+   * assistant replies, with the run rows between them. */
+  private seedStress(messages: number) {
+    const base = Date.now();
+    const turns = Math.max(1, Math.ceil(messages / 2));
+    const events: Array<{ kind: string; payload: unknown }> = [];
+    for (let i = 0; i < turns; i += 1) {
+      const at = base - (turns - i) * 30_000;
+      events.push({
+        kind: "user.message",
+        payload: {
+          text: `压测消息 ${i + 1}：检查长会话的滚动位置与离屏创建。`,
+          requestId: `stress-${i + 1}`,
+          delivery: "queue",
+          timestamp: at,
+        },
+      });
+      events.push({
+        kind: "assistant.message",
+        payload: {
+          role: "assistant",
+          content: [{ type: "text", text: `第 ${i + 1} 条回复：列表只创建视口附近的行，历史不参与布局。` }],
+          inputSeqs: [i * 3 + 1],
+          stopReason: "end_turn",
+          timestamp: at + 800,
+        },
+      });
+      events.push({
+        kind: "run.finished",
+        payload: { turns: 1, tokensIn: 120, tokensOut: 40, stopReason: "done", durationMs: 800, provider: "s2api", model: "deepseek-v4.1-flash", timestamp: at + 900 },
+      });
+    }
+    this.add("stress-1000", `${turns * 2} 条消息（压测）`, events);
   }
 
   private seed() {

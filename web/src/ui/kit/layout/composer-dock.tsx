@@ -120,6 +120,10 @@ export function ComposerDock(props: ComposerDockProps) {
           // ConversationTimeline.tsx:2043-2061 and 2169-2174).
           paddingHorizontal: props.draft || props.floating ? 0 : conversationColumnInsetPx(geometry()),
           paddingBottom: props.draft || props.floating ? 0 : COMPOSER_DOCK_INSET_PX,
+          // The floating "back to bottom" button sits above the shell; reserve
+          // its band so it cannot cover the last visible row's metadata on a
+          // short (390) column.
+          paddingTop: props.backToBottomVisible ? COMPOSER_BACK_TO_BOTTOM_SIZE_PX + COMPOSER_BACK_TO_BOTTOM_GAP_PX : 0,
         }}
       >
         <View
