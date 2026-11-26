@@ -400,6 +400,45 @@ test("TUI: MCP app 结果——不挂 iframe，文本兜底与能力提示", asy
   expect(app.shows("id:mcp-app-fallback-call-mcp-app")).toBe(false);
 });
 
+test("TUI: 设置页——检查点策略读取、收窄与恢复租户默认", async () => {
+  const app = await openApp();
+  await app.press("label:打开设置");
+  await app.waitFor("id:settings-section-general");
+  await app.press("id:settings-section-checkpoints");
+  await app.waitFor("id:settings-checkpoint-section");
+  await app.waitFor("id:settings-checkpoint-effective", { timeout: 15_000 });
+  const initial = app.texts().join("\n");
+  expect(initial).toContain("自动压缩 开");
+  expect(initial).toContain("来源：租户默认");
+
+  // A session can only narrow: requesting 10 checkpoints is clamped to the
+  // tenant's 3 and the clamp is visible.
+  await app.clear("id:settings-checkpoint-max");
+  await app.paste("id:settings-checkpoint-max", { text: "10" });
+  await app.press("id:settings-checkpoint-save");
+  await app.waitFor("id:settings-checkpoint-narrowed", { timeout: 15_000 });
+  // The save's finally block clears the busy flag after the response lands;
+  // reset is disabled while it is set.
+  await app.waitFor("id:settings-checkpoint-saving", { state: "gone", timeout: 15_000 });
+  if (app.shows("label:关闭提示")) await app.press("label:关闭提示");
+  const saved = app.texts().join("\n");
+  expect(saved).toContain("来源：会话覆盖");
+  // The request and the result are separate lines: the stored override says
+  // 10, the effective policy keeps the tenant's 3.
+  expect(saved).toContain("会话覆盖：最多 10 个");
+  expect(saved).toContain("最多 3 个");
+  expect(saved).toContain("最大检查点数：tenant maximum checkpoint count applies");
+
+  // TUI degradation: the effective policy is one readable text sentence, not
+  // only color/badges.
+  expect(saved).toContain("自动压缩 开 · 手动压缩 开 · 保留 20000 tokens");
+
+  // Clearing the override returns the tenant projection.
+  await app.press("id:settings-checkpoint-reset");
+  await app.waitFor("text:/来源：租户默认/", { timeout: 15_000 });
+  expect(app.texts().join("\n")).toContain("会话覆盖：未设置（完全继承租户策略）");
+}, 60_000);
+
 test("TUI: 历史消息搜索——命中跨会话正文，点结果打开会话", async () => {
   const app = await openApp();
   await app.type("id:session-search", "发布准备");

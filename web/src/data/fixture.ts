@@ -11,6 +11,9 @@
 // is consumed by the next assistant message; stop leaves queued input alone.
 import type {
   AttachmentRef,
+  CheckpointPolicyUpdate,
+  CheckpointPolicyValues,
+  CheckpointPolicyView,
   CliCapabilityView,
   ConnectionState,
   Delivery,
@@ -435,6 +438,8 @@ export class FixtureClient implements SettingsApi {
     source: "stored" | "deployment";
     document: Record<string, unknown>;
   } = { revision: 3, source: "deployment", document: demoDeploymentDocument() };
+  /** The demo session checkpoint overrides, keyed by session id. */
+  private checkpointPolicies = new Map<string, CheckpointPolicyUpdate>();
   /** Secret names, masked previews and times only — the demo never keeps a
    * value either. The third row predates the preview column (empty preview),
    * which is the legacy state the settings list renders as 「已保存」. */
@@ -634,6 +639,91 @@ export class FixtureClient implements SettingsApi {
   }
 
   // ---- settings demo -----------------------------------------------------
+
+  /** The demo's tenant checkpoint policy; a session override narrows it. */
+  private readonly checkpointTenant: CheckpointPolicyValues = {
+    enabled: true,
+    thresholdTokens: 100000,
+    retainTokens: 20000,
+    maxCheckpoints: 3,
+    ttlHours: 168,
+    manualCompact: true,
+    policyVersion: "cp1-demo",
+  };
+
+  private checkpointView(sessionId: string): CheckpointPolicyView {
+    const tenant = this.checkpointTenant;
+    const override = this.checkpointPolicies.get(sessionId);
+    const effective: CheckpointPolicyValues = { ...tenant };
+    const narrowed: { field: string; reason: string }[] = [];
+    if (override) {
+      if (override.enabled !== undefined) {
+        if (override.enabled && !tenant.enabled) {
+          narrowed.push({ field: "enabled", reason: "tenant policy disables checkpoints" });
+        } else {
+          effective.enabled = tenant.enabled && override.enabled;
+        }
+      }
+      if (override.manualCompact !== undefined) {
+        if (override.manualCompact && !tenant.manualCompact) {
+          narrowed.push({ field: "manualCompact", reason: "tenant policy disables manual compaction" });
+        } else {
+          effective.manualCompact = tenant.manualCompact && override.manualCompact;
+        }
+      }
+      if (override.thresholdTokens !== undefined) {
+        if (override.thresholdTokens < tenant.thresholdTokens) {
+          narrowed.push({ field: "thresholdTokens", reason: "tenant threshold is higher; the session cannot compact earlier" });
+          effective.thresholdTokens = tenant.thresholdTokens;
+        } else {
+          effective.thresholdTokens = override.thresholdTokens;
+        }
+      }
+      if (override.retainTokens !== undefined) {
+        if (override.retainTokens > tenant.retainTokens) {
+          narrowed.push({ field: "retainTokens", reason: "tenant retained-token ceiling applies" });
+          effective.retainTokens = tenant.retainTokens;
+        } else {
+          effective.retainTokens = override.retainTokens;
+        }
+      }
+      if (override.maxCheckpoints !== undefined) {
+        if (override.maxCheckpoints === 0 || override.maxCheckpoints > tenant.maxCheckpoints) {
+          narrowed.push({ field: "maxCheckpoints", reason: "tenant maximum checkpoint count applies" });
+          effective.maxCheckpoints = tenant.maxCheckpoints;
+        } else {
+          effective.maxCheckpoints = override.maxCheckpoints;
+        }
+      }
+      if (override.ttlHours !== undefined) {
+        if (override.ttlHours === 0 || override.ttlHours > tenant.ttlHours) {
+          narrowed.push({ field: "ttl", reason: "tenant expiry ceiling applies" });
+          effective.ttlHours = tenant.ttlHours;
+        } else {
+          effective.ttlHours = override.ttlHours;
+        }
+      }
+    }
+    effective.policyVersion = override ? "cp1-demo-session" : tenant.policyVersion;
+    return {
+      tenant: { ...tenant },
+      effective,
+      override,
+      narrowed,
+      revision: override ? 2 : 0,
+      source: override ? "session" : "tenant",
+    };
+  }
+
+  async checkpointPolicy(sessionId: string): Promise<CheckpointPolicyView> {
+    return this.checkpointView(sessionId);
+  }
+
+  async saveCheckpointPolicy(sessionId: string, update: CheckpointPolicyUpdate): Promise<CheckpointPolicyView> {
+    if (Object.keys(update).length === 0) this.checkpointPolicies.delete(sessionId);
+    else this.checkpointPolicies.set(sessionId, { ...update });
+    return this.checkpointView(sessionId);
+  }
 
   async modelsSettings(): Promise<ModelsSettingsView> {
     return {

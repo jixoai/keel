@@ -1022,6 +1022,47 @@ export interface McpAppOpenLinkOutcome {
   reason?: string;
 }
 
+
+/** One effective checkpoint policy (the tenant ceiling or a session's narrowed
+ * result). TTL is hours on the wire; every integer is a token/hour bound. */
+export interface CheckpointPolicyValues {
+  enabled: boolean;
+  thresholdTokens: number;
+  retainTokens: number;
+  maxCheckpoints: number;
+  ttlHours: number;
+  manualCompact: boolean;
+  policyVersion: string;
+}
+
+/** One field the tenant clamped; the reason is identifier-only. */
+export interface CheckpointPolicyNarrowing {
+  field: string;
+  reason: string;
+}
+
+/** The write shape: omitted fields inherit the tenant policy, and an empty
+ * object clears the session override. */
+export interface CheckpointPolicyUpdate {
+  enabled?: boolean;
+  thresholdTokens?: number;
+  retainTokens?: number;
+  maxCheckpoints?: number;
+  ttlHours?: number;
+  manualCompact?: boolean;
+}
+
+/** `GET/PUT /v1/sessions/{id}/checkpoint-policy`. `effective` is always the
+ * tenant policy narrowed by `override`; `narrowed` names the clamps. */
+export interface CheckpointPolicyView {
+  tenant: CheckpointPolicyValues;
+  effective: CheckpointPolicyValues;
+  override?: CheckpointPolicyUpdate;
+  narrowed: CheckpointPolicyNarrowing[];
+  revision: number;
+  source: "tenant" | "session";
+}
+
 /** The settings face of a transport. Both `KeelHttp` and the fixture client
  * implement it, so the settings screens and the session picker work against
  * the same store in live and fixture mode. */
@@ -1041,6 +1082,8 @@ export interface SettingsApi {
   /** `PUT /v1/settings/providers/{id}/credential`: store a directly pasted
    * credential and answer the reference + masked preview (never the value). */
   saveProviderCredential(providerId: string, value: string): Promise<ProviderCredentialSaved>;
+  checkpointPolicy(sessionId: string): Promise<CheckpointPolicyView>;
+  saveCheckpointPolicy(sessionId: string, update: CheckpointPolicyUpdate): Promise<CheckpointPolicyView>;
   skillsSettings(check?: boolean): Promise<SkillsSettingsView>;
   showSkill(name: string): Promise<SkillDetailView>;
   installSkill(request: SkillInstallRequest): Promise<SkillRecordView>;

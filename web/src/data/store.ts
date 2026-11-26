@@ -14,6 +14,8 @@ import type { IdentityApi } from "./identity-api";
 import { selectionForSend } from "./selection";
 import type {
   AttachmentRef,
+  CheckpointPolicyUpdate,
+  CheckpointPolicyView,
   ConnectionState,
   ConversationView,
   DecisionView,
@@ -370,6 +372,17 @@ class KeelStore {
   readonly settingsSaving = signal(false);
   /** The server's 400 field issues, verbatim. */
   readonly settingsIssues = signal<SettingsIssue[]>([]);
+
+  // ---- checkpoint policy (change keel-checkpoint) ------------------------
+
+  /** The session whose policy is open, the effective projection and the five
+   * faces the section draws (loading/empty/error/configured/busy). */
+  readonly checkpointPolicySessionId = signal("");
+  readonly checkpointPolicy = signal<CheckpointPolicyView | null>(null);
+  readonly checkpointPolicyLoading = signal(false);
+  readonly checkpointPolicySaving = signal(false);
+  readonly checkpointPolicyError = signal<string | null>(null);
+  readonly checkpointPolicyErrorStatus = signal<number | null>(null);
   /** The revision a 409 conflict reported (the one that won). */
   readonly settingsConflict = signal<number | null>(null);
   /** How many selectable models the last save reported. */
@@ -1082,6 +1095,67 @@ class KeelStore {
     await Promise.all([this.loadModelsSettings(), this.loadRegistry()]);
   }
 
+  /** The settings page's 检查点 section. With no explicit id it uses the open
+   * session, then the newest visible one; no sessions is an empty face. */
+  async loadCheckpointPolicy(sessionId?: string) {
+    const remembered = this.checkpointPolicySessionId();
+    const chosen =
+      sessionId ?? (remembered || this.activeId() || this.sessions()[0]?.sessionId || "");
+    if (!chosen) {
+      this.checkpointPolicySessionId.set("");
+      this.checkpointPolicy.set(null);
+      this.checkpointPolicyError.set(null);
+      this.checkpointPolicyErrorStatus.set(null);
+      return;
+    }
+    if (this.checkpointPolicyLoading()) return;
+    this.checkpointPolicySessionId.set(chosen);
+    this.checkpointPolicyLoading.set(true);
+    this.checkpointPolicyError.set(null);
+    this.checkpointPolicyErrorStatus.set(null);
+    try {
+      this.checkpointPolicy.set(await this.client.checkpointPolicy(chosen));
+    } catch (error) {
+      this.checkpointPolicy.set(null);
+      this.checkpointPolicyError.set(messageOf(error));
+      this.checkpointPolicyErrorStatus.set(error instanceof KeelApiError ? error.status : null);
+    } finally {
+      this.checkpointPolicyLoading.set(false);
+    }
+  }
+
+  selectCheckpointPolicySession(sessionId: string) {
+    this.checkpointPolicySessionId.set(sessionId);
+    this.checkpointPolicy.set(null);
+    void this.loadCheckpointPolicy(sessionId);
+  }
+
+  /** `PUT /v1/sessions/{id}/checkpoint-policy`: the session's narrowing
+   * override. An empty object clears it. The response is the new effective
+   * policy; on failure the current view stays so the reader can correct it. */
+  async saveCheckpointPolicy(update: CheckpointPolicyUpdate): Promise<boolean> {
+    const sessionId = this.checkpointPolicySessionId();
+    if (!sessionId || this.checkpointPolicySaving()) return false;
+    this.checkpointPolicySaving.set(true);
+    this.checkpointPolicyError.set(null);
+    this.checkpointPolicyErrorStatus.set(null);
+    try {
+      const view = await this.client.saveCheckpointPolicy(sessionId, update);
+      this.checkpointPolicy.set(view);
+      this.flash({
+        tone: "success",
+        text: view.source === "session" ? "会话检查点策略已保存（已按租户上限收窄）" : "会话检查点策略已恢复为租户默认",
+      });
+      return true;
+    } catch (error) {
+      this.checkpointPolicyError.set(messageOf(error));
+      this.checkpointPolicyErrorStatus.set(error instanceof KeelApiError ? error.status : null);
+      return false;
+    } finally {
+      this.checkpointPolicySaving.set(false);
+    }
+  }
+
   /** `PUT /v1/settings/models` — the server validates, stores and reloads.
    * 400 issues land in `settingsIssues` per field; a 409 lands in
    * `settingsConflict` with the revision that won. */
@@ -1698,6 +1772,10 @@ class KeelStore {
     this.secrets.set([]);
     this.secretsError.set(null);
     this.secretsActionError.set(null);
+    this.checkpointPolicy.set(null);
+    this.checkpointPolicySessionId.set("");
+    this.checkpointPolicyError.set(null);
+    this.checkpointPolicyErrorStatus.set(null);
     this.plugins.set(null);
     this.pluginsError.set(null);
     this.pluginsErrorStatus.set(null);

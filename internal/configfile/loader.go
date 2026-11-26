@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -211,15 +212,61 @@ func CaptureModeOf(config assembly.Config) (capturepolicy.CaptureMode, bool, err
 // The input is not mutated; the caller gets a copy with the file's setting
 // applied. The returned bool reports whether the file set the capture mode.
 func OverlayTenant(pinned assembly.Pinned, tenant host.TenantConfig) (host.TenantConfig, bool, error) {
+	applied := false
 	mode, ok, err := CaptureModeOf(pinned.Config)
 	if err != nil {
 		return host.TenantConfig{}, false, err
 	}
-	if !ok {
-		return tenant, false, nil
+	if ok {
+		tenant.Filesystem.Capture.Mode = string(mode)
+		applied = true
 	}
-	tenant.Filesystem.Capture.Mode = string(mode)
-	return tenant, true, nil
+	settings := pinned.Config.Settings
+	if raw, ok := settings.Get(assembly.SettingCompactionEnabled); ok {
+		value, err := strconv.ParseBool(raw)
+		if err != nil {
+			return host.TenantConfig{}, false, fmt.Errorf("configfile: compaction.enabled: %w", err)
+		}
+		tenant.Compaction.Enabled = &value
+		applied = true
+	}
+	if raw, ok := settings.Get(assembly.SettingCompactionManualCompact); ok {
+		value, err := strconv.ParseBool(raw)
+		if err != nil {
+			return host.TenantConfig{}, false, fmt.Errorf("configfile: compaction.manualCompact: %w", err)
+		}
+		tenant.Compaction.ManualCompact = &value
+		applied = true
+	}
+	if raw, ok := settings.Get(assembly.SettingCompactionThreshold); ok {
+		value, err := strconv.ParseFloat(raw, 64)
+		if err != nil {
+			return host.TenantConfig{}, false, fmt.Errorf("configfile: compaction.threshold: %w", err)
+		}
+		tenant.Compaction.Threshold = value
+		applied = true
+	}
+	for _, field := range []struct {
+		key    string
+		target *int
+	}{
+		{assembly.SettingCompactionKeepRecentTokens, &tenant.Compaction.KeepRecentTokens},
+		{assembly.SettingCompactionThresholdTokens, &tenant.Compaction.ThresholdTokens},
+		{assembly.SettingCompactionMaxCheckpoints, &tenant.Compaction.MaxCheckpoints},
+		{assembly.SettingCompactionTTLHours, &tenant.Compaction.TTLHours},
+	} {
+		raw, ok := settings.Get(field.key)
+		if !ok {
+			continue
+		}
+		value, err := strconv.Atoi(raw)
+		if err != nil {
+			return host.TenantConfig{}, false, fmt.Errorf("configfile: %s: %w", field.key, err)
+		}
+		*field.target = value
+		applied = true
+	}
+	return tenant, applied, nil
 }
 
 // Rotate writes data as the next configuration version:

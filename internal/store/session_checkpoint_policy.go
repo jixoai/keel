@@ -57,6 +57,33 @@ func (s *Store) GetSessionCheckpointPolicy(ctx context.Context, tenantID, sessio
 	return SessionCheckpointPolicy{Policy: json.RawMessage(raw), Revision: rev}, true, nil
 }
 
+// DeleteSessionCheckpointPolicy removes a session's override. Clearing the
+// override is a delete, not an empty document: a row that no longer narrows
+// anything must not keep a revision or be mistaken for a stored policy. A
+// missing (or foreign-tenant) session answers ErrNoSession; a session with no
+// override is a no-op.
+func (s *Store) DeleteSessionCheckpointPolicy(ctx context.Context, tenantID, sessionID uuid.UUID) error {
+	tag, err := s.pool.Exec(ctx,
+		`DELETE FROM session_checkpoint_policies
+		 WHERE tenant_id = $1 AND session_id = $2`,
+		tenantID, sessionID)
+	if err != nil {
+		return fmt.Errorf("store: delete session checkpoint policy: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		var exists bool
+		if err := s.pool.QueryRow(ctx,
+			`SELECT EXISTS (SELECT 1 FROM sessions WHERE tenant_id = $1 AND session_id = $2)`,
+			tenantID, sessionID).Scan(&exists); err != nil {
+			return fmt.Errorf("store: session probe: %w", err)
+		}
+		if !exists {
+			return ErrNoSession
+		}
+	}
+	return nil
+}
+
 // SetSessionCheckpointPolicy upserts a session's override and bumps its
 // revision. A missing (or foreign-tenant) session answers ErrNoSession: the
 // guarded INSERT cannot create an override for a session that does not exist.

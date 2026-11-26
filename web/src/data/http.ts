@@ -4,6 +4,10 @@
 // tenant headers in the browser; a dev origin can be passed explicitly.
 import type {
   AttachmentRef,
+  CheckpointPolicyNarrowing,
+  CheckpointPolicyUpdate,
+  CheckpointPolicyValues,
+  CheckpointPolicyView,
   ConnectionState,
   DecisionView,
   Delivery,
@@ -212,6 +216,55 @@ const asStatus = (value: unknown): DecisionView["status"] => {
       return "open";
   }
 };
+
+/** One checkpoint policy document. The server always sends `tenant` and
+ * `effective`; a malformed answer is an error, never an invented policy. */
+function parseCheckpointPolicyValues(value: unknown): CheckpointPolicyValues {
+  const row = asRecord(value);
+  return {
+    enabled: row.enabled === true,
+    thresholdTokens: numberOr(row.thresholdTokens, 0),
+    retainTokens: numberOr(row.retainTokens, 0),
+    maxCheckpoints: numberOr(row.maxCheckpoints, 0),
+    ttlHours: numberOr(row.ttlHours, 0),
+    manualCompact: row.manualCompact === true,
+    policyVersion: asText(row.policyVersion),
+  };
+}
+
+const parseCheckpointOverride = (value: unknown): CheckpointPolicyUpdate | undefined => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const row = asRecord(value);
+  const out: CheckpointPolicyUpdate = {};
+  if (typeof row.enabled === "boolean") out.enabled = row.enabled;
+  if (typeof row.thresholdTokens === "number") out.thresholdTokens = row.thresholdTokens;
+  if (typeof row.retainTokens === "number") out.retainTokens = row.retainTokens;
+  if (typeof row.maxCheckpoints === "number") out.maxCheckpoints = row.maxCheckpoints;
+  if (typeof row.ttlHours === "number") out.ttlHours = row.ttlHours;
+  if (typeof row.manualCompact === "boolean") out.manualCompact = row.manualCompact;
+  return Object.keys(out).length > 0 ? out : undefined;
+};
+
+function parseCheckpointPolicyView(value: unknown): CheckpointPolicyView {
+  const body = asRecord(value);
+  if (!body.tenant || !body.effective) {
+    throw new KeelApiError(500, "服务端返回了无法识别的检查点策略");
+  }
+  const narrowed: CheckpointPolicyNarrowing[] = listOf(body.narrowed)
+    .map((entry) => {
+      const row = asRecord(entry);
+      return { field: asText(row.field), reason: asText(row.reason) };
+    })
+    .filter((entry) => entry.field || entry.reason);
+  return {
+    tenant: parseCheckpointPolicyValues(body.tenant),
+    effective: parseCheckpointPolicyValues(body.effective),
+    override: parseCheckpointOverride(body.override),
+    narrowed,
+    revision: numberOr(body.revision, 0),
+    source: body.source === "session" ? "session" : "tenant",
+  };
+}
 
 /** The share route family: sessions, bots and team bots use the same trio. */
 const sharePath = (kind: ShareResourceKind, resourceId: string): string => {
@@ -1253,6 +1306,29 @@ export class KeelHttp implements SettingsApi {
   }
 
   // ---- skill library (change keel-harness-v2, W7 skills) ------------------
+
+  /** `GET /v1/sessions/{id}/checkpoint-policy` — the tenant policy narrowed by
+   * the session override (revision/source/narrowed included). */
+  async checkpointPolicy(sessionId: string): Promise<CheckpointPolicyView> {
+    const response = await this.request(
+      `/v1/sessions/${encodeURIComponent(sessionId)}/checkpoint-policy`,
+    );
+    return parseCheckpointPolicyView(await response.json());
+  }
+
+  /** `PUT /v1/sessions/{id}/checkpoint-policy` — store a narrowing override
+   * (omitted fields inherit; `{}` clears it) and answer the effective policy. */
+  async saveCheckpointPolicy(sessionId: string, update: CheckpointPolicyUpdate): Promise<CheckpointPolicyView> {
+    const response = await this.request(
+      `/v1/sessions/${encodeURIComponent(sessionId)}/checkpoint-policy`,
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(update),
+      },
+    );
+    return parseCheckpointPolicyView(await response.json());
+  }
 
   /** `GET /v1/settings/skills` — installed skills, sources and the update /
    * conflict state. `check` reads each source (the server's default); false

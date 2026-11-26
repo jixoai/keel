@@ -22,6 +22,20 @@ const configHashDomain = "keel-assembly-config-v1"
 // on the admin JSON document until their file representation is defined.
 const SettingFilesystemCaptureMode = "filesystem.capture.mode"
 
+// Compaction settings the config.toml file may carry. They map onto the
+// tenant document's compaction section; the file is the outermost deployment
+// layer, so an operator can turn automatic checkpointing on (and tune its
+// thresholds) without rewriting the admin JSON document.
+const (
+	SettingCompactionEnabled          = "compaction.enabled"
+	SettingCompactionThreshold        = "compaction.threshold"
+	SettingCompactionKeepRecentTokens = "compaction.keepRecentTokens"
+	SettingCompactionThresholdTokens  = "compaction.thresholdTokens"
+	SettingCompactionMaxCheckpoints   = "compaction.maxCheckpoints"
+	SettingCompactionTTLHours         = "compaction.ttlHours"
+	SettingCompactionManualCompact    = "compaction.manualCompact"
+)
+
 // ConfigSettings is the typed settings table of a config.toml document. Keys
 // use the tenant document's dotted names so the file and the admin JSON
 // document share one vocabulary.
@@ -374,6 +388,24 @@ func validateConfigSettings(settings ConfigSettings) []Issue {
 		where := "config.toml." + key
 		value := settings.Values[key]
 		switch key {
+		case SettingCompactionEnabled, SettingCompactionManualCompact:
+			if value != "true" && value != "false" {
+				issues = append(issues, Issue{Code: IssueConfigValue, Stage: StageConfig, Field: where,
+					Message: fmt.Sprintf("%s must be true or false", key)})
+			}
+		case SettingCompactionThreshold:
+			parsed, err := strconv.ParseFloat(value, 64)
+			if err != nil || parsed <= 0 || parsed > 1 {
+				issues = append(issues, Issue{Code: IssueConfigValue, Stage: StageConfig, Field: where,
+					Message: fmt.Sprintf("%s must be in (0, 1]", key)})
+			}
+		case SettingCompactionKeepRecentTokens, SettingCompactionThresholdTokens,
+			SettingCompactionMaxCheckpoints, SettingCompactionTTLHours:
+			parsed, err := strconv.ParseInt(value, 10, 64)
+			if err != nil || parsed < 0 {
+				issues = append(issues, Issue{Code: IssueConfigValue, Stage: StageConfig, Field: where,
+					Message: fmt.Sprintf("%s must be a non-negative integer", key)})
+			}
 		case SettingFilesystemCaptureMode:
 			if value == "" || strings.TrimSpace(value) != value {
 				issues = append(issues, Issue{
@@ -456,6 +488,7 @@ func ParseConfig(data []byte) (Config, error) {
 	seenIDs := map[RowID]bool{}
 	seenSettings := map[string]bool{}
 	seenCaptureTable := false
+	seenCompactionTable := false
 
 	issue := func(code string, line int, format string, args ...any) {
 		issues = append(issues, Issue{
@@ -548,7 +581,17 @@ func ParseConfig(data []byte) (Config, error) {
 				section = "capture"
 				continue
 			}
-			issue(IssueConfigTable, lineNo, "unsupported table header %q (only [[rows]] and [filesystem.capture] are defined)", line)
+			if line == "[compaction]" {
+				if seenCompactionTable {
+					issue(IssueConfigDuplicate, lineNo, "[compaction] appears twice")
+					section = "table"
+					continue
+				}
+				seenCompactionTable = true
+				section = "compaction"
+				continue
+			}
+			issue(IssueConfigTable, lineNo, "unsupported table header %q (only [[rows]], [filesystem.capture] and [compaction] are defined)", line)
 			section = "table"
 			continue
 		}
@@ -605,6 +648,26 @@ func ParseConfig(data []byte) (Config, error) {
 				config.Settings.Values = map[string]string{}
 			}
 			config.Settings.Values[SettingFilesystemCaptureMode] = value
+		case "compaction":
+			setting, ok := compactionSettingKey(key)
+			if !ok {
+				issue(IssueConfigKey, lineNo, "unknown [compaction] key %q", key)
+				continue
+			}
+			value, message := parseCompactionSetting(key, rawValue)
+			if message != "" {
+				issue(IssueConfigValue, lineNo, "%s", message)
+				continue
+			}
+			if seenSettings[setting] {
+				issue(IssueConfigDuplicate, lineNo, "%s is declared twice", setting)
+				continue
+			}
+			seenSettings[setting] = true
+			if config.Settings.Values == nil {
+				config.Settings.Values = map[string]string{}
+			}
+			config.Settings.Values[setting] = value
 		case "rows":
 			if current == nil {
 				issue(IssueConfigKey, lineNo, "key %q appears outside a [[rows]] table", key)
@@ -627,6 +690,54 @@ func ParseConfig(data []byte) (Config, error) {
 		return Config{}, &Error{Issues: issues}
 	}
 	return config, nil
+}
+
+// compactionSettingKey maps a [compaction] key to its tenant-document name.
+func compactionSettingKey(key string) (string, bool) {
+	switch key {
+	case "enabled":
+		return SettingCompactionEnabled, true
+	case "threshold":
+		return SettingCompactionThreshold, true
+	case "keepRecentTokens":
+		return SettingCompactionKeepRecentTokens, true
+	case "thresholdTokens":
+		return SettingCompactionThresholdTokens, true
+	case "maxCheckpoints":
+		return SettingCompactionMaxCheckpoints, true
+	case "ttlHours":
+		return SettingCompactionTTLHours, true
+	case "manualCompact":
+		return SettingCompactionManualCompact, true
+	default:
+		return "", false
+	}
+}
+
+// parseCompactionSetting validates one [compaction] value and returns its
+// canonical text. Booleans are true|false; threshold is a fraction in (0,1];
+// the rest are non-negative integers.
+func parseCompactionSetting(key, raw string) (string, string) {
+	value := strings.TrimSpace(raw)
+	switch key {
+	case "enabled", "manualCompact":
+		if value != "true" && value != "false" {
+			return "", fmt.Sprintf("compaction.%s must be true or false", key)
+		}
+		return value, ""
+	case "threshold":
+		parsed, err := strconv.ParseFloat(value, 64)
+		if err != nil || parsed <= 0 || parsed > 1 {
+			return "", "compaction.threshold must be in (0, 1]"
+		}
+		return strconv.FormatFloat(parsed, 'g', -1, 64), ""
+	default:
+		parsed, err := strconv.ParseInt(value, 10, 64)
+		if err != nil || parsed < 0 {
+			return "", fmt.Sprintf("compaction.%s must be a non-negative integer", key)
+		}
+		return strconv.FormatInt(parsed, 10), ""
+	}
 }
 
 func parseConfigRowKey(issue func(string, int, string, ...any), current *configRowState, lineNo int, key, rawValue string) {

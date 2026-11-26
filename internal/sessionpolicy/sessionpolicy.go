@@ -32,6 +32,7 @@ var ErrInvalid = errors.New("sessionpolicy: invalid checkpoint policy document")
 type Store interface {
 	GetSessionCheckpointPolicy(ctx context.Context, tenantID, sessionID uuid.UUID) (store.SessionCheckpointPolicy, bool, error)
 	SetSessionCheckpointPolicy(ctx context.Context, tenantID, sessionID uuid.UUID, document json.RawMessage) (int64, error)
+	DeleteSessionCheckpointPolicy(ctx context.Context, tenantID, sessionID uuid.UUID) error
 }
 
 // TenantPolicy supplies the current tenant checkpoint policy. The hosting
@@ -94,6 +95,15 @@ func (s *Service) Put(ctx context.Context, tenantID, sessionID uuid.UUID, docume
 	if err := document.Validate(); err != nil {
 		return View{}, fmt.Errorf("%w: %v", ErrInvalid, err)
 	}
+	base := s.basePolicy()
+	if document.IsEmpty() {
+		// Clearing is a delete: the session returns to the tenant policy with
+		// no stored row and no revision of its own.
+		if err := s.store.DeleteSessionCheckpointPolicy(ctx, tenantID, sessionID); err != nil {
+			return View{}, mapStoreError(err)
+		}
+		return s.view(base, store.SessionCheckpointPolicy{}, false), nil
+	}
 	raw, err := json.Marshal(document)
 	if err != nil {
 		return View{}, fmt.Errorf("%w: %v", ErrInvalid, err)
@@ -102,7 +112,6 @@ func (s *Service) Put(ctx context.Context, tenantID, sessionID uuid.UUID, docume
 	if err != nil {
 		return View{}, mapStoreError(err)
 	}
-	base := s.basePolicy()
 	record := store.SessionCheckpointPolicy{Policy: raw, Revision: revision}
 	return s.view(base, record, true), nil
 }

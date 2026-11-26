@@ -147,6 +147,7 @@ import {
   type SettingsSectionEntry,
 } from "../ui/kit";
 import { defaultReasoningFor } from "./model-picker";
+import { CheckpointsSection } from "./settings-checkpoints";
 import { SkillsSection } from "./settings-skills";
 import { LiveBadge, PressRow, fieldHeightProp, isMobile, touchStyle } from "./books/common";
 import { managementDoors } from "./books/management";
@@ -161,6 +162,7 @@ export type SettingsSection =
   | "general"
   | "appearance"
   | "models"
+  | "checkpoints"
   | "capabilities"
   | "secrets"
   | "plugins"
@@ -178,6 +180,7 @@ const SECTIONS: SettingsSectionEntry[] = [
   { id: "general", label: "通用", icon: "settings", group: "常规" },
   { id: "appearance", label: "外观", icon: "sun" },
   { id: "models", label: "模型接入", icon: "brain", group: "配置" },
+  { id: "checkpoints", label: "检查点", icon: "clock" },
   { id: "capabilities", label: "能力", icon: "spark" },
   { id: "secrets", label: "密钥", icon: "key" },
   { id: "plugins", label: "插件", icon: "layers" },
@@ -3966,8 +3969,16 @@ function SectionBodyNext() {
 
 function SectionBodyNextNext() {
   return (
-    <If when={settingsSection() === "models"} else={<SectionBodyRest />}>
+    <If when={settingsSection() === "models"} else={<SectionBodyCheckpoints />}>
       <ModelsSection />
+    </If>
+  );
+}
+
+function SectionBodyCheckpoints() {
+  return (
+    <If when={settingsSection() === "checkpoints"} else={<SectionBodyRest />}>
+      <CheckpointsSection />
     </If>
   );
 }
@@ -4045,7 +4056,14 @@ export function SettingsScreen() {
     const section = settingsSection();
     const timer = setTimeout(() => {
       if (section === "models") void store.loadModelsPanel();
-      else if (section === "secrets") void store.loadSecrets();
+      else if (section === "checkpoints") {
+        // The policy is per session: an empty list is an empty face, so read
+        // the list first and only then pick a session to project.
+        void (async () => {
+          if (store.sessions().length === 0) await store.refreshSessions();
+          void store.loadCheckpointPolicy();
+        })();
+      } else if (section === "secrets") void store.loadSecrets();
       else if (section === "plugins") void store.loadPlugins();
       else if (section === "skills") void store.loadSkillsPanel(true);
     }, 0);

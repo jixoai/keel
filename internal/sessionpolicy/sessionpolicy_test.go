@@ -16,12 +16,13 @@ import (
 // fakeStore is the durable seam double: it returns one stored document and
 // records writes. It never invents narrowing; that is the service's job.
 type fakeStore struct {
-	document json.RawMessage
-	found    bool
-	revision int64
-	err      error
-	written  json.RawMessage
-	setCalls int
+	document    json.RawMessage
+	found       bool
+	revision    int64
+	err         error
+	written     json.RawMessage
+	setCalls    int
+	deleteCalls int
 }
 
 func (f *fakeStore) GetSessionCheckpointPolicy(context.Context, uuid.UUID, uuid.UUID) (store.SessionCheckpointPolicy, bool, error) {
@@ -44,6 +45,17 @@ func (f *fakeStore) SetSessionCheckpointPolicy(_ context.Context, _ uuid.UUID, _
 	f.document = document
 	f.found = true
 	return f.revision, nil
+}
+
+func (f *fakeStore) DeleteSessionCheckpointPolicy(context.Context, uuid.UUID, uuid.UUID) error {
+	if f.err != nil {
+		return f.err
+	}
+	f.deleteCalls++
+	f.document = nil
+	f.found = false
+	f.revision = 0
+	return nil
 }
 
 func tenantPolicy() compaction.CheckpointPolicy {
@@ -126,6 +138,34 @@ func TestPutNarrowsAndReports(t *testing.T) {
 	}
 	if len(view.Narrowed) != 0 || view.Effective.MaxCheckpoints != 1 {
 		t.Fatalf("narrow view = %+v", view)
+	}
+}
+
+// TestPutEmptyDeletesTheOverride pins clearing: an empty document removes the
+// row (a delete), returns the tenant policy at revision 0 and does not write an
+// empty document that would keep a revision.
+func TestPutEmptyDeletesTheOverride(t *testing.T) {
+	st := &fakeStore{}
+	svc := testService(st)
+	max := 1
+	if _, err := svc.Put(context.Background(), uuid.New(), uuid.New(), compaction.CheckpointPolicyOverrideDocument{MaxCheckpoints: &max}); err != nil {
+		t.Fatalf("seed Put: %v", err)
+	}
+	view, err := svc.Put(context.Background(), uuid.New(), uuid.New(), compaction.CheckpointPolicyOverrideDocument{})
+	if err != nil {
+		t.Fatalf("clear Put: %v", err)
+	}
+	if st.deleteCalls != 1 {
+		t.Fatalf("delete calls = %d, want 1", st.deleteCalls)
+	}
+	if st.setCalls != 1 {
+		t.Fatalf("set calls = %d, want the one seed write only", st.setCalls)
+	}
+	if view.Source != "tenant" || view.Revision != 0 || view.Override != nil {
+		t.Fatalf("cleared view = %+v, want the tenant policy at revision 0", view)
+	}
+	if len(view.Narrowed) != 0 {
+		t.Fatalf("cleared narrowed = %+v, want none", view.Narrowed)
 	}
 }
 

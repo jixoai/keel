@@ -1180,6 +1180,7 @@ func (r *Runner) run(ctx context.Context, lease kernel.Lease, span telemetry.Spa
 			}
 			raw, err := marshalPayload(map[string]any{
 				"summary":             e.Summary,
+				"reason":              "threshold",
 				"tokensBefore":        e.TokensBefore,
 				"firstKept":           e.FirstKeptIndex,
 				"firstKeptTranscript": e.FirstKeptTranscriptIndex,
@@ -1694,6 +1695,20 @@ func presentUnreadInputLast(msgs agentcore.MessageList, seqs []int64, unread fun
 		keptSeqs = append(keptSeqs, seqs[i])
 	}
 	if len(moved) == 0 {
+		return msgs, seqs, len(msgs)
+	}
+	// An unread input already at the tail (the common queue case: the run was
+	// claimed for it) needs no reorder. Reporting it as a moved block would
+	// make every checkpoint cut at that boundary look unanchorable after the
+	// turn consumed it, and the projection would be pruned unused.
+	alreadyLast := true
+	for i, seq := range movedSeqs {
+		if seqs[len(kept)+i] != seq {
+			alreadyLast = false
+			break
+		}
+	}
+	if alreadyLast {
 		return msgs, seqs, len(msgs)
 	}
 	return append(kept, moved...), append(keptSeqs, movedSeqs...), len(kept)
