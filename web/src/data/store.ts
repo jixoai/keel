@@ -16,6 +16,7 @@ import type {
   AttachmentRef,
   ConnectionState,
   ConversationView,
+  DecisionView,
   Delivery,
   EventSource,
   FireResultView,
@@ -131,6 +132,10 @@ type Client = SettingsApi &
   deleteSession(sessionId: string): Promise<void>;
   source(sessionId: string): EventSource;
   commands(sessionId: string): UiCommands;
+  /** `GET /v1/sessions/{id}/decisions` — the host synthesizes the decision
+   * events the chat core consumes (the decision journal is not a kernel event
+   * kind). Optional: a transport without it keeps only streamed decisions. */
+  decisions?(sessionId: string): Promise<DecisionView[]>;
   tail?(sessionId: string, lastSeq: number, count?: number): Promise<WireEvent[]>;
 };
 
@@ -475,6 +480,9 @@ class KeelStore {
   private unsubscribeEngine: (() => void) | null = null;
   private unsubscribeStream: (() => void) | null = null;
   private openToken = 0;
+  /** The decisions read generation: a late answer for a previous session must
+   * not draw a card into the current one. */
+  private decisionSyncToken = 0;
   private noticeTimer: number | undefined;
   private refreshTimer: number | undefined;
   private answered = new Set<string>();
@@ -1851,6 +1859,7 @@ class KeelStore {
       }
       this.unsubscribeStream = detach;
       this.conversation.set(engine.view());
+      void this.syncDecisions(sessionId);
     } catch (error) {
       if (token !== this.openToken) return;
       this.notice.set({ tone: "danger", text: `打开会话失败：${messageOf(error)}` });
@@ -1893,6 +1902,12 @@ class KeelStore {
         this.patchSession(sessionId, { pendingDecision: false });
       }
     }
+    if (event.kind === "run.finished") {
+      // A creation approval opens inside the turn and is durable in the
+      // decision journal, not an event kind. Re-read the journal once the turn
+      // settles so the chat surface can draw the card (docs/CHAT-SURFACE.md).
+      void this.syncDecisions(sessionId);
+    }
     const row = this.sessions().find((candidate) => candidate.sessionId === sessionId);
     const stillQueued = queuedRunStatus(row?.runStatus);
     if (event.kind === "run.finished") {
@@ -1928,6 +1943,51 @@ class KeelStore {
   private scheduleRefresh() {
     if (this.refreshTimer !== undefined) clearTimeout(this.refreshTimer);
     this.refreshTimer = setTimeout(() => void this.refreshSessions(), 600) as unknown as number;
+  }
+
+  /** Synthesize the `decision` events the chat core consumes from the durable
+   * decision journal. The journal is product-layer state (harnessext), not a
+   * kernel event kind; the host owns this projection, and a failure only
+   * leaves streamed cards in place. */
+  private async syncDecisions(sessionId: string) {
+    const read = this.client.decisions?.bind(this.client);
+    const engine = this.engine;
+    if (!read || !engine || this.activeId() !== sessionId) return;
+    const token = ++this.decisionSyncToken;
+    try {
+      const rows = await read(sessionId);
+      if (token !== this.decisionSyncToken || this.activeId() !== sessionId || this.engine !== engine) return;
+      for (const row of rows) {
+        const kind =
+          row.status === "answered"
+            ? "decision.answered"
+            : row.status === "timeout"
+              ? "decision.timeout"
+              : row.status === "cancelled"
+                ? "decision.cancelled"
+                : "decision";
+        engine.applyDecision({
+          seq: row.seq || 0,
+          kind,
+          payload: {
+            decisionId: row.decisionId,
+            question: row.question,
+            prompt: row.question,
+            options: row.options.map((option) => ({
+              optionId: option.optionId,
+              id: option.optionId,
+              label: option.label,
+              ...(option.description ? { description: option.description } : {}),
+            })),
+            status: row.status,
+            ...(row.answer !== undefined ? { answer: row.answer } : {}),
+            ...(row.recommendation ? { recommendation: row.recommendation } : {}),
+          },
+        });
+      }
+    } catch {
+      /* A decision read is an enhancement: the streamed conversation remains. */
+    }
   }
 
   closeStream() {

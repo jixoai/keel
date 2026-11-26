@@ -109,6 +109,26 @@ func TestRenderProducesAnInstallablePackage(t *testing.T) {
 			t.Fatalf("README does not mention %q", want)
 		}
 	}
+
+	// A runtime chunk is imported as one self-contained module from
+	// /plugins/<id>/ui/settings.js inside the published (linked) realm. A bare
+	// `nsh` specifier cannot resolve there, so the template must read the host
+	// realm's module namespace instead of importing it. This is the difference
+	// between a hosted chunk that renders and a 200 that fails as ERR_CHUNK_LOAD.
+	settings, err := os.ReadFile(filepath.Join(dir, "ui", "settings.js"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, forbidden := range []string{`from "nsh"`, `from 'nsh'`, `import("nsh")`, `import('nsh')`} {
+		if strings.Contains(string(settings), forbidden) {
+			t.Fatalf("ui/settings.js imports the host module bare (%q); a runtime chunk cannot resolve it", forbidden)
+		}
+	}
+	for _, want := range []string{"__nsh_browser_realm", `get("nsh")`, "export function render"} {
+		if !strings.Contains(string(settings), want) {
+			t.Fatalf("ui/settings.js does not carry the runtime chunk contract (%q)", want)
+		}
+	}
 }
 
 func TestRenderRefusesUnknownTemplatesAndMissingValues(t *testing.T) {

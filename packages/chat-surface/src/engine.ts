@@ -101,6 +101,13 @@ export class ChatSurfaceEngine implements SurfaceEngine {
     return applied;
   }
 
+  /** Host-synthesized decision event (from the durable decision journal). It
+   * never advances the event watermark; the projection keys decisions by id. */
+  applyDecision(event: WireEvent): void {
+    this.projection.applyDecision(event);
+    this.notify();
+  }
+
   applyPartial(partial: PartialFrame): void {
     this.latestPartial = { text: partial.text, turnId: partial.turnId };
     // Partials never enter ConversationView; subscribers read engine.partial().

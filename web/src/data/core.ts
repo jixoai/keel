@@ -25,6 +25,8 @@ export interface CoreEngine extends UiEngine {
     onEvent?: (event: WireEvent) => void,
   ): Promise<() => void>;
   detach(): void;
+  /** Apply a host-synthesized decision journal row; never moves the event seq. */
+  applyDecision(event: WireEvent): void;
   answerDecisionLocal(decisionId: string, answer: string): boolean;
   resumeAutoDrain(): void;
 }
@@ -104,6 +106,9 @@ export function createCoreEngine(sessionId: string): CoreEngine {
     },
     applyPartial(partial) {
       core.applyPartial(partial);
+    },
+    applyDecision(event) {
+      core.applyDecision(event);
     },
     hydrate(events, attachmentIndex) {
       if (attachmentIndex) {

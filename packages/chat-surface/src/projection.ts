@@ -188,6 +188,14 @@ export class ConversationProjection {
     return applied;
   }
 
+  /** Applies one decision event the host synthesized from the durable decision
+   * journal. Decisions are product-layer state, not event-log kinds, so their
+   * seq is the journal's sequence and must not move the event watermark; the
+   * row itself is idempotent by decisionId. */
+  applyDecision(event: WireEvent): void {
+    this.onDecision(event);
+  }
+
   /** True when a gap was observed and the host should list events after lastSeq. */
   needsResync(): boolean {
     return this.gapDetected;

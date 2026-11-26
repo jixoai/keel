@@ -267,6 +267,16 @@ const statCard = (num, den, label, okStyle) =>
   `    <div class="stat${okStyle ? ' ok' : ''}"><b>${num}${den != null ? `<i>/${den}</i>` : ''}</b><span>${label}</span></div>`
 
 
+const publishBlock = (() => {
+  const p = data.publish
+  if (!p) return ''
+  const published = p.published === true && p.url
+  if (published) {
+    return `<p class="publish ok"><b>公网链接</b><a href="${esc(p.url)}">${esc(p.url)}</a></p>`
+  }
+  return `<p class="publish pending"><b>公网链接</b><span>未发布（${esc(p.reason || '本次报告只在本地生成，未部署公网')}）</span></p>`
+})()
+
 const envBlock = (() => {
   const env = data.environment
   if (!env) return ''
@@ -329,6 +339,10 @@ const html = `<!doctype html>
   .meta{color:var(--dim);font-size:13px;margin:0 0 18px}
   .meta code{background:rgba(26,28,34,.06);padding:1px 6px;border-radius:4px;font-family:"JetBrains Mono",ui-monospace,monospace}
   .concl{border-left:3px solid var(--gold);padding:12px 16px;background:var(--goldSoft);margin:0 0 20px;border-radius:0 10px 10px 0;font-size:14.5px}
+  .publish{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap;margin:0 0 14px;padding:8px 12px;border-radius:9px;font-size:13px;border:1px solid var(--hair);background:rgba(26,28,34,.025);color:var(--dim)}
+  .publish b{color:var(--ink);font-size:12px;letter-spacing:.06em}
+  .publish a{color:var(--goldDeep);word-break:break-all}
+  .publish.pending{border-color:rgba(179,38,30,.28);background:var(--failSoft)}
   .dashboard{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px}
   .stat{border:1px solid var(--hair);border-radius:12px;padding:14px 16px 12px;background:var(--card);transition:border-color .3s var(--ease),transform .3s var(--ease)}
   .stat:hover{transform:translateY(-1px);border-color:rgba(233,180,76,.55)}
@@ -511,6 +525,7 @@ const html = `<!doctype html>
 <h1>${esc(data.title)}</h1>
 <p class="meta">${esc(data.change)} · ${esc(data.date)}${data.frozenBase ? ` · 冻结基线 <code>${esc(data.frozenBase.repo)}@${esc(String(data.frozenBase.commit).slice(0, 9))}</code>` : ''}</p>
 <p class="concl">${esc(data.conclusion)}</p>
+${publishBlock}
 ${gateBanner}
 ${envBlock}
 <div class="dashboard">

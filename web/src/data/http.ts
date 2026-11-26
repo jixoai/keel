@@ -5,6 +5,7 @@
 import type {
   AttachmentRef,
   ConnectionState,
+  DecisionView,
   Delivery,
   EventSource,
   FireResultView,
@@ -198,6 +199,19 @@ const numberOr = (value: unknown, fallback: number): number =>
 const listOf = (value: unknown): unknown[] => (Array.isArray(value) ? value : []);
 
 const asText = (value: unknown): string => (typeof value === "string" ? value : "");
+
+/** The chat surface's decision status vocabulary; an unknown server value is
+ * an open question rather than a silently hidden card. */
+const asStatus = (value: unknown): DecisionView["status"] => {
+  switch (value) {
+    case "answered":
+    case "timeout":
+    case "cancelled":
+      return value;
+    default:
+      return "open";
+  }
+};
 
 /** The share route family: sessions, bots and team bots use the same trio. */
 const sharePath = (kind: ShareResourceKind, resourceId: string): string => {
@@ -920,10 +934,40 @@ export class KeelHttp implements SettingsApi {
     };
   }
 
+  /** `GET /v1/sessions/{id}/decisions` — the durable approval journal. The
+   * chat core consumes `decision` events; the host synthesizes them from this
+   * read (docs/CHAT-SURFACE.md: decisions are not kernel event kinds). */
+  async decisions(sessionId: string): Promise<DecisionView[]> {
+    const response = await this.request(`/v1/sessions/${encodeURIComponent(sessionId)}/decisions`);
+    const body = asRecord(await response.json());
+    const rows = listOf(body.decisions);
+    return rows.map((raw): DecisionView => {
+      const row = asRecord(raw);
+      const status = asStatus(row.status);
+      return {
+        decisionId: String(row.decisionId ?? row.id ?? ""),
+        seq: numberOr(row.seq, 0),
+        question: String(row.question ?? row.prompt ?? "需要你的确认"),
+        options: listOf(row.options).map((option): DecisionView["options"][number] => {
+          const entry = asRecord(option);
+          return {
+            optionId: String(entry.optionId ?? entry.id ?? ""),
+            label: String(entry.label ?? entry.optionId ?? entry.id ?? ""),
+            ...(typeof entry.description === "string" ? { description: entry.description } : {}),
+          };
+        }),
+        status,
+        ...(typeof row.answer === "string"
+          ? { answer: row.answer }
+          : row.answer && typeof row.answer === "object" && typeof asRecord(row.answer).optionId === "string"
+            ? { answer: String(asRecord(row.answer).optionId) }
+            : {}),
+        ...(typeof row.recommendation === "string" ? { recommendation: row.recommendation } : {}),
+      };
+    }).filter((row) => row.decisionId !== "");
+  }
+
   async createSession(botId?: string): Promise<string> {
-    // Every Session belongs to exactly one Bot (identity-access spec). A
-    // botless create is the legacy shape and cannot run, so the caller passes
-    // the Bot it resolved; the body stays `{}` only for the demo transport.
     const response = await this.request("/v1/sessions", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
