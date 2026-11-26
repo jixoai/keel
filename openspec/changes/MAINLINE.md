@@ -83,7 +83,8 @@ depth 默认 3/-1 不限）与 `keel-collab-superagent`（Source → Ticket → 
 - `keel-collab-superagent`：Source → Ticket → Assignment → Worker → Report/Attention →
   Channel 的 durable 闭环、产品 web/TUI 工单看板（`/superagent`，五态 + SSE invalidation +
   answer/resume/stop）与 Worker `report`/`ask` 模型工具已交付；独立复审 P0/P1=0。
-  live GitHub 链路（5.2）仍阻塞（无 token/仓库授权），不归档。
+  live GitHub 链路（5.2）作为外部凭据阻塞保留在归档任务中（不冒充已跑）；**已归档
+  2026-11-26**。
 - `keel-creation`：7 步 / 80 断言 / 53 文件覆盖 0 UNCOVERED；模型 read+write 改写 chunk 并
   实际渲染；会话 UI 批准；卸载零残留。独立复审的 P0（伪造 decision kind/派生审批 session）
   与 P1（viewer 误判、update 内容绑定、AI 写入口、证据）已修，复核 PASS；**已归档 2026-11-26**。
