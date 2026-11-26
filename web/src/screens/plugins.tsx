@@ -385,14 +385,20 @@ function TriggerTable(props: { pluginId: string; triggers: TriggerSpecView[] }) 
   const statusOf = (triggerId: string): TriggerStatusView | undefined =>
     store.triggers().find((row) => row.id === triggerId);
   return (
-    <Table bare accessibilityLabel={`${props.pluginId} 的触发器`}>
-      <TableHeaderRow>
-        <Th>
-          <Text style={headText()}>触发器</Text>
-        </Th>
-        <Th width="26%">
-          <Text style={headText()}>计划</Text>
-        </Th>
+    <View style={{ gap: space.xs }}>
+      <If when={!!store.triggersError()}>
+        <Text style={{ fontSize: typeScale.xs, color: color.warning }}>
+          {`触发器状态不可读：${store.triggersError() ?? ""}`}
+        </Text>
+      </If>
+      <Table bare accessibilityLabel={`${props.pluginId} 的触发器`}>
+        <TableHeaderRow>
+          <Th>
+            <Text style={headText()}>触发器</Text>
+          </Th>
+          <Th width="26%">
+            <Text style={headText()}>计划</Text>
+          </Th>
         <Th width="26%">
           <Text style={headText()}>状态</Text>
         </Th>
@@ -445,7 +451,8 @@ function TriggerTable(props: { pluginId: string; triggers: TriggerSpecView[] }) 
           )}
         </Each>
       </TableBody>
-    </Table>
+      </Table>
+    </View>
   );
 }
 
@@ -500,6 +507,7 @@ function PluginCard(props: { plugin: () => PluginStatusView }) {
    * when one last fired. */
   const triggerStatus = () => {
     if (triggers().length === 0) return "没有触发器";
+    if (store.triggersError()) return "触发器状态不可读（需要 trigger.read）";
     const rows = triggers().map((trigger) => store.triggers().find((row) => row.id === trigger.id));
     const disabled = triggers().filter(
       (trigger, index) => trigger.enabled === false || rows[index]?.enabled === false,

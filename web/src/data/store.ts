@@ -450,6 +450,9 @@ class KeelStore {
    * not by matching a localized message. */
   readonly pluginsErrorStatus = signal<number | null>(null);
   readonly triggers = signal<TriggerStatusView[]>([]);
+  /** Trigger status is a separate read (`trigger.read`); its failure is a
+   * section face, never the plugins page's permission gate. */
+  readonly triggersError = signal<string | null>(null);
   readonly firingTrigger = signal<string | null>(null);
   /** The last manual fire's outcome, per trigger id. */
   readonly fireOutcome = signal<{ triggerId: string; ok: boolean; text: string } | null>(null);
@@ -1575,11 +1578,23 @@ class KeelStore {
     this.pluginsLoading.set(true);
     this.pluginsError.set(null);
     this.pluginsErrorStatus.set(null);
+    this.triggersError.set(null);
     try {
       const client = this.pluginClient ?? this.client;
-      const [plugins, triggers] = await Promise.all([client.plugins(), client.triggers()]);
+      // The inventory is the page's data; trigger status is a separate read
+      // with a different permission (trigger.read). A viewer holds plugin.read
+      // but not trigger.read: the page must still show the inventory, with the
+      // trigger section degraded, instead of claiming "no permission to read
+      // plugins".
+      const plugins = await client.plugins();
       this.plugins.set(plugins);
-      this.triggers.set(triggers.triggers ?? []);
+      try {
+        const triggers = await client.triggers();
+        this.triggers.set(triggers.triggers ?? []);
+      } catch (error) {
+        this.triggers.set([]);
+        this.triggersError.set(messageOf(error));
+      }
     } catch (error) {
       this.pluginsError.set(messageOf(error));
       this.pluginsErrorStatus.set(error instanceof KeelApiError ? error.status : null);
