@@ -729,6 +729,9 @@ func (c *creationPlugin) read(ctx context.Context, _ string, raw json.RawMessage
 	if err != nil {
 		return creationResult(fieldFailure("file", err.Error()), true), nil
 	}
+	if info, statErr := os.Lstat(target); statErr == nil && info.Mode()&os.ModeSymlink != 0 {
+		return creationResult(fieldFailure("file", "refusing to read through a symlink"), true), nil
+	}
 	data, err := os.ReadFile(target)
 	if err != nil {
 		return creationResult(failureDocument("read "+name+": "+err.Error(), nil), true), nil
@@ -803,14 +806,35 @@ func creationFileTarget(dir, name string, createParent bool) (string, error) {
 		return "", errors.New("path must stay inside the staged package")
 	}
 	parent := filepath.Dir(target)
+	resolvedDir, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		return "", fmt.Errorf("resolve the staged package: %w", err)
+	}
+	// Check the deepest existing ancestor before creating anything: walking
+	// through a symlinked subdirectory must not create directories outside the
+	// package first and refuse afterwards.
+	ancestor := parent
+	for {
+		if _, statErr := os.Lstat(ancestor); statErr == nil {
+			resolved, resolveErr := filepath.EvalSymlinks(ancestor)
+			if resolveErr != nil {
+				return "", fmt.Errorf("resolve the target directory: %w", resolveErr)
+			}
+			if filepath.Clean(resolved) != filepath.Clean(resolvedDir) && !pluginpkg.IsInside(resolvedDir, resolved) {
+				return "", errors.New("the target directory resolves outside the staged package")
+			}
+			break
+		}
+		next := filepath.Dir(ancestor)
+		if next == ancestor {
+			break
+		}
+		ancestor = next
+	}
 	if createParent {
 		if err := os.MkdirAll(parent, 0o755); err != nil {
 			return "", fmt.Errorf("create the parent directory: %w", err)
 		}
-	}
-	resolvedDir, err := filepath.EvalSymlinks(dir)
-	if err != nil {
-		return "", fmt.Errorf("resolve the staged package: %w", err)
 	}
 	resolvedParent, err := filepath.EvalSymlinks(parent)
 	if err != nil {
@@ -1240,6 +1264,17 @@ func (c *creationPlugin) remove(ctx context.Context, _ string, raw json.RawMessa
 				map[string]any{"reason": approval["reason"], "decisionId": approval["decisionId"]})
 		}
 		return creationResult(approval, stateIsError(approval)), nil
+	}
+	// The approval was bound to the installed version/hash; an update between
+	// the question and the write must not delete the package nobody approved.
+	if installed {
+		if current, still := pluginViewOf(manager, id); !still ||
+			current.Version != version || current.ContentHash != view.ContentHash {
+			c.audit(ctx, manager, id, version, "creation.remove", store.PluginResultRefused,
+				map[string]any{"reason": "plugin changed after approval"})
+			return creationResult(failureDocument(
+				"the plugin changed after approval; ask again with the new version/hash", nil), true), nil
+		}
 	}
 	audit := AuditContext{TenantID: &tenant,
 		Actor: approvalActor("plugin:"+CreationPluginID+"/remove", approval)}

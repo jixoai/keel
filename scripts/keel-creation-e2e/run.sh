@@ -27,7 +27,7 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-MAIN="$(cd "$ROOT/../.." && pwd)"
+MAIN="$(cd "$ROOT/.." && pwd)"
 STAMP="$(date +%F)"
 RUN_DIR="${KEEL_E2E_RUN_DIR:-$MAIN/.agents/reports/keel/creation-e2e-$STAMP}"
 SECRETS="$RUN_DIR/secrets"

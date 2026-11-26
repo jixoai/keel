@@ -951,7 +951,7 @@ const conclusion =
   `${passedSteps}/${steps.length} 步通过，${passedChecks}/${checks.length} 断言通过；` +
   `chunk 200 且实际渲染；创建/审批/安装/卸载链路由真实 keel serve + 浏览器完成；` +
   (failedP01.length ? `P0/P1 ${failedP01.length} 项未清零，不得称完成。` : 'P0/P1 = 0。') +
-  ' 公网链接：未发布（本次只在本地生成报告，没有部署公网入口）。';
+  (PUBLIC_URL ? ` 公网报告：${PUBLIC_URL}。` : ' 公网链接：未发布（本次只在本地生成报告）。');
 
 
 // ---- coverage ---------------------------------------------------------------

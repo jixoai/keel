@@ -160,11 +160,14 @@ func (s *Server) installPlugin(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err)
 		return
 	}
-	manager, audit, ok := s.pluginWriteContext(w, r, installApprovalAsk(body.Path, body.ExpectedHash), body.pluginApprovalRequest)
+	ask := installApprovalAsk(body.Path, body.ExpectedHash)
+	manager, audit, ok := s.pluginWriteContext(w, r, ask, body.pluginApprovalRequest)
 	if !ok {
 		return
 	}
-	view, err := manager.Install(r.Context(), harnessext.InstallRequest{Path: body.Path, ExpectedHash: body.ExpectedHash}, audit)
+	// The manager verifies the hash the approval was actually bound to (the
+	// server-computed one when the client sent none), not a client field.
+	view, err := manager.Install(r.Context(), harnessext.InstallRequest{Path: body.Path, ExpectedHash: ask.ContentHash}, audit)
 	if err != nil {
 		s.writePluginError(w, err)
 		return

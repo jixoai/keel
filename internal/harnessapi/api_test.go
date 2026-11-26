@@ -756,3 +756,19 @@ func TestResumeRouteAnswersTerminalExplicitly(t *testing.T) {
 		t.Fatalf("terminal resume = %d %+v", code, body.Resume)
 	}
 }
+
+// TestDecisionHTTPRejectsThePluginKindNamespace: plugin lifecycle approvals are
+// opened by the server-side gate, never by a client-supplied kind. Allowing it
+// lets a session owner mint an "approval" row under a derived requestId.
+func TestDecisionHTTPRejectsThePluginKindNamespace(t *testing.T) {
+	broker := harnessext.NewDecisionBroker(harnessext.DecisionBrokerOptions{Store: harnessext.NewMemoryDecisionStore(), Logger: testLogger()})
+	defer broker.Close()
+	server := httptest.NewServer(New(Config{Decisions: broker, Logger: testLogger()}))
+	defer server.Close()
+	openURL := server.URL + "/v1/sessions/" + uuid.New().String() + "/decisions"
+	if code := doJSON(t, server.Client(), http.MethodPost, openURL, uuid.New(), map[string]any{
+		"requestId": "forge", "kind": "plugin.install", "prompt": "Install?",
+	}, nil); code != http.StatusBadRequest {
+		t.Fatalf("client-opened plugin kind = %d, want 400", code)
+	}
+}

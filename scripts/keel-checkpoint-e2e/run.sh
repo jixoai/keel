@@ -26,7 +26,7 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-MAIN="$(cd "$ROOT/../.." && pwd)"
+MAIN="$(cd "$ROOT/.." && pwd)"
 STAMP="$(date +%Y%m%d-%H%M%S)"
 BASE_DIR="${KEEL_E2E_REPORT_DIR:-$MAIN/.agents/reports/keel/checkpoint-e2e-$(date +%Y-%m-%d)}"
 # Keep one canonical date directory: a previous interrupted scratch directory
