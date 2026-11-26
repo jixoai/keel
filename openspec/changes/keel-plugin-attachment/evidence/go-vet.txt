@@ -1,0 +1,2 @@
+$ go vet relevant packages
+exit=0

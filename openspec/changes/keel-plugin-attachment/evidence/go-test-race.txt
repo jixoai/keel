@@ -1,0 +1,13 @@
+ok  	github.com/jixoai/keel/internal/attachment	1.178s
+ok  	github.com/jixoai/keel/internal/pluginpkg	1.325s
+ok  	github.com/jixoai/keel/internal/quota	2.773s
+ok  	github.com/jixoai/keel/internal/provider	1.476s
+ok  	github.com/jixoai/keel/internal/agentcore	1.146s
+ok  	github.com/jixoai/keel/internal/blob	21.999s
+ok  	github.com/jixoai/keel/internal/harnessext	30.419s
+ok  	github.com/jixoai/keel/internal/harnessapi	32.577s
+ok  	github.com/jixoai/keel/internal/httpapi	16.327s
+ok  	github.com/jixoai/keel/internal/agent	29.386s
+ok  	github.com/jixoai/keel/internal/accessgate	1.183s
+ok  	github.com/jixoai/keel/internal/store	13.767s
+ok  	github.com/jixoai/keel/cmd/keel	52.351s

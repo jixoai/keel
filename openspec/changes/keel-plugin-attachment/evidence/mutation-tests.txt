@@ -1,0 +1,12 @@
+== mutation: disable kernel.ErrQuota mapping ==
+--- FAIL: TestMCPAppMessageMapsQuotaRefusals (0.01s)
+    --- FAIL: TestMCPAppMessageMapsQuotaRefusals/kernel_quota (0.01s)
+        mcp_app_actions_test.go:1485: status = 502, want 429: {"error":"kernel: quota rejected"}
+FAIL
+FAIL	github.com/jixoai/keel/internal/harnessapi	0.484s
+== mutation: allow chunked raw upload ==
+--- FAIL: TestRawChunkedUploadRequiresLength (0.09s)
+    upload_limit_test.go:156: chunked raw upload = 201 ({"chunks":1,"fileId":"814012c3-e27b-4ebd-8b64-e2253f740dff","mime":"text/plain","sha256":"81db8ebbbbc69c6c6ad4a6aa92b76e0c08af547da236b9e2c9dbe1d8285a8130","size":5,"storage":1,"thumbStatus":"none","thumbnailUrl":"/v1/files/814012c3-e27b-4ebd-8b64-e2253f740dff/thumbnail","url":"/v1/files/814012c3-e27b-4ebd-8b64-e2253f740dff"}), want 411
+FAIL
+FAIL	github.com/jixoai/keel/internal/httpapi	0.547s
+FAIL

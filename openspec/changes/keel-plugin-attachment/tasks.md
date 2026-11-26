@@ -34,8 +34,9 @@
 - [x] 3.1 定义并实现 `AttachmentPart` 投影（fileId/name/mime/size/kind/尺寸/thumbStatus/
   thumbnailUrl/downloadUrl/delivery.native/reason）；由事件 payload + blob meta + attempt
   解析结果生成，禁止填入字节或 CAS 路径。
-  > 后端：`internal/attachment.BuildPart` + `GET /v1/attachments/{id}/part`（tenant + file.read，
-  > 未完成 409、缩略图状态/URL、delivery 由宿主传入）。3.2-3.6 前端仍归 UI 切片。
+  > 后端：`internal/attachment.BuildPart` + `GET /v1/sessions/{id}/attachments/{fileId}/part?seq=`
+  > （session.read；name/宽高取已提交 user.message，MIME/size/缩略图取 blob；未完成 409；
+  > delivery 明确标记为 attempt 未存储）。3.2-3.6 前端仍归 UI 切片。
 - [ ] 3.2 在 `web/src/screens/messages.tsx` 的附件行接入 `PluginMessagePartSlot`：
   以 `partKind="attachment"` 与 MIME 选择贡献；保留默认文件名/大小/下载入口。
 - [ ] 3.3 宿主默认附件行五态：缩略图 pending/ready/failed/none、无权限、加载失败；
