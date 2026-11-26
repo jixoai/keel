@@ -597,6 +597,21 @@ export class FixtureClient implements SettingsApi {
       },
       attentionCount: 0,
       openAttentionCount: 0,
+      pending: [
+        {
+          id: "fixture:manual-77:edit-2",
+          kind: "followup",
+          text: "Issue body: 第一周检查项改为按门店分批。",
+          trusted: true,
+          allowDispatch: true,
+          attempts: 2,
+          lastError: "turn starter unavailable",
+          failed: true,
+          createdAt: isoAt(-150_000),
+        },
+      ],
+      pendingCount: 1,
+      failedPendingCount: 1,
     },
     {
       id: "6a2f1c3e-4b5d-4e6f-8a90-1b2c3d4e5f03",

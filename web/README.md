@@ -160,8 +160,9 @@ web/
   resume/stop、待投递失败行与重试/清除、五态、只读、写失败、390/768）与
   `src/data/superagent.test.ts`（计数/时限/词表/202 等待投递/409 投递失败/待投递路由）；
   `nsh test --target tui --filter 'superagent'` → `20 tests: 20 passed, 0 failed`
-  （11 TUI + 6 data + 3 identity-stream 失效/竞态事件）；全量 `nsh test --target tui` →
-  `437 tests: 437 passed, 0 failed`。
+  （11 TUI + 6 data + 3 identity-stream 失效/竞态事件）。全量 `nsh test --target tui`
+  的结果按每次运行记录（本轮一次为 437/437）；该宿主存在少量 flake，失败时须复跑对应
+  文件并在 change 的 tasks/证据里记录，不把单次全绿当作稳定门禁。
 
 ## 设置页与会话模型选择（change keel-model-settings）
 

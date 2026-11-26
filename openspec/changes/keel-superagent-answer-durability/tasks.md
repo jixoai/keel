@@ -23,8 +23,9 @@
 - [x] 2.1 只对永久错误标 Failed；临时错误无限重试、退避 30s 封顶。
       （`pendingPermanentError`/`pendingBackoff`）
 - [x] 2.2 Board 增加 `pendingCount/failedPendingCount`，保留完整 pending 行；
-      `RetryPending`/`DismissPending` + 审计 `pending_retried/pending_dismissed`。
-      （`internal/superagent/orchestrator.go`、`internal/harnessapi/superagent.go`）
+      `RetryPending`/`DismissPending`（终态 retry 409、dismiss 可结算）；审计在动作后写
+      `accepted`/`failed`。（`internal/superagent/orchestrator.go`、
+      `internal/harnessapi/superagent.go`）
 - [x] 2.3 第 11 次 housekeeping 仍投递的回归用例。
       （`TestTransientDispatchFailureStillDeliversAfterTenRetries`）
 
@@ -65,8 +66,41 @@
       ./internal/collab ./internal/harnessapi`；`go test -race ./internal/superagent`。
 - [x] 6.2 真 PG（KEEL_TEST_DSN 非 skip）：`TestAnswerProtocolIsDurableInPostgres`、
       `TestWriterLeaseRejectsASecondProcess` 以及既有 PG 用例。
-- [x] 6.3 `nsh check`、`nsh test --target tui`（437 用例）。
+- [x] 6.3 `nsh check`；`nsh test --target tui` 全量实际结果逐次记录（含宿主 flake，
+      不以一次“全绿”作为结论），`--filter superagent` 20/20。
 - [x] 6.4 `openspec validate --all`。
 - [x] 6.5 live GitHub E2E（`scripts/superagent-live-github/run.sh`，只写 `keel-test-*`），
       报告绑定最终 commit/bin sha 并发布到
-      `https://local-kzf-keel-live-gh.fde2e.com/report.html`。
+      `https://local-kzf-keel-live-gh.fde2e.com/report.html`。第五轮重修后重跑并重发；
+      其回归清单含停止/终态边界、扫描 re-arm 与租约健康用例。
+
+## 7. 第五轮复审（停止/终态硬门与租约健康）
+
+- [x] 7.1 `ticketDeliveryClosed`（revoked / cancelling / cancelled / done / failed）硬门：
+      `deliverPendingLocked`、`attemptPendingDeliveryLocked`、`answerAttentionLocked`、
+      `retryAnsweredAttentionLocked`、`RetryPending` 在投递/重试前拒绝（HTTP 409），
+      不投递、不清 pending、不写 attempt/Failed；`DismissPending` 保留为终态结算入口。
+      UI 在停止/终态禁用 retry、保留 dismiss。
+      （`internal/superagent/orchestrator.go`、`web/src/screens/books/superagent.tsx`）
+- [x] 7.2 回归：cancelling+live、cancelled、done、failed 四组，answer/follow-up 各一条，
+      断言零投递/零派工、pending 未变、retry 409、dismiss 成功。
+      （`TestClosedTicketNeverDeliversPendingInput`、`TestSuperagentClosedTicketRetryIs409`、
+      `TestSuperagentClosedTicketAnswerIs409`）
+- [x] 7.3 启动补偿失败自愈：`noteAnswerRepairFailure` 保持 `answerRepair` 并按 1s→30s
+      退避；`Recover` 的扫描错误不再中止恢复；housekeeping 到期重跑。
+      （`TestAnswerRepairScanFailureIsRetriedByHousekeeping`）
+- [x] 7.4 临时 Host 写失败：intent 已持久化 → 返回 `ErrAnswerDeliveryPending`（202
+      `deliveryPending`）、触发 `o.changed`、pending pump 补写 decision 后投递；永久拒绝
+      才移除 intent 返回 4xx。（`TestTransientAnswerWriteIsRecordedPending`）
+- [x] 7.5 WriterLease `Healthy`（PG `SELECT 1` 复核会话）：Run 在 Recover 前与每轮 poll
+      前校验，失联即停写退出；真 PG 用 `pg_terminate_backend` 杀租约后端，断言 Healthy
+      变红、第二进程可在锁释放后接管。（`TestRunStopsWhenTheWriterLeaseIsUnhealthy`、
+      `TestWriterLeaseHealthDetectsATerminatedBackend`）
+- [x] 7.6 `MandateObserve` 禁止 dispatch（含 human resume）；Bot principal 不可达
+      `/v1/superagent/*`；不可信 context 无 live 时保留等待；`ListAttentionsByStatus`
+      增加 mode 过滤与 `collab_attentions_status_recovery` 索引。
+      （`TestObserveMandateCannotBeResumedForDispatch`、
+      `TestSuperagentBotPrincipalCannotUseTheOperatorAPI`、
+      `TestUntrustedContextWithoutALiveWorkerIsKept`、`internal/store/schema.sql`）
+- [x] 7.7 终态 pending 结算：retry 明确 409，dismiss 200；`RetryPending`/`DismissPending`
+      审计结果与动作一致（accepted/failed）。（`TestPendingAuditRecordsTheOutcome`）

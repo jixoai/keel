@@ -1075,6 +1075,13 @@ function PendingInputs() {
   const ticket = () => activeTicket() ?? emptyTicket("");
   const entries = () => ticket().pending ?? [];
   const writable = () => can("task.write");
+  // Retry is a delivery action; a stopped or terminal ticket refuses it
+  // (the server answers 409). Dismiss stays available to settle the row.
+  const retryable = () => {
+    const current = ticket();
+    if (current.mandate?.revokedAt) return false;
+    return !["cancelled", "cancelling", "done", "failed"].includes(current.status ?? "");
+  };
   const actionOf = (id: string) => {
     const action = superagentAccess.action();
     return action?.id === id ? action.kind : null;
@@ -1131,7 +1138,7 @@ function PendingInputs() {
                     icon="play"
                     label={actionOf(entry().id) === "retry" ? "重试中…" : "重试投递"}
                     accessibilityLabel="重试投递"
-                    disabled={actionOf(entry().id) !== null}
+                    disabled={!retryable() || actionOf(entry().id) !== null}
                     loading={actionOf(entry().id) === "retry"}
                     onPress={() => {
                       const current = ticket();
@@ -1171,6 +1178,11 @@ function PendingInputs() {
       <If when={!writable() && entries().length > 0}>
         <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>
           你的账号缺少「写任务」（task.write）能力，不能重试或清除待投递输入。{permissionHint("task.write")}
+        </Text>
+      </If>
+      <If when={writable() && entries().length > 0 && !retryable()}>
+        <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>
+          工单已停止或处于终态，重试投递被服务端拒绝（409）；这里只能清除待投递输入。
         </Text>
       </If>
     </View>

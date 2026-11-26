@@ -173,9 +173,12 @@ type Orchestrator struct {
 	cfg Config
 	mu  sync.Mutex
 	// answerRepair asks housekeeping to run the answer delivery/comment
-	// compensation scan. It is set by a failed comment enqueue or a receipt that
-	// still owes its Channel comment; crashes are covered by Recover's scan.
-	answerRepair bool
+	// compensation scan. It is set by a failed comment enqueue, a receipt that
+	// still owes its Channel comment, or a failed recovery scan; the scan is
+	// retried with backoff until a pass completes.
+	answerRepair         bool
+	answerRepairAttempts int
+	answerRepairNext     time.Time
 }
 
 // NewOrchestrator validates the assembly. Missing identity/seams fail at
@@ -245,12 +248,27 @@ func (o *Orchestrator) Run(ctx context.Context, interval time.Duration) {
 			o.cfg.Logger.Warn("superagent: writer lease release failed", "error", err)
 		}
 	}()
+	// Validate before recovery: Recover writes (assignment repair, answer
+	// compensation). A lease whose connection already died must not touch the
+	// tenant even once.
+	if err := lease.Healthy(ctx); err != nil {
+		o.cfg.Logger.Error("superagent: writer lease is not healthy; the queue stays idle", "error", err)
+		return
+	}
 	if _, err := o.Recover(ctx); err != nil {
 		o.cfg.Logger.Warn("superagent: recovery failed", "error", err)
 	}
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
+		// The lease is revalidated against the owning connection every round: a
+		// PostgreSQL restart/failover silently releases a session advisory lock,
+		// and this process must stop writing instead of double-delivering with a
+		// second replica that can now acquire the tenant.
+		if err := lease.Healthy(ctx); err != nil {
+			o.cfg.Logger.Error("superagent: writer lease lost; stopping the queue", "error", err)
+			return
+		}
 		if _, err := o.PollOnce(ctx); err != nil {
 			o.cfg.Logger.Warn("superagent: poll failed", "error", err)
 		}
@@ -335,9 +353,14 @@ func (o *Orchestrator) housekeepingLocked(ctx context.Context) error {
 	if _, err := o.reconcileLocked(ctx); err != nil {
 		return err
 	}
-	if o.answerRepair {
+	now := o.cfg.Now()
+	if o.answerRepair && (o.answerRepairNext.IsZero() || !now.Before(o.answerRepairNext)) {
+		// A failed pass (write error, DB hiccup) must not strand an answered
+		// Attention: the flag stays set and the next due tick retries with the
+		// same capped backoff as other durable work.
 		if healed, err := o.reconcileAnswerDeliveriesLocked(ctx); err != nil {
-			return err
+			o.noteAnswerRepairFailure(err, now)
+			o.cfg.Logger.Warn("superagent: answer repair scan failed; will retry", "error", err)
 		} else if healed > 0 {
 			o.changed(o.cfg.TenantID)
 		}
@@ -578,16 +601,9 @@ func (o *Orchestrator) attachLocked(ctx context.Context, event Event, verdict Ve
 		// The input is durably captured before any delivery attempt. A busy slot,
 		// a failed dispatch or a restarted process must not lose it, and one
 		// ticket's trouble must not stop this page from consuming other events:
-		// housekeeping retries pending entries with backoff.
-		assignment, assignmentErr := o.activeAssignment(ctx, ticket.ID)
-		if assignmentErr != nil {
-			return nil, assignmentErr
-		}
-		live := assignment.ID != uuid.Nil && assignment.SessionID != uuid.Nil
-		if !live && !trusted {
-			// No worker and no authority to start one: the comment stays context.
-			continue
-		}
+		// housekeeping retries pending entries with backoff. Untrusted context is
+		// captured too: AllowDispatch=false means it waits for a live worker
+		// instead of being silently dropped or starting one.
 		entry := PendingFollowUp{
 			ID: event.SourceID + ":" + event.EventID, Kind: PendingFollowUpInput,
 			Text: eventInputText(event), CreatedAt: o.cfg.Now(),
@@ -610,6 +626,24 @@ func (o *Orchestrator) attachLocked(ctx context.Context, event Event, verdict Ve
 		delivered = append(delivered, ticket)
 	}
 	return delivered, nil
+}
+
+// ticketDeliveryClosed is the hard stop/terminal boundary for every input
+// delivery. A revoked mandate, a cancelling/cancelled ticket and a finished
+// (done/failed) ticket accept no further worker input. Callers must return this
+// error (HTTP 409) without delivering and without clearing the durable pending
+// row: the row stays visible so an operator can dismiss it, but retry is not a
+// delivery path on a closed ticket.
+func ticketDeliveryClosed(ticket Ticket) error {
+	if ticket.Mandate.Revoked() {
+		return fmt.Errorf("%w: the ticket mandate was revoked", collab.ErrWorkItemClosed)
+	}
+	switch ticket.Status {
+	case collab.WorkItemCancelling, collab.WorkItemCancelled, collab.WorkItemDone, collab.WorkItemFailed:
+		return fmt.Errorf("%w: the ticket is %s", collab.ErrWorkItemClosed, ticket.Status)
+	default:
+		return nil
+	}
 }
 
 // inputDelivers reports whether a successful Deliver call actually reached a
@@ -866,6 +900,12 @@ func (o *Orchestrator) deliverPendingLocked(ctx context.Context, ticket *Ticket)
 	if len(ticket.Pending) == 0 {
 		return 0, nil
 	}
+	// Hard boundary: a stopped, cancelling or terminal ticket accepts no input.
+	// Returning before the loop leaves every pending row untouched (no attempt,
+	// no Failed mark, no snapshot advance).
+	if err := ticketDeliveryClosed(*ticket); err != nil {
+		return 0, err
+	}
 	now := o.cfg.Now()
 	kept := make([]PendingFollowUp, 0, len(ticket.Pending))
 	type deliveredInput struct {
@@ -993,6 +1033,11 @@ func (o *Orchestrator) deliverPendingLocked(ctx context.Context, ticket *Ticket)
 // returned verb names the delivery channel for the answer receipt. Only a human
 // answer or a policy-accepted follow-up may start a worker or unblock a ticket.
 func (o *Orchestrator) attemptPendingDeliveryLocked(ctx context.Context, ticket *Ticket, entry PendingFollowUp) (string, error) {
+	// Defense in depth: even a direct caller can never deliver past the stop or
+	// terminal boundary.
+	if err := ticketDeliveryClosed(*ticket); err != nil {
+		return "", err
+	}
 	kind := "followup"
 	requestID := "followup:" + entry.ID
 	if entry.Kind == PendingAnswer {
@@ -1081,8 +1126,8 @@ func (o *Orchestrator) completeAnswerIntentLocked(ctx context.Context, ticket *T
 	if attention.Status.Terminal() {
 		return fmt.Errorf("%w: the attention is %s", errPendingAnswerRejected, attention.Status)
 	}
-	if ticket.Mandate.Revoked() || ticket.Status == collab.WorkItemCancelled || ticket.Status == collab.WorkItemCancelling {
-		return fmt.Errorf("%w: the ticket was stopped", errPendingAnswerRejected)
+	if err := ticketDeliveryClosed(*ticket); err != nil {
+		return fmt.Errorf("%w: %v", errPendingAnswerRejected, err)
 	}
 	if _, err := o.cfg.Host.AnswerAttention(ctx, o.cfg.TenantID, ticket.ID, attention.ID, collab.AttentionAnswerRequest{
 		OptionID: entry.OptionID, Text: entry.AnswerText, Actor: entry.AnswerActor,
@@ -1123,12 +1168,16 @@ func (o *Orchestrator) retryPendingLocked(ctx context.Context) (int, error) {
 		if len(ticket.Pending) == 0 {
 			continue
 		}
-		if ticket.Mandate.Revoked() || ticket.Status == collab.WorkItemDone || ticket.Status == collab.WorkItemFailed ||
-			ticket.Status == collab.WorkItemCancelled || ticket.Status == collab.WorkItemCancelling {
+		if err := ticketDeliveryClosed(ticket); err != nil {
+			// A closed ticket keeps its pending rows for the operator to dismiss;
+			// housekeeping never delivers them.
 			continue
 		}
 		delivered, err := o.deliverPendingLocked(ctx, &ticket)
 		if err != nil {
+			if errors.Is(err, collab.ErrWorkItemClosed) {
+				continue
+			}
 			return total, err
 		}
 		total += delivered
@@ -1145,6 +1194,26 @@ func (o *Orchestrator) applyDelivered(ticket *Ticket, title, body string, at tim
 	ticket.Delivered = &ThreadSnapshot{Title: strings.TrimSpace(title), Body: strings.TrimSpace(body), At: at}
 }
 
+// noteAnswerRepairFailure keeps the compensation scan armed after a failed pass
+// and schedules the next attempt with the durable-work backoff. A one-shot
+// recovery that silently stops after one error would strand every answered
+// Attention whose intent/receipt never landed.
+func (o *Orchestrator) noteAnswerRepairFailure(err error, now time.Time) {
+	if err == nil {
+		return
+	}
+	o.answerRepair = true
+	o.answerRepairAttempts++
+	o.answerRepairNext = now.Add(pendingBackoff(o.answerRepairAttempts))
+}
+
+// clearAnswerRepair records a complete compensation pass.
+func (o *Orchestrator) clearAnswerRepair() {
+	o.answerRepair = false
+	o.answerRepairAttempts = 0
+	o.answerRepairNext = time.Time{}
+}
+
 // reconcileAnswerDeliveriesLocked is the startup compensation pass for the
 // answer protocol. For the newest answered Attentions:
 //
@@ -1155,10 +1224,12 @@ func (o *Orchestrator) applyDelivered(ticket *Ticket, title, body string, at tim
 //     existed): re-arm the intent from the recorded answer and deliver it.
 //
 // A closed/revoked ticket is skipped: there is no worker to receive it, and a
-// direct retry reports that state explicitly instead of claiming success.
+// direct retry reports that state explicitly instead of claiming success. Any
+// error keeps the repair flag set (housekeeping retries with backoff).
 func (o *Orchestrator) reconcileAnswerDeliveriesLocked(ctx context.Context) (int, error) {
-	attentions, err := o.cfg.Store.ListAttentionsByStatus(ctx, o.cfg.TenantID, answerRecoveryScan, collab.AttentionAnswered)
+	attentions, err := o.cfg.Store.ListAttentionsByStatus(ctx, o.cfg.TenantID, o.cfg.ModeID, answerRecoveryScan, collab.AttentionAnswered)
 	if err != nil {
+		o.noteAnswerRepairFailure(err, o.cfg.Now())
 		return 0, err
 	}
 	healed := 0
@@ -1191,14 +1262,20 @@ func (o *Orchestrator) reconcileAnswerDeliveriesLocked(ctx context.Context) (int
 			continue
 		}
 		if _, err := o.capturePending(ctx, &ticket, answerEntryFromAttention(attention, o.cfg.Now())); err != nil {
+			o.noteAnswerRepairFailure(err, o.cfg.Now())
 			return healed, err
 		}
 		if _, err := o.deliverPendingLocked(ctx, &ticket); err != nil {
+			o.noteAnswerRepairFailure(err, o.cfg.Now())
 			return healed, err
 		}
 		healed++
 	}
-	o.answerRepair = repairRemaining
+	if repairRemaining {
+		o.noteAnswerRepairFailure(fmt.Errorf("superagent: answer comment queue is still owed"), o.cfg.Now())
+	} else {
+		o.clearAnswerRepair()
+	}
 	return healed, nil
 }
 
@@ -1383,6 +1460,12 @@ func (o *Orchestrator) DispatchQueued(ctx context.Context) (int, error) {
 // OperatorAuthorizer, not a free boolean.
 func (o *Orchestrator) dispatchTicketLocked(ctx context.Context, ticket Ticket, humanFollowUp bool, reason, contextText string) (bool, error) {
 	if !ticket.CanDispatch() {
+		return false, nil
+	}
+	// An observe-only mandate never starts a Worker: it is authorization to
+	// track the thread, not to act on it. This covers recovery, queued dispatch
+	// and a human resume alike.
+	if ticket.Mandate.Strength == MandateObserve {
 		return false, nil
 	}
 	if existing, err := o.activeAssignment(ctx, ticket.ID); err != nil {
@@ -1684,9 +1767,11 @@ func (o *Orchestrator) Recover(ctx context.Context) (int, error) {
 	}
 	// The startup compensation pass repairs an answer whose crash left the
 	// Attention answered with no delivery intent/receipt, and finishes a Channel
-	// answer comment whose outbox row was never written.
+	// answer comment whose outbox row was never written. A failed pass keeps the
+	// repair flag armed for housekeeping; recovery of the rest of the queue must
+	// not depend on one compensation query.
 	if healed, err := o.reconcileAnswerDeliveriesLocked(ctx); err != nil {
-		return recovered, err
+		o.cfg.Logger.Warn("superagent: startup answer repair failed; housekeeping will retry", "error", err)
 	} else {
 		recovered += healed
 	}
@@ -2287,6 +2372,12 @@ func (o *Orchestrator) answerAttentionLocked(ctx context.Context, tenantID uuid.
 	if err != nil {
 		return collab.Attention{}, err
 	}
+	// The hard stop/terminal boundary applies to the answer too: a revoked
+	// mandate, a cancelling/cancelled ticket or a finished ticket accepts no
+	// decision, and a retry must say so rather than replay a delivery.
+	if err := ticketDeliveryClosed(ticket); err != nil {
+		return collab.Attention{}, err
+	}
 	if attention.Status == collab.AttentionAnswered {
 		if !sameAnswer(attention.Answer, optionID, text) {
 			return collab.Attention{}, fmt.Errorf("%w: attention was already answered differently", collab.ErrAttentionConflict)
@@ -2295,9 +2386,6 @@ func (o *Orchestrator) answerAttentionLocked(ctx context.Context, tenantID uuid.
 	}
 	if attention.Status.Terminal() {
 		return collab.Attention{}, fmt.Errorf("%w: attention is already %s", collab.ErrAttentionClosed, attention.Status)
-	}
-	if ticket.Status == collab.WorkItemCancelled || ticket.Status == collab.WorkItemCancelling || ticket.Mandate.Revoked() {
-		return collab.Attention{}, fmt.Errorf("%w: the ticket was stopped", collab.ErrWorkItemClosed)
 	}
 	// A live worker plus a sink that cannot reach it would record an answer no
 	// worker ever sees. Refuse before writing anything; the ticket stays blocked
@@ -2325,12 +2413,17 @@ func (o *Orchestrator) answerAttentionLocked(ctx context.Context, tenantID uuid.
 		if answerRejectionPermanent(err) {
 			// The Host refused the decision itself (option/status/tenancy). Drop
 			// the intent so the ticket does not advertise a delivery that can
-			// never happen; infra failures keep it for the retry.
+			// never happen; an invalid answer is a 4xx the caller can correct.
 			if _, removeErr := o.removePending(ctx, &ticket, entry.ID); removeErr != nil {
 				o.cfg.Logger.Warn("superagent: drop rejected answer intent", "ticket", ticket.ID, "error", removeErr)
 			}
+			return collab.Attention{}, err
 		}
-		return collab.Attention{}, err
+		// The intent is durable but the decision write failed transiently (DB,
+		// audit sink). The pending pump completes it on the next tick; report the
+		// recorded-pending state (HTTP 202), never a 4xx that would drop it.
+		o.cfg.Logger.Warn("superagent: answer recorded, decision write pending", "ticket", ticket.ID, "error", err)
+		return attention, ErrAnswerDeliveryPending
 	}
 	if _, err := o.deliverPendingLocked(ctx, &ticket); err != nil {
 		return answered, err
@@ -2344,6 +2437,9 @@ func (o *Orchestrator) answerAttentionLocked(ctx context.Context, tenantID uuid.
 // explicit failure, and a legacy "answered but no evidence" state is repaired
 // from the recorded answer instead of returning success.
 func (o *Orchestrator) retryAnsweredAttentionLocked(ctx context.Context, ticket *Ticket, attention collab.Attention) (collab.Attention, error) {
+	if err := ticketDeliveryClosed(*ticket); err != nil {
+		return attention, err
+	}
 	if receipt := ticket.AnswerReceiptFor(attention.ID); receipt != nil {
 		if receipt.Dismissed {
 			// The operator explicitly abandoned this undelivered answer; a retry
@@ -2486,10 +2582,14 @@ func pendingByID(ticket Ticket, id string) *PendingFollowUp {
 
 // RetryPending is the operator's explicit recovery for one durable input. It
 // clears a permanent Failed mark and the automatic backoff, then delivers now.
-// An answer intent whose Attention is still open completes the whole answer
-// protocol (record the decision, then deliver) rather than only the delivery
-// step; a stale answer whose Attention already answered re-delivers only when
-// the delivery is still owed.
+// A stopped or terminal ticket is a hard refusal (HTTP 409): the row stays
+// visible for dismissal but is never delivered. An answer intent whose
+// Attention is still open completes the whole answer protocol (record the
+// decision, then deliver) rather than only the delivery step.
+//
+// The audit row is written after the action: accepted only when the input left
+// the queue (or its answer was delivered), failed with the reason otherwise. An
+// audit written before the attempt would claim a retry that never happened.
 func (o *Orchestrator) RetryPending(ctx context.Context, tenantID, ticketID uuid.UUID, pendingID, actor string) (Ticket, error) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
@@ -2503,42 +2603,68 @@ func (o *Orchestrator) RetryPending(ctx context.Context, tenantID, ticketID uuid
 	if err != nil {
 		return Ticket{}, err
 	}
-	entry := pendingByID(ticket, pendingID)
-	if entry == nil {
-		return Ticket{}, fmt.Errorf("%w: pending input %q was not found", collab.ErrInvalidRequest, pendingID)
-	}
-	if err := o.auditRequired(ctx, AuditPendingRetried, "accepted", ticket.ID, "pending "+entry.ID); err != nil {
+	if err := ticketDeliveryClosed(ticket); err != nil {
+		o.audit(ctx, AuditPendingRetried, "failed", Event{}, ticket.ID, "pending "+pendingID+": "+err.Error())
 		return Ticket{}, err
 	}
+	entry := pendingByID(ticket, pendingID)
+	if entry == nil {
+		o.audit(ctx, AuditPendingRetried, "failed", Event{}, ticket.ID, "pending "+pendingID+": not found")
+		return Ticket{}, fmt.Errorf("%w: pending input %q was not found", collab.ErrInvalidRequest, pendingID)
+	}
+	actionErr := error(nil)
+	completedAnswer := false
 	if entry.Kind == PendingAnswer && entry.AttentionID != uuid.Nil {
-		attention, err := o.cfg.Store.GetAttention(ctx, tenantID, entry.AttentionID)
-		if err != nil {
-			return Ticket{}, err
-		}
-		if attention.Status != collab.AttentionAnswered {
+		attention, getErr := o.cfg.Store.GetAttention(ctx, tenantID, entry.AttentionID)
+		if getErr != nil {
+			actionErr = getErr
+		} else if attention.Status != collab.AttentionAnswered {
+			// The intent never reached the Attention: answerAttentionLocked
+			// records the decision and delivers it, so do not deliver twice.
+			completedAnswer = true
 			if _, err := o.answerAttentionLocked(ctx, tenantID, attention, entry.OptionID, entry.AnswerText, entry.AnswerActor); err != nil &&
 				!errors.Is(err, ErrAnswerDeliveryPending) && !errors.Is(err, ErrAnswerDeliveryFailed) && !errors.Is(err, ErrAnswerNotDelivered) {
-				return Ticket{}, err
+				actionErr = err
 			}
-			o.changed(tenantID)
-			return o.loadTicket(ctx, tenantID, ticketID)
 		}
 	}
-	entry.Failed = false
-	entry.LastError = ""
-	entry.NextAttemptAt = time.Time{}
-	if _, err := o.deliverPendingLocked(ctx, &ticket); err != nil {
-		o.changed(tenantID)
-		return ticket, err
+	if actionErr == nil {
+		if completedAnswer {
+			ticket, actionErr = o.loadTicket(ctx, tenantID, ticketID)
+		} else {
+			entry.Failed = false
+			entry.LastError = ""
+			entry.NextAttemptAt = time.Time{}
+			if _, err := o.deliverPendingLocked(ctx, &ticket); err != nil {
+				actionErr = err
+			}
+		}
 	}
+	result := "accepted"
+	detail := "pending " + entry.ID
+	if actionErr != nil {
+		result = "failed"
+		detail += ": " + actionErr.Error()
+	} else if remaining := pendingByID(ticket, entry.ID); remaining != nil {
+		result = "failed"
+		detail += ": " + remaining.LastError
+		if detail == "pending "+entry.ID+": " {
+			detail = "pending " + entry.ID + ": still pending"
+		}
+	}
+	o.audit(ctx, AuditPendingRetried, result, Event{}, ticket.ID, detail)
 	o.changed(tenantID)
+	if actionErr != nil {
+		return ticket, actionErr
+	}
 	return o.loadTicket(ctx, tenantID, ticketID)
 }
 
 // DismissPending removes one durable input at the operator's explicit request.
-// For an undelivered answer it leaves a durable abandonment marker, so neither
-// the startup compensation scan nor a later retry resurrects the delivery. The
-// ticket stays where it is: the operator resumes with a reason or stops it.
+// It is also the settlement action for a pending row on a stopped/terminal
+// ticket (retry is refused there): the row is cleared, and an undelivered answer
+// leaves a durable abandonment marker so neither the startup scan nor a later
+// retry resurrects the delivery. The audit row records the actual outcome.
 func (o *Orchestrator) DismissPending(ctx context.Context, tenantID, ticketID uuid.UUID, pendingID, actor string) (Ticket, error) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
@@ -2554,10 +2680,8 @@ func (o *Orchestrator) DismissPending(ctx context.Context, tenantID, ticketID uu
 	}
 	entry := pendingByID(ticket, pendingID)
 	if entry == nil {
+		o.audit(ctx, AuditPendingDismissed, "failed", Event{}, ticket.ID, "pending "+pendingID+": not found")
 		return Ticket{}, fmt.Errorf("%w: pending input %q was not found", collab.ErrInvalidRequest, pendingID)
-	}
-	if err := o.auditRequired(ctx, AuditPendingDismissed, "accepted", ticket.ID, "pending "+entry.ID); err != nil {
-		return Ticket{}, err
 	}
 	dismissed := *entry
 	kept := make([]PendingFollowUp, 0, len(ticket.Pending))
@@ -2585,8 +2709,10 @@ func (o *Orchestrator) DismissPending(ctx context.Context, tenantID, ticketID uu
 	ticket.UpdatedAt = o.cfg.Now()
 	stored, err := o.cfg.Store.UpdateWorkItem(ctx, ticket.Record())
 	if err != nil {
+		o.audit(ctx, AuditPendingDismissed, "failed", Event{}, ticket.ID, "pending "+entry.ID+": "+err.Error())
 		return Ticket{}, err
 	}
+	o.audit(ctx, AuditPendingDismissed, "accepted", Event{}, ticket.ID, "pending "+entry.ID)
 	o.changed(tenantID)
 	return TicketFromWorkItem(stored), nil
 }
@@ -2611,6 +2737,11 @@ func (o *Orchestrator) ResumeTicket(ctx context.Context, tenantID, ticketID uuid
 	}
 	if ticket.Mandate.Revoked() || ticket.Status == collab.WorkItemCancelled || ticket.Status == collab.WorkItemCancelling {
 		return Ticket{}, fmt.Errorf("%w: the ticket was stopped", collab.ErrWorkItemClosed)
+	}
+	if ticket.Mandate.Strength == MandateObserve {
+		// Resuming would create a human-follow-up assignment, which is dispatch.
+		// An observe-only mandate records tracking authority, never work.
+		return Ticket{}, fmt.Errorf("%w: an observe-only mandate cannot be resumed for dispatch", collab.ErrInvalidRequest)
 	}
 	if err := o.auditRequired(ctx, AuditTicketResumed, "accepted", ticket.ID, reason); err != nil {
 		return Ticket{}, err

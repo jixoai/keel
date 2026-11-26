@@ -1203,9 +1203,10 @@ func (s *Store) ActiveInMode(ctx context.Context, tenantID uuid.UUID, modeID str
 }
 
 // ListAttentionsByStatus lists the newest attention rows in the named states
-// (all states for an empty list), newest first, bounded by limit. The answer
-// recovery scan uses one query instead of walking every ticket.
-func (s *Store) ListAttentionsByStatus(ctx context.Context, tenantID uuid.UUID, limit int, statuses ...collab.AttentionStatus) ([]collab.Attention, error) {
+// (all states for an empty list), newest first, bounded by limit. modeID limits
+// the scan to this collaboration mode (empty means every mode). The answer
+// recovery scan uses one indexed query instead of walking every ticket.
+func (s *Store) ListAttentionsByStatus(ctx context.Context, tenantID uuid.UUID, modeID string, limit int, statuses ...collab.AttentionStatus) ([]collab.Attention, error) {
 	values := make([]string, 0, len(statuses))
 	for _, status := range statuses {
 		values = append(values, string(status))
@@ -1217,9 +1218,11 @@ func (s *Store) ListAttentionsByStatus(ctx context.Context, tenantID uuid.UUID, 
 		SELECT tenant_id, attention_id, work_item_id, assignment_id, mode_id, session_id, request_id,
 		       kind, prompt, options, allow_free_text, route, channel, status, answer, created_at, deadline
 		  FROM collab_attentions
-		 WHERE tenant_id = $1 AND (cardinality($2::text[]) = 0 OR status = ANY($2::text[]))
+		 WHERE tenant_id = $1
+		   AND (cardinality($2::text[]) = 0 OR status = ANY($2::text[]))
+		   AND ($3 = '' OR mode_id = $3)
 		 ORDER BY created_at DESC, attention_id DESC
-		 LIMIT $3`, tenantID, values, limit)
+		 LIMIT $4`, tenantID, values, modeID, limit)
 }
 
 // AcquireWriterLease takes a session-scoped PostgreSQL advisory lock for this
@@ -1264,6 +1267,22 @@ func superagentWriterLockKey(tenantID uuid.UUID) int64 {
 type superagentWriterLease struct {
 	conn *pgxpool.Conn
 	key  int64
+}
+
+// Healthy proves the lease still owns its advisory lock. A held connection that
+// the server killed (restart/failover) answers the round trip with an error; the
+// caller must then stop writing. SELECT 1 is sufficient because a session-level
+// advisory lock is only released by that session ending or an explicit unlock,
+// and this lease never unlocks before Release.
+func (l *superagentWriterLease) Healthy(ctx context.Context) error {
+	if l == nil || l.conn == nil {
+		return superagent.ErrWriterLeaseHeld
+	}
+	var one int
+	if err := l.conn.QueryRow(ctx, "SELECT 1").Scan(&one); err != nil {
+		return fmt.Errorf("%w: lease connection is unhealthy: %v", superagent.ErrWriterLeaseHeld, err)
+	}
+	return nil
 }
 
 // Release unlocks the advisory lock and returns the connection. A failed unlock

@@ -280,7 +280,22 @@ async function gotoIssueWaiting(expected) {
     await gotoIssue();
     try {
       await page.waitForFunction((text) => document.body.innerText.includes(text), expected, { timeout: 4000 });
-      await sleep(500);
+      // GitHub keeps its comments in an internal scroll container, so a
+      // full-page shot can be byte-identical while the claimed comment sits
+      // below the fold. Center the expected text before capturing; a screenshot
+      // must actually show the comment its caption names.
+      await page.evaluate((needle) => {
+        const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+        while (walker.nextNode()) {
+          if ((walker.currentNode.nodeValue || '').includes(needle)) {
+            const element = walker.currentNode.parentElement;
+            if (element) element.scrollIntoView({ block: 'center' });
+            return true;
+          }
+        }
+        return false;
+      }, expected);
+      await sleep(800);
       return;
     } catch {
       await sleep(3000);
@@ -461,6 +476,14 @@ async function main() {
     'TestFailedPendingIsVisibleAndCanBeDismissed',
     'TestWriterLeaseIsExclusive',
     'TestWriterLeaseRejectsASecondProcess',
+    'TestWriterLeaseHealthDetectsATerminatedBackend',
+    'TestClosedTicketNeverDeliversPendingInput',
+    'TestTransientAnswerWriteIsRecordedPending',
+    'TestAnswerRepairScanFailureIsRetriedByHousekeeping',
+    'TestUntrustedContextWithoutALiveWorkerIsKept',
+    'TestObserveMandateCannotBeResumedForDispatch',
+    'TestRunStopsWhenTheWriterLeaseIsUnhealthy',
+    'TestPendingAuditRecordsTheOutcome',
     'TestClearedIssueBodyIsDeliveredExplicitly',
     'TestGitHubSourceIgnoresOwnChannelComments',
     'TestGitHubSourceFailsClosedWhenOwnerIsUnknown',
@@ -472,7 +495,7 @@ async function main() {
   try {
     regressionOutput = execFileSync(
       'go',
-      ['test', './internal/superagent', '-run', regressionNames.join('|'), '-v', '-count=1'],
+      ['test', './internal/superagent', './internal/store', '-run', regressionNames.join('|'), '-v', '-count=1'],
       { encoding: 'utf8', maxBuffer: 8 << 20, env: { ...process.env, KEEL_TEST_DSN: DSN } },
     );
     regressionExit = 0;
@@ -486,7 +509,7 @@ async function main() {
   check(
     'R2',
     'dedupe',
-    'P1 快照 / pending 重启 / 派工失败不阻塞页 / Busy slot 毒丸 / Noop / answer 重试 / answer 双写自愈 / 11 次退避仍投递 / 不可信不派工 / blocked 不被不可信解锁 / 同内容去重 / 失败可见可重试清除 / comment 补偿 / 单写者 lease / 清空正文 / marker / 游标取 max / 分页 全部 PASS',
+    'P1 快照 / pending 重启 / 派工失败不阻塞页 / Busy slot 毒丸 / Noop / answer 重试 / answer 双写自愈 / 11 次退避仍投递 / 不可信不派工 / blocked 不被不可信解锁 / 暂停/终态零投递+409 / 扫描失败退避自愈 / 临时写失败 202 / observe 不派工 / 单写者 lease 健康失联停写 / 同内容去重 / 失败可见可重试清除 / comment 补偿 / 清空正文 / marker / 游标取 max / 分页 全部 PASS',
     regressed.length === 0,
     regressed.length === 0 ? `${regressionNames.length} cases PASS` : 'missing PASS: ' + regressed.join(','),
   );

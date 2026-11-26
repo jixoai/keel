@@ -64,6 +64,14 @@ func (s *Server) superagentReady(w http.ResponseWriter, r *http.Request, key str
 	if !ok {
 		return uuid.Nil, access.Principal{}, false
 	}
+	if principal.BotID != "" {
+		// The product API is the human/operator surface. A Bot principal (a
+		// worker Bot key or any delegation) must never reach it even when its
+		// harness narrowing happens to include task.write; the model tools are
+		// its only write seam.
+		writeErr(w, http.StatusForbidden, errors.New("superagent: the operator API is not available to Bot principals"))
+		return uuid.Nil, access.Principal{}, false
+	}
 	return tenantID, principal, true
 }
 

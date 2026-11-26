@@ -1598,6 +1598,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS collab_attentions_request
 CREATE INDEX IF NOT EXISTS collab_attentions_open
     ON collab_attentions (tenant_id, created_at)
     WHERE status = 'open';
+-- The answer-recovery scan: newest answered attentions of one mode, bounded.
+CREATE INDEX IF NOT EXISTS collab_attentions_status_recovery
+    ON collab_attentions (tenant_id, mode_id, status, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS collab_links (
     tenant_id     uuid NOT NULL,

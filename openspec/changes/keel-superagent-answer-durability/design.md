@@ -88,3 +88,38 @@ audit kind，失败写 `failed`。
 记录答复（含 pending/failed）后调用 `o.changed(tenantID)`，SSE 刷新 Board/Inbox。
 Web 解析 202 显示「已记录、等待投递」，409 显示「已记录、投递失败」；工单详情的
 「待投递输入」区提供重试/清除。
+
+## 7. 停止/终态硬门（第五轮）
+
+`ticketDeliveryClosed` 是唯一判据：`Mandate.Revoked()` 或状态为
+`cancelling/cancelled/done/failed`。`deliverPendingLocked` 在循环前返回、`attemptPendingDeliveryLocked`
+在入口再查一次（defense in depth），`answerAttentionLocked`/`retryAnsweredAttentionLocked`/
+`RetryPending` 在动作前查。失败返回 `collab.ErrWorkItemClosed`（API 409），不写 pending、
+不投递、不派工。`DismissPending` 不做该检查：它是终态 pending 的结算动作。UI 的 retry
+按钮在停止/终态 disabled，dismiss 保留。
+
+## 8. 补偿扫描的退避
+
+`answerRepair` 由失败的 enqueue/receipt 或失败的 Recover 扫描置位；
+`answerRepairAttempts/Next` 按 `pendingBackoff`（1s→30s）调度。`Recover` 的扫描错误只
+记录并保持标记，不再中止恢复。housekeeping 到期重跑；一次完整通过清除标记。
+
+## 9. 租约健康
+
+`WriterLease.Healthy` 在持有锁的连接上 `SELECT 1`。`Run` 在 Recover 前与每轮 poll 前
+调用；失败即记录并退出（defer Release 会丢弃死连接）。PG 后端被 restart/failover
+终止时 advisory lock 随之释放，第二进程可接管；第一进程不会在失联后继续写。真实 PG
+用例用 `pg_terminate_backend` 验证健康变红与接管。
+
+## 10. 临时 decision 写失败
+
+intent 已持久化后 `Host.AnswerAttention` 返回非永久错误：返回
+`ErrAnswerDeliveryPending`（API 202 `deliveryPending`），`AnswerAttention` 触发
+`o.changed`；housekeeping 的 `completeAnswerIntentLocked` 补写 decision 后投递。只有
+`answerRejectionPermanent` 才删除 intent 并返回 4xx。
+
+## 11. Observe / Bot 身份
+
+`dispatchTicketLocked` 拒绝 `MandateObserve`（覆盖 accept、恢复、queued dispatch 与
+resume）；`ResumeTicket` 对 observe 返回 `ErrInvalidRequest`。`superagentReady` 拒绝
+`principal.BotID != ""`，产品 API 只服务非 Bot 身份；worker Bot 只能通过模型工具写。

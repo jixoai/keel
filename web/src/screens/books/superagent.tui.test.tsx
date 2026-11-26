@@ -124,29 +124,32 @@ test("TUI: superagent 恢复工单——blocked/failed 重开并刷新为执行�
   expect(view.shows("id:superagent-detail-revoked")).toBe(false);
 }, 120_000);
 
-test("TUI: superagent 待投递输入——失败行可见，重试与清除各自留痕", async () => {
+test("TUI: superagent 待投递输入——活跃工单可重试/清除，终态只能清除", async () => {
   const view = await openBoard(1440);
-  await view.press("label:打开工单 同步渠道对账数据");
+  await view.press("label:打开工单 准备新客户入驻清单");
   await view.waitFor("id:superagent-detail-pending");
-  await view.waitFor("id:superagent-pending-fixture-manual-76-edit-1");
+  await view.waitFor("id:superagent-pending-fixture-manual-77-edit-2");
   const detail = view.texts().join("\n");
   expect(detail).toContain("投递失败");
-  expect(detail).toContain("this deployment cannot deliver input to a worker");
-  expect(view.shows("id:superagent-pending-fixture-manual-76-edit-1-retry")).toBe(true);
-  await view.press("id:superagent-pending-fixture-manual-76-edit-1-retry");
+  expect(detail).toContain("turn starter unavailable");
+  expect(view.shows("id:superagent-pending-fixture-manual-77-edit-2-retry")).toBe(true);
+  await view.press("id:superagent-pending-fixture-manual-77-edit-2-retry");
   await view.waitFor("id:superagent-notice", { timeout: 20_000 });
   expect(view.texts().join("\n")).toContain("已重新投递");
-  expect(view.shows("id:superagent-pending-fixture-manual-76-edit-1")).toBe(false);
+  expect(view.shows("id:superagent-pending-fixture-manual-77-edit-2")).toBe(false);
 
-  // A fresh fixture: dismiss removes the same row without a delivery attempt.
-  const second = await openBoard(1440);
-  await second.press("label:打开工单 同步渠道对账数据");
-  await second.waitFor("id:superagent-pending-fixture-manual-76-edit-1");
-  expect(second.shows("id:superagent-pending-fixture-manual-76-edit-1-dismiss")).toBe(true);
-  await second.press("id:superagent-pending-fixture-manual-76-edit-1-dismiss");
-  await second.waitFor("id:superagent-notice", { timeout: 20_000 });
-  expect(second.texts().join("\n")).toContain("待投递输入已清除");
-  expect(second.shows("id:superagent-pending-fixture-manual-76-edit-1")).toBe(false);
+  // A terminal ticket keeps the row visible for settlement, but retry is
+  // disabled (the server answers 409); dismiss still works.
+  const terminal = await openBoard(1440);
+  await terminal.press("label:打开工单 同步渠道对账数据");
+  await terminal.waitFor("id:superagent-pending-fixture-manual-76-edit-1");
+  expect(terminal.texts().join("\n")).toContain("只能清除待投递输入");
+  expect(terminal.enabled("id:superagent-pending-fixture-manual-76-edit-1-retry")).toBe(false);
+  expect(terminal.enabled("id:superagent-pending-fixture-manual-76-edit-1-dismiss")).toBe(true);
+  await terminal.press("id:superagent-pending-fixture-manual-76-edit-1-dismiss");
+  await terminal.waitFor("id:superagent-notice", { timeout: 20_000 });
+  expect(terminal.texts().join("\n")).toContain("待投递输入已清除");
+  expect(terminal.shows("id:superagent-pending-fixture-manual-76-edit-1")).toBe(false);
 }, 120_000);
 
 test("TUI: superagent 停止工单——确认对话框、Mandate 撤销、状态与操作同步关闭", async () => {

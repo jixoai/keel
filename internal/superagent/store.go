@@ -52,9 +52,10 @@ type Store interface {
 	UpdateOutbox(ctx context.Context, message OutboxMessage) (OutboxMessage, error)
 
 	// ListAttentionsByStatus lists the newest attention rows in the named states
-	// (all states for an empty list), newest first, bounded by limit. The answer
-	// recovery scan uses it to find a recorded answer with no delivery evidence.
-	ListAttentionsByStatus(ctx context.Context, tenantID uuid.UUID, limit int, statuses ...collab.AttentionStatus) ([]collab.Attention, error)
+	// (all states for an empty list), newest first, bounded by limit and limited
+	// to modeID when non-empty. The answer recovery scan uses it to find a
+	// recorded answer with no delivery evidence.
+	ListAttentionsByStatus(ctx context.Context, tenantID uuid.UUID, modeID string, limit int, statuses ...collab.AttentionStatus) ([]collab.Attention, error)
 
 	// AcquireWriterLease takes the tenant's single-writer guard. Run holds it for
 	// the process lifetime; a second orchestrator against the same tenant fails
@@ -68,8 +69,13 @@ var ErrWriterLeaseHeld = errors.New("superagent: another orchestrator owns this 
 
 // WriterLease is the durable single-writer ownership of one tenant's queue. It
 // is released on shutdown; a crashed process's lease expires with its
-// connection, so recovery does not need a manual unlock step.
+// connection, so recovery does not need a manual unlock step. Healthy MUST
+// prove the lease is still held (a live round trip against the owning
+// connection): a PostgreSQL restart/failover silently releases the advisory
+// lock with the backend, and the queue must stop writing instead of assuming it
+// still owns the tenant.
 type WriterLease interface {
+	Healthy(ctx context.Context) error
 	Release(ctx context.Context) error
 }
 
@@ -221,8 +227,9 @@ func (m *MemoryStore) ListOpenAttentions(_ context.Context, tenantID uuid.UUID) 
 }
 
 // ListAttentionsByStatus lists the newest attention rows in the named states
-// (all states for an empty list), newest first, bounded by limit.
-func (m *MemoryStore) ListAttentionsByStatus(_ context.Context, tenantID uuid.UUID, limit int, statuses ...collab.AttentionStatus) ([]collab.Attention, error) {
+// (all states for an empty list), newest first, bounded by limit and limited to
+// modeID when non-empty.
+func (m *MemoryStore) ListAttentionsByStatus(_ context.Context, tenantID uuid.UUID, modeID string, limit int, statuses ...collab.AttentionStatus) ([]collab.Attention, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	wanted := make(map[collab.AttentionStatus]bool, len(statuses))
@@ -232,6 +239,9 @@ func (m *MemoryStore) ListAttentionsByStatus(_ context.Context, tenantID uuid.UU
 	out := make([]collab.Attention, 0)
 	for _, attention := range m.attentions {
 		if attention.TenantID != tenantID {
+			continue
+		}
+		if modeID != "" && attention.ModeID != modeID {
 			continue
 		}
 		if len(wanted) > 0 && !wanted[attention.Status] {
@@ -270,6 +280,18 @@ func (m *MemoryStore) AcquireWriterLease(_ context.Context, tenantID uuid.UUID) 
 type memoryWriterLease struct {
 	store *MemoryStore
 	key   string
+}
+
+func (l *memoryWriterLease) Healthy(context.Context) error {
+	if l == nil || l.store == nil {
+		return ErrWriterLeaseHeld
+	}
+	l.store.mu.Lock()
+	defer l.store.mu.Unlock()
+	if !l.store.leases[l.key] {
+		return ErrWriterLeaseHeld
+	}
+	return nil
 }
 
 func (l *memoryWriterLease) Release(context.Context) error {

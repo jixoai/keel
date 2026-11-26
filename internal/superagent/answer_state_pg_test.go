@@ -118,7 +118,7 @@ func TestAnswerProtocolIsDurableInPostgres(t *testing.T) {
 	if receipt == nil || receipt.DeliveredAt.IsZero() || !receipt.Delivered() {
 		t.Fatalf("receipt = %+v, want durable delivery evidence", receipt)
 	}
-	answered, err := other.ListAttentionsByStatus(ctx, tenant, 10, collab.AttentionAnswered)
+	answered, err := other.ListAttentionsByStatus(ctx, tenant, collab.ModeSuperagent, 10, collab.AttentionAnswered)
 	if err != nil {
 		t.Fatalf("list answered attentions: %v", err)
 	}

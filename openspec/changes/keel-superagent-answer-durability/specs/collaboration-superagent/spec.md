@@ -75,9 +75,11 @@ Attention 仍 open 时投递给阻塞中的 Worker。不可信条目 MAY 延后�
 可见的重试与清除入口。
 
 #### Scenario: 202 等待投递
-- **WHEN** AnswerAttention 返回 `ErrAnswerDeliveryPending`
+- **WHEN** AnswerAttention 返回 `ErrAnswerDeliveryPending`（含 intent 已持久化但
+  Attention 写临时失败）
 - **THEN** 响应为 202，body 同时带 attention 与 deliveryPending=true
 - **AND** 页面提示已记录、等待投递，收件箱在 SSE 后刷新
+- **AND** housekeeping 补写缺失的 decision 后完成投递
 
 #### Scenario: 409 投递失败
 - **WHEN** AnswerAttention 返回 `ErrAnswerDeliveryFailed`
@@ -94,17 +96,24 @@ pending snapshot 相同）MUST NOT 捕获第二条 pending，也 MUST NOT 在之
 - **WHEN** 一次真实编辑已捕获为 pending 但未投递，随后同内容事件带新 event id 到达
 - **THEN** 不新增 pending 条目；只有内容真正变化时才新增
 
-### Requirement: 队列单写者
+### Requirement: 队列单写者与租约健康
 
 `Orchestrator.Run` MUST 在轮询/派工之前取得租约。生产 PostgreSQL MUST 使用会话级
 advisory lock；第二进程 MUST fail closed（`ErrWriterLeaseHeld`），且产品启动 MUST
 在中断旧 worker 会话之前完成租约获取，避免第二副本破坏第一副本的 Worker。Store
-不支持租约时 Run MUST fail closed。MemoryStore 的进程内租约仅用于测试/演示。
+不支持租约时 Run MUST fail closed。租约 MUST 暴露 `Healthy` 并在 Recover 之前及每轮
+poll 之前复核（PostgreSQL `SELECT 1` 走持有锁的会话）；连接被 PG 重启/failover 杀掉、
+锁已释放时 Run MUST 立即停止写并退出。MemoryStore 的进程内租约仅用于测试/演示。
 
 #### Scenario: 第二副本启动
 - **WHEN** 同一 tenant 的第二个 keel serve 尝试启动 super-agent
 - **THEN** 它在中断任何 worker 之前被租约拒绝，不轮询、不投递
 - **AND** 第一副本退出后新进程可以取得租约
+
+#### Scenario: 租约后端被杀死
+- **WHEN** 持有租约的 PostgreSQL 会话被 restart/failover 终止
+- **THEN** 下一次 `Healthy` 失败，Run 停止写并退出
+- **AND** 第二个进程可以在锁释放后接管
 
 ### Requirement: Answer 评论补偿与审计真实性
 
@@ -117,3 +126,49 @@ receipt MUST 记录评论行是否已入队，启动补偿扫描 MUST 为
 - **WHEN** Worker 已收到答复但 outbox 入队失败，进程随后重启
 - **THEN** 启动扫描补写同一幂等键的评论行，且只有一行
 - **AND** 对话线程看到答复评论，时间不早于 Worker 实际收到答复
+
+### Requirement: 停止与终态后的投递边界
+
+`Mandate` 已撤销、Ticket 为 cancelling/cancelled/done/failed 时，系统 MUST 拒绝任何
+输入投递与重试：`deliverPendingLocked`、`attemptPendingDeliveryLocked`、
+`answerAttentionLocked`、`retryAnsweredAttentionLocked`、`retryPending` MUST 在投递前
+返回 closed/not-delivered（HTTP 409），MUST NOT 投递、MUST NOT 清除或改写 pending 行
+（不增加 attempt、不标 Failed）。`dismissPending` MUST 保留为终态 pending 的结算入口
+（HTTP 200）；Web MUST 对停止/终态禁用 retry 并保留 dismiss。该边界 MUST 覆盖
+`Host.Cancel` 失败后仍存在的 live assignment。
+
+#### Scenario: cancelling 且仍有 live assignment
+- **WHEN** 停止请求已撤销 Mandate，Host.Cancel 失败留下 cancelling 与 live worker，
+  且存在 answer/follow-up pending
+- **THEN** housekeeping/retry 不投递任何内容，pending 原样保留
+- **AND** retry API 返回 409，dismiss 仍可结算
+
+#### Scenario: 终态工单的 pending
+- **WHEN** 工单为 done/failed/cancelled 且仍有 pending
+- **THEN** answer/retry 返回 409，零投递、零派工；retry 审计为 failed，dismiss 审计为
+  accepted
+
+### Requirement: 补偿扫描失败必须退避重试
+
+启动补偿扫描（answered 无证据/评论未入队）失败时，系统 MUST 保持补偿标记并按
+1s→30s 退避在 housekeeping 重跑；MUST NOT 因一次错误留下永久孤儿。`Recover` 的扫描
+错误 MUST NOT 中止其余恢复工作。
+
+#### Scenario: 扫描第一次失败
+- **WHEN** Recover 的 `ListAttentionsByStatus` 第一次返回错误
+- **THEN** 恢复继续，补偿标记保留
+- **AND** 退避到期后的 housekeeping 完成 answer 的 re-arm 与投递
+
+### Requirement: Observe 与 Bot 身份的派工边界
+
+`MandateObserve` MUST NOT 派工：accept、queued dispatch、恢复与人工 resume MUST 都不
+创建 Worker。`/v1/superagent/*` 产品 API MUST 拒绝 Bot principal（worker Bot key 或任何
+委托），即使其 Harness 收窄包含 task.read/task.write；模型工具是 Bot 唯一的写入口。
+
+#### Scenario: observe 工单被人工恢复
+- **WHEN** 操作者对 observe-only Mandate 的工单执行 resume
+- **THEN** 请求被拒绝，零派工
+
+#### Scenario: worker Bot key 调用产品 API
+- **WHEN** 请求身份带有 BotID
+- **THEN** 所有 `/v1/superagent/*` 路由返回 403

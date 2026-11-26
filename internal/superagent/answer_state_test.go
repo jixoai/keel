@@ -139,8 +139,8 @@ func TestAnsweredAttentionWithoutEvidenceOnAClosedTicketFailsExplicitly(t *testi
 	if _, err := env.store.UpdateWorkItem(ctx, item); err != nil {
 		t.Fatalf("close ticket: %v", err)
 	}
-	if _, err := env.orchestrator.AnswerAttention(ctx, env.tenant, attention.ID, "approve", "", "alice"); !errors.Is(err, superagent.ErrAnswerNotDelivered) {
-		t.Fatalf("retry on a closed ticket = %v, want ErrAnswerNotDelivered", err)
+	if _, err := env.orchestrator.AnswerAttention(ctx, env.tenant, attention.ID, "approve", "", "alice"); !errors.Is(err, collab.ErrWorkItemClosed) {
+		t.Fatalf("retry on a closed ticket = %v, want ErrWorkItemClosed (409)", err)
 	}
 	if env.sink.count() != 0 || env.launcher.count() != 1 {
 		t.Fatalf("closed-ticket retry delivered input: sink=%d launches=%d", env.sink.count(), env.launcher.count())
@@ -238,7 +238,16 @@ func TestStaleAnswerIntentIsNotDelivered(t *testing.T) {
 
 type faultStore struct {
 	*superagent.MemoryStore
-	failUpdates int
+	failUpdates       int
+	failAttentionList int
+}
+
+func (s *faultStore) ListAttentionsByStatus(ctx context.Context, tenantID uuid.UUID, modeID string, limit int, statuses ...collab.AttentionStatus) ([]collab.Attention, error) {
+	if s.failAttentionList > 0 {
+		s.failAttentionList--
+		return nil, errors.New("injected attention scan failure")
+	}
+	return s.MemoryStore.ListAttentionsByStatus(ctx, tenantID, modeID, limit, statuses...)
 }
 
 func (s *faultStore) UpdateWorkItem(ctx context.Context, item collab.WorkItem) (collab.WorkItem, error) {

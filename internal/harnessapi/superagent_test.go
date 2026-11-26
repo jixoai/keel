@@ -25,6 +25,8 @@ type fakeSuperagent struct {
 	resumedActor  string
 	stoppedActor  string
 	answerErr     error
+	retryErr      error
+	dismissErr    error
 	retriedID     string
 	dismissedID   string
 }
@@ -56,12 +58,12 @@ func (f *fakeSuperagent) AnswerAttention(_ context.Context, _, _ uuid.UUID, opti
 
 func (f *fakeSuperagent) RetryPending(_ context.Context, _, _ uuid.UUID, pendingID, _ string) (superagent.Ticket, error) {
 	f.retriedID = pendingID
-	return superagent.Ticket{}, nil
+	return superagent.Ticket{}, f.retryErr
 }
 
 func (f *fakeSuperagent) DismissPending(_ context.Context, _, _ uuid.UUID, pendingID, _ string) (superagent.Ticket, error) {
 	f.dismissedID = pendingID
-	return superagent.Ticket{}, nil
+	return superagent.Ticket{}, f.dismissErr
 }
 
 func (f *fakeSuperagent) ResumeTicket(_ context.Context, _, _ uuid.UUID, actor, _ string) (superagent.Ticket, error) {
@@ -257,5 +259,91 @@ func TestSuperagentPendingRecoveryRoutes(t *testing.T) {
 	denied.ServeHTTP(rec, req)
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("retry without task.write = %d, want 403", rec.Code)
+	}
+}
+
+// TestSuperagentBotPrincipalCannotUseTheOperatorAPI pins the identity boundary:
+// a Bot principal (a worker Bot key or any delegation) never reaches the
+// product API, even when its narrowed grants include task.read/task.write. The
+// model tools are the Bot's only write seam.
+func TestSuperagentBotPrincipalCannotUseTheOperatorAPI(t *testing.T) {
+	tenant := uuid.New()
+	service := &fakeSuperagent{}
+	server := New(Config{Superagent: service, Access: &fakeAccess{
+		principal: access.Principal{TenantID: tenant, AccountID: uuid.New(), BotID: "worker"},
+		grants: access.Grants{
+			access.KeyTaskRead:  access.ScopeTenant,
+			access.KeyTaskWrite: access.ScopeTenant,
+		},
+	}})
+	ticketID := uuid.New()
+	probes := []struct {
+		method string
+		path   string
+		body   string
+	}{
+		{method: http.MethodGet, path: "/v1/superagent/tickets"},
+		{method: http.MethodGet, path: "/v1/superagent/attention"},
+		{method: http.MethodPost, path: "/v1/superagent/tickets/" + ticketID.String() + "/stop", body: "{}"},
+		{method: http.MethodPost, path: "/v1/superagent/attention/" + uuid.New().String() + "/answer", body: `{"optionId":"approve"}`},
+	}
+	for _, probe := range probes {
+		var reader *strings.Reader
+		if probe.body == "" {
+			reader = strings.NewReader("")
+		} else {
+			reader = strings.NewReader(probe.body)
+		}
+		req := httptest.NewRequest(probe.method, probe.path, reader)
+		req.Header.Set("X-Tenant-ID", tenant.String())
+		rec := httptest.NewRecorder()
+		server.ServeHTTP(rec, req)
+		if rec.Code != http.StatusForbidden {
+			t.Fatalf("%s %s = %d, want 403: %s", probe.method, probe.path, rec.Code, rec.Body.String())
+		}
+		if !strings.Contains(rec.Body.String(), "Bot principals") {
+			t.Fatalf("%s %s body = %s", probe.method, probe.path, rec.Body.String())
+		}
+	}
+}
+
+// TestSuperagentClosedTicketRetryIs409: a retry on a stopped/terminal ticket is
+// an explicit conflict, never a 400 and never a delivery. Dismiss remains 200
+// because it is the settlement action for a terminal pending row.
+func TestSuperagentClosedTicketRetryIs409(t *testing.T) {
+	tenant := uuid.New()
+	ticketID := uuid.New()
+	service := &fakeSuperagent{retryErr: collab.ErrWorkItemClosed}
+	server := New(Config{Superagent: service, Access: &fakeAccess{grants: access.Grants{access.KeyTaskWrite: access.ScopeTenant}}})
+	req := httptest.NewRequest(http.MethodPost, "/v1/superagent/tickets/"+ticketID.String()+"/pending/fixture:e1/retry", strings.NewReader(`{}`))
+	req.Header.Set("X-Tenant-ID", tenant.String())
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("retry on a closed ticket = %d, want 409: %s", rec.Code, rec.Body.String())
+	}
+
+	service.dismissErr = nil
+	req = httptest.NewRequest(http.MethodPost, "/v1/superagent/tickets/"+ticketID.String()+"/pending/fixture:e1/dismiss", strings.NewReader(`{}`))
+	req.Header.Set("X-Tenant-ID", tenant.String())
+	rec = httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("dismiss on a closed ticket = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestSuperagentClosedTicketAnswerIs409: the answer path maps the closed gate to
+// 409 (not the generic 400 fallback).
+func TestSuperagentClosedTicketAnswerIs409(t *testing.T) {
+	tenant := uuid.New()
+	service := &fakeSuperagent{answerErr: collab.ErrWorkItemClosed}
+	server := New(Config{Superagent: service, Access: &fakeAccess{grants: access.Grants{access.KeyTaskWrite: access.ScopeTenant}}})
+	req := httptest.NewRequest(http.MethodPost, "/v1/superagent/attention/"+uuid.New().String()+"/answer", strings.NewReader(`{"optionId":"approve"}`))
+	req.Header.Set("X-Tenant-ID", tenant.String())
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("answer on a closed ticket = %d, want 409: %s", rec.Code, rec.Body.String())
 	}
 }

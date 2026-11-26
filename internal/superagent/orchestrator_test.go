@@ -237,6 +237,11 @@ type envOpts struct {
 	// injection). The Host keeps the raw store, so only product-side writes are
 	// injected.
 	store func(*superagent.MemoryStore) superagent.Store
+	// host wraps the collab Host used by the orchestrator (fault injection for
+	// AnswerAttention/Cancel). The rest of the test env keeps the raw host.
+	host func(superagent.Host) superagent.Host
+	// lease is an already-acquired writer lease (Run tests).
+	lease superagent.WriterLease
 }
 
 type testEnv struct {
@@ -336,8 +341,12 @@ func (e *testEnv) newOrchestrator(t *testing.T, opts envOpts) *superagent.Orches
 	if opts.inputs != nil {
 		inputs = opts.inputs
 	}
+	host := superagent.Host(e.host)
+	if opts.host != nil {
+		host = opts.host(host)
+	}
 	orch, err := superagent.NewOrchestrator(superagent.Config{
-		TenantID: e.tenant, Store: e.work, Host: e.host, Source: e.source, Channel: e.source,
+		TenantID: e.tenant, Store: e.work, Host: host, Source: e.source, Channel: e.source,
 		Policy:              policy,
 		Inputs:              inputs,
 		Sessions:            e.sessions,
@@ -350,6 +359,7 @@ func (e *testEnv) newOrchestrator(t *testing.T, opts envOpts) *superagent.Orches
 		OrchestratorSession: e.orchestratorSession.SessionID,
 		OrchestratorBot:     "orchestrator",
 		WorkerBot:           "worker",
+		Lease:               opts.lease,
 		MaxPoll:             20,
 		Now:                 func() time.Time { return *e.clock },
 		Changed:             e.changes.record,
@@ -1387,16 +1397,16 @@ func TestDuplicateAnswerDoesNotReopenOrDispatch(t *testing.T) {
 	if _, err := env.orchestrator.AnswerAttention(context.Background(), env.tenant, attention.ID, "next", "", "alice"); err != nil {
 		t.Fatalf("first answer: %v", err)
 	}
-	// Mark the ticket done and retry the same answer: it must return the
-	// original result without reopening or dispatching another worker.
+	// Mark the ticket done and retry the same answer: the hard terminal gate
+	// refuses it (409) and it must not reopen or dispatch another worker.
 	item, _ := env.store.GetWorkItem(context.Background(), env.tenant, ticket.ID)
 	item.Status = collab.WorkItemDone
 	if _, err := env.store.UpdateWorkItem(context.Background(), item); err != nil {
 		t.Fatalf("mark done: %v", err)
 	}
 	launches := env.launcher.count()
-	if _, err := env.orchestrator.AnswerAttention(context.Background(), env.tenant, attention.ID, "next", "", "alice"); err != nil {
-		t.Fatalf("duplicate answer: %v", err)
+	if _, err := env.orchestrator.AnswerAttention(context.Background(), env.tenant, attention.ID, "next", "", "alice"); !errors.Is(err, collab.ErrWorkItemClosed) {
+		t.Fatalf("duplicate answer on a done ticket = %v, want ErrWorkItemClosed", err)
 	}
 	stored, _ := env.store.GetWorkItem(context.Background(), env.tenant, ticket.ID)
 	if stored.Status != collab.WorkItemDone {
