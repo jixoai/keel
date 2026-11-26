@@ -59,9 +59,15 @@ jobs:
         # because this step was continue-on-error.
         run: |
           set -euo pipefail
-          curl -fsSL https://nsh.dev/install.sh | NSH_VERSION=v0.6.1 sh -s --
-          export PATH="$HOME/.nsh/bin:$PATH"
+          curl -fsSL https://nsh.dev/install.sh | NSH_VERSION=v0.7.1 sh -s --
+          # 0.7 packages the official nsh-extra module (speech) from Rust/wasm.
+          rustup target add wasm32-unknown-unknown
+          rustup component add llvm-tools
+          cargo install wasm-bindgen-cli --version 0.2.129 --locked
+          RUSTBIN="$(rustc --print sysroot)/lib/rustlib/$(rustc -vV | sed -n 's/^host: //p')/bin"
+          export PATH="$HOME/.nsh/bin:$HOME/.cargo/bin:$RUSTBIN:$PATH"
           nsh --version
+          wasm-bindgen --version
           ./scripts/package-web.sh "$RUNNER_TEMP/webdist"
           mkdir -p dist
           VERSION="${{ steps.ver.outputs.version }}"

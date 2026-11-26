@@ -1,13 +1,13 @@
 // TUI/headless gate · speech workbench (change keel-session-surfaces-v1, R1).
 //
 // Two hosts, one surface:
-//   · headless (`nsh test <file>`): `Speech` sessions are simulated, so the
-//     mic path is driven for real — press → `speechRequests()` → `hear` (a
-//     dimmed partial row) → `endSpeech` (exactly one final row);
+//   · headless (`nsh test <file>`): the `nsh-extra/speech` fake runs the
+//     sessions, so the mic path is driven for real — press → `fake("requests")`
+//     → `fake("hear")` (a dimmed partial row) → `fake("end")` (one final row);
 //   · terminal (`nsh test --target tui`): the host has no recognizer, so the
 //     same press must land on the 无麦克风 degradation with the text fallback
-//     kept — the spec's own scenario. `speechRequests`/`hear`/`endSpeech` are
-//     headless-only steps, so those assertions live inside the live branch.
+//     kept — the spec's own scenario. The fake's steps are headless-only, so
+//     those assertions live inside the live branch.
 //
 // The assistant reply, its tool card and its audio chip are gone from this
 // surface: an STT workbench transcribes, it does not answer. The TTS tab is a
@@ -21,9 +21,10 @@ const ready = () => "text:/待命/";
 
 /** The terminal host has no simulated recognizer: asking for its sessions
  * throws there, which is itself the degradation under test. */
-const sessionsOf = (app: Awaited<ReturnType<typeof open>>) => {
+const sessionsOf = async (app: Awaited<ReturnType<typeof open>>) => {
   try {
-    return app.speechRequests();
+    const requests = await app.fake("nsh-extra/speech", "requests");
+    return Array.isArray(requests) ? (requests as { lang?: string; interim?: boolean }[]) : [];
   } catch {
     return null;
   }
@@ -60,7 +61,7 @@ test("语音转写：空态文案诚实，未按麦克风不会开始收音", as
   // control. Where the host reports sessions (headless), none exists either.
   expect(app.texts()).not.toContain("录音中");
   expect(app.shows("id:speech-record")).toBe(true);
-  const sessions = sessionsOf(app);
+  const sessions = await sessionsOf(app);
   if (sessions) expect(sessions).toHaveLength(0);
 });
 
@@ -78,17 +79,17 @@ test("语音转写：按下麦克风——headless 收音并转写；无识别�
     return;
   }
 
-  const requests = app.speechRequests();
+  const requests = await app.fake("nsh-extra/speech", "requests") as { lang?: string; interim?: boolean }[];
   expect(requests).toHaveLength(1);
   expect(requests[0]!.lang).toBe("zh-CN");
   expect(requests[0]!.interim).toBe(true);
 
   // The partial is a UI-only row, never a committed one.
-  await app.hear("上午十点提醒我");
+  await app.fake("nsh-extra/speech", "hear", ["上午十点提醒我"]);
   await app.waitFor("text:/上午十点提醒我/");
   expect(app.texts()).toContain("转写中（未入账）");
 
-  await app.endSpeech();
+  await app.fake("nsh-extra/speech", "end");
   await app.waitUntil(() => !app.texts().includes("转写中（未入账）"));
   await app.waitFor("text:/已停止/");
   expect(app.texts().filter((text) => text === "上午十点提醒我")).toHaveLength(1);
@@ -110,7 +111,7 @@ test("语音转写：停止立即释放麦克风，已听到的内容仍入账",
     return;
   }
 
-  await app.hear("停止前的转写");
+  await app.fake("nsh-extra/speech", "hear", ["停止前的转写"]);
   await app.waitFor("text:/停止前的转写/");
   await app.press("id:speech-stop");
   await app.waitFor("text:/已停止/");
@@ -122,7 +123,7 @@ test("语音转写：停止立即释放麦克风，已听到的内容仍入账",
   // the partial row would come back and the microphone would still be hot.
   let stillListening = false;
   try {
-    await app.hear("停止后不应再被听到");
+    await app.fake("nsh-extra/speech", "hear", ["停止后不应再被听到"]);
     stillListening = true;
   } catch {
     stillListening = false;
@@ -136,7 +137,7 @@ test("语音转写：麦克风权限被拒绝时降级为文字输入", async ()
   await app.waitFor(ready());
   const recording = await startedRecording(app);
   if (recording) {
-    await app.endSpeech("not-allowed");
+    await app.fake("nsh-extra/speech", "end", ["not-allowed"]);
     await app.waitFor("text:/麦克风未授权/");
     expect(app.texts().join("\n")).toContain("麦克风权限被拒绝");
   } else {
@@ -160,7 +161,7 @@ test("语音转写：文字兜底直接入账，不会启动麦克风", async ()
   expect(app.texts()).toContain("文字输入");
   expect(app.texts()).toContain("说话人");
   expect(app.texts()).not.toContain("录音中");
-  const sessions = sessionsOf(app);
+  const sessions = await sessionsOf(app);
   if (sessions) expect(sessions).toHaveLength(0);
 });
 

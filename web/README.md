@@ -8,18 +8,19 @@
 
 | 项 | 值 |
 |---|---|
-| CLI | **nsh 0.6.1 (2f51d86)**，2026-11-24 由 0.6.0 nightly (f577c51) 升级 |
-| 安装 | `curl -fsSL https://nsh.dev/install.sh \| NSH_VERSION=v0.6.1 sh -s --`（校验 `sha256` 通过） |
-| 组件 | `web`、`tui`（由 `nsh package/run/test` 自动安装） |
-| 关键特性 | `List alignment="bottom"`（聊天列表底部对齐）、`--target tui` 开发宿主、`TextView` markdown/streaming、`Picker`、`host` 通道、`nsh test --target tui`（in-memory terminal） |
+| CLI | **nsh 0.7.1 (f78eace)**，2026-11-26 由 0.6.1 (2f51d86) 升级 |
+| 安装 | `curl -fsSL https://nsh.dev/install.sh \| NSH_VERSION=v0.7.1 sh -s --`（校验 `sha256` 通过） |
+| 组件 | `web`、`tui`（由 `nsh package/run/test` 自动安装）；Rust 工具链 + `wasm32-unknown-unknown` + `llvm-tools` + `wasm-bindgen-cli 0.2.129`（web 打包的 nshm 前置） |
+| 关键特性 | `List alignment="bottom"`、`--target tui` 开发宿主、`TextView` markdown/streaming、`Picker`、`host` 通道、`nsh test --target tui`、`nshm`（`nsh add` + `nsh.lock`）、`app.fake` |
 | 本地参考检出 | `~/Development/GitHub/longbridge/nsh` |
-| 0.6.0 升级适配 | ① 测试 app 的静态资源必须在该 app 目录内：realtime/speech 的 gate 从 `src/surfaces/*` 挪到 `web/` 根（`assets/` 在 app 根内），harness 改为 `*-harness.tsx`；② `PickedFile.file` 可为 `null`（`status: "tooLarge"`）：speech 的上传路径现在给出「文件过大」提示，不再把空字节送进转写 |
+| 0.7.0/0.7.1 升级适配 | ① `Speech` 从 `nsh` 移到 **`nsh-extra`**：`nsh add nsh-extra --features speech`，`import { Speech } from "nsh-extra"`；测试从 `app.speechRequests()/hear()/endSpeech()` 改为 `await app.fake("nsh-extra/speech", "requests"\|"hear"\|"end", ...)`；② `nsh.lock` 记录 nshm 版本与 checksum；③ web 打包现在会编译 Rust/wasm，需要 rustup 的 wasm target、`llvm-tools` 的 `llvm-ar` 与匹配版本的 `wasm-bindgen-cli` |
 
-**为什么锁 v0.6.1**：发布版 0.3.0（4e95ae5）缺 `List alignment=bottom` 与 `--target tui`；
-0.6.1 已同时具备（`nsh check` 0、`nsh test --target tui` 14/15，唯一失败是既有的设置页
-raw JSON 用例），且是稳定 release。**不再跟随 nightly**：2026-11-24 的 nightly（0.6.0
-589a60f）移除了 `Speech` 导出，导致 v0.2.0 的 CI web 构建失败；nightly 是滚动目标，不能作为
-可复现的发布输入。
+**为什么锁 v0.7.1**：0.7 把 `Speech` 抽成官方 `nsh-extra` 模块，是当前稳定 release；迁移后
+`nsh check` 0 错、`nsh test --target tui` 全绿、`nsh package --target web` 可产出静态站点。
+**不跟随 nightly**：nightly 是滚动目标，不能作为可复现的发布输入（0.6.x nightly 曾移除
+`Speech` 导出导致 web 构建失败）。web 打包需要：
+`rustup target add wasm32-unknown-unknown && rustup component add llvm-tools && cargo install wasm-bindgen-cli --version 0.2.129 --locked`，
+并让 `~/.cargo/bin` 与 rustup 的 `llvm-ar` 目录在 `PATH` 内。
 
 ## 构建与运行
 
@@ -35,6 +36,8 @@ nsh run --target tui                        # 真实终端开发宿主
 ```
 
 静态站点用任意静态服务器托管即可（`keel serve` 会把 `dist/web/keel/Keel/` 挂在根路径）。
+nsh 0.7 的 web runtime 含 wasm；部署若设置 CSP，`script-src` 需要 `'self' 'wasm-unsafe-eval'`，
+否则语音等 nshm 能力会被浏览器拒绝。
 注意当前 `nsh package` 会在 `-o` 目录下再建一个以 app 名命名的子目录（`Keel/`），
 部署时以该子目录为站点根。
 

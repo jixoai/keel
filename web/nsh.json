@@ -39,5 +39,13 @@
   "singleInstance": true,
   "schemes": [
     "keel"
-  ]
+  ],
+  "dependencies": {
+    "nsh-extra": {
+      "version": "^0.7.1",
+      "features": [
+        "speech"
+      ]
+    }
+  }
 }

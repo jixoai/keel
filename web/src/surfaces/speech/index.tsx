@@ -35,18 +35,8 @@
 // signal is read inside JSX or an `<If>`, never copied into a body local. The
 // row components take their changing values as getters (the partial row's text,
 // the recorder's state), so the binding re-reads the signal without a remount.
-import {
-  cleanup,
-  effect,
-  Picker,
-  Speech,
-  signal,
-  Text,
-  View,
-  type JSX,
-  type SpeechErrorCode,
-  type SpeechSession,
-} from "nsh";
+import { cleanup, effect, Picker, signal, Text, View, type JSX } from "nsh";
+import { Speech, type SpeechErrorCode, type SpeechSession } from "nsh-extra";
 import {
   alpha,
   Badge,

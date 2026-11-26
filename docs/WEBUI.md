@@ -45,9 +45,11 @@ scripts/package-web.sh                      # 静态站点 → web/dist/web/keel
 
 ## 4. NSH 版本策略
 
-**pin release `v0.6.1`**（`nsh 0.6.1 (2f51d86)`，2026-11-24 由 0.6.0 nightly `f577c51` 升级；
-不再跟随 nightly，理由见 `web/README.md:19-23`）：`List alignment=bottom` 与 `--target tui`
-开发宿主均已具备；需要新特性直接向作者提。
+**pin release `v0.7.1`**（`nsh 0.7.1 (f78eace)`，2026-11-26 由 0.6.1 `2f51d86` 升级；
+不再跟随 nightly，理由见 `web/README.md`）：`Speech` 已迁到官方 `nsh-extra` 模块
+（`nsh add nsh-extra --features speech`，`app.fake("nsh-extra/speech", ...)`）；web 打包需要
+rustup 的 `wasm32-unknown-unknown`、`llvm-tools` 与 `wasm-bindgen-cli 0.2.129`。需要新特性
+直接向作者提。
 
 ## 5. 视觉证据
 
