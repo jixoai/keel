@@ -119,7 +119,8 @@ func AttachmentClaims(contributions []ExtensionContribution) []AttachmentClaim {
 }
 
 // ExtensionDoc is the machine-readable extensibility document's presence.
-type ExtensionDoc struct {	Usable bool   `json:"usable"`
+type ExtensionDoc struct {
+	Usable bool   `json:"usable"`
 	Doc    string `json:"doc,omitempty"`
 	Schema string `json:"schema,omitempty"`
 	Reason string `json:"reason,omitempty"`
@@ -376,14 +377,12 @@ func mergeContribution(dst *ExtensionDeclaration, raw extensionContribution) {
 	mime := normalizedMimePatterns(raw.Mime)
 	for index := range dst.Contributes {
 		existing := &dst.Contributes[index]
-		// The claim document and plugin.yaml name the same contribution by id,
-		// or (when neither carries an id) by the (slot, form, entry) triple. The
-		// claim fields merge into that entry; they never create a second one.
-		if id != "" && existing.ID == id {
-			mergeContributionClaims(existing, part, mime)
-			return
-		}
-		if id == "" && existing.ID == "" && existing.Slot == slot && existing.Form == form && existing.Entry == entry {
+		// The claim document and plugin.yaml name the same contribution by
+		// (slot, form, entry) — the identity the contract freezes — or by an
+		// explicit id when both carry one. The claim fields merge into that
+		// entry; they never create a second one.
+		sameKey := existing.Slot == slot && existing.Form == form && existing.Entry == entry
+		if (id != "" && existing.ID == id) || sameKey {
 			mergeContributionClaims(existing, part, mime)
 			return
 		}
@@ -539,7 +538,13 @@ func ValidateExtension(pluginID, kind string, decl ExtensionDeclaration) []plugi
 		}
 		// Attachment preview claims (change keel-plugin-attachment): part/mime
 		// narrow a keel.ui.message-part contribution, and the claim is validated
-		// with the same rules pluginpkg applies to extensibility.json.
+		// with the same rules pluginpkg applies to extensibility.json. A claim
+		// without a usable document is not a claim at all: a package that never
+		// shipped extensibility.json cannot be recognized as a renderer.
+		if (strings.TrimSpace(contribution.Part) != "" || len(contribution.Mime) > 0) &&
+			(decl.Doc == nil || !decl.Doc.Usable) {
+			add(field("part"), "attachment preview claims require a usable "+ExtensionFileName)
+		}
 		for _, problem := range pluginpkg.AttachmentClaimProblems(contribution.Slot, contribution.Part, contribution.Mime) {
 			add(field(problem.Field), problem.Message)
 		}

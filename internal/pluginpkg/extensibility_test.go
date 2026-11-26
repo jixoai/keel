@@ -505,7 +505,7 @@ func attachmentDoc(t *testing.T, mime []string) *ExtensibilityDoc {
 // the message-part slot may carry `part`/`mime`, only `part: attachment` is
 // defined, and MIME patterns are lowercase `type/subtype` or `type/*`.
 func TestExtensibilityDocValidatesAttachmentClaims(t *testing.T) {
-	if err := attachmentDoc(t, []string{"application/pdf", "image/*"}).Validate(); err != nil {
+	if err := attachmentDoc(t, []string{"application/pdf", "image/*", "application/vnd.api+json", "application/x_custom"}).Validate(); err != nil {
 		t.Fatalf("a valid attachment claim must validate: %v", err)
 	}
 	cases := []struct {

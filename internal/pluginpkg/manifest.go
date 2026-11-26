@@ -367,9 +367,9 @@ const (
 )
 
 // mimeTokenPattern is the grammar of one non-wildcard MIME token: lowercase
-// letters, digits and the RFC 6838 punctuation `.` `+` `-`; a leading
-// alphanumeric keeps the pattern from starting with punctuation.
-var mimeTokenPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9.+-]*$`)
+// letters, digits and the RFC 6838 token punctuation. A leading alphanumeric
+// keeps the pattern from starting with punctuation.
+var mimeTokenPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9!#$&^_.+-]*$`)
 
 // MimePatternProblem reports why a MIME narrowing pattern is not `type/subtype`
 // or `type/*`. An empty result means the pattern is well-formed.
