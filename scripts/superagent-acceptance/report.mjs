@@ -50,7 +50,9 @@ function stepCard(step) {
 }
 
 const stats = (data.stats || []).map((s) => `<div class="stat"><b>${esc(s.value)}</b><span>${esc(s.label)}</span></div>`).join("");
-const env = (data.env || []).map(([k, v]) => `<div><dt>${esc(k)}</dt><dd>${rich(v)}</dd></div>`).join("");
+// .env is a two-column grid, so the dt/dd must be direct grid items; wrapping
+// each pair in a div made the whole row one 130px column.
+const env = (data.env || []).map(([k, v]) => `<dt>${esc(k)}</dt><dd>${rich(v)}</dd>`).join("");
 const assertions = (data.assertions || []).map((a) => `<tr>
   <td><code>${esc(a.id)}</code></td><td>${esc(a.group)}</td><td>${esc(a.name)}</td>
   <td>${badge(a.result)}</td><td>${rich(a.detail)}</td><td class="num">${esc(a.step == null ? "—" : a.step)}</td>
@@ -152,7 +154,7 @@ const html = `<!doctype html>
   <h2>断言总表</h2>
   <table><thead><tr><th>ID</th><th>组</th><th>断言</th><th>结果</th><th>证据</th><th class="num">步骤</th></tr></thead><tbody>${assertions}</tbody></table>
 
-  <h2>UI 缺口（必须在产品化前补齐）</h2>
+  <h2>缺口与风险（P0/P1 需在交付前清零）</h2>
   <ul class="gaps">${gaps}</ul>
 
   <h2>证据文件</h2>

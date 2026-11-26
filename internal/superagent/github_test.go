@@ -81,6 +81,63 @@ func TestGitHubSourcePollsIssuesAndComments(t *testing.T) {
 	}
 }
 
+// TestGitHubSourceIgnoresOwnChannelComments pins the live-loop fix: GitHub
+// attributes the Channel's comments to the token's owner, so without the
+// marker filter the deployment reads its own acceptance/question/completion
+// comments back as trusted follow-ups. The filtered comment must still advance
+// the cursor, or the page would grow until per_page hides newer human input.
+func TestGitHubSourceIgnoresOwnChannelComments(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/repos/acme/repo/issues":
+			_, _ = io.WriteString(w, `[
+				{"number":7,"title":"Fix it","body":"body","html_url":"https://github.com/acme/repo/issues/7",
+				 "state":"open","created_at":"2026-11-25T01:00:00Z","updated_at":"2026-11-25T04:30:00Z",
+				 "user":{"login":"alice","id":11,"type":"User"}}
+			]`)
+		case "/repos/acme/repo/issues/comments":
+			_, _ = io.WriteString(w, `[
+				{"id":99,"body":"a human comment","html_url":"https://github.com/acme/repo/issues/7#issuecomment-99",
+				 "issue_url":"https://api.github.com/repos/acme/repo/issues/7",
+				 "created_at":"2026-11-25T03:00:00Z","updated_at":"2026-11-25T03:00:00Z",
+				 "user":{"login":"alice","id":11,"type":"User"}},
+				{"id":100,"body":"Ticket 123 accepted\n\n<!-- keel-message:65e8a7ff-0000-0000-0000-000000000000 -->",
+				 "html_url":"https://github.com/acme/repo/issues/7#issuecomment-100",
+				 "issue_url":"https://api.github.com/repos/acme/repo/issues/7",
+				 "created_at":"2026-11-25T04:00:00Z","updated_at":"2026-11-25T04:00:00Z",
+				 "user":{"login":"deploy-bot","id":12,"type":"User"}}
+			]`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	tenant := uuid.New()
+	source, err := superagent.NewGitHubSource(superagent.GitHubConfig{
+		TenantID: tenant, Repo: "acme/repo", BaseURL: server.URL, Token: "secret-token",
+	})
+	if err != nil {
+		t.Fatalf("NewGitHubSource: %v", err)
+	}
+	page, err := source.Poll(context.Background(), tenant, "2026-11-25T00:00:00Z", 50)
+	if err != nil {
+		t.Fatalf("Poll: %v", err)
+	}
+	if len(page.Events) != 2 {
+		t.Fatalf("events = %d, want issue + one human comment: %+v", len(page.Events), page.Events)
+	}
+	for _, event := range page.Events {
+		if event.ExternalID == "comment:100" {
+			t.Fatal("the deployment's own marked comment was returned as a source event")
+		}
+	}
+	if page.NextCursor != "2026-11-25T04:30:00Z" {
+		t.Fatalf("next cursor = %q, want the ignored comment's newer timestamp to advance it", page.NextCursor)
+	}
+}
+
 func TestGitHubSourceBaselineCursor(t *testing.T) {
 	now := time.Date(2026, 11, 25, 12, 0, 0, 0, time.UTC)
 	tenant := uuid.New()

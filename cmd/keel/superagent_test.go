@@ -7,10 +7,26 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jixoai/keel/internal/accesswire"
+	"github.com/jixoai/keel/internal/collab"
 	"github.com/jixoai/keel/internal/harnessext"
 	"github.com/jixoai/keel/internal/superagent"
 	"github.com/jixoai/keel/internal/toolsurface"
 )
+
+// TestSuperagentOperatorFailsClosed pins the console seam the live deployment
+// wires: without a bridge it reports "not wired" (never allows), and without an
+// authenticated principal it denies instead of guessing an actor.
+func TestSuperagentOperatorFailsClosed(t *testing.T) {
+	if err := (superagentOperator{}).AuthorizeOperator(context.Background(), uuid.New(), uuid.New(), "alice", "answer"); !errors.Is(err, superagent.ErrOperatorUnavailable) {
+		t.Fatalf("nil bridge err = %v, want operator unavailable", err)
+	}
+	err := (superagentOperator{bridge: &accesswire.Bridge{}}).AuthorizeOperator(
+		context.Background(), uuid.New(), uuid.New(), "alice", "answer")
+	if !errors.Is(err, collab.ErrPermissionDenied) {
+		t.Fatalf("unauthenticated err = %v, want permission denied", err)
+	}
+}
 
 func envMap(values map[string]string) func(string) string {
 	return func(key string) string { return values[key] }

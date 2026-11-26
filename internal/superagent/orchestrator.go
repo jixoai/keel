@@ -487,6 +487,14 @@ func (o *Orchestrator) attachLocked(ctx context.Context, event Event, verdict Ve
 			// not authorization).
 			continue
 		}
+		if event.Kind == EventIssueUpdated && strings.TrimSpace(event.Body) == strings.TrimSpace(ticket.Request) {
+			// GitHub bumps an issue's updated_at for every new comment, including
+			// the Channel's own writes. An issue_updated event whose body is the
+			// ticket's existing request carries no new human input; delivering it
+			// would re-send the whole ticket text to the worker on every comment.
+			// A real edit changes the body and is still delivered.
+			continue
+		}
 		trusted := verdict.Action == ActionAttach || verdict.Action == ActionAccept
 		// A policy-allowed comment on a thread with exactly one open question is
 		// the structured answer path. An untrusted comment is never interpreted
@@ -819,10 +827,18 @@ func (o *Orchestrator) reconcileLocked(ctx context.Context) (int, error) {
 				_ = o.setTicketStatus(ctx, &ticket, collab.WorkItemOpen, "worker session cancelled")
 			}
 		} else {
+			// A worker that reported waiting and ended its turn leaves a blocked
+			// ticket, not an abandoned one: the answer will create a
+			// human-follow-up assignment on the same ticket. The note says that
+			// instead of claiming no report exists.
+			note := "worker session ended without a report"
+			if ticket.Status == collab.WorkItemBlocked {
+				note = "worker session ended while the ticket waits on a human answer"
+			}
 			assignment.Status = collab.AssignmentDone
-			assignment.Error = "worker session ended without a report"
+			assignment.Error = note
 			if ticket.Status == collab.WorkItemActive || ticket.Status == collab.WorkItemOpen {
-				_ = o.setTicketStatus(ctx, &ticket, collab.WorkItemBlocked, "worker session ended without a report")
+				_ = o.setTicketStatus(ctx, &ticket, collab.WorkItemBlocked, note)
 			}
 		}
 		assignment.UpdatedAt = o.cfg.Now()
@@ -909,8 +925,15 @@ func (o *Orchestrator) Recover(ctx context.Context) (int, error) {
 				case WorkerActive:
 					// The run is genuinely live; leave the assignment alone.
 				case WorkerDone:
+					// The same nuance as the runtime reconciler: a blocked ticket
+					// whose worker ended its turn is waiting on a human, not
+					// abandoned without a report.
+					if ticket.Status == collab.WorkItemBlocked {
+						assignment.Error = "worker run ended while the ticket waits on a human answer"
+					} else {
+						assignment.Error = "worker run completed without a report"
+					}
 					assignment.Status = collab.AssignmentDone
-					assignment.Error = "worker run completed without a report"
 					assignment.UpdatedAt = o.cfg.Now()
 					if err := o.auditRequired(ctx, AuditRecovered, "accepted", ticket.ID, assignment.Error); err != nil {
 						return recovered, err

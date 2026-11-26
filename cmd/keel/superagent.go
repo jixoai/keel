@@ -242,6 +242,11 @@ func newSuperagentRuntime(ctx context.Context, tenantID uuid.UUID, st *store.Sto
 		WorkerInspector:     superagentWorkerInspector{runs: storeSessions{Store: st}, runner: subagents},
 		WorkerTreeCanceller: superagentTreeCanceller{runner: subagents},
 		Slots:               superagent.NewSlots(st, superagent.SlotPolicy{Max: cfg.Slots, HumanReserved: cfg.HumanSlots}),
+		// The console answer/resume/stop loop has its own authorization seam. It
+		// is the caller's authenticated task.write grant at tenant scope; the
+		// answer body never names the acting identity. Without this the product
+		// board answers with 403 operator_not_wired in every real deployment.
+		Operator:            superagentOperator{bridge: bridge},
 		OrchestratorSession: sessionID,
 		OrchestratorBot:     cfg.OrchestratorBot,
 		WorkerBot:           cfg.WorkerBot,
@@ -303,6 +308,8 @@ func (w superagentWorkerWatcher) Watch(_ context.Context, tenantID, sessionID uu
 type superagentOperator struct {
 	bridge *accesswire.Bridge
 }
+
+var _ superagent.OperatorAuthorizer = superagentOperator{}
 
 func (o superagentOperator) AuthorizeOperator(ctx context.Context, tenantID, ticketID uuid.UUID, actor, action string) error {
 	if o.bridge == nil {

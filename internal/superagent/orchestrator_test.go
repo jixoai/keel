@@ -445,6 +445,42 @@ func TestCommentFansOutToSubscriptionWithoutNewTicket(t *testing.T) {
 	}
 }
 
+// TestUnchangedIssueUpdateIsNotAFollowUp pins the live-GitHub echo rule: every
+// Channel comment bumps the issue's updated_at, so the Source emits an
+// issue_updated event whose body is unchanged. Re-delivering it would re-send
+// the whole ticket text to the worker on every bot comment. A real edit still
+// arrives.
+func TestUnchangedIssueUpdateIsNotAFollowUp(t *testing.T) {
+	env := newEnv(t, envOpts{})
+	if _, err := env.orchestrator.HandleSourceEvent(context.Background(), fixtureEvent(t, issueEvent("e1", "issue#1"))); err != nil {
+		t.Fatalf("accept: %v", err)
+	}
+	updated := superagent.Event{
+		SourceID: "fixture", EventID: "u1", Kind: superagent.EventIssueUpdated,
+		Actor: alice(), Thread: superagent.ThreadRef{Source: "fixture", Kind: "issue", ID: "issue#1"},
+		Title: "Fix issue#1", Body: "Please fix it.",
+	}
+	result, err := env.orchestrator.HandleSourceEvent(context.Background(), fixtureEvent(t, updated))
+	if err != nil {
+		t.Fatalf("unchanged update: %v", err)
+	}
+	if result.Decision != string(superagent.ActionAttach) {
+		t.Fatalf("decision = %q, want attach", result.Decision)
+	}
+	if env.sink.count() != 0 {
+		t.Fatalf("deliveries = %d, want 0 for an unchanged body", env.sink.count())
+	}
+	edited := updated
+	edited.EventID = "u2"
+	edited.Body = "Please fix it. Also update the tests."
+	if _, err := env.orchestrator.HandleSourceEvent(context.Background(), fixtureEvent(t, edited)); err != nil {
+		t.Fatalf("edited update: %v", err)
+	}
+	if env.sink.count() != 1 {
+		t.Fatalf("deliveries = %d, want 1 after a real edit", env.sink.count())
+	}
+}
+
 func TestUnknownActorCommentStillFansOutToSubscribedTicket(t *testing.T) {
 	env := newEnv(t, envOpts{})
 	if _, err := env.orchestrator.HandleSourceEvent(context.Background(), fixtureEvent(t, issueEvent("e1", "issue#1"))); err != nil {

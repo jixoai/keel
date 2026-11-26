@@ -113,22 +113,27 @@ func (g *GitHubSource) Poll(ctx context.Context, tenantID uuid.UUID, cursor stri
 		return collab.SourcePage{}, fmt.Errorf("superagent: github cursor is not RFC3339: %w", err)
 	}
 
-	issues, err := g.listIssues(ctx, sinceTime, perPage)
+	issues, issueLatest, err := g.listIssues(ctx, sinceTime, perPage)
 	if err != nil {
 		return collab.SourcePage{}, err
 	}
-	comments, err := g.listComments(ctx, sinceTime, perPage)
+	comments, commentLatest, err := g.listComments(ctx, sinceTime, perPage)
 	if err != nil {
 		return collab.SourcePage{}, err
 	}
 	events := append(issues, comments...)
 	next := sinceTime
-	for _, event := range events {
-		if event.ReceivedAt.After(next) {
-			next = event.ReceivedAt
+	// The cursor advances past everything the page returned, including the
+	// Channel's own comments the Source deliberately ignores. A filtered
+	// comment was still consumed: leaving the cursor behind re-reads an
+	// ever-growing page, and the per_page cap would eventually hide newer
+	// human comments.
+	for _, latest := range []time.Time{issueLatest, commentLatest} {
+		if latest.After(next) {
+			next = latest
 		}
 	}
-	if len(events) == 0 {
+	if len(events) == 0 && issueLatest.IsZero() && commentLatest.IsZero() {
 		// An empty page does not move the cursor: a late-arriving event with an
 		// older timestamp is still read on the next poll.
 		next = sinceTime
@@ -164,7 +169,7 @@ type githubUser struct {
 	Type  string `json:"type"`
 }
 
-func (g *GitHubSource) listIssues(ctx context.Context, since time.Time, perPage int) ([]collab.SourceEvent, error) {
+func (g *GitHubSource) listIssues(ctx context.Context, since time.Time, perPage int) ([]collab.SourceEvent, time.Time, error) {
 	endpoint := fmt.Sprintf("%s/repos/%s/issues", g.base.String(), g.cfg.Repo)
 	values := url.Values{}
 	values.Set("state", "all")
@@ -174,10 +179,14 @@ func (g *GitHubSource) listIssues(ctx context.Context, since time.Time, perPage 
 	values.Set("per_page", strconv.Itoa(perPage))
 	var issues []githubIssue
 	if err := g.getJSON(ctx, endpoint+"?"+values.Encode(), &issues); err != nil {
-		return nil, err
+		return nil, time.Time{}, err
 	}
 	events := make([]collab.SourceEvent, 0, len(issues))
+	latest := time.Time{}
 	for _, issue := range issues {
+		if issue.UpdatedAt.After(latest) {
+			latest = issue.UpdatedAt
+		}
 		threadKind := "issue"
 		kind := EventIssueOpened
 		if issue.PullRequest != nil {
@@ -215,10 +224,17 @@ func (g *GitHubSource) listIssues(ctx context.Context, since time.Time, perPage 
 			ReceivedAt: issue.UpdatedAt,
 		})
 	}
-	return events, nil
+	return events, latest, nil
 }
 
-func (g *GitHubSource) listComments(ctx context.Context, since time.Time, perPage int) ([]collab.SourceEvent, error) {
+// channelMarkerPrefix starts the hidden marker GitHubChannel appends to every
+// comment it writes. The Source ignores its own comments: GitHub attributes
+// them to the token's owner account, so without this filter the deployment's
+// acceptance sentence, question and completion would come back as trusted
+// follow-ups and start another worker turn on every write.
+const channelMarkerPrefix = "<!-- keel-message:"
+
+func (g *GitHubSource) listComments(ctx context.Context, since time.Time, perPage int) ([]collab.SourceEvent, time.Time, error) {
 	endpoint := fmt.Sprintf("%s/repos/%s/issues/comments", g.base.String(), g.cfg.Repo)
 	values := url.Values{}
 	values.Set("sort", "updated")
@@ -227,10 +243,19 @@ func (g *GitHubSource) listComments(ctx context.Context, since time.Time, perPag
 	values.Set("per_page", strconv.Itoa(perPage))
 	var comments []githubComment
 	if err := g.getJSON(ctx, endpoint+"?"+values.Encode(), &comments); err != nil {
-		return nil, err
+		return nil, time.Time{}, err
 	}
 	events := make([]collab.SourceEvent, 0, len(comments))
+	latest := time.Time{}
 	for _, comment := range comments {
+		// The cursor must still move past a filtered comment (see Poll), so the
+		// timestamp is read before the skip.
+		if comment.UpdatedAt.After(latest) {
+			latest = comment.UpdatedAt
+		}
+		if strings.Contains(comment.Body, channelMarkerPrefix) {
+			continue
+		}
 		number := lastPathSegment(comment.IssueURL)
 		if number == "" {
 			continue
@@ -262,7 +287,7 @@ func (g *GitHubSource) listComments(ctx context.Context, since time.Time, perPag
 			ReceivedAt: comment.UpdatedAt,
 		})
 	}
-	return events, nil
+	return events, latest, nil
 }
 
 func (g *GitHubSource) getJSON(ctx context.Context, endpoint string, target any) error {
@@ -312,7 +337,7 @@ func (g *GitHubSource) Send(ctx context.Context, tenantID uuid.UUID, channelID s
 		if exists {
 			return nil
 		}
-		body += "\n\n<!-- keel-message:" + messageID + " -->"
+		body += "\n\n" + channelMarkerPrefix + messageID + " -->"
 	}
 	payload, err := json.Marshal(map[string]string{"body": body})
 	if err != nil {
