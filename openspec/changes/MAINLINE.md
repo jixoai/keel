@@ -81,8 +81,9 @@ depth 默认 3/-1 不限）与 `keel-collab-superagent`（Source → Ticket → 
 - `keel-collab-core` / `keel-collab-subagent`：Host/Mode 契约、深度策略（3/-1/0）、fork
   不耗深度、子代理取消/重试已交付；subagent 树/TUI 报告已出；**两者均已归档 2026-11-26**（core 的拓扑边界见 `docs/HARNESS.md` §3.6）。
 - `keel-collab-superagent`：Source → Ticket → Assignment → Worker → Report/Attention →
-  Channel 的 durable 闭环与五态看板 E2E（9 步）已出；产品 web/TUI 看板（tasks 4.2/4.3）
-  与 live GitHub 链路（4.5/5.2）未做，不归档。
+  Channel 的 durable 闭环、产品 web/TUI 工单看板（`/superagent`，五态 + SSE invalidation +
+  answer/resume/stop）与 Worker `report`/`ask` 模型工具已交付；独立复审 P0/P1=0。
+  live GitHub 链路（5.2）仍阻塞（无 token/仓库授权），不归档。
 - `keel-creation`：7 步 / 80 断言 / 53 文件覆盖 0 UNCOVERED；模型 read+write 改写 chunk 并
   实际渲染；会话 UI 批准；卸载零残留。独立复审的 P0（伪造 decision kind/派生审批 session）
   与 P1（viewer 误判、update 内容绑定、AI 写入口、证据）已修，复核 PASS；**已归档 2026-11-26**。
@@ -92,6 +93,13 @@ depth 默认 3/-1 不限）与 `keel-collab-superagent`（Source → Ticket → 
 - 公网报告：`https://local-kzf-keel-collab-reports.fde2e.com/creation-e2e-2026-11-26/report.html`、
   `.../checkpoint-e2e-2026-11-26/report.html`、`.../subagent-e2e-2026-11-26/report.html`、
   `.../superagent-e2e-2026-11-26/report.html`。
+
+**下一波：插件生态三条（2026-11-26 立项，文档已落 `09bf003`）**：`keel-plugin-attachment`
+（附件唯一 blob→模型输入→插件预览生命周期，插件只拿元数据）、`keel-plugin-commands`
+（斜杠命令是有权限/审计/幂等的宿主动作，不是 prompt 模板）、`keel-plugin-telemetry`
+（PI telemetry 契约插件化，OTLP 默认关、有界导出）。三者 `openspec validate --strict` 通过，
+实现按各自 tasks 推进；默认边界：命令首版 idle-only、附件首版不做字节处理、telemetry
+bundled 默认关闭。
 
 ## Owner 裁决（2026-11-22，记录，不再讨论）
 

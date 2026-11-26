@@ -989,9 +989,18 @@ function coverageRule(file) {
   // The superagent lane owns these files and its own board acceptance; this
   // report only names them so the diff stays fully accounted for.
   const superagentSurface = [
-    'internal/superagent/', 'internal/harnessapi/superagent', 'cmd/keel/superagent',
-    'internal/store/superagent.go', 'internal/toolsurface/superagent',
+    'internal/superagent/', 'internal/harnessapi/superagent', 'internal/harnessapi/identity_events',
+    'cmd/keel/superagent', 'internal/store/superagent', 'internal/toolsurface/superagent', 'internal/toolsurface/permissions_test.go',
+    'internal/collab/store.go', 'internal/toolauth/authorizer_test.go',
     'web/src/data/superagent', 'web/src/screens/books/superagent', 'scripts/superagent-acceptance/',
+    // Shared shell/route/data files changed by the superagent board lane; its
+    // own TUI suite (17/17) and report cover them, not this creation lane.
+    'web/App.tsx', 'web/src/data/route.ts', 'web/src/data/route.test.ts',
+    'web/src/data/fixture.ts', 'web/src/data/fixture-identity.ts',
+    'web/src/data/contract.ts', 'web/src/data/identity-stream',
+    'web/src/screens/books/shell.tsx', 'web/src/screens/books/chapters.tsx',
+    'web/src/screens/books/management', 'web/src/screens/command-palette.tsx',
+    'web/src/ui/icons.tsx', 'web/src/screens/books/books.tui.test.tsx', 'docs/HARNESS.md', 'internal/store/schema.sql', 'internal/store/rls.go',
   ];
   if (superagentSurface.some((prefix) => file === prefix || file.startsWith(prefix))) {
     return exempt('keel-collab-superagent 验收面', '由 superagent 工单看板/工具 lane 与其 E2E 覆盖，不在本 lane 冒充');

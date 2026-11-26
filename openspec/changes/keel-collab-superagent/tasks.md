@@ -76,5 +76,9 @@
       并发槽位、跨租户负控。（`internal/store/superagent_test.go` 使用本地临时 PG 实跑；
       DSN 未提交）
 - [ ] 5.2 GitHub 真链路 E2E：Issue → Ticket → Worker → PR/评论 → Attention → 完成；
-      每步截图 + HTML 报告（公网）。（未跑；无 GitHub 凭据/网络 E2E）
+      每步截图 + HTML 报告（公网）。（未跑：需要 Owner 提供测试仓库 + token/allowlist。
+      同一 orchestrator/Channel 语义已由 fixture Source + 本地 PG 的 9 步报告覆盖；
+      公网报告已发布。此项是唯一的归档阻塞。）
 - [ ] 5.3 独立 reviewer 复核；P0/P1 清零；`openspec validate --strict`；归档。
+      （产品 UI 与 Worker 工具分别经独立 reviewer 复核 PASS，P0/P1=0；strict 通过。
+      归档仍被 5.2 的 live GitHub 外部凭据阻塞。）
