@@ -78,13 +78,15 @@
 - [x] 5.2 GitHub 真链路 E2E：Issue → Ticket → Worker → PR/评论 → Attention → 完成；
       每步截图 + HTML 报告（公网）。（2026-11-27 实跑：真实 `keel serve` + 临时 PostgreSQL +
       `KEEL_SUPERAGENT_SOURCE=github`，测试仓库
-      `Gaubee/keel-test-superagent-e2e-20261126-161045`，本轮 issue #9；worker 模型经
-      4.5 的 `report`/`ask` 工具（脚本化 OpenAI provider），产品 UI 回答 Attention；
-      29/29 断言通过，报告
-      https://local-kzf-keel-superagent-live-github.fde2e.com/report.html
+      `Gaubee/keel-test-superagent-e2e-20261126-161045`；worker 模型经
+      4.5 的 `report`/`ask` 工具（脚本化 OpenAI provider），由产品 **HTTP API**
+      回答 Attention；断言全绿，报告
+      https://local-kzf-keel-live-gh.fde2e.com/report.html
       （`scripts/superagent-live-github/`）。实跑发现并修复：operator seam 未装配导致
-      产品答复 403、Channel 自身评论被 Source 读回形成回声、issue_updated 重复投递。
-      未覆盖：PR 线程、真实 LLM 判断质量——见报告「UI 缺口/风险」。）
+      产品答复 403、Channel 自身评论被 Source 读回形成回声（owner + 行尾 marker 精确过滤）、
+      issue_updated 按持久化「已投递标题/正文」快照去重（重启后仍成立）。
+      未覆盖：PR 线程、真实 LLM 判断质量——见报告「缺口与风险」。）
 - [x] 5.3 独立 reviewer 复核；P0/P1 清零；`openspec validate --strict`；归档。
       （产品 UI 与 Worker 工具分别经独立 reviewer 复核 PASS，P0/P1=0；strict 通过。
-      5.2 的外部凭据阻塞已于 2026-11-27 实跑解除。）
+      5.2 的外部凭据阻塞已于 2026-11-27 实跑解除；review 复审 P1（快照去重基准）与
+      P2（marker 过滤范围）已修复并补测。）

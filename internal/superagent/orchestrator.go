@@ -487,12 +487,12 @@ func (o *Orchestrator) attachLocked(ctx context.Context, event Event, verdict Ve
 			// not authorization).
 			continue
 		}
-		if event.Kind == EventIssueUpdated && strings.TrimSpace(event.Body) == strings.TrimSpace(ticket.Request) {
+		if event.Kind == EventIssueUpdated && !threadContentChanged(ticket, event) {
 			// GitHub bumps an issue's updated_at for every new comment, including
-			// the Channel's own writes. An issue_updated event whose body is the
-			// ticket's existing request carries no new human input; delivering it
-			// would re-send the whole ticket text to the worker on every comment.
-			// A real edit changes the body and is still delivered.
+			// the Channel's own writes. The durable snapshot records the title/body
+			// the worker last saw, so an unchanged update carries no input. A real
+			// edit (title or body) differs and is delivered once; the snapshot then
+			// advances, so the following comment bumps do not deliver it again.
 			continue
 		}
 		trusted := verdict.Action == ActionAttach || verdict.Action == ActionAccept
@@ -505,6 +505,9 @@ func (o *Orchestrator) attachLocked(ctx context.Context, event Event, verdict Ve
 				return nil, answerErr
 			}
 			if answered {
+				if err := o.recordDelivered(ctx, &ticket, event); err != nil {
+					return nil, err
+				}
 				delivered = append(delivered, ticket)
 				continue
 			}
@@ -538,9 +541,40 @@ func (o *Orchestrator) attachLocked(ctx context.Context, event Event, verdict Ve
 				o.cfg.Logger.Warn("superagent: follow-up dispatch failed", "ticket", ticket.ID, "error", err)
 			}
 		}
+		if err := o.recordDelivered(ctx, &ticket, event); err != nil {
+			return nil, err
+		}
 		delivered = append(delivered, ticket)
 	}
 	return delivered, nil
+}
+
+// threadContentChanged compares an issue_updated event with the durable
+// title/body snapshot the Ticket's worker last received. The snapshot lives in
+// the WorkItem input document, so the answer is the same after a restart.
+func threadContentChanged(ticket Ticket, event Event) bool {
+	last := ticket.LastDelivered()
+	return strings.TrimSpace(event.Title) != last.Title || strings.TrimSpace(event.Body) != last.Body
+}
+
+// recordDelivered persists the thread content the worker just received. It runs
+// only after a successful delivery (or dispatch), so a failed attempt is retried
+// by the next poll instead of being remembered as delivered.
+func (o *Orchestrator) recordDelivered(ctx context.Context, ticket *Ticket, event Event) error {
+	if event.Kind != EventIssueUpdated {
+		return nil
+	}
+	now := o.cfg.Now()
+	ticket.Delivered = &ThreadSnapshot{
+		Title: strings.TrimSpace(event.Title), Body: strings.TrimSpace(event.Body), At: now,
+	}
+	ticket.UpdatedAt = now
+	stored, err := o.cfg.Store.UpdateWorkItem(ctx, ticket.Record())
+	if err != nil {
+		return err
+	}
+	*ticket = TicketFromWorkItem(stored)
+	return nil
 }
 
 func (o *Orchestrator) answerFromCommentLocked(ctx context.Context, tenantID uuid.UUID, ticket Ticket, event Event) (bool, error) {

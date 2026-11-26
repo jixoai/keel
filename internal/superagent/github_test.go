@@ -23,6 +23,8 @@ func TestGitHubSourcePollsIssuesAndComments(t *testing.T) {
 		mu.Lock()
 		defer mu.Unlock()
 		switch r.URL.Path {
+		case "/user":
+			_, _ = io.WriteString(w, `{"login":"deploy-bot","id":12,"type":"User"}`)
 		case "/repos/acme/repo/issues":
 			issueSince = r.URL.Query().Get("since")
 			w.Header().Set("Content-Type", "application/json")
@@ -83,17 +85,22 @@ func TestGitHubSourcePollsIssuesAndComments(t *testing.T) {
 
 // TestGitHubSourceIgnoresOwnChannelComments pins the live-loop fix: GitHub
 // attributes the Channel's comments to the token's owner, so without the
-// marker filter the deployment reads its own acceptance/question/completion
-// comments back as trusted follow-ups. The filtered comment must still advance
+// filter the deployment reads its own acceptance/question/completion comments
+// back as trusted follow-ups. The rule is deliberately narrow: only the token
+// owner's own comment whose FINAL line is exactly our marker is skipped. A
+// trusted human who quotes the marker, or the owner editing a comment without a
+// trailing marker, is still delivered. The filtered comment must still advance
 // the cursor, or the page would grow until per_page hides newer human input.
 func TestGitHubSourceIgnoresOwnChannelComments(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
+		case "/user":
+			_, _ = io.WriteString(w, `{"login":"deploy-bot","id":12,"type":"User"}`)
 		case "/repos/acme/repo/issues":
 			_, _ = io.WriteString(w, `[
 				{"number":7,"title":"Fix it","body":"body","html_url":"https://github.com/acme/repo/issues/7",
-				 "state":"open","created_at":"2026-11-25T01:00:00Z","updated_at":"2026-11-25T04:30:00Z",
+				 "state":"open","created_at":"2026-11-25T01:00:00Z","updated_at":"2026-11-25T02:00:00Z",
 				 "user":{"login":"alice","id":11,"type":"User"}}
 			]`)
 		case "/repos/acme/repo/issues/comments":
@@ -105,8 +112,18 @@ func TestGitHubSourceIgnoresOwnChannelComments(t *testing.T) {
 				{"id":100,"body":"Ticket 123 accepted\n\n<!-- keel-message:65e8a7ff-0000-0000-0000-000000000000 -->",
 				 "html_url":"https://github.com/acme/repo/issues/7#issuecomment-100",
 				 "issue_url":"https://api.github.com/repos/acme/repo/issues/7",
-				 "created_at":"2026-11-25T04:00:00Z","updated_at":"2026-11-25T04:00:00Z",
-				 "user":{"login":"deploy-bot","id":12,"type":"User"}}
+				 "created_at":"2026-11-25T05:00:00Z","updated_at":"2026-11-25T05:00:00Z",
+				 "user":{"login":"deploy-bot","id":12,"type":"User"}},
+				{"id":101,"body":"what does <!-- keel-message:mid-body --> mean?",
+				 "html_url":"https://github.com/acme/repo/issues/7#issuecomment-101",
+				 "issue_url":"https://api.github.com/repos/acme/repo/issues/7",
+				 "created_at":"2026-11-25T04:10:00Z","updated_at":"2026-11-25T04:10:00Z",
+				 "user":{"login":"deploy-bot","id":12,"type":"User"}},
+				{"id":102,"body":"quoting the bot:\n<!-- keel-message:human-quote -->",
+				 "html_url":"https://github.com/acme/repo/issues/7#issuecomment-102",
+				 "issue_url":"https://api.github.com/repos/acme/repo/issues/7",
+				 "created_at":"2026-11-25T04:20:00Z","updated_at":"2026-11-25T04:20:00Z",
+				 "user":{"login":"alice","id":11,"type":"User"}}
 			]`)
 		default:
 			http.NotFound(w, r)
@@ -125,16 +142,50 @@ func TestGitHubSourceIgnoresOwnChannelComments(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Poll: %v", err)
 	}
-	if len(page.Events) != 2 {
-		t.Fatalf("events = %d, want issue + one human comment: %+v", len(page.Events), page.Events)
+	if len(page.Events) != 4 {
+		t.Fatalf("events = %d, want issue + 3 comments (own trailing marker skipped): %+v", len(page.Events), page.Events)
 	}
+	got := make(map[string]bool)
 	for _, event := range page.Events {
-		if event.ExternalID == "comment:100" {
-			t.Fatal("the deployment's own marked comment was returned as a source event")
-		}
+		got[event.ExternalID] = true
 	}
-	if page.NextCursor != "2026-11-25T04:30:00Z" {
-		t.Fatalf("next cursor = %q, want the ignored comment's newer timestamp to advance it", page.NextCursor)
+	if got["comment:100"] {
+		t.Fatal("the deployment's own trailing-marker comment was returned as a source event")
+	}
+	if !got["comment:101"] || !got["comment:102"] || !got["comment:99"] {
+		t.Fatalf("human / non-trailing comments were dropped: %+v", got)
+	}
+	// The filtered comment is the newest item on either endpoint (05:00), so the
+	// cursor must take the max across issues and comments including skipped
+	// ones. Taking only delivered events would leave it at 04:20 and re-read the
+	// page forever.
+	if page.NextCursor != "2026-11-25T05:00:00Z" {
+		t.Fatalf("next cursor = %q, want the filtered comment's newer timestamp to advance it", page.NextCursor)
+	}
+}
+
+// TestGitHubSourceFailsClosedWhenOwnerIsUnknown: if /user cannot be read, the
+// poll must fail rather than ingest the deployment's own comments as trusted
+// follow-ups. The next tick retries; no event is consumed in the meantime.
+func TestGitHubSourceFailsClosedWhenOwnerIsUnknown(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/user" {
+			http.Error(w, "no", http.StatusUnauthorized)
+			return
+		}
+		t.Errorf("unexpected request %s", r.URL.Path)
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+	tenant := uuid.New()
+	source, err := superagent.NewGitHubSource(superagent.GitHubConfig{
+		TenantID: tenant, Repo: "acme/repo", BaseURL: server.URL, Token: "secret-token",
+	})
+	if err != nil {
+		t.Fatalf("NewGitHubSource: %v", err)
+	}
+	if _, err := source.Poll(context.Background(), tenant, "2026-11-25T00:00:00Z", 50); err == nil {
+		t.Fatal("Poll succeeded without knowing the token owner")
 	}
 }
 
@@ -165,6 +216,10 @@ func TestGitHubChannelWritesCommentWithMarker(t *testing.T) {
 		}
 		if r.Method == http.MethodGet {
 			w.Header().Set("Content-Type", "application/json")
+			if r.URL.Path == "/user" {
+				_, _ = io.WriteString(w, `{"login":"deploy-bot","id":12,"type":"User"}`)
+				return
+			}
 			_, _ = io.WriteString(w, `[]`)
 			return
 		}
@@ -199,7 +254,11 @@ func TestGitHubChannelSkipsCommentWhenMarkerExists(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet {
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = io.WriteString(w, `[{"id":1,"body":"old\n\n<!-- keel-message:m-1 -->","issue_url":"https://api.github.com/repos/acme/repo/issues/7"}]`)
+			if r.URL.Path == "/user" {
+				_, _ = io.WriteString(w, `{"login":"deploy-bot","id":12,"type":"User"}`)
+				return
+			}
+			_, _ = io.WriteString(w, `[{"id":1,"body":"old\n\n<!-- keel-message:m-1 -->","issue_url":"https://api.github.com/repos/acme/repo/issues/7","user":{"login":"deploy-bot","id":12,"type":"User"}}]`)
 			return
 		}
 		posted = true

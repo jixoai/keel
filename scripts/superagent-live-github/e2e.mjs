@@ -25,6 +25,7 @@ const ISSUE = process.env.LIVE_ISSUE || '';
 const ISSUE_URL = process.env.LIVE_ISSUE_URL || '';
 const MARKER = process.env.LIVE_MARKER || '';
 const PROVIDER_LOG = process.env.LIVE_PROVIDER_LOG || '';
+const DSN_FILE = process.env.LIVE_DSN_FILE || '';
 const CHROME = process.env.LIVE_CHROME || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const PLAYWRIGHT = process.env.LIVE_PLAYWRIGHT || '';
 const HEADLESS = process.env.LIVE_HEADLESS !== 'false';
@@ -34,6 +35,7 @@ if (!BASE || !RUN || !REPO || !ISSUE || !MARKER) {
   process.exit(2);
 }
 const SHOTS = path.join(RUN, 'shots');
+const DSN = DSN_FILE && fs.existsSync(DSN_FILE) ? fs.readFileSync(DSN_FILE, 'utf8').trim() : '';
 fs.mkdirSync(SHOTS, { recursive: true });
 fs.mkdirSync(path.join(RUN, 'data'), { recursive: true });
 
@@ -314,9 +316,13 @@ async function main() {
 
   // 1. Source -> Ticket -> Assignment
   beginStep('ticket', 'Issue → Ticket/Assignment', `在真实 issue #${ISSUE} 上等待 Source 轮询接单。`, '看板出现唯一工单，线程 ID 指向该 issue，且派出 1 个执行 Assignment。');
+  // The queue creates the Ticket and its first Assignment in one locked pass,
+  // but the board read can interleave with the dispatch; wait for the settled
+  // shape the assertions describe instead of the transient accept row.
   const ticket = await waitFor('ticket', async () => {
     const body = await board();
-    return (body.tickets || []).find((item) => JSON.stringify(item).includes(MARKER));
+    const found = (body.tickets || []).find((item) => JSON.stringify(item).includes(MARKER));
+    return found && found.assignmentCount >= 1 ? found : null;
   }, 120000);
   const threadId = ticket.thread?.id || '';
   check('T1', 'ticket', '工单由真实 issue 接单', threadId === `${REPO}#${ISSUE}`, threadId);
@@ -325,7 +331,10 @@ async function main() {
     strength: ticket.mandate?.strength,
   });
   check('T3', 'ticket', '创建了一个执行 Assignment', ticket.assignmentCount >= 1, `assignmentCount=${ticket.assignmentCount}`);
-  const accepted = commentBodies().find((body) => body.includes(`Ticket ${ticket.id.slice(0, 8)} accepted`));
+  const accepted = await waitFor('acceptance comment', async () => {
+    const bodies = commentBodies();
+    return bodies.find((body) => body.includes(`Ticket ${ticket.id.slice(0, 8)} accepted`)) || null;
+  }, 45000);
   check('T4', 'ticket', 'Channel 在 issue 上写回接单评论', Boolean(accepted), accepted ? brief(accepted, 200) : 'missing');
   check('T5', 'ticket', '评论带 keel-message marker', Boolean(accepted && accepted.includes('<!-- keel-message:')), accepted ? 'marker present' : 'no marker');
   note(`ticketId=${ticket.id}\nassignmentCount=${ticket.assignmentCount}\nstatus=${ticket.status}\nthread=${threadId}`);
@@ -369,7 +378,106 @@ async function main() {
   await capture(() => gotoProduct('/superagent', '工单看板'), '02-product-board-attention.png', '产品 /superagent 看板：待人工收件箱显示员工问题');
   finishStep();
 
-  // 3. answer via product API + channel writeback
+  // 3. marker dedupe and self-echo while the ticket is parked on the human
+  beginStep(
+    'dedupe',
+    'marker 去重与自身回声（真实 GitHub，待人工窗口）',
+    '在同一 messageId 上连续 Send 两次；再写入去重探针评论（owner + 行尾 marker），让 Source 至少轮询三个周期；同时跑复审回归用例（正文编辑、仅标题编辑、owner+行尾 marker、跨端点游标取 max、PG 重启快照）。',
+    '重试不产生第二条评论；探针评论不被读回：assignment 数、模型 turn 数不增，工单仍 blocked；回归用例全 PASS。',
+  );
+  const beforeBoard = await board();
+  const beforeTicket = (beforeBoard.tickets || []).find((item) => item.id === ticket.id);
+  const turnCount = () => providerEntries().filter((entry) => typeof entry.roles === 'string').length;
+  const beforeTurns = turnCount();
+  let dedupeOutput = '';
+  let dedupeExit = 1;
+  try {
+    dedupeOutput = execFileSync(
+      'go',
+      ['test', './internal/superagent', '-run', 'TestGitHubChannelLiveMarkerDedupe', '-v', '-count=1'],
+      {
+        encoding: 'utf8',
+        maxBuffer: 8 << 20,
+        env: {
+          ...process.env,
+          KEEL_LIVE_GITHUB_REPO: REPO,
+          KEEL_LIVE_GITHUB_ISSUE: ISSUE,
+          KEEL_LIVE_GITHUB_TOKEN: process.env.LIVE_GITHUB_TOKEN || '',
+        },
+      },
+    );
+    dedupeExit = 0;
+  } catch (error) {
+    dedupeOutput = String(error.stdout || '') + String(error.stderr || '');
+    dedupeExit = typeof error.status === 'number' ? error.status : 1;
+  }
+  fs.writeFileSync(path.join(RUN, 'data', 'dedupe.log'), dedupeOutput);
+  check('M1', 'dedupe', 'Go live dedupe 用例通过', dedupeExit === 0, `exit=${dedupeExit}`);
+
+  // The review-driven regressions run inside the same lane so the report
+  // carries their real output: durable body/title snapshots (with real PG when
+  // the lane DSN is available), title-only edits, owner+trailing-marker
+  // filtering, human marker quotes, and the cross-endpoint cursor max over
+  // skipped self comments.
+  const regressionNames = [
+    'TestUnchangedIssueUpdateIsNotAFollowUp',
+    'TestIssueUpdateSnapshotIsDurableAcrossRestart',
+    'TestGitHubSourceIgnoresOwnChannelComments',
+    'TestGitHubSourceFailsClosedWhenOwnerIsUnknown',
+  ];
+  let regressionOutput = '';
+  let regressionExit = 1;
+  try {
+    regressionOutput = execFileSync(
+      'go',
+      ['test', './internal/superagent', '-run', regressionNames.join('|'), '-v', '-count=1'],
+      { encoding: 'utf8', maxBuffer: 8 << 20, env: { ...process.env, KEEL_TEST_DSN: DSN } },
+    );
+    regressionExit = 0;
+  } catch (error) {
+    regressionOutput = String(error.stdout || '') + String(error.stderr || '');
+    regressionExit = typeof error.status === 'number' ? error.status : 1;
+  }
+  fs.writeFileSync(path.join(RUN, 'data', 'regression.log'), regressionOutput);
+  check('R1', 'dedupe', '复审回归用例集 exit=0', regressionExit === 0, `exit=${regressionExit}`);
+  const regressed = regressionNames.filter((name) => !regressionOutput.includes('--- PASS: ' + name));
+  check(
+    'R2',
+    'dedupe',
+    'P1 快照 / 仅标题编辑 / owner+行尾 marker / 游标取 max / PG 重启 全部 PASS',
+    regressed.length === 0,
+    regressed.length === 0 ? `${regressionNames.length} cases PASS` : 'missing PASS: ' + regressed.join(','),
+  );
+  check('M2', 'dedupe', '日志断言重试后仍只有 1 条 marker 评论', dedupeOutput.includes('live marker dedupe:') && !dedupeOutput.includes('marker dedupe failed'), brief(dedupeOutput.split('\n').filter((line) => line.includes('marker') || line.includes('FAIL')).join(' | '), 300));
+  const markerProbe = commentBodies().filter((body) => body.includes('live E2E marker dedupe probe'));
+  check('M3', 'dedupe', '去重探针在 issue 上恰好 1 条', markerProbe.length === 1, `probe comments=${markerProbe.length}`);
+  // Three poll intervals (2s each) plus slack: the probe comment's updated_at
+  // bump and its marker comment must both have been read by the Source.
+  await sleep(9000);
+  const afterProbe = await board();
+  const afterTicket = (afterProbe.tickets || []).find((item) => item.id === ticket.id);
+  const afterTurns = turnCount();
+  check(
+    'M4',
+    'dedupe',
+    '自身评论不会被读回（待人工窗口内 assignment 数不增）',
+    afterTicket && afterTicket.assignmentCount === beforeTicket.assignmentCount,
+    { before: beforeTicket?.assignmentCount, after: afterTicket?.assignmentCount },
+  );
+  check(
+    'M5',
+    'dedupe',
+    '自身评论不会被读回（模型 turn 数不增）',
+    afterTurns === beforeTurns,
+    { before: beforeTurns, after: afterTurns },
+  );
+  check('M6', 'dedupe', '探针后工单仍为 blocked', afterTicket?.status === 'blocked', afterTicket?.status);
+  check('M7', 'dedupe', '探针后工单数不增', (afterProbe.tickets || []).length === 1, `tickets=${(afterProbe.tickets || []).length}`);
+  note(dedupeOutput.trim().split('\n').slice(-4).join('\n'));
+  note(regressionOutput.split('\n').filter((line) => line.includes('--- PASS') || line.includes('--- SKIP')).join('\n'));
+  finishStep();
+
+  // 4. answer via product API + channel writeback
   beginStep('answer', '产品 API 回答 Attention', `POST /v1/superagent/attention/${attention.id}/answer {optionId:"approve"}。`, '200；收件箱不再列该问题；issue 出现答复评论；答复进入同一 worker 会话。');
   const answered = await api('POST', `/v1/superagent/attention/${attention.id}/answer`, { optionId: 'approve', text: '' });
   check('N1', 'answer', '产品 answer 路由 200（operator seam 已装配）', answered.status === 200, `HTTP ${answered.status} ${brief(answered.body, 200)}`);
@@ -429,41 +537,6 @@ async function main() {
   note(`status=${doneTicket.status}\ncompletion=${brief(completion, 240)}`);
   await capture(() => gotoIssueWaiting(`Ticket ${ticket.id.slice(0, 8)} completed`), '04-github-complete.png', 'GitHub issue：完成评论');
   await capture(() => gotoProduct('/superagent', '工单看板'), '05-product-board-done.png', '产品 /superagent 看板：完成态与四类计数');
-  finishStep();
-
-  // 5. marker dedupe against live GitHub
-  beginStep('dedupe', 'marker 去重（真实 GitHub）', '同一 messageId 连续 Send 两次；第二次必须读到自己的隐藏 marker 并跳过。', 'marker 评论恰好 1 条；重试退出码 0；去重探针评论不会新建工单。');
-  let dedupeOutput = '';
-  let dedupeExit = 1;
-  try {
-    dedupeOutput = execFileSync(
-      'go',
-      ['test', './internal/superagent', '-run', 'TestGitHubChannelLiveMarkerDedupe', '-v', '-count=1'],
-      {
-        encoding: 'utf8',
-        maxBuffer: 8 << 20,
-        env: {
-          ...process.env,
-          KEEL_LIVE_GITHUB_REPO: REPO,
-          KEEL_LIVE_GITHUB_ISSUE: ISSUE,
-          KEEL_LIVE_GITHUB_TOKEN: process.env.LIVE_GITHUB_TOKEN || '',
-        },
-      },
-    );
-    dedupeExit = 0;
-  } catch (error) {
-    dedupeOutput = String(error.stdout || '') + String(error.stderr || '');
-    dedupeExit = typeof error.status === 'number' ? error.status : 1;
-  }
-  fs.writeFileSync(path.join(RUN, 'data', 'dedupe.log'), dedupeOutput);
-  check('M1', 'dedupe', 'Go live dedupe 用例通过', dedupeExit === 0, `exit=${dedupeExit}`);
-  check('M2', 'dedupe', '日志断言重试后仍只有 1 条 marker 评论', dedupeOutput.includes('live marker dedupe:') && !dedupeOutput.includes('marker dedupe failed'), brief(dedupeOutput.split('\n').filter((line) => line.includes('marker') || line.includes('FAIL')).join(' | '), 300));
-  const markerProbe = commentBodies().filter((body) => body.includes('live E2E marker dedupe probe'));
-  check('M3', 'dedupe', '去重探针在 issue 上恰好 1 条', markerProbe.length === 1, `probe comments=${markerProbe.length}`);
-  await sleep(5000);
-  const afterProbe = await board();
-  check('M4', 'dedupe', '自身 marker 评论不会被 Source 读回（工单数不增）', (afterProbe.tickets || []).length === 1, `tickets=${(afterProbe.tickets || []).length}`);
-  note(dedupeOutput.trim().split('\n').slice(-4).join('\n'));
   finishStep();
 
   // 6. product UI + GitHub screenshots
@@ -538,6 +611,7 @@ async function main() {
     { path: 'runtime/bootstrap.log', note: '角色/Profile/两个 Bot/授权组的创建结果' },
     { path: 'runtime/worker-tools.log', note: '启用部署后为 worker Bot 补 report/ask 工具授权' },
     { path: 'data/dedupe.log', note: '真实 GitHub marker 去重用例输出' },
+    { path: 'data/regression.log', note: '复审回归：P1 持久化快照（真 PG 重启）、仅标题编辑、owner+行尾 marker、人类引用 marker、跨端点游标取 max' },
     { path: 'shots/', note: 'GitHub issue 与产品看板/详情截图' },
   ];
   report.commands = [

@@ -447,20 +447,20 @@ func TestCommentFansOutToSubscriptionWithoutNewTicket(t *testing.T) {
 
 // TestUnchangedIssueUpdateIsNotAFollowUp pins the live-GitHub echo rule: every
 // Channel comment bumps the issue's updated_at, so the Source emits an
-// issue_updated event whose body is unchanged. Re-delivering it would re-send
-// the whole ticket text to the worker on every bot comment. A real edit still
-// arrives.
+// issue_updated event. The durable snapshot is the delivery baseline, not the
+// accept-time request: a real edit is delivered exactly once, and the comment
+// bumps that follow must not re-deliver that edited body.
 func TestUnchangedIssueUpdateIsNotAFollowUp(t *testing.T) {
 	env := newEnv(t, envOpts{})
 	if _, err := env.orchestrator.HandleSourceEvent(context.Background(), fixtureEvent(t, issueEvent("e1", "issue#1"))); err != nil {
 		t.Fatalf("accept: %v", err)
 	}
-	updated := superagent.Event{
-		SourceID: "fixture", EventID: "u1", Kind: superagent.EventIssueUpdated,
+	base := superagent.Event{
+		SourceID: "fixture", EventID: "u0", Kind: superagent.EventIssueUpdated,
 		Actor: alice(), Thread: superagent.ThreadRef{Source: "fixture", Kind: "issue", ID: "issue#1"},
 		Title: "Fix issue#1", Body: "Please fix it.",
 	}
-	result, err := env.orchestrator.HandleSourceEvent(context.Background(), fixtureEvent(t, updated))
+	result, err := env.orchestrator.HandleSourceEvent(context.Background(), fixtureEvent(t, base))
 	if err != nil {
 		t.Fatalf("unchanged update: %v", err)
 	}
@@ -470,14 +470,58 @@ func TestUnchangedIssueUpdateIsNotAFollowUp(t *testing.T) {
 	if env.sink.count() != 0 {
 		t.Fatalf("deliveries = %d, want 0 for an unchanged body", env.sink.count())
 	}
-	edited := updated
-	edited.EventID = "u2"
+
+	// A real body edit is delivered once.
+	edited := base
+	edited.EventID = "u1"
 	edited.Body = "Please fix it. Also update the tests."
 	if _, err := env.orchestrator.HandleSourceEvent(context.Background(), fixtureEvent(t, edited)); err != nil {
 		t.Fatalf("edited update: %v", err)
 	}
 	if env.sink.count() != 1 {
 		t.Fatalf("deliveries = %d, want 1 after a real edit", env.sink.count())
+	}
+
+	// The next comment bumps updated_at; the body is the edited one, so the
+	// snapshot (not the accept-time request) must suppress it.
+	bump := edited
+	bump.EventID = "u2"
+	if _, err := env.orchestrator.HandleSourceEvent(context.Background(), fixtureEvent(t, bump)); err != nil {
+		t.Fatalf("post-edit bump: %v", err)
+	}
+	if env.sink.count() != 1 {
+		t.Fatalf("deliveries = %d, want 1: a post-edit comment bump re-delivered the edited body", env.sink.count())
+	}
+
+	// A title-only edit is also a real edit, delivered once...
+	titled := bump
+	titled.EventID = "u3"
+	titled.Title = "Fix issue#1 (P1)"
+	if _, err := env.orchestrator.HandleSourceEvent(context.Background(), fixtureEvent(t, titled)); err != nil {
+		t.Fatalf("title-only update: %v", err)
+	}
+	if env.sink.count() != 2 {
+		t.Fatalf("deliveries = %d, want 2 after a title-only edit", env.sink.count())
+	}
+
+	// ...and its own comment bumps do not re-deliver it either.
+	titledAgain := titled
+	titledAgain.EventID = "u4"
+	if _, err := env.orchestrator.HandleSourceEvent(context.Background(), fixtureEvent(t, titledAgain)); err != nil {
+		t.Fatalf("title bump: %v", err)
+	}
+	if env.sink.count() != 2 {
+		t.Fatalf("deliveries = %d, want 2: a title bump re-delivered the title", env.sink.count())
+	}
+
+	// The snapshot is in the durable Ticket document.
+	board, err := env.orchestrator.Board(context.Background(), env.tenant, superagent.BoardFilter{})
+	if err != nil {
+		t.Fatalf("board: %v", err)
+	}
+	delivered := board.Tickets[0].LastDelivered()
+	if delivered.Title != "Fix issue#1 (P1)" || delivered.Body != "Please fix it. Also update the tests." {
+		t.Fatalf("durable snapshot = %+v", delivered)
 	}
 }
 

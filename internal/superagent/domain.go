@@ -279,15 +279,27 @@ type Mandate struct {
 // Revoked reports whether the mandate was withdrawn by a human stop.
 func (m Mandate) Revoked() bool { return m.RevokedAt != nil }
 
+// ThreadSnapshot is the issue title/body last delivered to the Ticket's worker.
+// Source events are compared against it so a comment-driven updated_at bump
+// never re-delivers content, while a real edit is delivered exactly once. It is
+// part of the durable Ticket document (not process memory), so the rule holds
+// across a restart.
+type ThreadSnapshot struct {
+	Title string    `json:"title,omitempty"`
+	Body  string    `json:"body,omitempty"`
+	At    time.Time `json:"at,omitempty"`
+}
+
 // ticketDoc is the WorkItem.Input document for super-agent tickets. Keeping it
 // in the generic WorkItem store means the core package needs no super-agent
 // table and one WorkStore implementation serves every mode.
 type ticketDoc struct {
-	Mandate   Mandate   `json:"mandate"`
-	Thread    ThreadRef `json:"thread"`
-	Request   string    `json:"request,omitempty"`
-	WorkerBot string    `json:"workerBot,omitempty"`
-	Event     *Event    `json:"event,omitempty"`
+	Mandate   Mandate         `json:"mandate"`
+	Thread    ThreadRef       `json:"thread"`
+	Request   string          `json:"request,omitempty"`
+	WorkerBot string          `json:"workerBot,omitempty"`
+	Event     *Event          `json:"event,omitempty"`
+	Delivered *ThreadSnapshot `json:"delivered,omitempty"`
 }
 
 // Ticket is a collab.WorkItem whose work unit is a ticket. It is independent of
@@ -295,10 +307,11 @@ type ticketDoc struct {
 // its Mandate stay.
 type Ticket struct {
 	collab.WorkItem
-	Mandate   Mandate   `json:"mandate"`
-	Thread    ThreadRef `json:"thread"`
-	Request   string    `json:"request,omitempty"`
-	WorkerBot string    `json:"workerBot,omitempty"`
+	Mandate   Mandate         `json:"mandate"`
+	Thread    ThreadRef       `json:"thread"`
+	Request   string          `json:"request,omitempty"`
+	WorkerBot string          `json:"workerBot,omitempty"`
+	Delivered *ThreadSnapshot `json:"delivered,omitempty"`
 }
 
 // TicketFromWorkItem projects a stored WorkItem into a Ticket. A malformed
@@ -317,6 +330,7 @@ func TicketFromWorkItem(item collab.WorkItem) Ticket {
 	ticket.Thread = doc.Thread
 	ticket.Request = doc.Request
 	ticket.WorkerBot = doc.WorkerBot
+	ticket.Delivered = doc.Delivered
 	return ticket
 }
 
@@ -324,11 +338,21 @@ func TicketFromWorkItem(item collab.WorkItem) Ticket {
 // Input with the ticket document.
 func (t Ticket) Record() collab.WorkItem {
 	item := t.WorkItem
-	doc := ticketDoc{Mandate: t.Mandate, Thread: t.Thread, Request: t.Request, WorkerBot: t.WorkerBot}
+	doc := ticketDoc{Mandate: t.Mandate, Thread: t.Thread, Request: t.Request, WorkerBot: t.WorkerBot, Delivered: t.Delivered}
 	if raw, err := json.Marshal(doc); err == nil {
 		item.Input = raw
 	}
 	return item
+}
+
+// LastDelivered is the thread content the worker has already seen. A ticket
+// accepted before the snapshot existed falls back to its request/title: the
+// accept turned exactly that content into the worker's task.
+func (t Ticket) LastDelivered() ThreadSnapshot {
+	if t.Delivered != nil {
+		return *t.Delivered
+	}
+	return ThreadSnapshot{Title: strings.TrimSpace(t.Title), Body: strings.TrimSpace(t.Request)}
 }
 
 // NewTicket builds an open Ticket from an accepted event and a verdict.
@@ -364,7 +388,13 @@ func NewTicket(tenantID uuid.UUID, modeID string, event Event, verdict Verdict, 
 		UpdatedAt: now,
 		Input:     nil,
 	}
-	ticket := Ticket{WorkItem: item, Mandate: mandate, Thread: event.Thread, Request: strings.TrimSpace(event.Body), WorkerBot: workerBot}
+	ticket := Ticket{
+		WorkItem: item, Mandate: mandate, Thread: event.Thread,
+		Request: strings.TrimSpace(event.Body), WorkerBot: workerBot,
+		// The accepted title/body is the content the worker's task already
+		// contains; later issue_updated events compare against this snapshot.
+		Delivered: &ThreadSnapshot{Title: strings.TrimSpace(event.Title), Body: strings.TrimSpace(event.Body), At: now},
+	}
 	ticket.WorkItem.Input = ticket.Record().Input
 	return ticket
 }

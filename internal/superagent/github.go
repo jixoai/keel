@@ -8,8 +8,10 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -52,6 +54,14 @@ type GitHubConfig struct {
 type GitHubSource struct {
 	cfg  GitHubConfig
 	base *url.URL
+
+	// selfMu guards the cached token-owner login. The Source must know whose
+	// comments are its own writes: GitHub attributes them to the token owner,
+	// and the policy otherwise trusts that account like a human.
+	selfMu     sync.Mutex
+	selfLogin  string
+	selfAt     time.Time
+	selfLookup bool
 }
 
 var _ collab.Source = (*GitHubSource)(nil)
@@ -113,6 +123,12 @@ func (g *GitHubSource) Poll(ctx context.Context, tenantID uuid.UUID, cursor stri
 		return collab.SourcePage{}, fmt.Errorf("superagent: github cursor is not RFC3339: %w", err)
 	}
 
+	// Resolve the deployment's own identity before reading anything: without
+	// it we cannot tell our own comments from a human's, and ingesting them is
+	// worse than failing this poll (the next tick retries).
+	if _, err := g.selfLoginOf(ctx); err != nil {
+		return collab.SourcePage{}, err
+	}
 	issues, issueLatest, err := g.listIssues(ctx, sinceTime, perPage)
 	if err != nil {
 		return collab.SourcePage{}, err
@@ -229,10 +245,53 @@ func (g *GitHubSource) listIssues(ctx context.Context, since time.Time, perPage 
 
 // channelMarkerPrefix starts the hidden marker GitHubChannel appends to every
 // comment it writes. The Source ignores its own comments: GitHub attributes
-// them to the token's owner account, so without this filter the deployment's
-// acceptance sentence, question and completion would come back as trusted
-// follow-ups and start another worker turn on every write.
+// them to the token's owner account, and the policy otherwise trusts that
+// account like a human.
 const channelMarkerPrefix = "<!-- keel-message:"
+
+// trailingMarkerLine matches the marker only as the final line, exactly as
+// Send writes it. A trusted human who quotes the marker mid-comment is not
+// filtered; only the deployment's own trailing marker is.
+var trailingMarkerLine = regexp.MustCompile(`^<!-- keel-message:[A-Za-z0-9._:-]{1,200} -->$`)
+
+func trailingChannelMarker(body string) bool {
+	trimmed := strings.TrimRight(body, " \t\r\n")
+	if trimmed == "" {
+		return false
+	}
+	if index := strings.LastIndex(trimmed, "\n"); index >= 0 {
+		trimmed = trimmed[index+1:]
+	}
+	return trailingMarkerLine.MatchString(strings.TrimSpace(trimmed))
+}
+
+// selfLoginOf resolves and caches the token owner's login. An empty token
+// cannot write, so there is nothing to filter. A lookup failure is returned as
+// an error: ingesting our own comments as trusted follow-ups is worse than
+// pausing this poll, and the next tick retries. The cache avoids a /user call
+// on every poll.
+func (g *GitHubSource) selfLoginOf(ctx context.Context) (string, error) {
+	if strings.TrimSpace(g.cfg.Token) == "" {
+		return "", nil
+	}
+	g.selfMu.Lock()
+	defer g.selfMu.Unlock()
+	if g.selfLookup && g.cfg.Now().Sub(g.selfAt) < 30*time.Minute {
+		return g.selfLogin, nil
+	}
+	var user githubUser
+	if err := g.getJSON(ctx, g.base.String()+"/user", &user); err != nil {
+		return "", fmt.Errorf("superagent: github token owner lookup: %w", err)
+	}
+	login := strings.TrimSpace(user.Login)
+	if login == "" {
+		return "", fmt.Errorf("superagent: github /user returned no login")
+	}
+	g.selfLogin = login
+	g.selfAt = g.cfg.Now()
+	g.selfLookup = true
+	return login, nil
+}
 
 func (g *GitHubSource) listComments(ctx context.Context, since time.Time, perPage int) ([]collab.SourceEvent, time.Time, error) {
 	endpoint := fmt.Sprintf("%s/repos/%s/issues/comments", g.base.String(), g.cfg.Repo)
@@ -241,6 +300,10 @@ func (g *GitHubSource) listComments(ctx context.Context, since time.Time, perPag
 	values.Set("direction", "asc")
 	values.Set("since", since.UTC().Format(time.RFC3339))
 	values.Set("per_page", strconv.Itoa(perPage))
+	self, err := g.selfLoginOf(ctx)
+	if err != nil {
+		return nil, time.Time{}, err
+	}
 	var comments []githubComment
 	if err := g.getJSON(ctx, endpoint+"?"+values.Encode(), &comments); err != nil {
 		return nil, time.Time{}, err
@@ -253,7 +316,7 @@ func (g *GitHubSource) listComments(ctx context.Context, since time.Time, perPag
 		if comment.UpdatedAt.After(latest) {
 			latest = comment.UpdatedAt
 		}
-		if strings.Contains(comment.Body, channelMarkerPrefix) {
+		if self != "" && strings.EqualFold(comment.User.Login, self) && trailingChannelMarker(comment.Body) {
 			continue
 		}
 		number := lastPathSegment(comment.IssueURL)
@@ -391,6 +454,15 @@ func (g *GitHubSource) parseChannel(channelID string) (string, string, error) {
 }
 
 func (g *GitHubSource) commentWithMarkerExists(ctx context.Context, repo, number, messageID string) (bool, error) {
+	self, err := g.selfLoginOf(ctx)
+	if err != nil {
+		return false, err
+	}
+	if self == "" {
+		// Without a token the write itself cannot succeed; there is no prior
+		// comment this deployment could have left.
+		return false, nil
+	}
 	endpoint := fmt.Sprintf("%s/repos/%s/issues/%s/comments", g.base.String(), repo, number)
 	values := url.Values{}
 	values.Set("sort", "created")
@@ -402,6 +474,11 @@ func (g *GitHubSource) commentWithMarkerExists(ctx context.Context, repo, number
 	}
 	marker := "keel-message:" + messageID
 	for _, comment := range comments {
+		// Only our own trailing marker is evidence of a landed write; a human
+		// quoting the same id mid-comment must not suppress the retry.
+		if !strings.EqualFold(comment.User.Login, self) || !trailingChannelMarker(comment.Body) {
+			continue
+		}
 		if strings.Contains(comment.Body, marker) {
 			return true, nil
 		}
