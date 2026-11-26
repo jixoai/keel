@@ -186,6 +186,16 @@ func TestIdentityEventsHubIsTenantScopedAndBounded(t *testing.T) {
 	case <-time.After(80 * time.Millisecond):
 	}
 
+	hub.Publish(tenantA, IdentityEventSuperagent)
+	select {
+	case event := <-subA.Events():
+		if event.Kind != IdentityEventSuperagent {
+			t.Fatalf("tenant A superagent kind = %q, want %q", event.Kind, IdentityEventSuperagent)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("tenant A did not receive the superagent invalidation")
+	}
+
 	// An unknown kind is a code mistake, not a new wire vocabulary.
 	hub.Publish(tenantA, IdentityEventKind("credentials"))
 	select {
@@ -220,6 +230,32 @@ func TestIdentityEventsHubIsTenantScopedAndBounded(t *testing.T) {
 	defer second.Close()
 	if _, err := limit.Subscribe(uuid.New()); !errors.Is(err, ErrIdentityEventStreamFull) {
 		t.Fatalf("over-budget subscribe err = %v, want ErrIdentityEventStreamFull", err)
+	}
+}
+
+func TestIdentityEventSuperagentKindIsClosedAndPublishes(t *testing.T) {
+	if !validIdentityEventKind(IdentityEventSuperagent) {
+		t.Fatal("the superagent invalidation kind must be in the closed vocabulary")
+	}
+	if validIdentityEventKind(IdentityEventKind("super_agent")) {
+		t.Fatal("an unknown superagent spelling must not be valid")
+	}
+	hub := NewIdentityEvents()
+	tenant := uuid.New()
+	sub, err := hub.Subscribe(tenant)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sub.Close()
+	server := &Server{identityEvents: hub}
+	server.PublishSuperagentChange(tenant)
+	select {
+	case event := <-sub.Events():
+		if event.Kind != IdentityEventSuperagent {
+			t.Fatalf("kind = %q, want %q", event.Kind, IdentityEventSuperagent)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("PublishSuperagentChange published nothing")
 	}
 }
 

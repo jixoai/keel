@@ -87,8 +87,18 @@ func (s *Store) GetWorkItem(ctx context.Context, tenantID, workItemID uuid.UUID)
 	return row, nil
 }
 
-// ListWorkItems lists one tenant's work items, oldest first.
+// ListWorkItems lists one tenant's work items in the requested order. The
+// default is oldest created first (the dispatch queue); the board asks for
+// updated-desc with an id tie-break so a refresh is stable.
 func (s *Store) ListWorkItems(ctx context.Context, tenantID uuid.UUID, filter collab.WorkFilter) ([]collab.WorkItem, error) {
+	if !filter.Order.Valid() {
+		return nil, collabError(collab.ErrInvalidRequest, collab.CodeInvalidRequest, "list_work_items",
+			"work item order "+string(filter.Order)+" is not in the closed vocabulary")
+	}
+	order := "created_at ASC, work_item_id ASC"
+	if filter.Order == collab.WorkOrderUpdatedDesc {
+		order = "updated_at DESC, work_item_id ASC"
+	}
 	rows, err := s.pool.Query(ctx, `
 		SELECT tenant_id, work_item_id, mode_id, title, input, source, scope, limits,
 		       status, owner_session_id, idempotency_key, created_at, updated_at
@@ -96,7 +106,7 @@ func (s *Store) ListWorkItems(ctx context.Context, tenantID uuid.UUID, filter co
 		 WHERE tenant_id = $1
 		   AND ($2 = '' OR mode_id = $2)
 		   AND ($3 = '' OR status = $3)
-		 ORDER BY created_at ASC, work_item_id ASC`,
+		 ORDER BY `+order,
 		tenantID, string(filter.ModeID), string(filter.Status))
 	if err != nil {
 		return nil, fmt.Errorf("store: list work items: %w", err)

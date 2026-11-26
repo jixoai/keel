@@ -36,10 +36,37 @@ type WorkStore interface {
 	ListLinks(ctx context.Context, tenantID, workItemID uuid.UUID) ([]Link, error)
 }
 
-// WorkFilter narrows a work-item list. Zero values mean "no filter".
+// WorkOrder is the stable ordering of a work-item list. The zero value keeps
+// the historical oldest-created-first order (the dispatch queue's fairness
+// rule); a board asks for most-recently-updated-first explicitly.
+type WorkOrder string
+
+const (
+	// WorkOrderCreatedAsc is the default: oldest created first, id ascending
+	// as the stable tie-break.
+	WorkOrderCreatedAsc WorkOrder = "created_asc"
+	// WorkOrderUpdatedDesc is the board order: most recently updated first,
+	// id ascending as the stable tie-break.
+	WorkOrderUpdatedDesc WorkOrder = "updated_desc"
+)
+
+// Valid reports whether the order is in the closed vocabulary. The empty
+// value is the default created-asc order.
+func (o WorkOrder) Valid() bool {
+	switch o {
+	case "", WorkOrderCreatedAsc, WorkOrderUpdatedDesc:
+		return true
+	default:
+		return false
+	}
+}
+
+// WorkFilter narrows a work-item list. Zero values mean "no filter"; a zero
+// Order keeps the default created-asc order.
 type WorkFilter struct {
 	ModeID string
 	Status WorkItemStatus
+	Order  WorkOrder
 }
 
 // SessionState is the index's view of one mode-created session. It exists so
@@ -192,12 +219,26 @@ func (m *MemoryWorkStore) ListWorkItems(_ context.Context, tenantID uuid.UUID, f
 		}
 		out = append(out, cloneWorkItem(item))
 	}
-	sort.Slice(out, func(i, j int) bool {
-		if !out[i].CreatedAt.Equal(out[j].CreatedAt) {
-			return out[i].CreatedAt.Before(out[j].CreatedAt)
-		}
-		return out[i].ID.String() < out[j].ID.String()
-	})
+	if !filter.Order.Valid() {
+		return nil, newError(ErrInvalidRequest, CodeInvalidRequest, "list_work_items",
+			"work item order "+string(filter.Order)+" is not in the closed vocabulary")
+	}
+	switch filter.Order {
+	case WorkOrderUpdatedDesc:
+		sort.Slice(out, func(i, j int) bool {
+			if !out[i].UpdatedAt.Equal(out[j].UpdatedAt) {
+				return out[i].UpdatedAt.After(out[j].UpdatedAt)
+			}
+			return out[i].ID.String() < out[j].ID.String()
+		})
+	default:
+		sort.Slice(out, func(i, j int) bool {
+			if !out[i].CreatedAt.Equal(out[j].CreatedAt) {
+				return out[i].CreatedAt.Before(out[j].CreatedAt)
+			}
+			return out[i].ID.String() < out[j].ID.String()
+		})
+	}
 	return out, nil
 }
 

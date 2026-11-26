@@ -181,6 +181,38 @@ func (s *recordingSink) last() superagent.InputRequest {
 	return s.delivered[len(s.delivered)-1]
 }
 
+type changeRecorder struct {
+	mu      sync.Mutex
+	tenants []uuid.UUID
+}
+
+func (c *changeRecorder) record(tenantID uuid.UUID) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.tenants = append(c.tenants, tenantID)
+}
+
+func (c *changeRecorder) count() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return len(c.tenants)
+}
+
+func (c *changeRecorder) last() uuid.UUID {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if len(c.tenants) == 0 {
+		return uuid.Nil
+	}
+	return c.tenants[len(c.tenants)-1]
+}
+
+func (c *changeRecorder) reset() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.tenants = nil
+}
+
 type envOpts struct {
 	slots         int
 	humanReserved int
@@ -203,6 +235,7 @@ type testEnv struct {
 	outbox              *superagent.Outbox
 	host                *collab.Coordinator
 	sink                *recordingSink
+	changes             *changeRecorder
 	orchestrator        *superagent.Orchestrator
 	orchestratorSession collab.SessionRef
 }
@@ -232,6 +265,7 @@ func newEnv(t *testing.T, opts envOpts) *testEnv {
 	env.audit = &fakeAudit{}
 	env.source = superagent.NewFixtureSource(func() time.Time { return *env.clock })
 	env.sink = &recordingSink{}
+	env.changes = &changeRecorder{}
 	env.orchestratorSession = collab.SessionRef{
 		TenantID: tenant, SessionID: uuid.New(), BotID: "orchestrator",
 		Depth: 0, State: collab.SessionActive, CreatedAt: now,
@@ -292,6 +326,7 @@ func (e *testEnv) newOrchestrator(t *testing.T, opts envOpts) *superagent.Orches
 		WorkerBot:           "worker",
 		MaxPoll:             20,
 		Now:                 func() time.Time { return *e.clock },
+		Changed:             e.changes.record,
 	})
 	if err != nil {
 		t.Fatalf("NewOrchestrator: %v", err)
@@ -628,12 +663,16 @@ func TestRecoveryMarksLostAssignmentAndRedispatches(t *testing.T) {
 		Inputs: env.sink, Sessions: restartSessions, Audit: env.audit, Outbox: env.outbox,
 		OrchestratorSession: env.orchestratorSession.SessionID, OrchestratorBot: "orchestrator",
 		WorkerBot: "worker", Now: func() time.Time { return *env.clock },
+		Changed: env.changes.record,
 	})
 	if err != nil {
 		t.Fatalf("NewOrchestrator: %v", err)
 	}
 	if _, err := orch.Recover(context.Background()); err != nil {
 		t.Fatalf("Recover: %v", err)
+	}
+	if env.changes.count() == 0 {
+		t.Fatal("Recover did not publish a board invalidation")
 	}
 	assignments, err := env.store.ListAssignments(context.Background(), env.tenant, ticket.ID)
 	if err != nil {

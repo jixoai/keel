@@ -1482,7 +1482,8 @@ func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, 
 	// when KEEL_SUPERAGENT_SOURCE names a Source and both role Bots. It enables
 	// the mode and starts the poller; with no configuration the descriptor stays
 	// disabled exactly as the core change left it.
-	superagentRuntime, err := newSuperagentRuntime(ctx, opts.TenantID, st, collabModes, accessBridge, subagents, starter, log)
+	superagentChanges := newSuperagentChangeSink()
+	superagentRuntime, err := newSuperagentRuntime(ctx, opts.TenantID, st, collabModes, accessBridge, subagents, starter, superagentChanges.Publish, log)
 	if err != nil {
 		return nil, fmt.Errorf("super-agent: %w", err)
 	}
@@ -1713,6 +1714,10 @@ func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, 
 	// inventory over the same SSE tail the identity pages use; the client
 	// re-reads GET /v1/plugins, never a row from the event.
 	manager.SetChangeSink(api.PublishPluginChange)
+	// A successful super-agent ticket/Attention write invalidates the board and
+	// Attention inbox over the same SSE tail; the client re-reads the board,
+	// never a row from the event.
+	superagentChanges.set(api)
 	auth, err := newAuthController(authConfig{
 		Mode:       opts.AuthMode,
 		Store:      st,

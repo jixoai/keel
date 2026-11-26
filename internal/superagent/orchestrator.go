@@ -140,6 +140,11 @@ type Config struct {
 	TicketLimits     collab.Limits
 	Now              func() time.Time
 	Logger           *slog.Logger
+	// Changed publishes one board/inbox invalidation after a successful
+	// Ticket/Attention write. Nil is a no-op (tests and headless callers);
+	// the product wires it to the identity SSE hub. Refused/failed writes do
+	// not call it.
+	Changed func(tenantID uuid.UUID)
 }
 
 // Orchestrator is the super-agent queue. It evaluates Source events, creates
@@ -279,8 +284,10 @@ func (o *Orchestrator) housekeepingLocked(ctx context.Context) error {
 	if _, err := o.reconcileLocked(ctx); err != nil {
 		return err
 	}
-	if _, err := o.dispatchQueuedLocked(ctx); err != nil {
+	if dispatched, err := o.dispatchQueuedLocked(ctx); err != nil {
 		return err
+	} else if dispatched > 0 {
+		o.changed(o.cfg.TenantID)
 	}
 	if o.cfg.Outbox != nil {
 		if _, err := o.cfg.Outbox.Flush(ctx, o.cfg.TenantID, 50); err != nil {
@@ -368,6 +375,9 @@ func (o *Orchestrator) handleSourceEventLocked(ctx context.Context, raw collab.S
 		if err != nil {
 			return result, err
 		}
+		if len(tickets) > 0 {
+			o.changed(o.cfg.TenantID)
+		}
 		reason := verdict.Reason
 		if verdict.Action == ActionIgnore {
 			reason = "delivered as untrusted thread context: " + verdict.Reason
@@ -402,6 +412,7 @@ func (o *Orchestrator) handleSourceEventLocked(ctx context.Context, raw collab.S
 	result.TicketID = ticket.ID
 	result.Reason = verdict.Reason
 	_, _ = o.dispatchTicketLocked(ctx, ticket, false, "accepted event "+event.EventID, "")
+	o.changed(o.cfg.TenantID)
 	return result, nil
 }
 
@@ -622,7 +633,11 @@ func (o *Orchestrator) dispatchQueuedLocked(ctx context.Context) (int, error) {
 func (o *Orchestrator) DispatchQueued(ctx context.Context) (int, error) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	return o.dispatchQueuedLocked(ctx)
+	count, err := o.dispatchQueuedLocked(ctx)
+	if count > 0 {
+		o.changed(o.cfg.TenantID)
+	}
+	return count, err
 }
 
 // dispatchTicketLocked creates one Assignment and Worker Session. The old
@@ -756,6 +771,9 @@ func (o *Orchestrator) expireAttentionsLocked(ctx context.Context) (int, error) 
 		expired++
 		o.audit(ctx, AuditAttentionExpire, "accepted", Event{}, attention.WorkItemID, "attention "+attention.ID.String())
 	}
+	if expired > 0 {
+		o.changed(o.cfg.TenantID)
+	}
 	return expired, nil
 }
 
@@ -813,6 +831,9 @@ func (o *Orchestrator) reconcileLocked(ctx context.Context) (int, error) {
 		}
 		changed++
 		o.audit(ctx, AuditRecovered, "accepted", Event{}, ticket.ID, assignment.Error)
+	}
+	if changed > 0 {
+		o.changed(o.cfg.TenantID)
 	}
 	return changed, nil
 }
@@ -913,6 +934,9 @@ func (o *Orchestrator) Recover(ctx context.Context) (int, error) {
 	}
 	if _, err := o.dispatchQueuedLocked(ctx); err != nil {
 		return recovered, err
+	}
+	if recovered > 0 {
+		o.changed(o.cfg.TenantID)
 	}
 	return recovered, nil
 }
@@ -1038,6 +1062,7 @@ func (o *Orchestrator) report(ctx context.Context, request ReportRequest, requir
 		if err != nil {
 			return WorkerReportOutcome{}, err
 		}
+		o.changed(request.TenantID)
 		return WorkerReportOutcome{Ticket: ticket, Assignment: assignment, Created: true}, nil
 	}
 	sessionID := request.CallerSessionID
@@ -1091,6 +1116,7 @@ func (o *Orchestrator) report(ctx context.Context, request ReportRequest, requir
 	if existed {
 		// A previous attempt may have stopped after the claim. Complete only the
 		// missing phases, in order.
+		appliedNow := false
 		if stored.AuditedAt == nil {
 			if err := o.auditRequiredWorker(ctx, AuditReport, "accepted", ticket, assignment, "state="+string(stored.State)); err != nil {
 				return WorkerReportOutcome{}, err
@@ -1112,6 +1138,7 @@ func (o *Orchestrator) report(ctx context.Context, request ReportRequest, requir
 			if err != nil {
 				return WorkerReportOutcome{}, err
 			}
+			appliedNow = true
 			at := o.cfg.Now()
 			marked, err := o.cfg.Store.MarkWorkerReportApplied(ctx, o.cfg.TenantID, stored.ID, at)
 			if err != nil {
@@ -1120,6 +1147,9 @@ func (o *Orchestrator) report(ctx context.Context, request ReportRequest, requir
 			if marked {
 				stored.AppliedAt = &at
 			}
+		}
+		if appliedNow {
+			o.changed(request.TenantID)
 		}
 		return WorkerReportOutcome{Ticket: ticket, Assignment: assignment, Report: stored, Created: created}, nil
 	}
@@ -1145,6 +1175,7 @@ func (o *Orchestrator) report(ctx context.Context, request ReportRequest, requir
 	} else if marked {
 		stored.AppliedAt = &appliedAt
 	}
+	o.changed(request.TenantID)
 	return WorkerReportOutcome{Ticket: ticket, Assignment: assignment, Report: stored, Created: true}, nil
 }
 
@@ -1437,7 +1468,11 @@ func (o *Orchestrator) ask(ctx context.Context, ticketID, assignmentID uuid.UUID
 	request.CallerSessionID = callerSession
 	request.AssignmentID = assignment.ID
 	attention, err := o.cfg.Host.Ask(ctx, o.cfg.TenantID, ticketID, request)
-	return attention, ticket, err
+	if err != nil {
+		return collab.Attention{}, Ticket{}, err
+	}
+	o.changed(o.cfg.TenantID)
+	return attention, ticket, nil
 }
 
 // AnswerAttention records a human answer and wakes the same Ticket. A stopped
@@ -1457,7 +1492,12 @@ func (o *Orchestrator) AnswerAttention(ctx context.Context, tenantID, attentionI
 	if err := o.requireOperator(ctx, tenantID, attention.WorkItemID, actor, "answer"); err != nil {
 		return collab.Attention{}, err
 	}
-	return o.answerAttentionLocked(ctx, tenantID, attention, optionID, text, actor)
+	answered, err := o.answerAttentionLocked(ctx, tenantID, attention, optionID, text, actor)
+	if err != nil {
+		return collab.Attention{}, err
+	}
+	o.changed(tenantID)
+	return answered, nil
 }
 
 func (o *Orchestrator) answerAttentionLocked(ctx context.Context, tenantID uuid.UUID, attention collab.Attention, optionID, text, actor string) (collab.Attention, error) {
@@ -1559,7 +1599,12 @@ func (o *Orchestrator) ResumeTicket(ctx context.Context, tenantID, ticketID uuid
 	if _, err := o.dispatchTicketLocked(ctx, ticket, true, "human follow-up: "+reason, reason); err != nil && !errors.Is(err, collab.ErrConcurrencyExceeded) {
 		return Ticket{}, err
 	}
-	return o.loadTicket(ctx, tenantID, ticketID)
+	resumed, err := o.loadTicket(ctx, tenantID, ticketID)
+	if err != nil {
+		return Ticket{}, err
+	}
+	o.changed(tenantID)
+	return resumed, nil
 }
 
 // StopTicket applies a human stop: the Mandate is revoked, the Ticket cannot
@@ -1636,13 +1681,15 @@ func (o *Orchestrator) stopTicketLocked(ctx context.Context, ticketID uuid.UUID,
 	if _, err := o.cfg.Store.UpdateWorkItem(ctx, ticket.Record()); err != nil {
 		return err
 	}
+	o.changed(o.cfg.TenantID)
 	return nil
 }
 
 // Board is the read-only ticket board projection.
 type BoardFilter struct {
 	Status collab.WorkItemStatus `json:"status,omitempty"`
-	Limit  int                   `json:"limit,omitempty"`
+	// Limit bounds the newest tickets (updated-desc head), not the oldest tail.
+	Limit int `json:"limit,omitempty"`
 }
 
 // TicketView is one board row.
@@ -1662,17 +1709,21 @@ type BoardView struct {
 	Counts   map[string]int `json:"counts"`
 }
 
-// Board lists the tenant's tickets, newest first (bounded by filter limit).
+// Board lists the tenant's tickets, most recently updated first (bounded by
+// filter limit). The limit is applied to the head of that order: a small board
+// shows the newest activity, never the oldest tail.
 func (o *Orchestrator) Board(ctx context.Context, tenantID uuid.UUID, filter BoardFilter) (BoardView, error) {
 	if err := o.checkTenant(tenantID); err != nil {
 		return BoardView{}, err
 	}
-	items, err := o.cfg.Store.ListWorkItems(ctx, tenantID, collab.WorkFilter{ModeID: o.cfg.ModeID, Status: filter.Status})
+	items, err := o.cfg.Store.ListWorkItems(ctx, tenantID, collab.WorkFilter{
+		ModeID: o.cfg.ModeID, Status: filter.Status, Order: collab.WorkOrderUpdatedDesc,
+	})
 	if err != nil {
 		return BoardView{}, err
 	}
 	if filter.Limit > 0 && len(items) > filter.Limit {
-		items = items[len(items)-filter.Limit:]
+		items = items[:filter.Limit]
 	}
 	view := BoardView{TenantID: tenantID, ModeID: o.cfg.ModeID, Tickets: make([]TicketView, 0, len(items)), Counts: map[string]int{}}
 	for _, item := range items {
@@ -1875,6 +1926,16 @@ func (o *Orchestrator) checkTenant(tenantID uuid.UUID) error {
 		return fmt.Errorf("%w: the tenant does not own this orchestrator", collab.ErrTenantMismatch)
 	}
 	return nil
+}
+
+// changed publishes one invalidation fact after a successful Ticket/Attention
+// write. A refused or failed write returns before this call, so the SSE stream
+// never teaches a client that a rejected action changed something.
+func (o *Orchestrator) changed(tenantID uuid.UUID) {
+	if o == nil || o.cfg.Changed == nil || tenantID == uuid.Nil {
+		return
+	}
+	o.cfg.Changed(tenantID)
 }
 
 type assignmentDoc struct {

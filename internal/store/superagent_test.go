@@ -45,6 +45,69 @@ func TestCollabSuperagentSchemaAndRLS(t *testing.T) {
 	}
 }
 
+func TestCollabWorkItemsUpdatedDescOrder(t *testing.T) {
+	st := readyTestStore(t)
+	ctx := context.Background()
+	tenant := uuid.New()
+	if err := st.CreateTenant(ctx, tenant, "order-"+tenant.String()[:8]); err != nil {
+		t.Fatalf("CreateTenant: %v", err)
+	}
+	first := collab.WorkItem{
+		ID: uuid.New(), TenantID: tenant, ModeID: collab.ModeSuperagent,
+		Title: "first", Status: collab.WorkItemOpen,
+	}
+	second := collab.WorkItem{
+		ID: uuid.New(), TenantID: tenant, ModeID: collab.ModeSuperagent,
+		Title: "second", Status: collab.WorkItemOpen,
+	}
+	if _, err := st.CreateWorkItem(ctx, first); err != nil {
+		t.Fatalf("CreateWorkItem first: %v", err)
+	}
+	if _, err := st.CreateWorkItem(ctx, second); err != nil {
+		t.Fatalf("CreateWorkItem second: %v", err)
+	}
+	// Pin the update timestamps so the assertion cannot depend on call latency.
+	future := time.Now().UTC().Add(time.Hour)
+	if _, err := st.pool.Exec(ctx, `
+		UPDATE collab_work_items SET updated_at = $3
+		 WHERE tenant_id = $1 AND work_item_id = $2`, tenant, first.ID, future); err != nil {
+		t.Fatalf("pin first updated_at: %v", err)
+	}
+	old := time.Now().UTC().Add(-time.Hour)
+	if _, err := st.pool.Exec(ctx, `
+		UPDATE collab_work_items SET updated_at = $3
+		 WHERE tenant_id = $1 AND work_item_id = $2`, tenant, second.ID, old); err != nil {
+		t.Fatalf("pin second updated_at: %v", err)
+	}
+
+	items, err := st.ListWorkItems(ctx, tenant, collab.WorkFilter{Order: collab.WorkOrderUpdatedDesc})
+	if err != nil {
+		t.Fatalf("ListWorkItems updated desc: %v", err)
+	}
+	if len(items) != 2 || items[0].ID != first.ID || items[1].ID != second.ID {
+		t.Fatalf("updated desc order = %v, want first then second", workItemIDs(items))
+	}
+	// The default stays oldest-created-first for the dispatch queue.
+	items, err = st.ListWorkItems(ctx, tenant, collab.WorkFilter{})
+	if err != nil {
+		t.Fatalf("ListWorkItems default: %v", err)
+	}
+	if len(items) != 2 || items[0].ID != first.ID || items[1].ID != second.ID {
+		t.Fatalf("default order = %v, want creation order", workItemIDs(items))
+	}
+	if _, err := st.ListWorkItems(ctx, tenant, collab.WorkFilter{Order: collab.WorkOrder("bogus")}); err == nil {
+		t.Fatal("an unknown work order was accepted")
+	}
+}
+
+func workItemIDs(items []collab.WorkItem) []uuid.UUID {
+	out := make([]uuid.UUID, 0, len(items))
+	for _, item := range items {
+		out = append(out, item.ID)
+	}
+	return out
+}
+
 func TestCollabSuperagentStoreRoundTrip(t *testing.T) {
 	st := readyTestStore(t)
 	ctx := context.Background()

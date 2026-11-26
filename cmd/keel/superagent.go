@@ -9,12 +9,14 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jixoai/keel/internal/access"
 	"github.com/jixoai/keel/internal/accesswire"
 	"github.com/jixoai/keel/internal/collab"
+	"github.com/jixoai/keel/internal/harnessapi"
 	"github.com/jixoai/keel/internal/harnessext"
 	"github.com/jixoai/keel/internal/store"
 	"github.com/jixoai/keel/internal/superagent"
@@ -105,7 +107,7 @@ func superagentConfigFromEnv(getenv func(string) string) (superagentConfig, erro
 
 // newSuperagentRuntime assembles the orchestrator and enables the mode. It
 // returns nil when no Source is configured, which is the default deployment.
-func newSuperagentRuntime(ctx context.Context, tenantID uuid.UUID, st *store.Store, registry *collab.ModeRegistry, bridge *accesswire.Bridge, subagents *harnessext.SubagentRunner, starter *harnessext.TurnStarter, log *slog.Logger) (*superagent.Orchestrator, error) {
+func newSuperagentRuntime(ctx context.Context, tenantID uuid.UUID, st *store.Store, registry *collab.ModeRegistry, bridge *accesswire.Bridge, subagents *harnessext.SubagentRunner, starter *harnessext.TurnStarter, changed func(uuid.UUID), log *slog.Logger) (*superagent.Orchestrator, error) {
 	cfg, err := superagentConfigFromEnv(os.Getenv)
 	if err != nil {
 		return nil, err
@@ -244,6 +246,7 @@ func newSuperagentRuntime(ctx context.Context, tenantID uuid.UUID, st *store.Sto
 		OrchestratorBot:     cfg.OrchestratorBot,
 		WorkerBot:           cfg.WorkerBot,
 		Logger:              log,
+		Changed:             changed,
 	})
 	if err != nil {
 		return nil, err
@@ -466,6 +469,37 @@ func warnSuperagentWorkerGrants(ctx context.Context, st *store.Store, tenantID u
 	if len(missing) > 0 {
 		log.Warn("super-agent worker bot is missing worker tool grants; the model-facing report/ask tools will be unavailable or denied",
 			"bot", botID, "missing", missing)
+	}
+}
+
+// superagentChangeSink bridges the orchestrator's board/inbox invalidation to
+// the product API's identity SSE hub. The API is assembled after the queue, so
+// the sink tolerates "not attached yet" and becomes live when set is called.
+type superagentChangeSink struct {
+	mu  sync.RWMutex
+	api *harnessapi.Server
+}
+
+func newSuperagentChangeSink() *superagentChangeSink { return &superagentChangeSink{} }
+
+func (s *superagentChangeSink) set(api *harnessapi.Server) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.api = api
+	s.mu.Unlock()
+}
+
+func (s *superagentChangeSink) Publish(tenantID uuid.UUID) {
+	if s == nil {
+		return
+	}
+	s.mu.RLock()
+	api := s.api
+	s.mu.RUnlock()
+	if api != nil {
+		api.PublishSuperagentChange(tenantID)
 	}
 }
 

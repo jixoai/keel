@@ -71,7 +71,7 @@ keel version
 | GET | `/v1/triggers`、POST `/v1/triggers/{id}/fire` | 触发器审计与手动/签名触发（幂等键；签名头见 §3.3）；fire 以 trigger 的 `botId` 创建 Bot-owned Session，`created_by` = 调用者 |
 | GET | `/v1/subagents`、`/v1/subagents/{id}` | 子代理列表/详情 |
 | POST | `/v1/sessions/{id}/subagents` | 派生子代理（`wait:true` 同步等待；断线不再取消子代理） |
-| GET | `/v1/superagent/tickets`、`/v1/superagent/attention` | super-agent 工单看板 / Attention 收件箱（需 `task.read`；未装配 503，`superagent.board=false`） |
+| GET | `/v1/superagent/tickets`、`/v1/superagent/attention` | super-agent 工单看板（`updated_at DESC`，limit 取最新头部）/ Attention 收件箱（需 `task.read`；未装配 503，`superagent.board=false`；写成功后经 `/v1/identity/events` 的 `superagent` invalidation 通知） |
 | POST | `/v1/superagent/tickets/{id}/report`、`…/ask`、`…/resume`、`…/stop`、`/v1/superagent/attention/{id}/answer` | worker report/ask（需 sessionId；report 可带幂等 `requestId`）与 operator answer/resume/stop（需 `task.write` + `OperatorAuthorizer`）；worker 模型侧另有 `report`/`ask` 工具（§3.5） |
 
 ### 身份与 Bot API（`internal/harnessapi`，A2–A4）
@@ -230,7 +230,10 @@ Worker Bot 的 Harness 是工具白名单：要使用模型侧 `report`/`ask`，
 
 首版生产写入口是 HTTP：worker report/ask 与 operator answer/resume/stop。Source 评论在
 policy 允许且恰好一个 open Attention 时按选项/自由文本作答；不可信评论只能作为 thread context，
-不能 resume blocked Ticket 或启动 worker。worker 同时有模型侧工具（4.5）：
+不能 resume blocked Ticket 或启动 worker。看板按 `updated_at DESC` + `work_item_id` 稳定
+tie-break 返回，`limit` 截取最新头部；Ticket/Attention 的成功写（accept/attach、report、ask、
+answer、resume、stop、recover/reconcile/expire）发布 `superagent` SSE invalidation，
+失败/拒绝路径不发布。worker 同时有模型侧工具（4.5）：
 
 - **工具入口**：启用模式时 `report`/`ask` 作为 product extra tool 追加到工具面（不属于恒定
   11 个 builtin，所以默认部署的清单哈希不变）；`report` 的状态是

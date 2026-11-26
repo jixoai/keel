@@ -17,6 +17,7 @@
 //	teams        TeamBot rows, Mission/Roster and archive state
 //	sessions     session visibility/list (shares, archive, bot invocation)
 //	plugins      plugin inventory/lifecycle (install, enable, disable, uninstall)
+//	superagent   super-agent ticket board / Attention inbox
 //
 // Publishing happens after the business write (and its mandatory audit row)
 // succeeded. A refused or failed write publishes nothing, so a 4xx/5xx never
@@ -45,6 +46,7 @@ const (
 	IdentityEventTeams       IdentityEventKind = "teams"
 	IdentityEventSessions    IdentityEventKind = "sessions"
 	IdentityEventPlugins     IdentityEventKind = "plugins"
+	IdentityEventSuperagent  IdentityEventKind = "superagent"
 )
 
 // validIdentityEventKind keeps a programming mistake out of the wire: the
@@ -53,7 +55,8 @@ const (
 func validIdentityEventKind(kind IdentityEventKind) bool {
 	switch kind {
 	case IdentityEventAccounts, IdentityEventPermissions, IdentityEventBots,
-		IdentityEventTeams, IdentityEventSessions, IdentityEventPlugins:
+		IdentityEventTeams, IdentityEventSessions, IdentityEventPlugins,
+		IdentityEventSuperagent:
 		return true
 	}
 	return false
@@ -67,6 +70,17 @@ func (s *Server) PublishPluginChange(tenantID uuid.UUID) {
 		return
 	}
 	s.identityEvents.Publish(tenantID, IdentityEventPlugins)
+}
+
+// PublishSuperagentChange tells the tenant's clients that the super-agent
+// ticket board or Attention inbox changed. The orchestrator calls it after a
+// successful ticket/Attention write; the web client re-reads the board/inbox
+// through its ordinary routes (never a row from the event).
+func (s *Server) PublishSuperagentChange(tenantID uuid.UUID) {
+	if s == nil || s.identityEvents == nil {
+		return
+	}
+	s.identityEvents.Publish(tenantID, IdentityEventSuperagent)
 }
 
 // IdentityEvent is one invalidation fact. It carries no ids, names, grants or
