@@ -63,6 +63,11 @@ var ErrSessionNotFound = errors.New("harnessapi: session not found")
 // it has no native run to cancel (409).
 var ErrExternalSession = errors.New("harnessapi: session is owned by an external backend")
 
+// ErrSessionConflict reports a session state that refuses the write (for
+// example an archived session). The native input path already maps it to 409;
+// the MCP bridge uses this sentinel so the shared commit refusal is not a 502.
+var ErrSessionConflict = errors.New("harnessapi: session state does not allow this operation")
+
 // CancelFunc cancels the session's active run. The adapter lives in the hosting
 // process (cmd/keel) because it needs the run seam and the session check.
 type CancelFunc func(ctx context.Context, tenantID, sessionID uuid.UUID) (harnessext.CancelResult, error)

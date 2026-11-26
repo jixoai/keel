@@ -422,8 +422,11 @@ func pluginApprovalPrompt(ask pluginApprovalAsk) string {
 // prompt, and the rendered text is capped so a pathological declaration cannot
 // flood the decision UI.
 const (
-	pluginApprovalClaimLineMax  = 512
-	pluginApprovalClaimsTextMax = 2048
+	// A valid contribution carries at most 32 patterns of 128 bytes; 16 KiB
+	// leaves room for the fixed prefix. The MIME list is never cut mid-list: a
+	// human approving a preview must see every narrowed type.
+	pluginApprovalClaimLineMax  = 16 << 10
+	pluginApprovalClaimsTextMax = 64 << 10
 )
 
 // attachmentClaimPrompts renders the attachment claims of a declaration for the
@@ -462,9 +465,13 @@ func attachmentClaimPrompts(contributions []harnessext.ExtensionContribution) []
 		line := fmt.Sprintf("%s attachment preview contribution (form %s) for MIME: %s",
 			claim.Slot, form, mimeText)
 		if len(line) > pluginApprovalClaimLineMax {
-			line = line[:pluginApprovalClaimLineMax]
+			// Validated patterns make this unreachable; if a future bound changes,
+			// say so explicitly instead of silently hiding MIME types.
+			line = line[:pluginApprovalClaimLineMax] + " [claim text truncated]"
 		}
 		if total+len(line)+2 > pluginApprovalClaimsTextMax {
+			out = append(out, fmt.Sprintf(
+				"[additional attachment preview claims omitted: approval text bound %d bytes]", pluginApprovalClaimsTextMax))
 			break
 		}
 		total += len(line) + 2

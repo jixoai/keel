@@ -469,3 +469,38 @@ func TestRetryRefusesAnUnresolvableStoredSelection(t *testing.T) {
 		t.Fatalf("refused retry wrote %d events (before %d)", len(after), len(before))
 	}
 }
+
+// TestRetryRejectsAnInvalidAttachment pins that a retry re-validates the stored
+// attachment against the current tenant/blob state: an unknown fileId is a
+// field-level 400, and the ledger does not grow.
+func TestRetryRejectsAnInvalidAttachment(t *testing.T) {
+	hs, st := newTestServer(t)
+	hc := hs.Client()
+	tenant := uuid.NewString()
+	session := inputSetup(t, hs, tenant)
+	tenantID := uuid.MustParse(tenant)
+	var appended struct {
+		Seq int64 `json:"seq"`
+	}
+	original := map[string]any{
+		"text": "retry me", "requestId": "retry-bad-attachment",
+		"attachments": []map[string]any{{
+			"fileId": uuid.NewString(), "name": "ghost.txt", "mime": "text/plain",
+		}},
+	}
+	if code := doJSON(t, hc, http.MethodPost, hs.URL+"/v1/sessions/"+session.String()+"/events", tenant,
+		map[string]any{"kind": "user.message", "payload": original}, &appended); code != http.StatusCreated {
+		t.Fatalf("append original: %d", code)
+	}
+	var retry retryBody
+	code := postRetry(t, hc, hs, tenant, session, "t_"+strconv.FormatInt(appended.Seq, 10), "", &retry)
+	if code != http.StatusBadRequest {
+		t.Fatalf("retry = %d (%+v), want 400", code, retry)
+	}
+	if !strings.Contains(retry.Error, "attachments[0].fileId") {
+		t.Fatalf("retry error = %q, want the field path", retry.Error)
+	}
+	if events := loadSessionEvents(t, st, tenantID, session); len(events) != 1 {
+		t.Fatalf("a refused retry wrote events: %d", len(events))
+	}
+}

@@ -2,13 +2,15 @@ package httpapi
 
 // AttachmentPart projection (change keel-plugin-attachment, task 3.1).
 //
-// A plugin UI never reads blob bytes; it receives this read-only document and
-// draws a preview from it. MIME/size/thumbnail lifecycle come from the blob
-// record (the authority); name/width/height are display facts the event payload
-// carries; delivery describes the last attempt's transport decision. The shape
-// carries no bytes, base64, CAS path, tenant header or credential.
+// The projection is message-scoped, not a bare blob lookup: the display facts
+// (name/width/height) come from the committed user.message identified by `seq`,
+// while MIME/size/thumbnail lifecycle come from the blob record (the authority).
+// `delivery` is attempt-scoped and is not persisted with the message, so this
+// endpoint reports it as not evaluated rather than trusting a caller-supplied
+// value. A plugin UI never reads blob bytes.
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
@@ -20,10 +22,7 @@ import (
 	"github.com/jixoai/keel/internal/store"
 )
 
-const (
-	attachmentPartReasonMax = 400
-	attachmentPartNameMax   = attachment.NameMaxBytes
-)
+const attachmentPartNotAttemptScoped = "delivery is decided during an attempt and is not stored with this message"
 
 func (s *Server) attachmentPart(w http.ResponseWriter, r *http.Request) {
 	tenantID, ok := tenantFrom(r)
@@ -31,12 +30,55 @@ func (s *Server) attachmentPart(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusUnauthorized, errors.New("X-Tenant-ID is required"))
 		return
 	}
-	id, err := uuid.Parse(r.PathValue("id"))
+	sessionID, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, errors.New("bad session id"))
+		return
+	}
+	fileID, err := uuid.Parse(r.PathValue("fileId"))
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, errors.New("bad file id"))
 		return
 	}
-	meta, err := s.cfg.Store.BlobMetaOf(r.Context(), tenantID, id)
+	seq, err := strconv.ParseInt(strings.TrimSpace(r.URL.Query().Get("seq")), 10, 64)
+	if err != nil || seq <= 0 {
+		writeErr(w, http.StatusBadRequest, errors.New("seq must name the committed user.message carrying the attachment"))
+		return
+	}
+	events, err := s.cfg.Store.LoadEvents(r.Context(), tenantID, sessionID, seq-1, 1)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	if len(events) != 1 || events[0].Seq != seq {
+		writeErr(w, http.StatusNotFound, errors.New("message not found"))
+		return
+	}
+	if events[0].Kind != store.EventUserMessage {
+		writeErr(w, http.StatusBadRequest, errors.New("seq must name a user.message"))
+		return
+	}
+	var payload struct {
+		Attachments []attachment.Ref `json:"attachments"`
+	}
+	if err := json.Unmarshal(events[0].Payload, &payload); err != nil {
+		writeErr(w, http.StatusInternalServerError, errors.New("the committed message payload is not readable"))
+		return
+	}
+	var ref attachment.Ref
+	found := false
+	for _, candidate := range payload.Attachments {
+		if candidate.FileID == fileID.String() {
+			ref = candidate
+			found = true
+			break
+		}
+	}
+	if !found {
+		writeErr(w, http.StatusNotFound, errors.New("attachment not found in this message"))
+		return
+	}
+	meta, err := s.cfg.Store.BlobMetaOf(r.Context(), tenantID, fileID)
 	if err != nil {
 		status := http.StatusInternalServerError
 		if errors.Is(err, store.ErrNoBlob) {
@@ -46,68 +88,16 @@ func (s *Server) attachmentPart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !meta.Complete {
-		// A projection of an in-flight object would let a preview claim bytes
-		// that do not exist yet; the input path refuses the same state with a
-		// field error.
 		writeJSON(w, http.StatusConflict, map[string]any{
 			"error":  "attachment is not complete",
 			"fileId": meta.BlobID,
 		})
 		return
 	}
-	query := r.URL.Query()
-	name := strings.TrimSpace(query.Get("name"))
-	if len(name) > attachmentPartNameMax {
-		writeErr(w, http.StatusBadRequest, errors.New("name must be at most 256 bytes"))
-		return
-	}
-	width, ok := attachmentPartDimension(w, query.Get("width"), "width")
-	if !ok {
-		return
-	}
-	height, ok := attachmentPartDimension(w, query.Get("height"), "height")
-	if !ok {
-		return
-	}
-	native := false
-	if raw := strings.TrimSpace(query.Get("native")); raw != "" {
-		parsed, err := strconv.ParseBool(raw)
-		if err != nil {
-			writeErr(w, http.StatusBadRequest, errors.New("native must be a boolean"))
-			return
-		}
-		native = parsed
-	}
-	reason := strings.TrimSpace(query.Get("reason"))
-	if len(reason) > attachmentPartReasonMax {
-		writeErr(w, http.StatusBadRequest, errors.New("reason must be at most 400 bytes"))
-		return
-	}
-	ref := attachment.Ref{
-		FileID: meta.BlobID.String(),
-		Name:   name,
-		Mime:   meta.Mime,
-		Size:   meta.Size,
-		Width:  width,
-		Height: height,
-	}
 	part := attachment.BuildPart(ref, attachment.BlobFacts{
 		Mime:        meta.Mime,
 		Size:        meta.Size,
 		ThumbStatus: meta.ThumbStatus,
-	}, attachment.Delivery{Native: native, Reason: reason})
+	}, attachment.Delivery{Native: false, Reason: attachmentPartNotAttemptScoped})
 	writeJSON(w, http.StatusOK, part)
-}
-
-func attachmentPartDimension(w http.ResponseWriter, raw, field string) (int, bool) {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return 0, true
-	}
-	value, err := strconv.Atoi(raw)
-	if err != nil || value < 0 {
-		writeErr(w, http.StatusBadRequest, errors.New(field+" must be a non-negative integer"))
-		return 0, false
-	}
-	return value, true
 }

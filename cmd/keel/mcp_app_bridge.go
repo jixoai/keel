@@ -123,6 +123,9 @@ func mcpAppInputCommit(st *store.Store, edge kernel.Committer, edgeQuota *quota.
 			Attachments: attachments,
 		}, httpapi.ClientInputOptions{MaxUpload: maxUpload, Quota: edgeQuota})
 		if err != nil {
+			if errors.Is(err, httpapi.ErrInputArchivedSession) {
+				return harnessapi.MCPAppInput{}, harnessapi.ErrSessionConflict
+			}
 			if errors.Is(err, httpapi.ErrInputExternalSession) {
 				return harnessapi.MCPAppInput{}, harnessapi.ErrExternalSession
 			}

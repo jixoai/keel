@@ -112,14 +112,14 @@ func sampleRoutePath(path string) string {
 	return string(out)
 }
 
-// TestAttachmentPartUsesTheFileReadCapability pins the projection's permission
-// model: it is a tenant blob read, not a session-scoped grant.
-func TestAttachmentPartUsesTheFileReadCapability(t *testing.T) {
-	match, ok := accessgate.Match("GET", "/v1/attachments/00000000-0000-0000-0000-000000000000/part")
+// TestAttachmentPartUsesTheSessionReadCapability pins the projection's
+// permission model: it is a read of the session's committed message.
+func TestAttachmentPartUsesTheSessionReadCapability(t *testing.T) {
+	match, ok := accessgate.Match("GET", "/v1/sessions/00000000-0000-0000-0000-000000000000/attachments/11111111-1111-1111-1111-111111111111/part")
 	if !ok {
 		t.Fatal("no matrix rule for the attachment projection")
 	}
-	if match.Rule.Key != access.KeyFileRead {
-		t.Fatalf("attachment part key = %q, want %q", match.Rule.Key, access.KeyFileRead)
+	if match.Rule.Key != access.KeySessionRead {
+		t.Fatalf("attachment part key = %q, want %q", match.Rule.Key, access.KeySessionRead)
 	}
 }

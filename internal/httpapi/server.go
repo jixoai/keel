@@ -32,6 +32,11 @@ import (
 	"github.com/jixoai/keel/internal/stream"
 )
 
+// multipartEnvelopeAllowance is the multipart framing budget above MaxUpload:
+// a file exactly at the limit still fits its boundary headers. The file itself
+// is checked against MaxUpload after parsing.
+const multipartEnvelopeAllowance int64 = 1 << 20
+
 // Config wires the server's dependencies.
 type Config struct {
 	Store     *store.Store
@@ -252,7 +257,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/files/{id}/meta", s.fileMeta)
 	s.mux.HandleFunc("GET /v1/files/{id}/thumbnail", s.fileThumbnail)
 	s.mux.HandleFunc("GET /v1/files/{id}", s.file)
-	s.mux.HandleFunc("GET /v1/attachments/{id}/part", s.attachmentPart)
+	s.mux.HandleFunc("GET /v1/sessions/{id}/attachments/{fileId}/part", s.attachmentPart)
 	s.mux.HandleFunc("POST /v1/mcp/servers/{name}/signin", s.mcpSignIn)
 	s.mux.HandleFunc("/v1/mcp/callback", s.mcpCallback)
 	// Product-layer HarnessAPI (keel-agent): its own mux owns the remaining /v1
@@ -1236,8 +1241,9 @@ func (s *Server) upload(w http.ResponseWriter, r *http.Request) {
 	if strings.HasPrefix(mime, "multipart/form-data") {
 		// A multipart body has no single file size the quota middleware can
 		// pre-check (and a chunked one has no Content-Length at all). Bound the
-		// whole body first, then admit the file's declared size before storing.
-		r.Body = http.MaxBytesReader(w, r.Body, s.cfg.MaxUpload)
+		// whole body with an envelope allowance so a file exactly MaxUpload still
+		// fits, then judge the file itself by its declared size.
+		r.Body = http.MaxBytesReader(w, r.Body, s.cfg.MaxUpload+multipartEnvelopeAllowance)
 		if err := r.ParseMultipartForm(8 << 20); err != nil {
 			writeMultipartReadError(w, err)
 			return
@@ -1248,6 +1254,11 @@ func (s *Server) upload(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		defer file.Close()
+		if header.Size > s.cfg.MaxUpload {
+			writeErr(w, http.StatusRequestEntityTooLarge,
+				fmt.Errorf("file is %d bytes; the upload limit is %d bytes", header.Size, s.cfg.MaxUpload))
+			return
+		}
 		if s.cfg.Quota != nil {
 			if _, err := s.cfg.Quota.AdmitStorage(r.Context(), tenantID, header.Size); err != nil {
 				if !quota.WriteError(w, err) {
@@ -1269,6 +1280,23 @@ func (s *Server) upload(w http.ResponseWriter, r *http.Request) {
 	}
 	if mime == "" {
 		mime = "application/octet-stream"
+	}
+	if r.ContentLength < 0 {
+		// A chunked raw body has no size the quota path can admit before bytes
+		// are stored. Multipart is the supported chunked shape (it is bounded by
+		// MaxUpload and its file size is checked after parsing); refusing here is
+		// honest rather than silently skipping the tenant ceiling.
+		writeErr(w, http.StatusLengthRequired,
+			errors.New("raw uploads require Content-Length; use multipart/form-data for a chunked body"))
+		return
+	}
+	if s.cfg.Quota != nil {
+		if _, err := s.cfg.Quota.AdmitStorage(r.Context(), tenantID, r.ContentLength); err != nil {
+			if !quota.WriteError(w, err) {
+				writeErr(w, 500, err)
+			}
+			return
+		}
 	}
 	meta, err := s.cfg.Uploader.Put(r.Context(), tenantID, mime, http.MaxBytesReader(w, r.Body, s.cfg.MaxUpload))
 	if err != nil {

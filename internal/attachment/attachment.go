@@ -147,20 +147,25 @@ func parseRef(index int, item json.RawMessage) (Ref, error) {
 			ref.FileID = id.String()
 		}
 	}
-	if raw, ok := fields["name"]; ok {
-		value, err := optionalString(raw)
-		if err != nil {
-			return Ref{}, &FieldError{Field: path("name"), Message: "name must be a string"}
-		}
-		value = strings.TrimSpace(value)
-		if value == "" {
-			return Ref{}, &FieldError{Field: path("name"), Message: "name must be 1..256 bytes and is display-only"}
-		}
-		if len(value) > NameMaxBytes {
-			return Ref{}, &FieldError{Field: path("name"), Message: fmt.Sprintf("name must be at most %d bytes", NameMaxBytes)}
-		}
-		ref.Name = value
+	rawName, hasName := fields["name"]
+	if !hasName {
+		// The display name is required by the shared contract (the MCP pre-check
+		// and the native input must agree): an attachment row without a label is
+		// not something the default attachment line can render.
+		return Ref{}, &FieldError{Field: path("name"), Message: "name is required (1..256 bytes, display-only)"}
 	}
+	value, err := optionalString(rawName)
+	if err != nil {
+		return Ref{}, &FieldError{Field: path("name"), Message: "name must be a string"}
+	}
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return Ref{}, &FieldError{Field: path("name"), Message: "name must be 1..256 bytes and is display-only"}
+	}
+	if len(value) > NameMaxBytes {
+		return Ref{}, &FieldError{Field: path("name"), Message: fmt.Sprintf("name must be at most %d bytes", NameMaxBytes)}
+	}
+	ref.Name = value
 	if raw, ok := fields["mime"]; ok {
 		value, err := optionalString(raw)
 		if err != nil {

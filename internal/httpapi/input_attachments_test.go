@@ -171,6 +171,13 @@ func TestInputAttachmentRefusals(t *testing.T) {
 			wantStatus:  http.StatusBadRequest,
 		},
 		{
+			name:        "missing name",
+			requestID:   "attach-missing-name",
+			attachments: []map[string]any{{"mime": "text/plain"}},
+			field:       "attachments[0].name",
+			wantStatus:  http.StatusBadRequest,
+		},
+		{
 			name:      "more than sixteen",
 			requestID: "attach-count",
 			attachments: func() []map[string]any {

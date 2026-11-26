@@ -23,6 +23,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/jixoai/keel/internal/harnessext"
+	"github.com/jixoai/keel/internal/kernel"
 	"github.com/jixoai/keel/internal/mcp"
 	"github.com/jixoai/keel/internal/mcphost"
 	"github.com/jixoai/keel/internal/quota"
@@ -1199,6 +1200,7 @@ func TestMCPAppMessageAttachments(t *testing.T) {
 		"bad file id":   []map[string]any{{"fileId": "not-a-uuid", "name": "x"}},
 		"unknown field": []map[string]any{{"fileId": uuid.NewString(), "name": "x", "url": "https://evil.example"}},
 		"empty name":    []map[string]any{{"fileId": uuid.NewString(), "name": ""}},
+		"missing name":  []map[string]any{{"fileId": uuid.NewString()}},
 		"long mime":     []map[string]any{{"fileId": uuid.NewString(), "name": "x", "mime": strings.Repeat("m", mcpAppAttachmentMIMETypeMax+1)}},
 		"negative size": []map[string]any{{"fileId": uuid.NewString(), "name": "x", "size": -1}},
 	}
@@ -1438,6 +1440,30 @@ func TestMCPAppMessageMapsQuotaRefusals(t *testing.T) {
 			err:    fmt.Errorf("%w: tenant x", quota.ErrConfig),
 			status: http.StatusServiceUnavailable,
 			want:   "quota",
+		},
+		{
+			name:   "kernel quota",
+			err:    kernel.ErrQuota,
+			status: http.StatusTooManyRequests,
+			want:   "quota",
+		},
+		{
+			name:   "kernel key conflict",
+			err:    kernel.ErrKeyConflict,
+			status: http.StatusConflict,
+			want:   "idempotency key",
+		},
+		{
+			name:   "kernel not found",
+			err:    kernel.ErrNotFound,
+			status: http.StatusNotFound,
+			want:   "session not found",
+		},
+		{
+			name:   "archived session",
+			err:    ErrSessionConflict,
+			status: http.StatusConflict,
+			want:   "session state",
 		},
 	}
 	for _, testCase := range cases {

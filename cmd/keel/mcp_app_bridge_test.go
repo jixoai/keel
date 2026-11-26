@@ -6,14 +6,21 @@ package main
 // httptest-level fake cannot prove.
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
 
 	"github.com/google/uuid"
 
+	"github.com/jixoai/keel/internal/attachment"
+	"github.com/jixoai/keel/internal/blob"
+	"github.com/jixoai/keel/internal/harnessapi"
+	"github.com/jixoai/keel/internal/httpapi"
 	"github.com/jixoai/keel/internal/kernel"
 	"github.com/jixoai/keel/internal/store"
 )
@@ -130,5 +137,63 @@ func TestMCPAppInputCommitWritesUserMessage(t *testing.T) {
 	}
 	if len(events) != 1 {
 		t.Fatalf("events after replay = %d, want 1", len(events))
+	}
+}
+
+// TestMCPAppInputCommitProductionAttachmentGate pins the production adapter's
+// attachment path: the MCP seam uses the shared commit validation and its
+// configured MaxUpload, so a foreign fileId is a typed field error, not a
+// silently committed message.
+func TestMCPAppInputCommitProductionAttachmentGate(t *testing.T) {
+	dsn := os.Getenv("KEEL_TEST_DSN")
+	if dsn == "" {
+		t.Skip("KEEL_TEST_DSN not set")
+	}
+	ctx := context.Background()
+	st, err := store.Open(ctx, store.Config{DSN: dsn, MaxConns: 4, MinConns: 1})
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(st.Close)
+	tenant, session := uuid.New(), uuid.New()
+	if err := st.CreateTenant(ctx, tenant, "mcp-app-attach-"+tenant.String()[:8]); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.CreateSession(ctx, tenant, session); err != nil {
+		t.Fatal(err)
+	}
+	mem := kernel.NewMemStore()
+	mem.CreateSession(tenant, session)
+	k := kernel.New(mem, kernel.Options{})
+	commit := mcpAppInputCommit(st, k, nil, httpapi.DefaultMaxUpload)
+
+	uploader := &blob.Uploader{Store: st, CASDir: t.TempDir()}
+	meta, err := uploader.Put(ctx, tenant, "text/plain", bytes.NewReader([]byte("hello")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	requestID := "mcp-app:test:attachment-1"
+	attachments := json.RawMessage(fmt.Sprintf(
+		`[{"fileId":%q,"name":"a.txt","mime":"text/plain"}]`, meta.BlobID.String()))
+	if _, err := commit(ctx, tenant, session, requestID, "look", attachments); err != nil {
+		t.Fatalf("valid attachment commit: %v", err)
+	}
+
+	_, err = commit(ctx, tenant, session, "mcp-app:test:attachment-2", "look",
+		json.RawMessage(fmt.Sprintf(`[{"fileId":%q,"name":"ghost.txt","mime":"text/plain"}]`, uuid.NewString())))
+	var fieldErr *attachment.FieldError
+	if !errors.As(err, &fieldErr) {
+		t.Fatalf("unknown attachment error = %v, want a typed field error", err)
+	}
+	if fieldErr.Field != "attachments[0].fileId" || fieldErr.HTTPStatus() != 400 {
+		t.Fatalf("field error = %+v", fieldErr)
+	}
+
+	// An archived session is the shared commit path's 409, not a 502.
+	if _, err := st.ArchiveSession(ctx, tenant, session); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := commit(ctx, tenant, session, "mcp-app:test:archived", "look", nil); !errors.Is(err, harnessapi.ErrSessionConflict) {
+		t.Fatalf("archived session error = %v, want ErrSessionConflict", err)
 	}
 }

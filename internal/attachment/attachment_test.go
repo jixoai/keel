@@ -53,15 +53,16 @@ func TestParseRefsFieldErrors(t *testing.T) {
 	}{
 		{"not an array", `{"fileId":"` + id + `"}`, "attachments"},
 		{"not an object", `["x"]`, "attachments[0]"},
-		{"file id not a string", `[{"fileId":3}]`, "attachments[0].fileId"},
-		{"file id not a uuid", `[{"fileId":"blob-1"}]`, "attachments[0].fileId"},
+		{"file id not a string", `[{"name":"a.txt","fileId":3}]`, "attachments[0].fileId"},
+		{"file id not a uuid", `[{"name":"a.txt","fileId":"blob-1"}]`, "attachments[0].fileId"},
+		{"missing name", `[{"fileId":"` + id + `"}]`, "attachments[0].name"},
 		{"name wrong type", `[{"name":1}]`, "attachments[0].name"},
 		{"empty name", `[{"name":"   "}]`, "attachments[0].name"},
 		{"long name", `[{"name":"` + strings.Repeat("a", NameMaxBytes+1) + `"}]`, "attachments[0].name"},
-		{"long mime", `[{"mime":"` + strings.Repeat("a", MimeMaxBytes+1) + `"}]`, "attachments[0].mime"},
-		{"negative size", `[{"size":-1}]`, "attachments[0].size"},
-		{"fractional size", `[{"size":1.5}]`, "attachments[0].size"},
-		{"negative width", `[{"width":-1}]`, "attachments[0].width"},
+		{"long mime", `[{"name":"a.txt","mime":"` + strings.Repeat("a", MimeMaxBytes+1) + `"}]`, "attachments[0].mime"},
+		{"negative size", `[{"name":"a.txt","size":-1}]`, "attachments[0].size"},
+		{"fractional size", `[{"name":"a.txt","size":1.5}]`, "attachments[0].size"},
+		{"negative width", `[{"name":"a.txt","width":-1}]`, "attachments[0].width"},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {

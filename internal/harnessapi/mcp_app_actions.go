@@ -38,6 +38,7 @@ import (
 	"github.com/jixoai/keel/internal/agentcore"
 	"github.com/jixoai/keel/internal/attachment"
 	"github.com/jixoai/keel/internal/harnessext"
+	"github.com/jixoai/keel/internal/kernel"
 	"github.com/jixoai/keel/internal/logsafe"
 	"github.com/jixoai/keel/internal/mcp"
 	"github.com/jixoai/keel/internal/mcphost"
@@ -1136,10 +1137,19 @@ func writeMCPAppInputError(w http.ResponseWriter, err error) {
 		return
 	}
 	switch {
-	case errors.Is(err, ErrExternalSession):
+	case errors.Is(err, ErrExternalSession), errors.Is(err, ErrSessionConflict),
+		errors.Is(err, kernel.ErrExternalSession), errors.Is(err, kernel.ErrKeyConflict):
 		writeErr(w, http.StatusConflict, err)
-	case errors.Is(err, store.ErrNoSession), errors.Is(err, placement.ErrSessionNotFound):
+	case errors.Is(err, store.ErrNoSession), errors.Is(err, placement.ErrSessionNotFound), errors.Is(err, kernel.ErrNotFound):
 		writeErr(w, http.StatusNotFound, ErrSessionNotFound)
+	case errors.Is(err, kernel.ErrQuota):
+		// The production kernel wraps event-rate and tenant-config refusals in
+		// ErrQuota. They are the same 429 the native input path answers, never a
+		// 502 that would blame the MCP app for a deployment condition.
+		writeErr(w, http.StatusTooManyRequests, err)
+	case errors.Is(err, kernel.ErrUnknownKind), errors.Is(err, kernel.ErrKeyKindMismatch),
+		errors.Is(err, kernel.ErrInvalidRequest), errors.Is(err, kernel.ErrMissingToken):
+		writeErr(w, http.StatusBadRequest, err)
 	default:
 		writeErr(w, http.StatusBadGateway, err)
 	}

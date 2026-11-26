@@ -703,3 +703,25 @@ extensibility:
 		t.Fatalf("asking must not update: %+v", manager.calls)
 	}
 }
+
+// TestPluginApprovalClaimPromptListsEveryValidatedMimePattern: the approval
+// text must not silently cut a MIME list; 32 validated patterns all appear.
+func TestPluginApprovalClaimPromptListsEveryValidatedMimePattern(t *testing.T) {
+	patterns := make([]string, 0, pluginpkg.MimePatternsMax)
+	for index := 0; index < pluginpkg.MimePatternsMax; index++ {
+		patterns = append(patterns, fmt.Sprintf("application/vnd.keel.test-%d", index))
+	}
+	lines := attachmentClaimPrompts([]harnessext.ExtensionContribution{{
+		Slot: pluginpkg.MessagePartSlotID, Form: "chunk",
+		Part: pluginpkg.AttachmentPartKind, Mime: patterns,
+	}})
+	if len(lines) != 1 {
+		t.Fatalf("lines = %+v", lines)
+	}
+	if !strings.Contains(lines[0], patterns[0]) || !strings.Contains(lines[0], patterns[len(patterns)-1]) {
+		t.Fatalf("approval line hides MIME patterns: %q", lines[0])
+	}
+	if strings.Contains(lines[0], "truncated") {
+		t.Fatalf("approval line claims truncation for a valid list: %q", lines[0])
+	}
+}
