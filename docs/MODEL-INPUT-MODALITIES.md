@@ -133,11 +133,13 @@ POST /v1/files → blob（tenant, complete, mime, size, thumb_status）
 权威（小写去参数后比较）；name 1..256 字节且只作展示；失败返回字段级错误且不落事件。
 缺 `fileId` 是唯一不拒绝的降级：生成显式文本 notice，模型仍知道附件存在。
 
-**只读投影**（`AttachmentPart`，后端为 `GET /v1/plugins` 的 contribution 投影提供
-`part/mime` 认领）：`fileId/name/mime/size/kind`、可选尺寸、`thumbStatus`、同源
-`thumbnailUrl/downloadUrl`、本次 attempt 的 `delivery.native/reason`。MUST NOT 含字节、
+**只读投影**（`AttachmentPart`，`GET /v1/attachments/{id}/part`）：`fileId/name/mime/size/kind`、
+可选尺寸、`thumbStatus`、同源 `thumbnailUrl/downloadUrl`、本次 attempt 的
+`delivery.native/reason`。MIME/size/缩略图状态取 blob 记录（权威）；name/宽高是展示事实；
+`delivery` 由宿主按模型声明与协议能力计算后传入，插件不得自行判断。MUST NOT 含字节、
 base64、data URI、CAS 路径、租户头、cookie、凭据或跨租户 URL；插件后端在本 change
-**拿不到字节句柄**。
+**拿不到字节句柄**。该路由与文件路由共用 tenant + `file.read` 能力模型（不叠加
+`session.read`；会话面可见性由 `session.read` 约束，见 design §11）。
 
 **预览槽位**：复用 `keel.ui.message-part`，贡献以 `part=attachment` 认领，可在
 `extensibility.json` 用 `mime` 收窄（`type/subtype` 或 `type/*`）。宿主按声明顺序选择

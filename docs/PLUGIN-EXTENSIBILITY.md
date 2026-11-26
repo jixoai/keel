@@ -201,6 +201,8 @@ TUI 上的不可用必须**显式降级**：入口隐藏或显示「此面板在
   `keel.ui.message-part` 投普通消息部件。
 - 宿主按插件声明顺序选择第一个 ready、target 可用且 MIME 匹配的贡献：**先声明先匹配**。
   多个插件声明同一模式是合法竞争，不是一个需要宿主去重/合并的配置错误；顺序就是结果。
+  跨插件的顺序就是 `GET /v1/plugins` 的 inventory 顺序（当前按 plugin id 排序；插件内按
+  `contributes[]` 声明顺序），UI 不得自行重排。
 - 安装/启用审批展示将认领的槽位、form、`part=attachment` 与 MIME 列表；停用/卸载在同一
   generation 撤销贡献。渲染器 MUST 保留文件名、大小与下载/打开入口。
 - `part`/`mime` 只属于 `extensibility.json`：写进 `plugin.yaml` 的 `contributes` 是字段级拒绝。

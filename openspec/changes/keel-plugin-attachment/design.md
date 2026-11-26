@@ -185,3 +185,16 @@ durable ref
 - 签名 URL、跨租户共享、附件编辑/版本；
 - 新上传路由、新 blob 表、新引用计数；
 - 把 `keel.ui.message-part` 变成附件专属槽位（它仍是通用消息部件槽位）。
+
+## 11. 已登记的后续契约（本切片不修）
+
+- **跨插件优先序**：`GET /v1/plugins` 的 inventory 顺序即选择优先序。当前实现按 plugin id
+  排序返回插件；同一插件内按 `contributes[]` 声明顺序。UI 3.2 必须按该顺序取第一个 ready
+  且 MIME 匹配的贡献，不得自行重排。若要改成“安装时间/显式 priority”，必须先改 inventory
+  契约与前端，而不是在预览层另建排序。
+- **blob 路由能力模型**：`/v1/files/{id}`、`/thumbnail` 与 `/v1/attachments/{id}/part` 使用
+  tenant + `file.read`（`access.KeyFileRead`），不叠加 `session.read`；调用方必须是该 tenant
+  的已认证 principal。会话视图的可见性仍由 `session.read` 的会话面约束；跨租户/无权限的
+  端到端行为由 5.5 E2E 覆盖。若未来要求“附件 URL 也只能从可读会话访问”，需要新增
+  session-scoped 路由或带 session 谓词的签名入口，不在本 change 内偷偷加。
+
