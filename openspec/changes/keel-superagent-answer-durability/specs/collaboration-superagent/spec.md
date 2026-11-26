@@ -88,8 +88,8 @@ Attention 仍 open 时投递给阻塞中的 Worker。不可信条目 MAY 延后�
 
 ### Requirement: 同内容 pending 去重
 
-在第一个编辑尚未投递时，issue_updated 的重复 bump（title/body 与最后一个未失败
-pending snapshot 相同）MUST NOT 捕获第二条 pending，也 MUST NOT 在之后重复投递；
+在第一个编辑尚未投递时，issue_updated 的重复 bump（title/body 与最后一个 pending
+snapshot 相同，含 failed 行；dismiss 移除后不再比较）MUST NOT 捕获第二条 pending，也 MUST NOT 在之后重复投递；
 真正不同的编辑仍 MUST 逐条捕获。
 
 #### Scenario: 评论造成的 updated_at bump
@@ -172,3 +172,52 @@ receipt MUST 记录评论行是否已入队，启动补偿扫描 MUST 为
 #### Scenario: worker Bot key 调用产品 API
 - **WHEN** 请求身份带有 BotID
 - **THEN** 所有 `/v1/superagent/*` 路由返回 403
+
+### Requirement: 租约失联后所有写入口 fail closed
+
+`WriterLease` 失联（Healthy 失败/已释放）后，产品 API 与 Source 处理的所有写入口
+（answer/report/ask/resume/stop/retry/dismiss、Source 事件、poll/housekeeping/recover）
+MUST 在任何状态变更前拒绝（`ErrWriterLeaseLost`，HTTP 503）；读取（Board/Inbox）
+MUST 保持可用。`Run` 失联退出与写入口检查 MUST 同时存在，避免 API 进程在租约
+死亡后继续写而第二副本已接管。
+
+#### Scenario: 租约连接死亡后的 API 写
+- **WHEN** 租约连接被 PostgreSQL 终止，第二进程取得租约
+- **THEN** 第一进程的 answer/report/ask/stop/retry 均返回 503，不写、不投递
+- **AND** 读接口仍返回既有投影
+
+### Requirement: 补偿扫描在本轮内不得清掉新置位的标记
+
+补偿扫描 MUST 在结束前重新读取本轮触及的 Ticket 的当前 receipt；任何
+`CommentQueued=false && !Dismissed` 的 receipt MUST 令本轮不完整（保留 repair 标记并
+退避重跑）。`loadTicket` 失败 MUST 视为不完整而不是静默跳过。`deliverPendingLocked`
+MUST 返回本轮未入队的 answer 评论数，供扫描判定。
+
+#### Scenario: Recover 扫描期间 outbox 仍失败
+- **WHEN** 答复已投递但评论入队失败，Recover 的扫描再次入队失败
+- **THEN** repair 标记保留，退避到期后的 housekeeping 再次扫描
+- **AND** outbox 恢复后恰好写入一条 answer 评论并标记 CommentQueued
+
+### Requirement: 终态 answer 的 409 载荷
+
+停止/终态工单上的 answer MUST 返回 409，载荷 MUST 含 `attention`、
+`deliveryFailed=true` 与 `code=answer_not_delivered`；Web MUST 按该 code 显示
+“答复未送达/工单已停止或终态”，不得显示“已记录、投递失败”。retry 在终态返回 409
+（本 change 既有要求）；dismiss 可在终态结算（200）。
+
+#### Scenario: 停止后回复答案
+- **WHEN** 工单已 stopped/done/failed，操作者调用 answer
+- **THEN** 响应 409，code=answer_not_delivered，带 attention 与 deliveryFailed
+- **AND** Web 的提示不再声称答复已记录
+
+### Requirement: retry 后条目仍 Failed 的 API 语义
+
+`retryPending` 的 HTTP 结果 MUST 区分“动作被接受”和“投递成功”：条目在本次重试后
+仍为 Failed/Pending 时，接口返回 200 与工单当前状态（Board 显示失败行），审计行
+MUST 记为 `failed`；只有条目离开队列（或答案已投递）才记 `accepted`。停止/终态
+工单的 retry MUST 返回 409 且不改变条目。
+
+#### Scenario: 投递 seam 仍不可用
+- **WHEN** 操作者对 Failed 条目 retry，seam 仍拒绝
+- **THEN** 200 + 工单（条目仍 Failed），审计 pending_retried=failed
+- **AND** 下一次 retry 或 dismiss 仍是操作者的选择

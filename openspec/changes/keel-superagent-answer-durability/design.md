@@ -82,12 +82,15 @@ audit kind，失败写 `failed`。
 | 已记录、等待投递 | 202 `{attention, deliveryPending:true}` |
 | 已记录、永久投递失败 | 409 `{attention, deliveryFailed:true, code:"answer_delivery_failed"}` |
 | 已记录、工单关闭无投递 | 409 `{attention, deliveryFailed:true, code:"answer_not_delivered"}` |
+| 停止/终态后 answer（硬门拒绝） | 409 `{attention, deliveryFailed:true, code:"answer_not_delivered"}` |
 | 部署无 TurnStarter 且有 live worker | 503 |
 | option 不属于问题 / 缺答复 | 400（未记录，可修正） |
 
 记录答复（含 pending/failed）后调用 `o.changed(tenantID)`，SSE 刷新 Board/Inbox。
-Web 解析 202 显示「已记录、等待投递」，409 显示「已记录、投递失败」；工单详情的
-「待投递输入」区提供重试/清除。
+Web 解析 202 显示「已记录、等待投递」；`answer_delivery_failed` 显示「已记录、投递
+失败」，`answer_not_delivered` 显示「答复未送达：工单已停止或处于终态」（不声称已记录）。
+工单详情的「待投递输入」区提供重试/清除；retry 在条目仍 Failed 时返回 200 + 看板状态，
+审计记 failed；停止/终态 retry 409，dismiss 200。
 
 ## 7. 停止/终态硬门（第五轮）
 
@@ -102,14 +105,19 @@ Web 解析 202 显示「已记录、等待投递」，409 显示「已记录、�
 
 `answerRepair` 由失败的 enqueue/receipt 或失败的 Recover 扫描置位；
 `answerRepairAttempts/Next` 按 `pendingBackoff`（1s→30s）调度。`Recover` 的扫描错误只
-记录并保持标记，不再中止恢复。housekeeping 到期重跑；一次完整通过清除标记。
+记录并保持标记，不再中止恢复。扫描结束前 MUST 重新读取本轮触及 Ticket 的当前 receipt
+（`CommentQueued=false && !Dismissed` 即未完成）；`loadTicket` 失败也视为未完成。
+`deliverPendingLocked` 返回本轮未入队的 answer 评论数。housekeeping 到期重跑；只有
+一次完整通过才清除标记。
 
 ## 9. 租约健康
 
 `WriterLease.Healthy` 在持有锁的连接上 `SELECT 1`。`Run` 在 Recover 前与每轮 poll 前
 调用；失败即记录并退出（defer Release 会丢弃死连接）。PG 后端被 restart/failover
-终止时 advisory lock 随之释放，第二进程可接管；第一进程不会在失联后继续写。真实 PG
-用例用 `pg_terminate_backend` 验证健康变红与接管。
+终止时 advisory lock 随之释放，第二进程可接管；第一进程在失联后**每个写入口**
+（answer/report/ask/resume/stop/retry/dismiss、Source 事件、poll/housekeeping/recover）
+都调用 `checkWriterLease` 并返回 `ErrWriterLeaseLost`（HTTP 503），不再写；读接口
+保持可用。真实 PG 用例用 `pg_terminate_backend` 验证健康变红与接管。
 
 ## 10. 临时 decision 写失败
 

@@ -157,7 +157,7 @@ web/
 - **视觉**：计数瓦片 + 收件箱卡片 + 工单行/详情 band，全部 solid-glass 令牌 + lucide 单色；
   ≥1024 列表与详情同屏（详情 420px），<1024 列表/详情分屏，≤767 单列、计数 2×2、44px 控件。
 - **验证**：`src/screens/books/superagent.tui.test.tsx`（成功面、最新在前、answer 选项/自由文本、
-  resume/stop、待投递失败行与重试/清除、五态、只读、写失败、390/768）与
+  resume/stop、待投递失败行与重试/清除（停止/终态仅保留清除）、五态、只读、写失败、390/768）与
   `src/data/superagent.test.ts`（计数/时限/词表/202 等待投递/409 投递失败/待投递路由）；
   `nsh test --target tui --filter 'superagent'` → `20 tests: 20 passed, 0 failed`
   （11 TUI + 6 data + 3 identity-stream 失效/竞态事件）。全量 `nsh test --target tui`

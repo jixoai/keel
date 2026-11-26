@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"hash/fnv"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -1265,6 +1266,9 @@ func superagentWriterLockKey(tenantID uuid.UUID) int64 {
 }
 
 type superagentWriterLease struct {
+	// mu serializes Healthy/Release: they share one pgxpool.Conn, and Run's
+	// per-round check can overlap an API write's check.
+	mu   sync.Mutex
 	conn *pgxpool.Conn
 	key  int64
 }
@@ -1275,7 +1279,12 @@ type superagentWriterLease struct {
 // advisory lock is only released by that session ending or an explicit unlock,
 // and this lease never unlocks before Release.
 func (l *superagentWriterLease) Healthy(ctx context.Context) error {
-	if l == nil || l.conn == nil {
+	if l == nil {
+		return superagent.ErrWriterLeaseHeld
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.conn == nil {
 		return superagent.ErrWriterLeaseHeld
 	}
 	var one int
@@ -1289,7 +1298,12 @@ func (l *superagentWriterLease) Healthy(ctx context.Context) error {
 // destroys the connection instead of pooling it, so a lock can never leak to a
 // later holder.
 func (l *superagentWriterLease) Release(context.Context) error {
-	if l == nil || l.conn == nil {
+	if l == nil {
+		return nil
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.conn == nil {
 		return nil
 	}
 	conn := l.conn

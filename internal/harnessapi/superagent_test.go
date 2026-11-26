@@ -27,6 +27,10 @@ type fakeSuperagent struct {
 	answerErr     error
 	retryErr      error
 	dismissErr    error
+	reportErr     error
+	askErr        error
+	resumeErr     error
+	stopErr       error
 	retriedID     string
 	dismissedID   string
 }
@@ -43,11 +47,11 @@ func (f *fakeSuperagent) Inbox(_ context.Context, tenantID uuid.UUID) (superagen
 
 func (f *fakeSuperagent) Report(_ context.Context, request superagent.ReportRequest) error {
 	f.reported = request
-	return nil
+	return f.reportErr
 }
 
 func (f *fakeSuperagent) Ask(_ context.Context, _, _ uuid.UUID, request collab.AttentionRequest) (collab.Attention, error) {
-	return collab.Attention{Prompt: request.Prompt, Status: collab.AttentionOpen}, nil
+	return collab.Attention{Prompt: request.Prompt, Status: collab.AttentionOpen}, f.askErr
 }
 
 func (f *fakeSuperagent) AnswerAttention(_ context.Context, _, _ uuid.UUID, optionID, text, actor string) (collab.Attention, error) {
@@ -68,12 +72,12 @@ func (f *fakeSuperagent) DismissPending(_ context.Context, _, _ uuid.UUID, pendi
 
 func (f *fakeSuperagent) ResumeTicket(_ context.Context, _, _ uuid.UUID, actor, _ string) (superagent.Ticket, error) {
 	f.resumedActor = actor
-	return superagent.Ticket{}, nil
+	return superagent.Ticket{}, f.resumeErr
 }
 
 func (f *fakeSuperagent) StopTicket(_ context.Context, _, _ uuid.UUID, actor, _ string) error {
 	f.stoppedActor = actor
-	return nil
+	return f.stopErr
 }
 
 func TestSuperagentRoutesFailClosedWithoutSeam(t *testing.T) {
@@ -337,13 +341,63 @@ func TestSuperagentClosedTicketRetryIs409(t *testing.T) {
 // 409 (not the generic 400 fallback).
 func TestSuperagentClosedTicketAnswerIs409(t *testing.T) {
 	tenant := uuid.New()
+	attentionID := uuid.New()
 	service := &fakeSuperagent{answerErr: collab.ErrWorkItemClosed}
 	server := New(Config{Superagent: service, Access: &fakeAccess{grants: access.Grants{access.KeyTaskWrite: access.ScopeTenant}}})
-	req := httptest.NewRequest(http.MethodPost, "/v1/superagent/attention/"+uuid.New().String()+"/answer", strings.NewReader(`{"optionId":"approve"}`))
+	req := httptest.NewRequest(http.MethodPost, "/v1/superagent/attention/"+attentionID.String()+"/answer", strings.NewReader(`{"optionId":"approve"}`))
 	req.Header.Set("X-Tenant-ID", tenant.String())
 	rec := httptest.NewRecorder()
 	server.ServeHTTP(rec, req)
 	if rec.Code != http.StatusConflict {
 		t.Fatalf("answer on a closed ticket = %d, want 409: %s", rec.Code, rec.Body.String())
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if payload["code"] != "answer_not_delivered" || payload["deliveryFailed"] != true {
+		t.Fatalf("closed answer payload = %v, want answer_not_delivered + deliveryFailed", payload)
+	}
+	if _, ok := payload["attention"].(map[string]any); !ok {
+		t.Fatalf("closed answer payload must carry the attention: %v", payload["attention"])
+	}
+}
+
+// TestSuperagentLeaseLostIs503: every product write fails closed with 503 when
+// the writer lease is gone; reads stay available.
+func TestSuperagentLeaseLostIs503(t *testing.T) {
+	tenant := uuid.New()
+	ticketID := uuid.New()
+	service := &fakeSuperagent{
+		answerErr:  superagent.ErrWriterLeaseLost,
+		retryErr:   superagent.ErrWriterLeaseLost,
+		dismissErr: superagent.ErrWriterLeaseLost,
+		reportErr:  superagent.ErrWriterLeaseLost,
+		askErr:     superagent.ErrWriterLeaseLost,
+		resumeErr:  superagent.ErrWriterLeaseLost,
+		stopErr:    superagent.ErrWriterLeaseLost,
+	}
+	server := New(Config{Superagent: service, Access: &fakeAccess{grants: access.Grants{access.KeyTaskWrite: access.ScopeTenant}}})
+	probes := []struct {
+		method string
+		path   string
+		body   string
+	}{
+		{http.MethodPost, "/v1/superagent/tickets/" + ticketID.String() + "/report", `{"assignmentId":"` + uuid.New().String() + `","sessionId":"` + uuid.New().String() + `","state":"progress"}`},
+		{http.MethodPost, "/v1/superagent/tickets/" + ticketID.String() + "/ask", `{"assignmentId":"` + uuid.New().String() + `","sessionId":"` + uuid.New().String() + `","prompt":"q"}`},
+		{http.MethodPost, "/v1/superagent/tickets/" + ticketID.String() + "/resume", `{}`},
+		{http.MethodPost, "/v1/superagent/tickets/" + ticketID.String() + "/stop", `{}`},
+		{http.MethodPost, "/v1/superagent/tickets/" + ticketID.String() + "/pending/fixture:e1/retry", `{}`},
+		{http.MethodPost, "/v1/superagent/tickets/" + ticketID.String() + "/pending/fixture:e1/dismiss", `{}`},
+		{http.MethodPost, "/v1/superagent/attention/" + uuid.New().String() + "/answer", `{"optionId":"approve"}`},
+	}
+	for _, probe := range probes {
+		req := httptest.NewRequest(probe.method, probe.path, strings.NewReader(probe.body))
+		req.Header.Set("X-Tenant-ID", tenant.String())
+		rec := httptest.NewRecorder()
+		server.ServeHTTP(rec, req)
+		if rec.Code != http.StatusServiceUnavailable {
+			t.Fatalf("%s = %d, want 503: %s", probe.path, rec.Code, rec.Body.String())
+		}
 	}
 }

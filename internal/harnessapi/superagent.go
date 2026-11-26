@@ -245,6 +245,20 @@ func (s *Server) superagentAnswer(w http.ResponseWriter, r *http.Request) {
 				"deliveryFailed": true,
 			})
 			return
+		case errors.Is(err, collab.ErrWorkItemClosed):
+			// The answer path's hard stop/terminal gate. The payload matches
+			// design §6: the Attention travels with the explicit not-delivered
+			// code so a client never renders a generic 400/409.
+			writeJSON(w, http.StatusConflict, map[string]any{
+				"error":          "the ticket is stopped or terminal; the answer was not delivered",
+				"code":           "answer_not_delivered",
+				"attention":      attention,
+				"deliveryFailed": true,
+			})
+			return
+		case errors.Is(err, superagent.ErrWriterLeaseLost):
+			writeErr(w, http.StatusServiceUnavailable, err)
+			return
 		case errors.Is(err, superagent.ErrPendingNotDeliverable):
 			writeErr(w, http.StatusServiceUnavailable, err)
 			return
@@ -380,7 +394,8 @@ func writeSuperagentError(w http.ResponseWriter, err error) {
 		writeErr(w, http.StatusNotFound, err)
 	case errors.Is(err, collab.ErrWorkItemClosed), errors.Is(err, collab.ErrAttentionConflict), errors.Is(err, collab.ErrAttentionClosed), errors.Is(err, collab.ErrAttentionExpired):
 		writeErr(w, http.StatusConflict, err)
-	case errors.Is(err, collab.ErrAuditUnavailable), errors.Is(err, collab.ErrAttentionPublish):
+	case errors.Is(err, collab.ErrAuditUnavailable), errors.Is(err, collab.ErrAttentionPublish),
+		errors.Is(err, superagent.ErrWriterLeaseLost):
 		writeErr(w, http.StatusServiceUnavailable, err)
 	default:
 		writeErr(w, http.StatusBadRequest, err)

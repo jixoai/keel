@@ -4,7 +4,7 @@
 
 - [x] 1.1 Ticket 文档新增 `answers []AnswerReceipt` 与 pending 的
       `trusted/allowDispatch/optionId/answerText/answerActor`；
-      `LastKnownThread` 以最后一个未失败 snapshot 为比较点。
+      `LastKnownThread` 以最后一个 pending snapshot（含 failed；dismiss 后移除）为比较点。
       （`internal/superagent/domain.go`）
 - [x] 1.2 答案写序改为 intent → Host.AnswerAttention → deliver → receipt；
       去掉了投递前写 `accepted` 审计。（`internal/superagent/orchestrator.go`
@@ -104,3 +104,28 @@
       `TestUntrustedContextWithoutALiveWorkerIsKept`、`internal/store/schema.sql`）
 - [x] 7.7 终态 pending 结算：retry 明确 409，dismiss 200；`RetryPending`/`DismissPending`
       审计结果与动作一致（accepted/failed）。（`TestPendingAuditRecordsTheOutcome`）
+
+## 8. 第六轮复审（扫描标记、租约写入口、终态载荷）
+
+- [x] 8.1 补偿扫描末尾重新读取本轮触及 Ticket 的当前 receipt；
+      `CommentQueued=false && !Dismissed` 保持 repair；`loadTicket` 失败不再静默
+      continue；`deliverPendingLocked` 返回未入队评论数。回归：
+      `TestAnswerCommentRepairSurvivesAScanFailure`（Recover 扫描再次入队失败 →
+      下一 tick 修复）、`TestAnswerRepairScanKeepsArmedAfterATicketReadFailure`。
+- [x] 8.2 租约失联时所有写入口 fail closed：`checkWriterLease` 覆盖
+      answer/report/ask/resume/stop/retry/dismiss、Source 事件、poll/housekeeping/
+      recover/dispatch；API 返回 503。测试：`TestWriterLeaseLossFailsClosedForEveryWrite`、
+      `TestSuperagentLeaseLostIs503`；design §9 与 delta spec 写明。
+- [x] 8.3 停止/终态 answer 的 409 载荷统一为
+      `{attention, deliveryFailed:true, code:"answer_not_delivered"}`；Web 按 code
+      显示“答复未送达”，不再声称已记录。测试：`TestSuperagentClosedTicketAnswerIs409`、
+      数据用例。
+- [x] 8.4 `LastKnownThread`/spec/tasks 统一为“最后一个 pending snapshot（含 failed）”。
+- [x] 8.5 dismiss 未投递 answer 的回归：`TestDismissedAnswerIsNotResurrected`
+      （retry 返回 `ErrAnswerNotDelivered`，启动扫描不复活）。
+- [x] 8.6 retry 后条目仍 Failed 的 API 语义写明：200 + 看板状态，审计 failed；
+      终态 retry 409、dismiss 200。
+- [x] 8.7 live 03/04 截图改为“滚动到目标评论的视口截图”，并在步骤 note 写明
+      全页截图在脚本化 worker 提前完成时会字节相同；`run.sh` 退出时删除
+      `runtime/dsn`。
+- [x] 8.8 TUI 全量原始输出落盘到本 change 的 `evidence/`（不口头声称全绿）。

@@ -107,6 +107,7 @@ func TestClosedTicketNeverDeliversPendingInput(t *testing.T) {
 			setTicketStatusForTest(t, env, ticket.ID, tc.status)
 
 			launches := env.launcher.count()
+			changesBefore := env.changes.count()
 			// Housekeeping must skip the ticket entirely.
 			if err := env.orchestrator.Housekeeping(ctx); err != nil {
 				t.Fatalf("housekeeping: %v", err)
@@ -114,6 +115,9 @@ func TestClosedTicketNeverDeliversPendingInput(t *testing.T) {
 			// An answer retry is refused before touching anything.
 			if _, err := env.orchestrator.AnswerAttention(ctx, env.tenant, attention.ID, "approve", "", "alice"); !errors.Is(err, collab.ErrWorkItemClosed) {
 				t.Fatalf("answer retry on %s = %v, want ErrWorkItemClosed", tc.name, err)
+			}
+			if env.changes.count() != changesBefore {
+				t.Fatalf("%s: a refused answer emitted an SSE invalidation", tc.name)
 			}
 			// Both retry shapes are refused with the closed sentinel.
 			for _, id := range []string{answerEntry.ID, followUp.ID} {
@@ -334,7 +338,11 @@ type fakeWriterLease struct {
 	releases   int
 }
 
-func (l *fakeWriterLease) Healthy(context.Context) error { return l.healthyErr }
+func (l *fakeWriterLease) Healthy(context.Context) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.healthyErr
+}
 
 func (l *fakeWriterLease) Release(context.Context) error {
 	l.mu.Lock()
@@ -425,4 +433,134 @@ func lastAuditDetail(t *testing.T, env *testEnv, kind string) string {
 	}
 	t.Fatalf("no audit row %q", kind)
 	return ""
+}
+
+// TestWriterLeaseLossFailsClosedForEveryWrite is the sixth-review P2 boundary:
+// after the lease connection dies, every write entry refuses (503 semantics)
+// before touching state; reads stay available. A second replica can take over
+// while this process can no longer mutate the tenant.
+func TestWriterLeaseLossFailsClosedForEveryWrite(t *testing.T) {
+	lease := &fakeWriterLease{}
+	env := newEnv(t, envOpts{lease: lease})
+	ctx := context.Background()
+	acceptEvent(t, env, issueEvent("e1", "issue#1"))
+	ticket := ticketByThread(t, env, "issue#1")
+	attention := askAndBlock(t, env, ticket, collab.AttentionRequest{
+		Prompt: "Approve?", Options: []collab.AttentionOption{{ID: "approve"}}, AllowFreeText: true,
+	})
+	followUp := superagent.PendingFollowUp{
+		ID: "fixture:lease-1", Kind: superagent.PendingFollowUpInput,
+		Text: "context", Trusted: true, AllowDispatch: true, CreatedAt: *env.clock,
+	}
+	appendPendingForTest(t, env, ticket.ID, followUp)
+	lease.mu.Lock()
+	lease.healthyErr = errors.New("lease connection lost")
+	lease.mu.Unlock()
+
+	launches := env.launcher.count()
+	if _, err := env.orchestrator.AnswerAttention(ctx, env.tenant, attention.ID, "approve", "", "alice"); !errors.Is(err, superagent.ErrWriterLeaseLost) {
+		t.Fatalf("answer after lease loss = %v, want ErrWriterLeaseLost", err)
+	}
+	if err := env.orchestrator.Report(ctx, superagent.ReportRequest{
+		TenantID: env.tenant, WorkItemID: ticket.ID, AssignmentID: ticket.ActiveAssignment.ID,
+		State: superagent.ReportProgress, Summary: "should not apply",
+	}); !errors.Is(err, superagent.ErrWriterLeaseLost) {
+		t.Fatalf("report after lease loss = %v, want ErrWriterLeaseLost", err)
+	}
+	if _, err := env.orchestrator.Ask(ctx, ticket.ID, ticket.ActiveAssignment.ID, collab.AttentionRequest{Prompt: "again?"}); !errors.Is(err, superagent.ErrWriterLeaseLost) {
+		t.Fatalf("ask after lease loss = %v, want ErrWriterLeaseLost", err)
+	}
+	if err := env.orchestrator.StopTicket(ctx, env.tenant, ticket.ID, "alice", "stop"); !errors.Is(err, superagent.ErrWriterLeaseLost) {
+		t.Fatalf("stop after lease loss = %v, want ErrWriterLeaseLost", err)
+	}
+	if _, err := env.orchestrator.ResumeTicket(ctx, env.tenant, ticket.ID, "alice", "resume"); !errors.Is(err, superagent.ErrWriterLeaseLost) {
+		t.Fatalf("resume after lease loss = %v, want ErrWriterLeaseLost", err)
+	}
+	for _, id := range []string{followUp.ID, "attention:" + attention.ID.String()} {
+		if _, err := env.orchestrator.RetryPending(ctx, env.tenant, ticket.ID, id, "alice"); !errors.Is(err, superagent.ErrWriterLeaseLost) {
+			t.Fatalf("retry pending after lease loss = %v, want ErrWriterLeaseLost", err)
+		}
+	}
+	if _, err := env.orchestrator.DismissPending(ctx, env.tenant, ticket.ID, followUp.ID, "alice"); !errors.Is(err, superagent.ErrWriterLeaseLost) {
+		t.Fatalf("dismiss pending after lease loss = %v, want ErrWriterLeaseLost", err)
+	}
+	event := issueEvent("e2", "issue#2")
+	if _, err := env.orchestrator.HandleSourceEvent(ctx, fixtureEvent(t, event)); !errors.Is(err, superagent.ErrWriterLeaseLost) {
+		t.Fatalf("source event after lease loss = %v, want ErrWriterLeaseLost", err)
+	}
+	if err := env.orchestrator.Housekeeping(ctx); !errors.Is(err, superagent.ErrWriterLeaseLost) {
+		t.Fatalf("housekeeping after lease loss = %v, want ErrWriterLeaseLost", err)
+	}
+	if _, err := env.orchestrator.PollOnce(ctx); !errors.Is(err, superagent.ErrWriterLeaseLost) {
+		t.Fatalf("poll after lease loss = %v, want ErrWriterLeaseLost", err)
+	}
+	if _, err := env.orchestrator.Recover(ctx); !errors.Is(err, superagent.ErrWriterLeaseLost) {
+		t.Fatalf("recover after lease loss = %v, want ErrWriterLeaseLost", err)
+	}
+	if _, err := env.orchestrator.DispatchQueued(ctx); !errors.Is(err, superagent.ErrWriterLeaseLost) {
+		t.Fatalf("dispatch after lease loss = %v, want ErrWriterLeaseLost", err)
+	}
+	if env.sink.count() != 0 || env.launcher.count() != launches {
+		t.Fatalf("lease loss delivered/dispatched: sink=%d launches=%d", env.sink.count(), env.launcher.count())
+	}
+	unchanged := ticketByThread(t, env, "issue#1")
+	if unchanged.Status != collab.WorkItemBlocked || unchanged.Mandate.Revoked() {
+		t.Fatalf("ticket mutated after lease loss: status=%s revoked=%v", unchanged.Status, unchanged.Mandate.Revoked())
+	}
+	if len(unchanged.Pending) != 1 {
+		t.Fatalf("pending mutated after lease loss: %+v", unchanged.Pending)
+	}
+	stored, err := env.store.GetAttention(ctx, env.tenant, attention.ID)
+	if err != nil || stored.Status != collab.AttentionOpen {
+		t.Fatalf("attention mutated after lease loss: %+v err=%v", stored, err)
+	}
+}
+
+// TestDismissedAnswerIsNotResurrected: dismissing an undelivered answer records
+// a durable abandonment marker; a later retry and the startup scan must not
+// deliver it again.
+func TestDismissedAnswerIsNotResurrected(t *testing.T) {
+	env := newEnv(t, envOpts{})
+	ctx := context.Background()
+	acceptEvent(t, env, issueEvent("e1", "issue#1"))
+	ticket := ticketByThread(t, env, "issue#1")
+	attention := askAndBlock(t, env, ticket, collab.AttentionRequest{
+		Prompt: "Approve?", Options: []collab.AttentionOption{{ID: "approve"}},
+	})
+	env.sink.failNext = 1
+	env.sink.failWith = collab.ErrPermissionDenied
+	if _, err := env.orchestrator.AnswerAttention(ctx, env.tenant, attention.ID, "approve", "", "alice"); !errors.Is(err, superagent.ErrAnswerDeliveryFailed) {
+		t.Fatalf("answer = %v, want ErrAnswerDeliveryFailed", err)
+	}
+	pending := ticketByThread(t, env, "issue#1").Pending
+	if len(pending) != 1 || !pending[0].Failed || pending[0].Kind != superagent.PendingAnswer {
+		t.Fatalf("pending = %+v", pending)
+	}
+	if _, err := env.orchestrator.DismissPending(ctx, env.tenant, ticket.ID, pending[0].ID, "alice"); err != nil {
+		t.Fatalf("dismiss: %v", err)
+	}
+	dismissed := ticketByThread(t, env, "issue#1")
+	if len(dismissed.Pending) != 0 {
+		t.Fatalf("pending after dismiss = %+v", dismissed.Pending)
+	}
+	if receipt := dismissed.AnswerReceiptFor(attention.ID); receipt == nil || !receipt.Dismissed {
+		t.Fatalf("receipt = %+v, want a dismissed marker", receipt)
+	}
+	// Retry is explicit: the abandoned answer is not delivered.
+	if _, err := env.orchestrator.AnswerAttention(ctx, env.tenant, attention.ID, "approve", "", "alice"); !errors.Is(err, superagent.ErrAnswerNotDelivered) {
+		t.Fatalf("retry of a dismissed answer = %v, want ErrAnswerNotDelivered", err)
+	}
+	*env.clock = env.clock.Add(2 * time.Second)
+	if _, err := env.orchestrator.Recover(ctx); err != nil {
+		t.Fatalf("recover: %v", err)
+	}
+	if err := env.orchestrator.Housekeeping(ctx); err != nil {
+		t.Fatalf("housekeeping: %v", err)
+	}
+	if env.sink.count() != 0 {
+		t.Fatalf("a dismissed answer was resurrected: %+v", env.sink.delivered)
+	}
+	if after := ticketByThread(t, env, "issue#1"); len(after.Pending) != 0 || after.AnswerReceiptFor(attention.ID) == nil {
+		t.Fatalf("after scan: pending=%+v receipt=%+v", after.Pending, after.AnswerReceiptFor(attention.ID))
+	}
 }

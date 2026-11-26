@@ -87,6 +87,11 @@ type Host interface {
 // must not be treated as an implicit human takeover.
 var ErrOperatorUnavailable = errors.New("superagent: operator authorization is not wired")
 
+// ErrWriterLeaseLost means this process no longer owns the tenant's queue: the
+// lease connection died (PostgreSQL restart/failover) or was released. Every
+// write entry checks it and fails closed (HTTP 503); reads stay available.
+var ErrWriterLeaseLost = errors.New("superagent: the writer lease is lost")
+
 // OperatorAuthorizer is the independent permission seam for operator actions.
 // It is deliberately not the HumanTakeover boolean: a free bool on an
 // Assignment request is not an authorization, and no mode may mint one for
@@ -291,7 +296,29 @@ func (o *Orchestrator) acquireWriterLease(ctx context.Context) (WriterLease, err
 	if !ok {
 		return nil, fmt.Errorf("superagent: the store has no writer lease; refusing a multi-writer queue")
 	}
-	return store.AcquireWriterLease(ctx, o.cfg.TenantID)
+	lease, err := store.AcquireWriterLease(ctx, o.cfg.TenantID)
+	if err != nil {
+		return nil, err
+	}
+	// Make the acquired lease visible to the write entries. Run is the only
+	// startup writer; the lock keeps the API-facing reads of cfg.Lease safe.
+	o.mu.Lock()
+	o.cfg.Lease = lease
+	o.mu.Unlock()
+	return lease, nil
+}
+
+// checkWriterLease is the write-entry guard: a process that lost its queue lease
+// must not mutate the tenant. It is a no-op without a configured lease (tests
+// and in-process stores); production wires Config.Lease before serving.
+func (o *Orchestrator) checkWriterLease(ctx context.Context) error {
+	if o.cfg.Lease == nil {
+		return nil
+	}
+	if err := o.cfg.Lease.Healthy(ctx); err != nil {
+		return fmt.Errorf("%w: %v", ErrWriterLeaseLost, err)
+	}
+	return nil
 }
 
 // PollOnce reads one bounded page and then runs housekeeping. A Source failure
@@ -301,6 +328,9 @@ func (o *Orchestrator) PollOnce(ctx context.Context) (int, error) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	if err := o.checkTenant(o.cfg.TenantID); err != nil {
+		return 0, err
+	}
+	if err := o.checkWriterLease(ctx); err != nil {
 		return 0, err
 	}
 	handled, pollErr := o.pollSourceLocked(ctx)
@@ -314,6 +344,9 @@ func (o *Orchestrator) Housekeeping(ctx context.Context) error {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	if err := o.checkTenant(o.cfg.TenantID); err != nil {
+		return err
+	}
+	if err := o.checkWriterLease(ctx); err != nil {
 		return err
 	}
 	return o.housekeepingLocked(ctx)
@@ -388,6 +421,9 @@ func (o *Orchestrator) housekeepingLocked(ctx context.Context) error {
 func (o *Orchestrator) HandleSourceEvent(ctx context.Context, raw collab.SourceEvent) (EventResult, error) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
+	if err := o.checkWriterLease(ctx); err != nil {
+		return EventResult{}, err
+	}
 	return o.handleSourceEventLocked(ctx, raw)
 }
 
@@ -620,7 +656,7 @@ func (o *Orchestrator) attachLocked(ctx context.Context, event Event, verdict Ve
 		if _, err := o.capturePending(ctx, &ticket, entry); err != nil {
 			return nil, err
 		}
-		if _, err := o.deliverPendingLocked(ctx, &ticket); err != nil {
+		if _, _, err := o.deliverPendingLocked(ctx, &ticket); err != nil {
 			return nil, err
 		}
 		delivered = append(delivered, ticket)
@@ -896,15 +932,15 @@ func pendingAnswerOf(ticket Ticket, attentionID uuid.UUID) *PendingFollowUp {
 // backoff forever (30s cap); only a permanent refusal marks it Failed, which the
 // board exposes for an explicit operator retry/dismiss. Untrusted context never
 // unblocks a blocked ticket and never starts a worker.
-func (o *Orchestrator) deliverPendingLocked(ctx context.Context, ticket *Ticket) (int, error) {
+func (o *Orchestrator) deliverPendingLocked(ctx context.Context, ticket *Ticket) (int, int, error) {
 	if len(ticket.Pending) == 0 {
-		return 0, nil
+		return 0, 0, nil
 	}
 	// Hard boundary: a stopped, cancelling or terminal ticket accepts no input.
 	// Returning before the loop leaves every pending row untouched (no attempt,
 	// no Failed mark, no snapshot advance).
 	if err := ticketDeliveryClosed(*ticket); err != nil {
-		return 0, err
+		return 0, 0, err
 	}
 	now := o.cfg.Now()
 	kept := make([]PendingFollowUp, 0, len(ticket.Pending))
@@ -971,6 +1007,7 @@ func (o *Orchestrator) deliverPendingLocked(ctx context.Context, ticket *Ticket)
 		delivered = append(delivered, deliveredInput{entry: entry, via: via})
 		changed = true
 	}
+	unqueued := 0
 	if changed {
 		// A delivered answer's Channel comment is a durable outbox row. It is
 		// enqueued before the ticket write (idempotent by attention id), so a
@@ -983,6 +1020,7 @@ func (o *Orchestrator) deliverPendingLocked(ctx context.Context, ticket *Ticket)
 				commentQueued[item.entry.ID] = queued
 				if !queued {
 					o.answerRepair = true
+					unqueued++
 				}
 			}
 		}
@@ -1008,7 +1046,7 @@ func (o *Orchestrator) deliverPendingLocked(ctx context.Context, ticket *Ticket)
 		ticket.UpdatedAt = now
 		stored, err := o.cfg.Store.UpdateWorkItem(ctx, ticket.Record())
 		if err != nil {
-			return len(delivered), err
+			return len(delivered), unqueued, err
 		}
 		*ticket = TicketFromWorkItem(stored)
 	}
@@ -1022,10 +1060,10 @@ func (o *Orchestrator) deliverPendingLocked(ctx context.Context, ticket *Ticket)
 			continue
 		}
 		if err := o.auditRequired(ctx, AuditTicketAttached, "accepted", ticket.ID, "delivered "+entry.ID); err != nil {
-			return len(delivered), err
+			return len(delivered), unqueued, err
 		}
 	}
-	return len(delivered), nil
+	return len(delivered), unqueued, nil
 }
 
 // attemptPendingDeliveryLocked tries one delivery: to the live assignment when
@@ -1173,7 +1211,7 @@ func (o *Orchestrator) retryPendingLocked(ctx context.Context) (int, error) {
 			// housekeeping never delivers them.
 			continue
 		}
-		delivered, err := o.deliverPendingLocked(ctx, &ticket)
+		delivered, _, err := o.deliverPendingLocked(ctx, &ticket)
 		if err != nil {
 			if errors.Is(err, collab.ErrWorkItemClosed) {
 				continue
@@ -1234,11 +1272,16 @@ func (o *Orchestrator) reconcileAnswerDeliveriesLocked(ctx context.Context) (int
 	}
 	healed := 0
 	repairRemaining := false
+	touched := make(map[uuid.UUID]bool)
 	for _, attention := range attentions {
 		ticket, err := o.loadTicket(ctx, o.cfg.TenantID, attention.WorkItemID)
 		if err != nil {
+			// The receipt state is unknown, so the pass is incomplete: keep the
+			// repair flag armed instead of silently clearing it.
+			repairRemaining = true
 			continue
 		}
+		touched[ticket.ID] = true
 		if receipt := ticket.AnswerReceiptFor(attention.ID); receipt != nil {
 			if receipt.Dismissed || receipt.CommentQueued {
 				continue
@@ -1265,11 +1308,27 @@ func (o *Orchestrator) reconcileAnswerDeliveriesLocked(ctx context.Context) (int
 			o.noteAnswerRepairFailure(err, o.cfg.Now())
 			return healed, err
 		}
-		if _, err := o.deliverPendingLocked(ctx, &ticket); err != nil {
+		if _, unqueued, err := o.deliverPendingLocked(ctx, &ticket); err != nil {
 			o.noteAnswerRepairFailure(err, o.cfg.Now())
 			return healed, err
+		} else if unqueued > 0 {
+			repairRemaining = true
 		}
 		healed++
+	}
+	// Re-read every Ticket this pass touched before clearing the flag: a receipt
+	// (or its comment enqueue) may have changed after the entry was inspected —
+	// including a delivery that ran earlier in the same tick. Only the current
+	// durable receipts may declare the pass complete.
+	for ticketID := range touched {
+		ticket, err := o.loadTicket(ctx, o.cfg.TenantID, ticketID)
+		if err != nil {
+			repairRemaining = true
+			continue
+		}
+		if hasUnqueuedAnswerComment(ticket) {
+			repairRemaining = true
+		}
 	}
 	if repairRemaining {
 		o.noteAnswerRepairFailure(fmt.Errorf("superagent: answer comment queue is still owed"), o.cfg.Now())
@@ -1277,6 +1336,17 @@ func (o *Orchestrator) reconcileAnswerDeliveriesLocked(ctx context.Context) (int
 		o.clearAnswerRepair()
 	}
 	return healed, nil
+}
+
+// hasUnqueuedAnswerComment reports whether the Ticket still owes a Channel
+// answer comment for a delivered (not dismissed) answer.
+func hasUnqueuedAnswerComment(ticket Ticket) bool {
+	for _, receipt := range ticket.Answers {
+		if !receipt.Dismissed && !receipt.CommentQueued {
+			return true
+		}
+	}
+	return false
 }
 
 // enqueueAnswerComment publishes the Channel answer message after the worker
@@ -1445,6 +1515,9 @@ func (o *Orchestrator) dispatchQueuedLocked(ctx context.Context) (int, error) {
 func (o *Orchestrator) DispatchQueued(ctx context.Context) (int, error) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
+	if err := o.checkWriterLease(ctx); err != nil {
+		return 0, err
+	}
 	count, err := o.dispatchQueuedLocked(ctx)
 	if count > 0 {
 		o.changed(o.cfg.TenantID)
@@ -1568,6 +1641,9 @@ func (o *Orchestrator) bindWorkerSession(ctx context.Context, ticket Ticket, ass
 func (o *Orchestrator) ExpireAttentions(ctx context.Context) (int, error) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
+	if err := o.checkWriterLease(ctx); err != nil {
+		return 0, err
+	}
 	return o.expireAttentionsLocked(ctx)
 }
 
@@ -1603,6 +1679,9 @@ func (o *Orchestrator) expireAttentionsLocked(ctx context.Context) (int, error) 
 func (o *Orchestrator) Reconcile(ctx context.Context) (int, error) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
+	if err := o.checkWriterLease(ctx); err != nil {
+		return 0, err
+	}
 	return o.reconcileLocked(ctx)
 }
 
@@ -1671,6 +1750,9 @@ func (o *Orchestrator) reconcileLocked(ctx context.Context) (int, error) {
 func (o *Orchestrator) Recover(ctx context.Context) (int, error) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
+	if err := o.checkWriterLease(ctx); err != nil {
+		return 0, err
+	}
 	recovered := 0
 	if _, err := o.expireAttentionsLocked(ctx); err != nil {
 		return 0, err
@@ -1879,6 +1961,9 @@ func (o *Orchestrator) report(ctx context.Context, request ReportRequest, requir
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	if err := o.checkTenant(request.TenantID); err != nil {
+		return WorkerReportOutcome{}, err
+	}
+	if err := o.checkWriterLease(ctx); err != nil {
 		return WorkerReportOutcome{}, err
 	}
 	if !request.State.Valid() {
@@ -2239,6 +2324,9 @@ func (o *Orchestrator) ask(ctx context.Context, ticketID, assignmentID uuid.UUID
 	if err := o.checkTenant(o.cfg.TenantID); err != nil {
 		return collab.Attention{}, Ticket{}, err
 	}
+	if err := o.checkWriterLease(ctx); err != nil {
+		return collab.Attention{}, Ticket{}, err
+	}
 	ticket, err := o.loadTicket(ctx, o.cfg.TenantID, ticketID)
 	if err != nil {
 		return collab.Attention{}, Ticket{}, err
@@ -2336,6 +2424,9 @@ func (o *Orchestrator) AnswerAttention(ctx context.Context, tenantID, attentionI
 	if err := o.checkTenant(tenantID); err != nil {
 		return collab.Attention{}, err
 	}
+	if err := o.checkWriterLease(ctx); err != nil {
+		return collab.Attention{}, err
+	}
 	attention, err := o.cfg.Store.GetAttention(ctx, tenantID, attentionID)
 	if err != nil {
 		return collab.Attention{}, err
@@ -2344,10 +2435,11 @@ func (o *Orchestrator) AnswerAttention(ctx context.Context, tenantID, attentionI
 		return collab.Attention{}, err
 	}
 	answered, err := o.answerAttentionLocked(ctx, tenantID, attention, optionID, text, actor)
-	if answered.ID != uuid.Nil || errors.Is(err, ErrAnswerDeliveryPending) || errors.Is(err, ErrAnswerDeliveryFailed) ||
+	if err == nil || errors.Is(err, ErrAnswerDeliveryPending) || errors.Is(err, ErrAnswerDeliveryFailed) ||
 		errors.Is(err, ErrAnswerNotDelivered) {
-		// The answer (or its intent) is a durable board fact even when delivery
-		// is still owed; the UI must show "recorded, waiting" without a refresh.
+		// Only a recorded answer (delivered or still owed) invalidates the board.
+		// A closed/invalid/rejected answer returns the Attention for the 409 body
+		// but did not write, so it must not emit an SSE fact.
 		o.changed(tenantID)
 	}
 	return answered, err
@@ -2376,7 +2468,8 @@ func (o *Orchestrator) answerAttentionLocked(ctx context.Context, tenantID uuid.
 	// mandate, a cancelling/cancelled ticket or a finished ticket accepts no
 	// decision, and a retry must say so rather than replay a delivery.
 	if err := ticketDeliveryClosed(ticket); err != nil {
-		return collab.Attention{}, err
+		// Return the loaded Attention so the API can carry it in the 409 body.
+		return attention, err
 	}
 	if attention.Status == collab.AttentionAnswered {
 		if !sameAnswer(attention.Answer, optionID, text) {
@@ -2417,7 +2510,7 @@ func (o *Orchestrator) answerAttentionLocked(ctx context.Context, tenantID uuid.
 			if _, removeErr := o.removePending(ctx, &ticket, entry.ID); removeErr != nil {
 				o.cfg.Logger.Warn("superagent: drop rejected answer intent", "ticket", ticket.ID, "error", removeErr)
 			}
-			return collab.Attention{}, err
+			return attention, err
 		}
 		// The intent is durable but the decision write failed transiently (DB,
 		// audit sink). The pending pump completes it on the next tick; report the
@@ -2425,7 +2518,7 @@ func (o *Orchestrator) answerAttentionLocked(ctx context.Context, tenantID uuid.
 		o.cfg.Logger.Warn("superagent: answer recorded, decision write pending", "ticket", ticket.ID, "error", err)
 		return attention, ErrAnswerDeliveryPending
 	}
-	if _, err := o.deliverPendingLocked(ctx, &ticket); err != nil {
+	if _, _, err := o.deliverPendingLocked(ctx, &ticket); err != nil {
 		return answered, err
 	}
 	return o.answerDeliveryResult(ticket, answered)
@@ -2457,7 +2550,7 @@ func (o *Orchestrator) retryAnsweredAttentionLocked(ctx context.Context, ticket 
 		entry.Failed = false
 		entry.LastError = ""
 		entry.NextAttemptAt = time.Time{}
-		if _, err := o.deliverPendingLocked(ctx, ticket); err != nil {
+		if _, _, err := o.deliverPendingLocked(ctx, ticket); err != nil {
 			return attention, err
 		}
 		return o.answerDeliveryResult(*ticket, attention)
@@ -2475,7 +2568,7 @@ func (o *Orchestrator) retryAnsweredAttentionLocked(ctx context.Context, ticket 
 	if _, err := o.capturePending(ctx, ticket, answerEntryFromAttention(attention, o.cfg.Now())); err != nil {
 		return attention, err
 	}
-	if _, err := o.deliverPendingLocked(ctx, ticket); err != nil {
+	if _, _, err := o.deliverPendingLocked(ctx, ticket); err != nil {
 		return attention, err
 	}
 	return o.answerDeliveryResult(*ticket, attention)
@@ -2596,6 +2689,9 @@ func (o *Orchestrator) RetryPending(ctx context.Context, tenantID, ticketID uuid
 	if err := o.checkTenant(tenantID); err != nil {
 		return Ticket{}, err
 	}
+	if err := o.checkWriterLease(ctx); err != nil {
+		return Ticket{}, err
+	}
 	if err := o.requireOperator(ctx, tenantID, ticketID, actor, "retry_pending"); err != nil {
 		return Ticket{}, err
 	}
@@ -2635,7 +2731,7 @@ func (o *Orchestrator) RetryPending(ctx context.Context, tenantID, ticketID uuid
 			entry.Failed = false
 			entry.LastError = ""
 			entry.NextAttemptAt = time.Time{}
-			if _, err := o.deliverPendingLocked(ctx, &ticket); err != nil {
+			if _, _, err := o.deliverPendingLocked(ctx, &ticket); err != nil {
 				actionErr = err
 			}
 		}
@@ -2669,6 +2765,9 @@ func (o *Orchestrator) DismissPending(ctx context.Context, tenantID, ticketID uu
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	if err := o.checkTenant(tenantID); err != nil {
+		return Ticket{}, err
+	}
+	if err := o.checkWriterLease(ctx); err != nil {
 		return Ticket{}, err
 	}
 	if err := o.requireOperator(ctx, tenantID, ticketID, actor, "dismiss_pending"); err != nil {
@@ -2728,6 +2827,9 @@ func (o *Orchestrator) ResumeTicket(ctx context.Context, tenantID, ticketID uuid
 	if err := o.checkTenant(tenantID); err != nil {
 		return Ticket{}, err
 	}
+	if err := o.checkWriterLease(ctx); err != nil {
+		return Ticket{}, err
+	}
 	if err := o.requireOperator(ctx, tenantID, ticketID, actor, "resume"); err != nil {
 		return Ticket{}, err
 	}
@@ -2774,6 +2876,9 @@ func (o *Orchestrator) StopTicket(ctx context.Context, tenantID, ticketID uuid.U
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	if err := o.checkTenant(tenantID); err != nil {
+		return err
+	}
+	if err := o.checkWriterLease(ctx); err != nil {
 		return err
 	}
 	if err := o.requireOperator(ctx, tenantID, ticketID, actor, "stop"); err != nil {

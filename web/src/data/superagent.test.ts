@@ -179,6 +179,11 @@ test("superagent 答复：202 等待投递与 409 投递失败都是已记录事
   expect(await superagentAccess.answer("a-1", { text: "yes" })).toBe(true);
   expect(superagentAccess.notice()).toContain("投递失败");
 
+  result = { deliveryFailed: true, deliveryCode: "answer_not_delivered" };
+  expect(await superagentAccess.answer("a-1", { text: "yes" })).toBe(true);
+  expect(superagentAccess.notice()).toContain("答复未送达");
+  expect(superagentAccess.notice()).toContain("终态");
+
   store.setSuperagentTransport(null);
   superagentAccess.reset();
 });

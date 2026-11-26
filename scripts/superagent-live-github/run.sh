@@ -76,6 +76,11 @@ cleanup() {
   trap - EXIT INT TERM
   stop_pid "${SERVER_PID:-}"
   stop_pid "${PROVIDER_PID:-}"
+  # The lane's DSN file is local evidence only; it is not part of the report and
+  # must not survive the run.
+  if [[ -n "${RUNTIME:-}" ]]; then
+    rm -f "$RUNTIME/dsn"
+  fi
   if [[ "$KEEP_STACK" != "1" ]]; then
     if [[ "$DB_CREATED" == "1" ]]; then
       dropdb --force --if-exists "$DB" >/dev/null 2>&1 || true

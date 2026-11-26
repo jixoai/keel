@@ -453,7 +453,11 @@ class SuperagentAccess {
       const result = await api.answerSuperagentAttention(attentionId, input);
       await this.load();
       if (result.deliveryFailed) {
-        this.notice.set("答复已记录，但投递失败；请在这张工单的「待投递输入」里重试或清除。");
+        this.notice.set(
+          result.deliveryCode === "answer_not_delivered"
+            ? "答复未送达：工单已停止或处于终态。"
+            : "答复已记录，但投递失败；请在这张工单的「待投递输入」里重试或清除。",
+        );
       } else if (result.deliveryPending) {
         this.notice.set("答复已记录，等待投递到员工；投递成功后工单会自动继续。");
       } else {

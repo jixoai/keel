@@ -321,6 +321,28 @@ async function capture(fn, name, caption, opts = {}) {
   }
 }
 
+// captureComment screenshots the comment element itself. A page/viewport shot is
+// not enough evidence here: the scripted worker often finishes before the answer
+// capture, so the whole page can be byte-identical at both steps, and the
+// completion comment may sit below the fold. The element shot always shows the
+// comment its caption names.
+async function captureComment(expected, name, caption) {
+  if (!page) {
+    check('S:' + name, 'evidence', `截图可用：${name}`, false, 'browser unavailable');
+    return;
+  }
+  try {
+    await gotoIssueWaiting(expected);
+    const locator = page.locator(`text=${expected}`).first();
+    await locator.scrollIntoViewIfNeeded();
+    await locator.screenshot({ path: path.join(SHOTS, name) });
+    if (current) current.shots.push({ src: `shots/${name}`, caption });
+  } catch (error) {
+    note(`screenshot ${name} failed: ${error.message}`);
+    check('S:' + name, 'evidence', `截图成功：${name}`, false, error.message);
+  }
+}
+
 // ---- lane ------------------------------------------------------------------
 
 async function main() {
@@ -480,6 +502,10 @@ async function main() {
     'TestClosedTicketNeverDeliversPendingInput',
     'TestTransientAnswerWriteIsRecordedPending',
     'TestAnswerRepairScanFailureIsRetriedByHousekeeping',
+    'TestAnswerCommentRepairSurvivesAScanFailure',
+    'TestAnswerRepairScanKeepsArmedAfterATicketReadFailure',
+    'TestWriterLeaseLossFailsClosedForEveryWrite',
+    'TestDismissedAnswerIsNotResurrected',
     'TestUntrustedContextWithoutALiveWorkerIsKept',
     'TestObserveMandateCannotBeResumedForDispatch',
     'TestRunStopsWhenTheWriterLeaseIsUnhealthy',
@@ -509,7 +535,7 @@ async function main() {
   check(
     'R2',
     'dedupe',
-    'P1 快照 / pending 重启 / 派工失败不阻塞页 / Busy slot 毒丸 / Noop / answer 重试 / answer 双写自愈 / 11 次退避仍投递 / 不可信不派工 / blocked 不被不可信解锁 / 暂停/终态零投递+409 / 扫描失败退避自愈 / 临时写失败 202 / observe 不派工 / 单写者 lease 健康失联停写 / 同内容去重 / 失败可见可重试清除 / comment 补偿 / 清空正文 / marker / 游标取 max / 分页 全部 PASS',
+    'P1 快照 / pending 重启 / 派工失败不阻塞页 / Busy slot 毒丸 / Noop / answer 重试 / answer 双写自愈 / 11 次退避仍投递 / 不可信不派工 / blocked 不被不可信解锁 / 暂停/终态零投递+409 / 扫描失败退避自愈 / 扫描末尾不清新标记 / 临时写失败 202 / 终态 answer 409 载荷 / dismiss answer 不复活 / 租约失联全写入口 503 / observe 不派工 / 单写者 lease 健康失联停写 / 同内容去重 / 失败可见可重试清除 / comment 补偿 / 清空正文 / marker / 游标取 max / 分页 全部 PASS',
     regressed.length === 0,
     regressed.length === 0 ? `${regressionNames.length} cases PASS` : 'missing PASS: ' + regressed.join(','),
   );
@@ -561,8 +587,8 @@ async function main() {
     return (body.tickets || []).find((item) => item.id === ticket.id && item.status !== 'blocked') || null;
   }, 60000);
   check('N4', 'answer', '答复唤醒同一工单（active 或已完成）', ['active', 'done'].includes(liveTicket.status), liveTicket.status);
-  note(`answerStatus=${answered.status}\ncomment=${brief(answerComment, 240)}`);
-  await capture(() => gotoIssueWaiting('Human selected: approve'), '03-github-answer.png', 'GitHub issue：产品答复写回评论', { fullPage: true });
+  note(`answerStatus=${answered.status}\ncomment=${brief(answerComment, 240)}\nscreenshot=answer comment element; a page shot can be byte-identical to the completion shot when the scripted worker finishes early and the completion is below the fold.`);
+  await captureComment('Human selected: approve', '03-github-answer.png', 'GitHub issue：答复评论（评论元素截图）');
   finishStep();
 
   // 4. worker ready -> done
@@ -599,8 +625,8 @@ async function main() {
   check('D3', 'done', '完成评论写回 GitHub（含 marker）', Boolean(completion), brief(completion, 220));
   const answerTurn = providerEntries().find((entry) => (entry.last?.text || '').includes('Human selected: approve'));
   check('D4', 'done', '答复真实进入员工模型（模型看到 Human selected: approve）', Boolean(answerTurn), answerTurn ? `role=${answerTurn.last.role} ${brief(answerTurn.last.text, 200)}` : 'missing');
-  note(`status=${doneTicket.status}\ncompletion=${brief(completion, 240)}`);
-  await capture(() => gotoIssueWaiting(`Ticket ${ticket.id.slice(0, 8)} completed`), '04-github-complete.png', 'GitHub issue：完成评论', { fullPage: true });
+  note(`status=${doneTicket.status}\ncompletion=${brief(completion, 240)}\nscreenshot=completion comment element; 03 and 04 are distinct elements even when the worker finished early.`);
+  await captureComment(`Ticket ${ticket.id.slice(0, 8)} completed`, '04-github-complete.png', 'GitHub issue：完成评论（评论元素截图）');
   await capture(() => gotoProduct('/superagent', '工单看板'), '05-product-board-done.png', '产品 /superagent 看板：完成态与四类计数');
   finishStep();
 

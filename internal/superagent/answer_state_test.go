@@ -240,6 +240,15 @@ type faultStore struct {
 	*superagent.MemoryStore
 	failUpdates       int
 	failAttentionList int
+	failGetWorkItem   int
+}
+
+func (s *faultStore) GetWorkItem(ctx context.Context, tenantID, workItemID uuid.UUID) (collab.WorkItem, error) {
+	if s.failGetWorkItem > 0 {
+		s.failGetWorkItem--
+		return collab.WorkItem{}, errors.New("injected work item read failure")
+	}
+	return s.MemoryStore.GetWorkItem(ctx, tenantID, workItemID)
 }
 
 func (s *faultStore) ListAttentionsByStatus(ctx context.Context, tenantID uuid.UUID, modeID string, limit int, statuses ...collab.AttentionStatus) ([]collab.Attention, error) {
@@ -709,4 +718,110 @@ func TestWriterLeaseIsExclusive(t *testing.T) {
 		t.Fatalf("lease after release: %v", err)
 	}
 	_ = second.Release(ctx)
+}
+
+// TestAnswerCommentRepairSurvivesAScanFailure is the sixth-review P1: the failed
+// enqueue already set answerRepair, but the same Recover scan failed to enqueue
+// again and used to clear the flag. The next due tick must still repair it.
+func TestAnswerCommentRepairSurvivesAScanFailure(t *testing.T) {
+	fault := &outboxFaultStore{}
+	env := newEnv(t, envOpts{store: func(inner *superagent.MemoryStore) superagent.Store {
+		fault.MemoryStore = inner
+		return fault
+	}})
+	ctx := context.Background()
+	acceptEvent(t, env, issueEvent("e1", "issue#1"))
+	ticket := ticketByThread(t, env, "issue#1")
+	attention := askAndBlock(t, env, ticket, collab.AttentionRequest{
+		Prompt: "Approve?", Options: []collab.AttentionOption{{ID: "approve"}},
+	})
+	fault.setFailAnswer(true)
+	if _, err := env.orchestrator.AnswerAttention(ctx, env.tenant, attention.ID, "approve", "", "alice"); err != nil {
+		t.Fatalf("answer: %v", err)
+	}
+	receipt := ticketByThread(t, env, "issue#1").AnswerReceiptFor(attention.ID)
+	if receipt == nil || receipt.CommentQueued {
+		t.Fatalf("receipt = %+v, want delivered with the comment still owed", receipt)
+	}
+	// The recovery scan runs while the outbox is still down; it must keep the
+	// repair flag, not clear it at the end.
+	if _, err := env.orchestrator.Recover(ctx); err != nil {
+		t.Fatalf("recover: %v", err)
+	}
+	if got := ticketByThread(t, env, "issue#1").AnswerReceiptFor(attention.ID); got == nil || got.CommentQueued {
+		t.Fatalf("receipt after a failed scan = %+v, want still owed", got)
+	}
+	fault.setFailAnswer(false)
+	*env.clock = env.clock.Add(2 * time.Second)
+	if err := env.orchestrator.Housekeeping(ctx); err != nil {
+		t.Fatalf("housekeeping: %v", err)
+	}
+	repaired := ticketByThread(t, env, "issue#1").AnswerReceiptFor(attention.ID)
+	if repaired == nil || !repaired.CommentQueued {
+		t.Fatalf("receipt after repair = %+v, want CommentQueued", repaired)
+	}
+	key := "attention:" + attention.ID.String() + ":answer"
+	messages, err := env.store.ListOutbox(ctx, env.tenant, "", 100)
+	if err != nil {
+		t.Fatalf("list outbox: %v", err)
+	}
+	found := 0
+	for _, message := range messages {
+		if message.IdempotencyKey == key {
+			found++
+		}
+	}
+	if found != 1 {
+		t.Fatalf("answer outbox rows = %d, want exactly one", found)
+	}
+}
+
+// TestAnswerRepairScanKeepsArmedAfterATicketReadFailure: a ticket read failure
+// during the scan is an incomplete pass; the flag stays armed and the next tick
+// repairs the answered Attention. The assignment is already ended so Recover's
+// assignment loop cannot consume the injected read failure.
+func TestAnswerRepairScanKeepsArmedAfterATicketReadFailure(t *testing.T) {
+	fault := &faultStore{}
+	env := newEnv(t, envOpts{store: func(inner *superagent.MemoryStore) superagent.Store {
+		fault.MemoryStore = inner
+		return fault
+	}})
+	ctx := context.Background()
+	acceptEvent(t, env, issueEvent("e1", "issue#1"))
+	ticket := ticketByThread(t, env, "issue#1")
+	attention := askAndBlock(t, env, ticket, collab.AttentionRequest{
+		Prompt: "Approve?", Options: []collab.AttentionOption{{ID: "approve"}},
+	})
+	assignment := *ticket.ActiveAssignment
+	assignment.Status = collab.AssignmentFailed
+	if _, err := env.store.UpdateAssignment(ctx, assignment); err != nil {
+		t.Fatalf("fail assignment: %v", err)
+	}
+	if _, err := env.host.AnswerAttention(ctx, env.tenant, ticket.ID, attention.ID, collab.AttentionAnswerRequest{
+		OptionID: "approve", Actor: "alice",
+	}); err != nil {
+		t.Fatalf("direct answer: %v", err)
+	}
+	launches := env.launcher.count()
+	fault.failGetWorkItem = 1
+	if _, err := env.orchestrator.Recover(ctx); err != nil {
+		t.Fatalf("recover must keep going after a ticket read failure: %v", err)
+	}
+	if env.launcher.count() != launches {
+		t.Fatalf("the failed scan delivered a worker: %d -> %d", launches, env.launcher.count())
+	}
+	*env.clock = env.clock.Add(2 * time.Second)
+	if err := env.orchestrator.Housekeeping(ctx); err != nil {
+		t.Fatalf("housekeeping: %v", err)
+	}
+	if env.launcher.count() != launches+1 {
+		t.Fatalf("launches = %d, want %d after repair", env.launcher.count(), launches+1)
+	}
+	if task := env.launcher.lastLaunch().Task; !strings.Contains(task, "Human selected: approve") {
+		t.Fatalf("repair task = %q, want the answer", task)
+	}
+	after := ticketByThread(t, env, "issue#1")
+	if after.AnswerReceiptFor(attention.ID) == nil || len(after.Pending) != 0 {
+		t.Fatalf("after repair: receipt=%+v pending=%+v", after.AnswerReceiptFor(attention.ID), after.Pending)
+	}
 }
