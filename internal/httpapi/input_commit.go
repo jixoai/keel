@@ -62,9 +62,11 @@ type ClientInput struct {
 	// The value is the effective mode: the guide lease probe and the downgrade
 	// rule belong to the input endpoint, which decides it before committing.
 	Delivery string
-	// Selection and Attachments travel verbatim (RawMessage) into the payload:
-	// the value the caller sent is the value in the log. A non-object selection
-	// never reaches here (the input endpoint vets it first).
+	// Selection travels verbatim (RawMessage) into the payload: the value the
+	// caller sent is the value in the log. Attachments are parsed and
+	// canonicalized by the shared commit path, so only the blob's authoritative
+	// facts are persisted. A non-object selection never reaches here (the input
+	// endpoint vets it first).
 	Selection   json.RawMessage
 	Attachments json.RawMessage
 	// RetryOf, when set, is the user.message seq this input re-asks. It is the
