@@ -296,6 +296,11 @@ func (o *Orchestrator) housekeepingLocked(ctx context.Context) error {
 	if _, err := o.reconcileLocked(ctx); err != nil {
 		return err
 	}
+	if delivered, err := o.retryPendingLocked(ctx); err != nil {
+		return err
+	} else if delivered > 0 {
+		o.changed(o.cfg.TenantID)
+	}
 	if dispatched, err := o.dispatchQueuedLocked(ctx); err != nil {
 		return err
 	} else if dispatched > 0 {
@@ -520,71 +525,38 @@ func (o *Orchestrator) attachLocked(ctx context.Context, event Event, verdict Ve
 				return nil, answerErr
 			}
 			if answered {
-				if err := o.recordDelivered(ctx, &ticket, event); err != nil {
-					return nil, err
-				}
 				delivered = append(delivered, ticket)
 				continue
 			}
 		}
-		if err := o.auditRequired(ctx, AuditTicketAttached, "accepted", ticket.ID, verdict.Reason); err != nil {
+		// The input is durably captured before any delivery attempt. A busy slot,
+		// a failed dispatch or a restarted process must not lose it, and one
+		// ticket's trouble must not stop this page from consuming other events:
+		// housekeeping retries pending entries with backoff.
+		assignment, assignmentErr := o.activeAssignment(ctx, ticket.ID)
+		if assignmentErr != nil {
+			return nil, assignmentErr
+		}
+		live := assignment.ID != uuid.Nil && assignment.SessionID != uuid.Nil
+		if !live && !trusted {
+			// No worker and no authority to start one: the comment stays context.
+			continue
+		}
+		entry := PendingFollowUp{
+			ID: event.SourceID + ":" + event.EventID, Kind: PendingFollowUpInput,
+			Text: eventInputText(event), CreatedAt: o.cfg.Now(),
+		}
+		if event.Kind == EventIssueUpdated {
+			entry.Snapshot = true
+			entry.Title = strings.TrimSpace(event.Title)
+			entry.Body = strings.TrimSpace(event.Body)
+			entry.Text = issueEditText(ticket, event)
+		}
+		if _, err := o.capturePending(ctx, &ticket, entry); err != nil {
 			return nil, err
 		}
-		assignment, _ := o.activeAssignment(ctx, ticket.ID)
-		text := eventInputText(event)
-		if event.Kind == EventIssueUpdated {
-			text = issueEditText(event)
-		}
-		deliveredToWorker := false
-		if assignment.ID != uuid.Nil && assignment.SessionID != uuid.Nil {
-			if err := o.cfg.Inputs.Deliver(ctx, InputRequest{
-				TenantID: o.cfg.TenantID, WorkItemID: ticket.ID, AssignmentID: assignment.ID,
-				SessionID: assignment.SessionID, Text: text,
-				RequestID: "followup:" + event.SourceID + ":" + event.EventID, Kind: "followup",
-			}); err != nil {
-				return nil, err
-			}
-			deliveredToWorker = inputDelivers(o.cfg.Inputs)
-		} else {
-			// No live worker: only a policy-allowed human follow-up may resume a
-			// blocked ticket. An untrusted Source comment is context, not authority,
-			// and is never allowed to start a worker.
-			if !trusted {
-				continue
-			}
-			statusChanged := false
-			if ticket.Status == collab.WorkItemBlocked {
-				if err := o.setTicketStatus(ctx, &ticket, collab.WorkItemActive, "follow-up received"); err != nil {
-					return nil, err
-				}
-				statusChanged = true
-			}
-			dispatched, dispatchErr := o.dispatchTicketLocked(ctx, ticket, true, "human follow-up on "+event.Thread.ID, text)
-			if dispatchErr != nil {
-				// The worker never received the content. Revert the resume and
-				// return the error so the caller does not advance the Source
-				// cursor; the event is not recorded seen and the page is retried.
-				if statusChanged {
-					_ = o.setTicketStatus(ctx, &ticket, collab.WorkItemBlocked, "follow-up dispatch failed; ticket re-blocked")
-				}
-				return nil, fmt.Errorf("superagent: follow-up dispatch for ticket %s: %w", ticket.ID, dispatchErr)
-			}
-			if !dispatched {
-				// Another assignment exists but has no live session (the crash
-				// window recovery repairs), or the ticket cannot dispatch. Nothing
-				// reached a worker, so the delivered snapshot must stay at the old
-				// content: the next updated_at bump re-delivers it.
-				if statusChanged {
-					_ = o.setTicketStatus(ctx, &ticket, collab.WorkItemBlocked, "follow-up not dispatched; ticket re-blocked")
-				}
-				continue
-			}
-			deliveredToWorker = true
-		}
-		if deliveredToWorker {
-			if err := o.recordDelivered(ctx, &ticket, event); err != nil {
-				return nil, err
-			}
+		if _, err := o.deliverPendingLocked(ctx, &ticket); err != nil {
+			return nil, err
 		}
 		delivered = append(delivered, ticket)
 	}
@@ -606,19 +578,26 @@ func inputDelivers(sink InputSink) bool {
 }
 
 // issueEditText is the follow-up body for a real issue edit. GitHub sends the
-// title and body separately, so a title-only edit has an unchanged body;
-// delivering only the body would silently drop the title change.
-func issueEditText(event Event) string {
+// title and body separately, so a title-only edit has an unchanged body and a
+// cleared body is a real change too; each case gets explicit text instead of a
+// silently empty message.
+func issueEditText(ticket Ticket, event Event) string {
+	last := ticket.LastDelivered()
 	title := strings.TrimSpace(event.Title)
 	body := strings.TrimSpace(event.Body)
-	switch {
-	case title == "":
-		return eventInputText(event)
-	case body == "":
-		return "Issue title: " + title
-	default:
-		return "Issue title: " + title + "\n\n" + body
+	parts := make([]string, 0, 2)
+	if title != "" {
+		parts = append(parts, "Issue title: "+title)
 	}
+	switch {
+	case body == last.Body:
+		parts = append(parts, "Issue body unchanged.")
+	case body == "":
+		parts = append(parts, "Issue body cleared.")
+	default:
+		parts = append(parts, "Issue body:\n"+body)
+	}
+	return strings.Join(parts, "\n\n")
 }
 
 // threadContentChanged compares an issue_updated event with the durable
@@ -629,29 +608,240 @@ func threadContentChanged(ticket Ticket, event Event) bool {
 	return strings.TrimSpace(event.Title) != last.Title || strings.TrimSpace(event.Body) != last.Body
 }
 
-// recordDelivered persists the thread content the worker just received. It runs
-// only after a successful delivery (or dispatch), so a failed attempt is retried
-// by the next poll instead of being remembered as delivered.
-func (o *Orchestrator) recordDelivered(ctx context.Context, ticket *Ticket, event Event) error {
-	if event.Kind != EventIssueUpdated {
-		return nil
+// Pending-delivery errors. A busy slot is transient; a deployment without a
+// turn starter can never deliver; a ticket that cannot dispatch is retried
+// until another assignment frees up.
+var (
+	errPendingNotDeliverable = errors.New("superagent: this deployment cannot deliver input to a worker")
+	errPendingNotDispatched  = errors.New("superagent: pending input was not dispatched")
+	// ErrAnswerDeliveryPending means the answer is durably recorded but the
+	// worker has not received it yet. The operator API surfaces it; a Source
+	// comment treats the answer as handled and lets housekeeping retry.
+	ErrAnswerDeliveryPending = errors.New("superagent: answer recorded but not yet delivered")
+	// ErrAnswerDeliveryFailed means the durable retry exhausted its attempts.
+	ErrAnswerDeliveryFailed = errors.New("superagent: answer recorded but delivery failed")
+)
+
+const (
+	pendingMaxAttempts = 10
+	pendingMaxBackoff  = 30 * time.Second
+)
+
+// pendingBackoff is the retry delay after N failed attempts (1s doubling to a
+// 30s cap). A busy slot therefore produces a bounded audit rate, not one row
+// every poll.
+func pendingBackoff(attempt int) time.Duration {
+	if attempt < 1 {
+		attempt = 1
+	}
+	delay := time.Second
+	for i := 1; i < attempt; i++ {
+		delay *= 2
+		if delay >= pendingMaxBackoff {
+			return pendingMaxBackoff
+		}
+	}
+	return delay
+}
+
+// capturePending appends one durable input to the ticket and persists it. The
+// ID makes a replayed Source event return the existing entry instead of a
+// duplicate.
+func (o *Orchestrator) capturePending(ctx context.Context, ticket *Ticket, entry PendingFollowUp) (bool, error) {
+	for _, existing := range ticket.Pending {
+		if existing.ID == entry.ID {
+			return false, nil
+		}
+	}
+	if entry.CreatedAt.IsZero() {
+		entry.CreatedAt = o.cfg.Now()
+	}
+	ticket.Pending = append(ticket.Pending, entry)
+	ticket.UpdatedAt = entry.CreatedAt
+	stored, err := o.cfg.Store.UpdateWorkItem(ctx, ticket.Record())
+	if err != nil {
+		return false, err
+	}
+	*ticket = TicketFromWorkItem(stored)
+	return true, nil
+}
+
+// deliverPendingLocked attempts the ticket's due pending inputs in creation
+// order. It is the only place that advances the delivered snapshot: a follow-up
+// is marked delivered (and its text audited) only after a worker actually got
+// it. A failure keeps the entry with backoff and blocks later entries for the
+// same ticket (per-thread ordering).
+func (o *Orchestrator) deliverPendingLocked(ctx context.Context, ticket *Ticket) (int, error) {
+	if len(ticket.Pending) == 0 {
+		return 0, nil
 	}
 	now := o.cfg.Now()
-	if title := strings.TrimSpace(event.Title); title != "" {
-		// The thread's title is part of what the worker now knows; the board
-		// shows the current issue title instead of the accept-time one.
-		ticket.Title = title
+	kept := make([]PendingFollowUp, 0, len(ticket.Pending))
+	deliveredEntries := make([]PendingFollowUp, 0, len(ticket.Pending))
+	changed := false
+	halt := false
+	for _, entry := range ticket.Pending {
+		if entry.Failed || halt {
+			kept = append(kept, entry)
+			continue
+		}
+		if entry.NextAttemptAt.After(now) {
+			halt = true
+			kept = append(kept, entry)
+			continue
+		}
+		entry.Attempts++
+		if err := o.attemptPendingDeliveryLocked(ctx, ticket, entry); err != nil {
+			entry.LastError = err.Error()
+			entry.NextAttemptAt = now.Add(pendingBackoff(entry.Attempts))
+			if errors.Is(err, errPendingNotDeliverable) || (!errors.Is(err, collab.ErrConcurrencyExceeded) && entry.Attempts >= pendingMaxAttempts) {
+				entry.Failed = true
+			}
+			kept = append(kept, entry)
+			changed = true
+			halt = true
+			continue
+		}
+		if entry.Snapshot {
+			o.applyDelivered(ticket, entry.Title, entry.Body, now)
+		}
+		deliveredEntries = append(deliveredEntries, entry)
+		changed = true
 	}
-	ticket.Delivered = &ThreadSnapshot{
-		Title: strings.TrimSpace(event.Title), Body: strings.TrimSpace(event.Body), At: now,
+	if changed {
+		ticket.Pending = kept
+		ticket.UpdatedAt = now
+		stored, err := o.cfg.Store.UpdateWorkItem(ctx, ticket.Record())
+		if err != nil {
+			return len(deliveredEntries), err
+		}
+		*ticket = TicketFromWorkItem(stored)
 	}
-	ticket.UpdatedAt = now
-	stored, err := o.cfg.Store.UpdateWorkItem(ctx, ticket.Record())
+	// Post-persist side effects: a delivered answer publishes its Channel
+	// comment only now (a failed delivery must not tell GitHub it was answered),
+	// and a delivered follow-up writes its audit row only on success.
+	for _, entry := range deliveredEntries {
+		if entry.Kind == PendingAnswer {
+			o.enqueueAnswerComment(ctx, *ticket, entry)
+			continue
+		}
+		if err := o.auditRequired(ctx, AuditTicketAttached, "accepted", ticket.ID, "delivered "+entry.ID); err != nil {
+			return len(deliveredEntries), err
+		}
+	}
+	return len(deliveredEntries), nil
+}
+
+// attemptPendingDeliveryLocked tries one delivery: to the live assignment when
+// there is one, otherwise by dispatching a human-follow-up assignment.
+func (o *Orchestrator) attemptPendingDeliveryLocked(ctx context.Context, ticket *Ticket, entry PendingFollowUp) error {
+	kind := "followup"
+	requestID := "followup:" + entry.ID
+	if entry.Kind == PendingAnswer {
+		kind = "attention_answer"
+		requestID = "attention:" + entry.AttentionID.String()
+	}
+	assignment, err := o.activeAssignment(ctx, ticket.ID)
 	if err != nil {
 		return err
 	}
-	*ticket = TicketFromWorkItem(stored)
+	if assignment.ID != uuid.Nil && assignment.SessionID != uuid.Nil {
+		if err := o.cfg.Inputs.Deliver(ctx, InputRequest{
+			TenantID: o.cfg.TenantID, WorkItemID: ticket.ID, AssignmentID: assignment.ID,
+			SessionID: assignment.SessionID, Text: entry.Text, RequestID: requestID, Kind: kind,
+		}); err != nil {
+			return err
+		}
+		if !inputDelivers(o.cfg.Inputs) {
+			return errPendingNotDeliverable
+		}
+		if ticket.Status == collab.WorkItemBlocked {
+			if err := o.setTicketStatus(ctx, ticket, collab.WorkItemActive, "input delivered to the live worker"); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	statusChanged := false
+	if ticket.Status == collab.WorkItemBlocked {
+		if err := o.setTicketStatus(ctx, ticket, collab.WorkItemActive, "pending input dispatch"); err != nil {
+			return err
+		}
+		statusChanged = true
+	}
+	dispatched, dispatchErr := o.dispatchTicketLocked(ctx, *ticket, true, "pending input for "+ticket.ID.String(), entry.Text)
+	if dispatchErr != nil {
+		return errors.Join(dispatchErr, o.revertToBlocked(ctx, ticket, statusChanged))
+	}
+	if !dispatched {
+		return errors.Join(errPendingNotDispatched, o.revertToBlocked(ctx, ticket, statusChanged))
+	}
 	return nil
+}
+
+// revertToBlocked restores the pre-attempt status. A failure to revert is
+// audited and returned (joined by the caller), never swallowed: an active
+// ticket without a worker would otherwise be silent.
+func (o *Orchestrator) revertToBlocked(ctx context.Context, ticket *Ticket, changed bool) error {
+	if !changed {
+		return nil
+	}
+	if err := o.setTicketStatus(ctx, ticket, collab.WorkItemBlocked, "input delivery failed; ticket re-blocked"); err != nil {
+		o.audit(ctx, AuditRecovered, "failed", Event{}, ticket.ID, "re-block after failed input delivery: "+err.Error())
+		return fmt.Errorf("superagent: re-block ticket after failed delivery: %w", err)
+	}
+	return nil
+}
+
+// retryPendingLocked is the housekeeping pump for durable pending inputs. It
+// lists the mode's tickets (bounded by the tenant's own work items) and retries
+// each due entry; a busy ticket never affects another ticket's retry.
+func (o *Orchestrator) retryPendingLocked(ctx context.Context) (int, error) {
+	items, err := o.cfg.Store.ListWorkItems(ctx, o.cfg.TenantID, collab.WorkFilter{ModeID: o.cfg.ModeID})
+	if err != nil {
+		return 0, err
+	}
+	total := 0
+	for _, item := range items {
+		ticket := TicketFromWorkItem(item)
+		if len(ticket.Pending) == 0 {
+			continue
+		}
+		if ticket.Mandate.Revoked() || ticket.Status == collab.WorkItemDone || ticket.Status == collab.WorkItemFailed ||
+			ticket.Status == collab.WorkItemCancelled || ticket.Status == collab.WorkItemCancelling {
+			continue
+		}
+		delivered, err := o.deliverPendingLocked(ctx, &ticket)
+		if err != nil {
+			return total, err
+		}
+		total += delivered
+	}
+	return total, nil
+}
+
+// applyDelivered advances the in-memory snapshot; the caller persists it in the
+// same work-item write that removes the pending entry.
+func (o *Orchestrator) applyDelivered(ticket *Ticket, title, body string, at time.Time) {
+	if t := strings.TrimSpace(title); t != "" {
+		ticket.Title = t
+	}
+	ticket.Delivered = &ThreadSnapshot{Title: strings.TrimSpace(title), Body: strings.TrimSpace(body), At: at}
+}
+
+// enqueueAnswerComment publishes the Channel answer message after the worker
+// actually received it, so GitHub never shows an answer the board still lists
+// as waiting.
+func (o *Orchestrator) enqueueAnswerComment(ctx context.Context, ticket Ticket, entry PendingFollowUp) {
+	if o.cfg.Outbox == nil || entry.AttentionID == uuid.Nil {
+		return
+	}
+	_, _ = o.cfg.Outbox.Enqueue(ctx, OutboxMessage{
+		TenantID: o.cfg.TenantID, WorkItemID: ticket.ID, ChannelID: ticket.Thread.ID,
+		Thread: ticket.Thread, Text: entry.Text,
+		Data:           marshalData(map[string]any{"ticketId": ticket.ID.String(), "event": "attention_answered"}),
+		IdempotencyKey: "attention:" + entry.AttentionID.String() + ":answer",
+	})
 }
 
 func isThreadComment(kind EventKind) bool {
@@ -684,7 +874,17 @@ func (o *Orchestrator) answerFromCommentLocked(ctx context.Context, tenantID uui
 		actor = event.Actor.ID
 	}
 	if _, err := o.answerAttentionLocked(ctx, tenantID, attention, optionID, text, actor); err != nil {
-		return false, err
+		switch {
+		case errors.Is(err, ErrAnswerDeliveryPending), errors.Is(err, ErrAnswerDeliveryFailed):
+			// The answer is durably recorded; housekeeping retries or the
+			// operator resumes. The Source page must not retry the comment.
+			return true, nil
+		case errors.Is(err, errPendingNotDeliverable):
+			// Not recorded: let the comment become a normal follow-up input.
+			return false, nil
+		default:
+			return false, err
+		}
 	}
 	return true, nil
 }
@@ -1641,17 +1841,52 @@ func (o *Orchestrator) AnswerAttention(ctx context.Context, tenantID, attentionI
 func (o *Orchestrator) answerAttentionLocked(ctx context.Context, tenantID uuid.UUID, attention collab.Attention, optionID, text, actor string) (collab.Attention, error) {
 	optionID = strings.TrimSpace(optionID)
 	text = strings.TrimSpace(text)
-	if attention.Status == collab.AttentionAnswered && sameAnswer(attention.Answer, optionID, text) {
-		// A retried answer is one fact: return the original result without
-		// reopening the Ticket or dispatching another Worker.
-		return attention, nil
-	}
 	ticket, err := o.loadTicket(ctx, tenantID, attention.WorkItemID)
 	if err != nil {
 		return collab.Attention{}, err
 	}
+	pendingAnswer := func() *PendingFollowUp {
+		for i := range ticket.Pending {
+			if ticket.Pending[i].Kind == PendingAnswer && ticket.Pending[i].AttentionID == attention.ID {
+				return &ticket.Pending[i]
+			}
+		}
+		return nil
+	}
+	if attention.Status == collab.AttentionAnswered && sameAnswer(attention.Answer, optionID, text) {
+		// A retried answer is one fact. It is only fully handled when no
+		// undelivered answer input remains; otherwise retry the delivery instead
+		// of returning early forever.
+		entry := pendingAnswer()
+		if entry == nil {
+			return attention, nil
+		}
+		if entry.Failed {
+			return attention, ErrAnswerDeliveryFailed
+		}
+		// An explicit retry is a human asking again: do not make it wait for the
+		// backoff of an automatic attempt.
+		entry.NextAttemptAt = time.Time{}
+		if _, err := o.deliverPendingLocked(ctx, &ticket); err != nil {
+			return attention, err
+		}
+		if pendingAnswer() == nil {
+			return attention, nil
+		}
+		return attention, ErrAnswerDeliveryPending
+	}
 	if ticket.Status == collab.WorkItemCancelled || ticket.Status == collab.WorkItemCancelling || ticket.Mandate.Revoked() {
 		return collab.Attention{}, fmt.Errorf("%w: the ticket was stopped", collab.ErrWorkItemClosed)
+	}
+	// A live worker plus a sink that cannot reach it would record an answer no
+	// worker ever sees. Refuse before mutating the attention; the ticket stays
+	// blocked and the API reports the misconfiguration.
+	assignment, err := o.activeAssignment(ctx, ticket.ID)
+	if err != nil {
+		return collab.Attention{}, err
+	}
+	if assignment.ID != uuid.Nil && assignment.SessionID != uuid.Nil && !inputDelivers(o.cfg.Inputs) {
+		return collab.Attention{}, errPendingNotDeliverable
 	}
 	if err := o.auditRequired(ctx, AuditAttentionAnswer, "accepted", ticket.ID, "attention "+attention.ID.String()+" by "+actor); err != nil {
 		return collab.Attention{}, err
@@ -1662,52 +1897,24 @@ func (o *Orchestrator) answerAttentionLocked(ctx context.Context, tenantID uuid.
 	if err != nil {
 		return collab.Attention{}, err
 	}
-	statusChanged := false
-	if ticket.Status == collab.WorkItemBlocked {
-		if err := o.setTicketStatus(ctx, &ticket, collab.WorkItemActive, "attention answered by "+actor); err != nil {
-			return collab.Attention{}, err
-		}
-		statusChanged = true
+	entry := PendingFollowUp{
+		ID: "attention:" + answered.ID.String(), Kind: PendingAnswer,
+		Text: attentionAnswerText(answered), AttentionID: answered.ID, CreatedAt: o.cfg.Now(),
 	}
-	// A delivery/dispatch failure must not leave an active ticket without a
-	// worker. The answer row is already durable; re-blocking keeps the board
-	// honest and leaves the ticket resumable.
-	revert := func() {
-		if statusChanged {
-			_ = o.setTicketStatus(ctx, &ticket, collab.WorkItemBlocked, "answer delivery failed; ticket re-blocked")
-		}
-	}
-	assignment, err := o.activeAssignment(ctx, ticket.ID)
-	if err != nil {
+	if _, err := o.capturePending(ctx, &ticket, entry); err != nil {
 		return collab.Attention{}, err
 	}
-	answerText := attentionAnswerText(answered)
-	if o.cfg.Outbox != nil {
-		_, _ = o.cfg.Outbox.Enqueue(ctx, OutboxMessage{
-			TenantID: tenantID, WorkItemID: ticket.ID, ChannelID: ticket.Thread.ID,
-			Thread: ticket.Thread, Text: answerText,
-			Data:           marshalData(map[string]any{"ticketId": ticket.ID.String(), "event": "attention_answered"}),
-			IdempotencyKey: "attention:" + answered.ID.String() + ":answer",
-		})
+	if _, err := o.deliverPendingLocked(ctx, &ticket); err != nil {
+		return collab.Attention{}, err
 	}
-	if assignment.ID != uuid.Nil && assignment.SessionID != uuid.Nil {
-		if err := o.cfg.Inputs.Deliver(ctx, InputRequest{
-			TenantID: tenantID, WorkItemID: ticket.ID, AssignmentID: assignment.ID,
-			SessionID: assignment.SessionID, Text: answerText,
-			RequestID: "attention:" + answered.ID.String(), Kind: "attention_answer",
-		}); err != nil {
-			revert()
-			return collab.Attention{}, err
+	if remaining := pendingAnswer(); remaining != nil {
+		if remaining.Failed {
+			return answered, ErrAnswerDeliveryFailed
 		}
-	} else {
-		if _, err := o.dispatchTicketLocked(ctx, ticket, true, "attention answered by "+actor, answerText); err != nil {
-			revert()
-			return collab.Attention{}, err
-		}
+		return answered, ErrAnswerDeliveryPending
 	}
 	return answered, nil
 }
-
 func sameAnswer(answer *collab.AttentionAnswer, optionID, text string) bool {
 	return answer != nil && answer.OptionID == optionID && answer.Text == text
 }

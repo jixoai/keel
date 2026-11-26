@@ -290,16 +290,52 @@ type ThreadSnapshot struct {
 	At    time.Time `json:"at,omitempty"`
 }
 
+// PendingFollowUp kinds.
+const (
+	PendingFollowUpInput PendingKind = "followup"
+	PendingAnswer        PendingKind = "attention_answer"
+)
+
+// PendingKind is the closed vocabulary of durable pending inputs.
+type PendingKind string
+
+// PendingFollowUp is one durable, not-yet-delivered input for a Ticket's
+// worker. It lives in the Ticket document: a busy slot or a failed dispatch
+// must not block the Source page, and the text must survive a restart until a
+// worker actually receives it. The delivered snapshot advances only when the
+// entry is removed, so a duplicate Source event re-captures by ID and re-tries.
+type PendingFollowUp struct {
+	// ID is the idempotency identity: "<sourceID>:<eventID>" for a follow-up or
+	// "attention:<attentionID>" for an answer.
+	ID   string      `json:"id"`
+	Kind PendingKind `json:"kind"`
+	Text string      `json:"text"`
+	// Title/Body are the thread snapshot this input carries; advancing them is
+	// deferred until delivery succeeds.
+	Title string `json:"title,omitempty"`
+	Body  string `json:"body,omitempty"`
+	// Snapshot marks an issue_updated input whose Title/Body must advance the
+	// delivered snapshot on success (including a deliberately cleared body).
+	Snapshot      bool      `json:"snapshot,omitempty"`
+	AttentionID   uuid.UUID `json:"attentionId,omitempty"`
+	Attempts      int       `json:"attempts,omitempty"`
+	NextAttemptAt time.Time `json:"nextAttemptAt,omitempty"`
+	LastError     string    `json:"lastError,omitempty"`
+	Failed        bool      `json:"failed,omitempty"`
+	CreatedAt     time.Time `json:"createdAt,omitempty"`
+}
+
 // ticketDoc is the WorkItem.Input document for super-agent tickets. Keeping it
 // in the generic WorkItem store means the core package needs no super-agent
 // table and one WorkStore implementation serves every mode.
 type ticketDoc struct {
-	Mandate   Mandate         `json:"mandate"`
-	Thread    ThreadRef       `json:"thread"`
-	Request   string          `json:"request,omitempty"`
-	WorkerBot string          `json:"workerBot,omitempty"`
-	Event     *Event          `json:"event,omitempty"`
-	Delivered *ThreadSnapshot `json:"delivered,omitempty"`
+	Mandate   Mandate           `json:"mandate"`
+	Thread    ThreadRef         `json:"thread"`
+	Request   string            `json:"request,omitempty"`
+	WorkerBot string            `json:"workerBot,omitempty"`
+	Event     *Event            `json:"event,omitempty"`
+	Delivered *ThreadSnapshot   `json:"delivered,omitempty"`
+	Pending   []PendingFollowUp `json:"pending,omitempty"`
 }
 
 // Ticket is a collab.WorkItem whose work unit is a ticket. It is independent of
@@ -307,11 +343,12 @@ type ticketDoc struct {
 // its Mandate stay.
 type Ticket struct {
 	collab.WorkItem
-	Mandate   Mandate         `json:"mandate"`
-	Thread    ThreadRef       `json:"thread"`
-	Request   string          `json:"request,omitempty"`
-	WorkerBot string          `json:"workerBot,omitempty"`
-	Delivered *ThreadSnapshot `json:"delivered,omitempty"`
+	Mandate   Mandate           `json:"mandate"`
+	Thread    ThreadRef         `json:"thread"`
+	Request   string            `json:"request,omitempty"`
+	WorkerBot string            `json:"workerBot,omitempty"`
+	Delivered *ThreadSnapshot   `json:"delivered,omitempty"`
+	Pending   []PendingFollowUp `json:"pending,omitempty"`
 }
 
 // TicketFromWorkItem projects a stored WorkItem into a Ticket. A malformed
@@ -331,6 +368,7 @@ func TicketFromWorkItem(item collab.WorkItem) Ticket {
 	ticket.Request = doc.Request
 	ticket.WorkerBot = doc.WorkerBot
 	ticket.Delivered = doc.Delivered
+	ticket.Pending = doc.Pending
 	return ticket
 }
 
@@ -338,7 +376,7 @@ func TicketFromWorkItem(item collab.WorkItem) Ticket {
 // Input with the ticket document.
 func (t Ticket) Record() collab.WorkItem {
 	item := t.WorkItem
-	doc := ticketDoc{Mandate: t.Mandate, Thread: t.Thread, Request: t.Request, WorkerBot: t.WorkerBot, Delivered: t.Delivered}
+	doc := ticketDoc{Mandate: t.Mandate, Thread: t.Thread, Request: t.Request, WorkerBot: t.WorkerBot, Delivered: t.Delivered, Pending: t.Pending}
 	if raw, err := json.Marshal(doc); err == nil {
 		item.Input = raw
 	}

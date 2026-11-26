@@ -157,11 +157,17 @@ func (c *recordingTreeCanceller) count() int {
 type recordingSink struct {
 	mu        sync.Mutex
 	delivered []superagent.InputRequest
+	// failNext makes the next n Deliver calls fail (retry tests).
+	failNext int
 }
 
 func (s *recordingSink) Deliver(_ context.Context, request superagent.InputRequest) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.failNext > 0 {
+		s.failNext--
+		return errors.New("delivery channel down")
+	}
 	s.delivered = append(s.delivered, request)
 	return nil
 }
@@ -542,9 +548,10 @@ func TestUnchangedIssueUpdateIsNotAFollowUp(t *testing.T) {
 }
 
 // TestFollowUpDispatchFailureKeepsSnapshotForRetry is the P1 replay rule: a
-// real issue edit whose follow-up could not be dispatched must not advance the
-// delivered snapshot. The event's error keeps the Source cursor in place; a
-// later bump with the same content must deliver it.
+// real issue edit whose delivery cannot happen is captured as durable pending
+// input, the page succeeds, and the delivered snapshot advances only when a
+// worker actually receives it. A later retry (here a housekeeping tick after
+// the launcher recovers) delivers the same text.
 func TestFollowUpDispatchFailureKeepsSnapshotForRetry(t *testing.T) {
 	env := newEnv(t, envOpts{})
 	acceptEvent(t, env, issueEvent("e1", "issue#1"))
@@ -552,8 +559,8 @@ func TestFollowUpDispatchFailureKeepsSnapshotForRetry(t *testing.T) {
 	board, _ := env.orchestrator.Board(ctx, env.tenant, superagent.BoardFilter{})
 	ticket := board.Tickets[0]
 
-	// Park the ticket on a human question, then lose the worker so the follow-up
-	// takes the dispatch branch.
+	// Park the ticket on a human question, then lose the worker so the
+	// follow-up takes the dispatch branch.
 	attention, err := env.orchestrator.Ask(ctx, ticket.ID, ticket.ActiveAssignment.ID, collab.AttentionRequest{
 		Prompt: "Approve?", AllowFreeText: true,
 	})
@@ -578,8 +585,8 @@ func TestFollowUpDispatchFailureKeepsSnapshotForRetry(t *testing.T) {
 		Title: "Fix issue#1", Body: "Please fix it. Also update the tests.",
 	}
 	env.launcher.launchErr = errors.New("launch down")
-	if _, err := env.orchestrator.HandleSourceEvent(ctx, fixtureEvent(t, edited)); err == nil {
-		t.Fatal("dispatch failure must return an error so the cursor does not advance")
+	if _, err := env.orchestrator.HandleSourceEvent(ctx, fixtureEvent(t, edited)); err != nil {
+		t.Fatalf("a failed dispatch must not fail the page: %v", err)
 	}
 	board, _ = env.orchestrator.Board(ctx, env.tenant, superagent.BoardFilter{})
 	if board.Tickets[0].Status != collab.WorkItemBlocked {
@@ -588,21 +595,228 @@ func TestFollowUpDispatchFailureKeepsSnapshotForRetry(t *testing.T) {
 	if got := board.Tickets[0].LastDelivered().Body; got != "Please fix it." {
 		t.Fatalf("snapshot after a failed dispatch = %q, want the original body", got)
 	}
+	if len(board.Tickets[0].Pending) != 1 || !strings.Contains(board.Tickets[0].Pending[0].Text, "Also update the tests") {
+		t.Fatalf("pending input = %+v, want the edited body captured", board.Tickets[0].Pending)
+	}
 
-	// The launcher recovers; a later event with the same content is delivered
-	// because the snapshot never advanced.
+	// A retry while still failing keeps the entry (no snapshot advance).
+	env.orchestrator.Housekeeping(ctx)
+	board, _ = env.orchestrator.Board(ctx, env.tenant, superagent.BoardFilter{})
+	if got := board.Tickets[0].LastDelivered().Body; got != "Please fix it." {
+		t.Fatalf("snapshot after a failed retry = %q", got)
+	}
+
+	// The launcher recovers; the next due housekeeping tick delivers it.
 	env.launcher.launchErr = nil
-	retry := edited
-	retry.EventID = "u2"
-	if _, err := env.orchestrator.HandleSourceEvent(ctx, fixtureEvent(t, retry)); err != nil {
-		t.Fatalf("retry: %v", err)
+	*env.clock = env.clock.Add(2 * time.Second)
+	if err := env.orchestrator.Housekeeping(ctx); err != nil {
+		t.Fatalf("housekeeping retry: %v", err)
 	}
 	if launch := env.launcher.lastLaunch(); !strings.Contains(launch.Task, "Also update the tests") {
 		t.Fatalf("follow-up task = %q, want the edited body", launch.Task)
 	}
 	board, _ = env.orchestrator.Board(ctx, env.tenant, superagent.BoardFilter{})
 	if got := board.Tickets[0].LastDelivered().Body; got != "Please fix it. Also update the tests." {
-		t.Fatalf("snapshot after the retry = %q, want the edited body", got)
+		t.Fatalf("snapshot after delivery = %q, want the edited body", got)
+	}
+	if len(board.Tickets[0].Pending) != 0 {
+		t.Fatalf("pending after delivery = %+v, want empty", board.Tickets[0].Pending)
+	}
+}
+
+// TestBusySlotDoesNotBlockTheSourcePage is the head-of-line regression: a
+// follow-up that cannot dispatch because the tenant's only slot is busy is
+// captured as pending, while another event on the same page is still consumed.
+// Freeing the slot lets housekeeping deliver the pending text.
+func TestBusySlotDoesNotBlockTheSourcePage(t *testing.T) {
+	env := newEnv(t, envOpts{slots: 1})
+	ctx := context.Background()
+	// Ticket A holds the only worker slot.
+	acceptEvent(t, env, issueEvent("a1", "issue#A"))
+	// Ticket B is accepted but cannot dispatch (busy slot); it stays open.
+	acceptEvent(t, env, issueEvent("b1", "issue#B"))
+	if board, _ := env.orchestrator.Board(ctx, env.tenant, superagent.BoardFilter{}); len(board.Tickets) != 2 {
+		t.Fatalf("tickets = %d, want 2", len(board.Tickets))
+	}
+
+	// One page: a comment on B (needs a dispatch, slot busy) and a comment on A
+	// (live assignment). The busy ticket must not fail the page.
+	if err := env.source.PushEvent(env.tenant, superagent.Event{
+		SourceID: "fixture", EventID: "b-comment", Kind: superagent.EventIssueComment,
+		Actor: alice(), Thread: superagent.ThreadRef{Source: "fixture", Kind: "issue", ID: "issue#B"},
+		Body: "please handle B",
+	}); err != nil {
+		t.Fatalf("push B comment: %v", err)
+	}
+	if err := env.source.PushEvent(env.tenant, superagent.Event{
+		SourceID: "fixture", EventID: "a-comment", Kind: superagent.EventIssueComment,
+		Actor: alice(), Thread: superagent.ThreadRef{Source: "fixture", Kind: "issue", ID: "issue#A"},
+		Body: "context for A",
+	}); err != nil {
+		t.Fatalf("push A comment: %v", err)
+	}
+	if _, err := env.orchestrator.PollOnce(ctx); err != nil {
+		t.Fatalf("busy slot must not fail the page: %v", err)
+	}
+	if env.sink.count() != 1 || !strings.Contains(env.sink.last().Text, "context for A") {
+		t.Fatalf("live ticket delivery = %+v, want the A comment", env.sink)
+	}
+	board, _ := env.orchestrator.Board(ctx, env.tenant, superagent.BoardFilter{})
+	var b superagent.TicketView
+	for _, item := range board.Tickets {
+		if item.Thread.ID == "issue#B" {
+			b = item
+		}
+	}
+	if len(b.Pending) != 1 || !strings.Contains(b.Pending[0].Text, "please handle B") {
+		t.Fatalf("B pending = %+v, want the captured comment", b.Pending)
+	}
+
+	// Free the slot: A finishes, then housekeeping retries B's pending input.
+	for _, item := range board.Tickets {
+		if item.Thread.ID == "issue#A" {
+			if err := env.orchestrator.Report(ctx, superagent.ReportRequest{
+				TenantID: env.tenant, WorkItemID: item.ID, AssignmentID: item.ActiveAssignment.ID,
+				State: superagent.ReportReady, Summary: "done",
+			}); err != nil {
+				t.Fatalf("Report ready A: %v", err)
+			}
+		}
+	}
+	*env.clock = env.clock.Add(2 * time.Second)
+	if err := env.orchestrator.Housekeeping(ctx); err != nil {
+		t.Fatalf("housekeeping: %v", err)
+	}
+	if env.sink.count() < 2 || !strings.Contains(env.sink.last().Text, "please handle B") {
+		t.Fatalf("B follow-up delivery = %+v, want the captured text", env.sink.delivered)
+	}
+	board, _ = env.orchestrator.Board(ctx, env.tenant, superagent.BoardFilter{})
+	for _, item := range board.Tickets {
+		if item.Thread.ID == "issue#B" && len(item.Pending) != 0 {
+			t.Fatalf("B pending after slot release = %+v", item.Pending)
+		}
+	}
+}
+
+// TestAnswerRetryDeliversAfterAFailedAttempt: the answer is durable before the
+// delivery attempt. A failed attempt returns the pending sentinel, keeps the
+// ticket blocked and does not publish the Channel answer; retrying the same
+// answer does not early-return until the pending input is actually delivered.
+func TestAnswerRetryDeliversAfterAFailedAttempt(t *testing.T) {
+	env := newEnv(t, envOpts{})
+	ctx := context.Background()
+	acceptEvent(t, env, issueEvent("e1", "issue#1"))
+	board, _ := env.orchestrator.Board(ctx, env.tenant, superagent.BoardFilter{})
+	ticket := board.Tickets[0]
+	attention, err := env.orchestrator.Ask(ctx, ticket.ID, ticket.ActiveAssignment.ID, collab.AttentionRequest{
+		Prompt: "Approve?", Options: []collab.AttentionOption{{ID: "approve", Label: "Approve"}},
+	})
+	if err != nil {
+		t.Fatalf("Ask: %v", err)
+	}
+	if err := env.orchestrator.Report(ctx, superagent.ReportRequest{
+		TenantID: env.tenant, WorkItemID: ticket.ID, AssignmentID: ticket.ActiveAssignment.ID,
+		State: superagent.ReportWaiting, Summary: "waiting", AttentionID: attention.ID,
+	}); err != nil {
+		t.Fatalf("Report waiting: %v", err)
+	}
+	env.orchestrator.Housekeeping(ctx) // flush the question comment
+	before := len(env.source.Messages())
+
+	env.sink.failNext = 1
+	_, err = env.orchestrator.AnswerAttention(ctx, env.tenant, attention.ID, "approve", "", "alice")
+	if !errors.Is(err, superagent.ErrAnswerDeliveryPending) {
+		t.Fatalf("first answer err = %v, want ErrAnswerDeliveryPending", err)
+	}
+	board, _ = env.orchestrator.Board(ctx, env.tenant, superagent.BoardFilter{})
+	if board.Tickets[0].Status != collab.WorkItemBlocked {
+		t.Fatalf("ticket after a failed answer delivery = %s, want blocked", board.Tickets[0].Status)
+	}
+	if len(board.Tickets[0].Pending) != 1 || board.Tickets[0].Pending[0].Kind != superagent.PendingAnswer {
+		t.Fatalf("pending = %+v, want one answer entry", board.Tickets[0].Pending)
+	}
+
+	// Retrying the same answer must not early-return: it retries the delivery.
+	if _, err := env.orchestrator.AnswerAttention(ctx, env.tenant, attention.ID, "approve", "", "alice"); err != nil {
+		t.Fatalf("retried answer: %v", err)
+	}
+	board, _ = env.orchestrator.Board(ctx, env.tenant, superagent.BoardFilter{})
+	if board.Tickets[0].Status != collab.WorkItemActive {
+		t.Fatalf("ticket after delivery = %s, want active", board.Tickets[0].Status)
+	}
+	if len(board.Tickets[0].Pending) != 0 {
+		t.Fatalf("pending after delivery = %+v", board.Tickets[0].Pending)
+	}
+	if env.sink.count() != 1 || !strings.Contains(env.sink.last().Text, "Human selected: approve") {
+		t.Fatalf("worker delivery = %+v, want the answer", env.sink.delivered)
+	}
+	// The Channel answer message is published only after delivery succeeded.
+	env.orchestrator.Housekeeping(ctx)
+	if got := len(env.source.Messages()); got != before+1 {
+		t.Fatalf("channel messages = %d, want the deferred answer after %d", got, before)
+	}
+}
+
+// TestAnswerRefusedWhenDeliveryIsNotWired: an answer to a live worker in a
+// deployment without a turn starter must not be recorded, so the attention
+// stays open and the board stays blocked instead of claiming an answer nobody
+// received.
+func TestAnswerRefusedWhenDeliveryIsNotWired(t *testing.T) {
+	env := newEnv(t, envOpts{inputs: superagent.NoopInputSink{}})
+	ctx := context.Background()
+	acceptEvent(t, env, issueEvent("e1", "issue#1"))
+	board, _ := env.orchestrator.Board(ctx, env.tenant, superagent.BoardFilter{})
+	ticket := board.Tickets[0]
+	attention, err := env.orchestrator.Ask(ctx, ticket.ID, ticket.ActiveAssignment.ID, collab.AttentionRequest{
+		Prompt: "Approve?", Options: []collab.AttentionOption{{ID: "approve", Label: "Approve"}},
+	})
+	if err != nil {
+		t.Fatalf("Ask: %v", err)
+	}
+	if err := env.orchestrator.Report(ctx, superagent.ReportRequest{
+		TenantID: env.tenant, WorkItemID: ticket.ID, AssignmentID: ticket.ActiveAssignment.ID,
+		State: superagent.ReportWaiting, Summary: "waiting", AttentionID: attention.ID,
+	}); err != nil {
+		t.Fatalf("Report waiting: %v", err)
+	}
+	if _, err := env.orchestrator.AnswerAttention(ctx, env.tenant, attention.ID, "approve", "", "alice"); err == nil {
+		t.Fatal("answer in a no-op delivery deployment must fail")
+	}
+	inbox, _ := env.orchestrator.Inbox(ctx, env.tenant)
+	if len(inbox.Items) != 1 || inbox.Items[0].Status != collab.AttentionOpen {
+		t.Fatalf("inbox = %+v, want the question still open", inbox.Items)
+	}
+}
+
+// TestClearedIssueBodyIsDeliveredExplicitly: "body unchanged" and "body
+// cleared" are different edits; the follow-up text says which one happened and
+// the snapshot records the cleared body.
+func TestClearedIssueBodyIsDeliveredExplicitly(t *testing.T) {
+	env := newEnv(t, envOpts{})
+	acceptEvent(t, env, issueEvent("e1", "issue#1"))
+	ctx := context.Background()
+	cleared := superagent.Event{
+		SourceID: "fixture", EventID: "clear-1", Kind: superagent.EventIssueUpdated,
+		Actor: alice(), Thread: superagent.ThreadRef{Source: "fixture", Kind: "issue", ID: "issue#1"},
+		Title: "Fix issue#1", Body: "",
+	}
+	if _, err := env.orchestrator.HandleSourceEvent(ctx, fixtureEvent(t, cleared)); err != nil {
+		t.Fatalf("cleared body: %v", err)
+	}
+	if env.sink.count() != 1 || !strings.Contains(env.sink.last().Text, "Issue body cleared.") {
+		t.Fatalf("cleared body delivery = %q", env.sink.last().Text)
+	}
+	board, _ := env.orchestrator.Board(ctx, env.tenant, superagent.BoardFilter{})
+	if got := board.Tickets[0].LastDelivered().Body; got != "" {
+		t.Fatalf("snapshot body after clear = %q, want empty", got)
+	}
+	again := cleared
+	again.EventID = "clear-2"
+	if _, err := env.orchestrator.HandleSourceEvent(ctx, fixtureEvent(t, again)); err != nil {
+		t.Fatalf("repeat cleared body: %v", err)
+	}
+	if env.sink.count() != 1 {
+		t.Fatalf("deliveries = %d, want 1: a repeated cleared-body bump re-delivered", env.sink.count())
 	}
 }
 

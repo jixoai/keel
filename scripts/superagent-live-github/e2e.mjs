@@ -29,6 +29,9 @@ const DSN_FILE = process.env.LIVE_DSN_FILE || '';
 const GIT_COMMIT = process.env.LIVE_GIT_COMMIT || '';
 const GIT_DIRTY = process.env.LIVE_GIT_DIRTY || '';
 const BIN_SHA256 = process.env.LIVE_BIN_SHA256 || '';
+const BUILD_REV = process.env.LIVE_BUILD_REV || '';
+const HEAD_REV = process.env.LIVE_HEAD_REV || '';
+const BUILD_MODIFIED = process.env.LIVE_BUILD_MODIFIED || '';
 const CHROME = process.env.LIVE_CHROME || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const PLAYWRIGHT = process.env.LIVE_PLAYWRIGHT || '';
 const HEADLESS = process.env.LIVE_HEADLESS !== 'false';
@@ -60,6 +63,7 @@ const report = {
     'local-only 产品鉴权',
     `commit：${GIT_COMMIT.slice(0, 12) || 'unknown'}（tracked dirty=${GIT_DIRTY || '?'}）`,
     `bin sha256：${BIN_SHA256.slice(0, 16) || 'unknown'}…`,
+    `build vcs.revision：${BUILD_REV.slice(0, 12) || 'unknown'}（=HEAD：${BUILD_REV !== '' && BUILD_REV === HEAD_REV}）`,
   ],
   conclusion: '',
   stats: [],
@@ -248,10 +252,10 @@ async function openBrowser() {
   return true;
 }
 
-async function shot(name, caption, target = page) {
+async function shot(name, caption, fullPage = false, target = page) {
   if (!target) return;
   const file = path.join(SHOTS, name);
-  await target.screenshot({ path: file, fullPage: false });
+  await target.screenshot({ path: file, fullPage });
   if (current) current.shots.push({ src: `shots/${name}`, caption });
   return `shots/${name}`;
 }
@@ -285,15 +289,20 @@ async function gotoIssueWaiting(expected) {
   throw new Error(`issue page never showed: ${expected}`);
 }
 
-// capture runs one navigation+screenshot and only records a note on failure:
-// a slow GitHub render must not turn a product assertion red.
-async function capture(fn, name, caption) {
-  if (!page) return;
+// capture runs one navigation+screenshot. Evidence that did not get captured is
+// a failed assertion, not a note: a report must not claim a screenshot it does
+// not have.
+async function capture(fn, name, caption, opts = {}) {
+  if (!page) {
+    check('S:' + name, 'evidence', `截图可用：${name}`, false, 'browser unavailable');
+    return;
+  }
   try {
     await fn();
-    await shot(name, caption);
+    await shot(name, caption, opts.fullPage === true);
   } catch (error) {
     note(`screenshot ${name} failed: ${error.message}`);
+    check('S:' + name, 'evidence', `截图成功：${name}`, false, error.message);
   }
 }
 
@@ -318,7 +327,8 @@ async function main() {
     url: issue?.html_url,
   });
   note(`serve=${BASE}\nissue=${ISSUE_URL}\naccount=${auth.account?.username} tenant=${auth.tenantId}`);
-  note(`commit=${GIT_COMMIT} trackedDirty=${GIT_DIRTY} binSha256=${BIN_SHA256}`);
+  note(`commit=${GIT_COMMIT} trackedDirty=${GIT_DIRTY} binSha256=${BIN_SHA256} buildRev=${BUILD_REV} head=${HEAD_REV}`);
+  check('B4', 'boot', '二进制 vcs.revision == git HEAD 且 vcs.modified=false', BUILD_REV !== '' && BUILD_REV === HEAD_REV && BUILD_MODIFIED === 'false', { buildRevision: BUILD_REV, head: HEAD_REV, modified: BUILD_MODIFIED });
   finishStep();
 
   // 1. Source -> Ticket -> Assignment
@@ -381,7 +391,7 @@ async function main() {
   });
   note(`attentionId=${attention.id}\nprompt=${attention.prompt}\nstatus=${blockedTicket.status}`);
   await openBrowser();
-  await capture(() => gotoIssueWaiting(attention.prompt), '01-github-question.png', 'GitHub issue：接单 + 员工问题评论');
+  await capture(() => gotoIssueWaiting(attention.prompt), '01-github-question.png', 'GitHub issue：接单 + 员工问题评论', { fullPage: true });
   await capture(() => gotoProduct('/superagent', '工单看板'), '02-product-board-attention.png', '产品 /superagent 看板：待人工收件箱显示员工问题');
   finishStep();
 
@@ -430,8 +440,13 @@ async function main() {
   const regressionNames = [
     'TestUnchangedIssueUpdateIsNotAFollowUp',
     'TestIssueUpdateSnapshotIsDurableAcrossRestart',
+    'TestPendingFollowUpSurvivesRestart',
     'TestFollowUpDispatchFailureKeepsSnapshotForRetry',
+    'TestBusySlotDoesNotBlockTheSourcePage',
     'TestNoopInputSinkDoesNotAdvanceDeliveredSnapshot',
+    'TestAnswerRetryDeliversAfterAFailedAttempt',
+    'TestAnswerRefusedWhenDeliveryIsNotWired',
+    'TestClearedIssueBodyIsDeliveredExplicitly',
     'TestGitHubSourceIgnoresOwnChannelComments',
     'TestGitHubSourceFailsClosedWhenOwnerIsUnknown',
     'TestGitHubSourceFollowsPagination',
@@ -456,7 +471,7 @@ async function main() {
   check(
     'R2',
     'dedupe',
-    'P1 快照 / 派工失败不推进 / Noop 不推进 / 仅标题编辑 / owner+行尾 marker / 游标取 max / 分页 / PG 重启 全部 PASS',
+    'P1 快照 / pending 重启 / 派工失败不阻塞页 / Busy slot 毒丸 / Noop / answer 重试 / 清空正文 / marker / 游标取 max / 分页 全部 PASS',
     regressed.length === 0,
     regressed.length === 0 ? `${regressionNames.length} cases PASS` : 'missing PASS: ' + regressed.join(','),
   );
@@ -509,7 +524,7 @@ async function main() {
   }, 60000);
   check('N4', 'answer', '答复唤醒同一工单（active 或已完成）', ['active', 'done'].includes(liveTicket.status), liveTicket.status);
   note(`answerStatus=${answered.status}\ncomment=${brief(answerComment, 240)}`);
-  await capture(() => gotoIssueWaiting('Human selected: approve'), '03-github-answer.png', 'GitHub issue：产品答复写回评论');
+  await capture(() => gotoIssueWaiting('Human selected: approve'), '03-github-answer.png', 'GitHub issue：产品答复写回评论', { fullPage: true });
   finishStep();
 
   // 4. worker ready -> done
@@ -547,7 +562,7 @@ async function main() {
   const answerTurn = providerEntries().find((entry) => (entry.last?.text || '').includes('Human selected: approve'));
   check('D4', 'done', '答复真实进入员工模型（模型看到 Human selected: approve）', Boolean(answerTurn), answerTurn ? `role=${answerTurn.last.role} ${brief(answerTurn.last.text, 200)}` : 'missing');
   note(`status=${doneTicket.status}\ncompletion=${brief(completion, 240)}`);
-  await capture(() => gotoIssueWaiting(`Ticket ${ticket.id.slice(0, 8)} completed`), '04-github-complete.png', 'GitHub issue：完成评论');
+  await capture(() => gotoIssueWaiting(`Ticket ${ticket.id.slice(0, 8)} completed`), '04-github-complete.png', 'GitHub issue：完成评论', { fullPage: true });
   await capture(() => gotoProduct('/superagent', '工单看板'), '05-product-board-done.png', '产品 /superagent 看板：完成态与四类计数');
   finishStep();
 

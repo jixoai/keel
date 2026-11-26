@@ -24,3 +24,6 @@ __pycache__/
 # live E2E report evidence must never carry credentials or the local DSN
 /.agents/reports/**/secrets/
 **/dsn
+
+# report/evidence trees are never versioned (they may carry local paths)
+/.agents/reports/

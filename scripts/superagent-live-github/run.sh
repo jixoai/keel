@@ -165,6 +165,15 @@ if [[ "$SKIP_BUILD" != "1" ]]; then
   ( cd "$ROOT" && GOTOOLCHAIN=auto go build -o "$BIN" ./cmd/keel ) || fail "go build failed"
 fi
 [[ -x "$BIN" ]] || fail "missing keel binary: $BIN"
+# The report must prove which commit it ran. A cached binary (KEEL_LIVE_SKIP_BUILD)
+# is only accepted when its embedded VCS revision equals HEAD.
+HEAD_REV="$(cd "$ROOT" && git rev-parse HEAD)"
+BUILD_REV="$(go version -m "$BIN" 2>/dev/null | awk '$1=="build" && $2 ~ /^vcs.revision=/{sub("vcs.revision=","",$2); print $2; exit}')"
+BUILD_MODIFIED="$(go version -m "$BIN" 2>/dev/null | awk '$1=="build" && $2 ~ /^vcs.modified=/{sub("vcs.modified=","",$2); print $2; exit}')"
+[[ -n "$BUILD_REV" ]] || fail "binary $BIN has no vcs.revision; rebuild it from the worktree with buildvcs enabled"
+[[ "$BUILD_REV" == "$HEAD_REV" ]] || fail "binary revision $BUILD_REV != HEAD $HEAD_REV; rebuild (unset KEEL_LIVE_SKIP_BUILD)"
+[[ "$BUILD_MODIFIED" == "false" ]] || fail "binary was built from a modified tree (vcs.modified=$BUILD_MODIFIED); commit first and rebuild"
+say "binary revision: $BUILD_REV (vcs.modified=false)"
 if [[ ! -f "$WEB_ROOT/index.html" ]]; then
   [[ "$SKIP_WEB" != "1" ]] || fail "missing web build: $WEB_ROOT (unset KEEL_LIVE_SKIP_WEB)"
   say "packaging web -> $WEB_ROOT"
@@ -320,7 +329,10 @@ export LIVE_DSN_FILE="$RUNTIME/dsn"
 # Bind the report to the code it actually ran: HEAD, tracked-tree dirtiness and
 # the exact binary. The lane runs after the final commit, so a reader can check
 # the report against that commit.
-export LIVE_GIT_COMMIT="$(cd "$ROOT" && git rev-parse HEAD)"
+export LIVE_GIT_COMMIT="$HEAD_REV"
+export LIVE_HEAD_REV="$HEAD_REV"
+export LIVE_BUILD_REV="$BUILD_REV"
+export LIVE_BUILD_MODIFIED="$BUILD_MODIFIED"
 export LIVE_GIT_DIRTY="$(cd "$ROOT" && git status --porcelain --untracked-files=no | wc -l | tr -d ' ')"
 export LIVE_BIN_SHA256="$(shasum -a 256 "$BIN" | awk '{print $1}')"
 export LIVE_GITHUB_TOKEN="$(gh auth token)"

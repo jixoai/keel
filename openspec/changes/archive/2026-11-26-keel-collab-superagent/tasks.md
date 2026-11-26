@@ -91,6 +91,8 @@
       报告绑定 `git rev-parse HEAD` + 二进制 sha256，且只在 exit=0 时发布。
       未覆盖：PR 线程、真实 LLM 判断质量、第二个人类账号、App token——见报告「缺口与风险」。）
 - [x] 5.3 独立 reviewer 复核；P0/P1 清零；`openspec validate --strict`；归档。
-      （产品 UI 与 Worker 工具分别经独立 reviewer 复核 PASS，P0/P1=0；strict 通过。
+      （产品 UI 与 Worker 工具分别经独立 reviewer 复核 PASS，P0/P1=0；`openspec validate --all`
+      45 项通过（`--strict` 未单独作为证据，产出中的 Purpose 占位是既有 warning）。
       5.2 的外部凭据阻塞已于 2026-11-27 实跑解除；多轮复审的 P1/P2（快照基准、
-      派工失败回滚、marker 过滤范围、标题投递、分页、报告版本绑定）已修复并补测。）
+      派工失败不阻塞 Source 页、pending 持久化重试、answer 投递重试/Noop 拒绝、marker
+      过滤范围、标题/清空正文投递、分页、报告版本绑定）已修复并补测。）
