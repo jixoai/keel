@@ -2,7 +2,7 @@
 
 ## Purpose
 
-为 keel 提供一个租户级、跨 Session、跨 Bot 的通用任务与线程标准：任务就是线程根，回复就是工作日志，认领是带租约与 epoch 围栏的 claim，依赖与标签组成可路由的队列，所有状态变化可从追加日志重建。
+为 keel 提供一个租户级、跨 Session、跨 Bot 的通用任务与线程标准：任务就是线程根，回复就是工作日志，认领是带租约与 epoch 围栏的 claim，依赖与标签组成可路由的队列，所有状态变化可从追加日志重建；board 线程还必须能通过 Slack、GitHub、Linear 与任意 Chat SDK adapter 双向同步，并保持去重、重试、凭据隔离与不可信输入防护。
 
 ## ADDED Requirements
 
@@ -314,15 +314,155 @@ Claim token MUST 只保存在客户端内存；刷新或换标签页后 MUST 显
 - **WHEN** 同一 BoardQueue 在 nsh web 与 TUI target 渲染
 - **THEN** 状态 tabs、筛选、任务行与权限动作一致，平台差异只允许图标/悬停等不可移植项
 
-### Requirement: superagent 与外部来源适配
+### Requirement: 双向线程同步（Slack/GitHub/Linear 与 Chat SDK 通用桥）
+
+系统 MUST 提供 sync 引擎，把 board thread 与外部平台 thread 双向镜像。Sync MUST 在 phase 0
+交付 Slack、GitHub、Linear 三个原生适配器，并通过签名 HTTP bridge 支持任意 Chat SDK
+adapter；MUST NOT 把 sync 降级为“只做 GitHub 最小入站”。每个 sync entry MUST 有独立的
+key、platform、路由与凭据；MUST 支持 root 起 thread、attach 已有 thread（channel target
+backfill root+replies，thread target 只接收 join 之后的消息）、reply/edit/delete/reaction、
+files、typing、permalink 与 source read。系统 MUST 跳过来源 target/key、平台自身 bot、
+`noSync` 消息；同一 board thread 的投递 MUST 保序，不同 thread MUST 可并行。GitHub 原生
+MUST 覆盖 PR/issue 生命周期、comments、review、CI/state/label/assignee；board root 默认
+不创建 issue（与标准一致），已有 PR/issue 线程 MUST 双向。Linear 原生 MUST 支持 board
+root 创建 issue、comments、状态/属性/标签/assignee。Chat SDK bridge MUST 以 HMAC +
+timestamp + nonce 交换归一化事件与投递请求，MUST NOT 把 Node/Chat SDK 运行时嵌入
+keel-board/keel 核心。
+
+#### Scenario: Slack 双向镜像
+
+- **WHEN** Slack 频道里出现一条新消息，board 对应 thread 随后出现一条回复
+- **THEN** 新消息成为 board 线程根/回复，board 回复出现在同一 Slack thread；edit/delete/reaction
+  也同步到对应副本
+
+#### Scenario: GitHub PR 生命周期与评论
+
+- **WHEN** GitHub PR 打开、收到 review/comment、合并
+- **THEN** board 对应线程出现根、回复与 `state/review/head` 等标签；board 回复写回该 PR 的评论，
+  merge 后平台状态反映在 board 标签上
+
+#### Scenario: Linear issue 与 board root 互建
+
+- **WHEN** Linear issue 被创建/评论，或 board root 在 mapped team channel 发布
+- **THEN** 对应 board 线程/Linear issue 被创建，评论与回复双向；状态/属性/标签保持同步
+
+#### Scenario: attach 与 thread target 的差异
+
+- **WHEN** 调用者把一个已有 board thread attach 到 Slack channel target，或 attach 到已存在的
+  Slack thread target
+- **THEN** channel target 收到 root + 历史回复的 backfill；thread target 只收到 join 之后的新消息
+
+#### Scenario: Chat SDK 通用桥
+
+- **WHEN** 部署方用任意 Chat SDK adapter 的 sidecar 推送一条归一化事件并请求一条出站投递
+- **THEN** board 按 dedupe 只导入一次，并通过 HMAC 校验的 `/deliver` 调用 sidecar；核心进程不加载
+  Node/Chat SDK
+
+#### Scenario: 文件与 typing
+
+- **WHEN** Slack 消息带文件，或 board 对一个已同步线程调用 typing
+- **THEN** 文件经 blob lifecycle 落到 board（超限降级为附件说明行），typing 只在支持平台尽力显示
+  且不写入日志
+
+### Requirement: Sync 去重、重试与失败恢复
+
+系统 MUST 为每个入站 occurrence 使用稳定 `dedupe`（≤300 字符），并以
+`(tenant,key,dedupe)` 唯一约束保证重投只导入一次；同一 action 的后续 occurrence（如
+reaction add/remove/add）MUST 有不同的 dedupe。导入消息 MUST 使用确定性 client ID；出站
+MUST 使用确定性 `delivery_id`；receipt/copy MUST 唯一。出站失败 MUST 按有界指数退避重试
+（默认 1s 起至 30s、5 次），之后写 `message.sync_failed`，MUST 继续后续消息；每 target 的
+失败 MUST 可见，并由后续成功清除。入站 MUST 先持久化再 ack；存储失败 MUST 返回 5xx 让平台
+重试；处理失败 MUST 重试并在超过上限后进入 dead letter，且 MUST 只阻塞该 external thread
+lane。重启 MUST 从 durable inbox/outbox/source cursor 恢复。系统 MUST 通过平台 bot 身份、
+来源 target/key、`noSync` 与隐藏 echo marker 抑制回声；平台既无可靠 bot 身份又无 marker 时
+MUST fail closed（不发送）。
+
+#### Scenario: 重复 webhook 只导入一次
+
+- **WHEN** 平台因超时重投同一个 message webhook
+- **THEN** board 只产生一条消息，第二次返回已有结果
+
+#### Scenario: reaction 的三次 occurrence
+
+- **WHEN** 同一人连续 add、remove、add 同一 reaction
+- **THEN** 系统视为三个不同 occurrence，最终 board 状态为 added，不合并中间事件
+
+#### Scenario: 出站失败后继续
+
+- **WHEN** 一条消息投递到 Slack 连续失败 5 次
+- **THEN** 记录 `message.sync_failed` 与失败原因，同 thread 的下一条消息继续投递；后续成功清除该
+  target 的失败标记
+
+#### Scenario: 重启恢复
+
+- **WHEN** 进程在 inbox/outbox 处理中崩溃并重启
+- **THEN** 未 ack 的事件/投递被重新领取，按 dedupe/delivery_id 幂等完成，不重复产生消息
+
+#### Scenario: dead letter 隔离
+
+- **WHEN** 一个 external thread 的事件持续失败并进入 dead letter
+- **THEN** 其他 external thread 与 board 主路径继续工作，dead letter 可查询与重试
+
+#### Scenario: echo 抑制
+
+- **WHEN** board 投递的消息被平台作为入站事件回传，或消息带隐藏 marker
+- **THEN** sync 丢弃该事件，不产生第二条 board 消息或循环
+
+### Requirement: Sync 凭据隔离与不可信输入
+
+系统 MUST 通过 per-tenant/per-entry `SecretResolver` 获取平台凭据，MUST NOT 把 token、
+signing secret 或 bridge secret 写入 board 事件、`board_sync_*` 行、指标、日志或错误体。
+Provider MUST 在接收事件前验证平台签名；Chat SDK bridge MUST 验证 HMAC、timestamp 与
+nonce，并有重放窗口。凭据 MUST 最小 scope、可轮换；轮换失败 MUST fail closed，MUST NOT
+静默降级为无认证。平台 payload MUST 视为不可信：MUST 限长、schema 校验、清洗 NUL/孤立
+代理项/控制字符、消毒 markdown/HTML、限制 link/file 大小与数量；抓取 URL MUST 只允许
+https 公网地址，MUST 拒绝 loopback/私网/link-local/云 metadata 与重定向到这些地址，MUST
+有连接/总超时。系统 MUST NOT 允许运行时数据注入回调 URL、脚本或任意 bridge baseURL。
+
+#### Scenario: 跨租户凭据隔离
+
+- **WHEN** tenant A 的 Slack entry 投递消息
+- **THEN** 只使用 tenant A 的 secret；tenant B 的 webhook/secret 不可见，跨租户 key 返回 404
+
+#### Scenario: secret 不泄露
+
+- **WHEN** 读取 board 事件、sync 状态、inbox 或日志
+- **THEN** 响应/日志中没有 token、signing secret、bridge secret 或原始凭据
+
+#### Scenario: sync 管理需要 board.manage
+
+- **WHEN** 没有 `board.manage` 的调用者读取 sync entries/inbox 或调用 source read
+- **THEN** 返回 403，不返回平台凭据、原始事件或平台内容
+
+#### Scenario: 伪造 webhook
+
+- **WHEN** 请求缺少/伪造平台签名或 timestamp 超出窗口
+- **THEN** 返回 401/403，不落 inbox，不产生事件
+
+#### Scenario: SSRF 尝试
+
+- **WHEN** 平台消息里的附件/链接指向 `http://127.0.0.1`、私网或云 metadata
+- **THEN** 抓取被拒绝，消息以附件说明行降级落地，不发起内网请求
+
+#### Scenario: 超长/恶意文本
+
+- **WHEN** 平台发送超过 10,000 字符或含脚本/控制字符的文本
+- **THEN** 文本按码点截断并清洗，HTML 被消毒，消息仍落地且不执行脚本
+
+#### Scenario: bridge 重放
+
+- **WHEN** 同一 bridge nonce 在窗口内重复提交
+- **THEN** 返回 401/409，不二次导入
+
+### Requirement: superagent 适配
 
 系统 MUST 通过适配器把 superagent 的 Ticket、Assignment、Attention 与 worker report
 映射为 board 任务、claim、blocked 与线程回复；适配 MUST 先单向镜像，再提供命令桥，且
 MUST NOT 制造第二真值：superagent 仍是 Ticket/Assignment 的真值，board 只在 supervisor
 成功后更新投影。映射 MUST 幂等：Ticket/Assignment/Attention/report 重复同步 MUST NOT
-产生重复任务、claim 或回复。已归档工单 MUST 保持只读，MUST NOT 被改写。外部 GitHub
-issue/PR MUST 只做最小入站镜像与回复出站，复用既有 Source/Channel 抽象，MUST NOT 引入
-Vercel sync/Chat SDK，MUST NOT 跨租户泄露。
+产生重复任务、claim 或回复。已归档工单 MUST 保持只读，MUST NOT 被改写。GitHub 的
+PR/issue/评论 MUST 由统一 sync 处理；superagent 的 GitHub Source MUST NOT 另起第二套
+评论同步，两者 MUST 用映射行与外部 event ID 去重。
 
 #### Scenario: Ticket 投影为任务
 
@@ -344,19 +484,20 @@ Vercel sync/Chat SDK，MUST NOT 跨租户泄露。
 - **WHEN** bridge 开启，调用者在 board 上 complete 一个镜像任务
 - **THEN** 先调用 supervisor 的完成 API，成功后才追加 board 事件；supervisor 拒绝时不产生 board 状态变化
 
-#### Scenario: GitHub 入站幂等
+#### Scenario: GitHub 不双同步
 
-- **WHEN** 同一 GitHub issue/comment 事件被 Source 重试读取
-- **THEN** 只产生一个 board 任务或回复，外部 event ID 去重
+- **WHEN** 同一 GitHub PR 同时被统一 sync 和 superagent Source 看到
+- **THEN** 只产生一条 board 线程/回复；映射行与 external event ID 去重，不起第二套评论同步
 
 ### Requirement: Watcher 与 schedule 扩展
 
-系统 MUST 在 phase 3 提供 durable watcher 与 schedule，且两者 MUST 复用 board 事件与既有
-durable/jobqueue/triggers 能力，MUST NOT 新增调度器或运行时。Watcher MUST 以部署时声明的
-代码/插件动作运行，MUST NOT 在运行时接受任意 URL；动作 MUST 以 Bot 身份执行并受
-`board.write` 与频道关系约束。Schedule MUST 持久化发送计划，触发时 MUST 重新校验创建者
-的频道权限；权限被回收 MUST 取消并记录原因。投递 MUST 为 at-least-once，重试 MUST 有
-退避与死信，MUST NOT 因一个 watcher/schedule 失败阻塞 board 主路径。
+系统 MUST 在 phase 0 提供 durable watcher 与 schedule，且两者 MUST 复用 board 事件与
+durable worker（独立仓库自带 PG worker；keel 导入后可复用 keel jobqueue/triggers），MUST NOT
+新增外部调度器或运行时。Watcher MUST 以部署时声明的代码/插件动作运行，MUST NOT 在运行时
+接受任意 URL；动作 MUST 以 Bot 身份执行并受 `board.write` 与频道关系约束。Schedule MUST
+持久化发送计划，触发时 MUST 重新校验创建者的频道权限；权限被回收 MUST 取消并记录原因。
+投递 MUST 为 at-least-once，重试 MUST 有退避与死信，MUST NOT 因一个 watcher/schedule 失败
+阻塞 board 主路径。
 
 #### Scenario: watcher 失败不阻塞 board
 

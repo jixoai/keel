@@ -1,5 +1,36 @@
 # Design: keel-board-v1
 
+## 0. 交付路径与版本固定
+
+**独立仓库先行，keel 导入。** 本设计的所有核心实现（协议、日志、PG 存储、投影、API、
+SSE、watchers/schedules、sync 引擎与 Slack/GitHub/Linear/Chat SDK 适配）都落在
+`github.com/jixoai/keel-board`；keel 不维护第二套 `internal/board`。
+
+| 项 | 约定 |
+| --- | --- |
+| 独立仓库 | `github.com/jixoai/keel-board`，Apache-2.0 |
+| 上游参考 pin | `vercel/board@26428ed4e0661ff362c59abdf1215997c59891b0`（Apache-2.0，仅概念/契约） |
+| 独立仓库 pin | phase 0 产出不可变 commit + `v0.1.0` tag；README/NOTICE 记录 |
+| keel 依赖 | `go.mod` 固定 `github.com/jixoai/keel-board@<phase-0-commit>` 的 pseudo-version；MUST NOT 浮动 branch/tag |
+| 升级 | 独立 PR + keel-board conformance + keel 集成/E2E；不得静默跟随 main |
+| 许可 | keel-board `LICENSE` Apache-2.0；`NOTICE` 写明独立实现与上游归属；keel `NOTICE` 记录 module+commit |
+
+**为什么独立仓库先行**：board 核心 + sync 是一个可脱离 keel 独立运行的标准实现；先在独立
+仓库用 in-memory store、测试 auth/authorizer、假平台适配器完成 conformance，能证明协议不是
+被 keel 的某个内部结构“倒推”出来的。keel 只在 phase 1 提供身份/RBAC/PG/SSE/secret 适配，
+不复制核心代码。这样 sync 的 provider 契约、错误语义、重试/去重可以在没有 keel 依赖时被
+第三方实现和测试。
+
+**阶段**：
+
+| 阶段 | 内容 | 退出条件 |
+| --- | --- | --- |
+| Phase 0 | 独立仓库：核心协议/日志/存储/API/SSE → watchers/schedules/attachments/reactions/blocks → sync 引擎 + Slack/GitHub/Linear 原生 + Chat SDK bridge → 测试/E2E | 独立仓库全绿，产出 commit/tag |
+| Phase 1 | keel 导入：身份/RBAC/ReBAC/PG/SSE/secret 适配；superagent 只读镜像→命令桥；启用 sync | keel 集成全绿 |
+| Phase 2 | nsh UI：队列/任务卡/线程/租约/live/五态；sync/watcher/schedule 状态与故障 UI | 全量 E2E、复核、归档 |
+
+Sync MUST 在 phase 0 完成；phase 1 只做“接通 keel 的身份/权限/存储/凭据”，不补 sync 功能。
+
 ## 1. Context
 
 keel 当前的协作事实分成三层，各自有明确的真值：
@@ -32,26 +63,35 @@ keel 当前的协作事实分成三层，各自有明确的真值：
 不引入新语言/运行时。Board 是协作元数据，不是 token 流；它的写入量远低于聊天，允许用
 更简单的强一致方案。
 
+Sync 是标准的一部分，不是附加功能：board 线程从一开始就要能双向映射到 Slack、GitHub、
+Linear 与任意 Chat SDK adapter 的线程；否则“通用任务/线程标准”会在第一个外部集成处失效。
+独立仓库 phase 0 必须自带 sync，keel phase 1 只负责把它接到自己的身份、权限、PG 与 secret
+上。
+
 ## 2. Goals / Non-Goals
 
 **Goals**
 
-- 一套可被 CLI、agent、人、插件、superagent 与外部 Issue 共用的任务/线程契约。
+- 一套可被 CLI、agent、人、插件、superagent 与外部平台共用的任务/线程契约。
 - 任务队列的强一致认领：并发 claim 只有一个成功，租约过期后旧 claim 不能结算。
 - 任务依赖可表达、可检测环、完成时在同一写事务内 ready 依赖者。
 - 所有状态变化可审计、可从日志重建；投影损坏不丢事实。
 - 权限与租户边界在 API、存储、UI 三处一致；跨租户一律 404。
 - nsh web/TUI 同源，队列/任务卡/线程/租约倒计时/live tail 的五态完整。
-- superagent 与 GitHub 作为适配器接入，不制造第二真值。
+- **Sync 全量双向**：Slack/GitHub/Linear 原生 + Chat SDK 通用桥；thread 镜像、去重 marker、
+  出站重试、凭据隔离、不可信输入、失败恢复。
+- superagent 作为适配器接入，不制造第二真值。
 
 **Non-Goals**
 
 - 不照搬 Vercel 后端、Vercel API、OIDC、team/project/deployment、grants 引擎。
 - 不把 board 事件写进 Session 账本，也不让 board 事件进入模型上下文。
 - 不重写 superagent 的 Ticket/Mandate/Assignment/Attention；不迁移已归档工单。
-- 不做通用 Slack/GitHub 双向同步；phase 2 只做 GitHub issue/PR 的最小入站与回复出站。
+- 不把 sync 降级为“只做 GitHub 最小入站”；Slack/GitHub/Linear/Chat SDK 全量属于 phase 0。
+- 不在 keel-board/keel 内嵌 Node/Chat SDK 运行时；Chat SDK 只通过签名 HTTP bridge 接入。
 - 不做全文搜索、聚合、DM、presence、read receipts、每线程 ACL、跨租户看板。
-- 不新增调度器/消息队列/语言运行时；watchers/schedules 复用既有 durable/jobqueue/triggers。
+- 不新增外部调度器/消息队列服务/语言运行时；watchers/schedules/sync 使用 PG durable 表与
+  进程内 worker，keel 导入后可复用 keel jobqueue/triggers。
 
 ## 3. 概念映射：vercel/board → keel
 
@@ -69,8 +109,15 @@ keel 当前的协作事实分成三层，各自有明确的真值：
 | token | `claim_token_hash` | 只存 SHA-256；原文只在 claim 响应出现一次 |
 | needs | `board_task_needs` | 有界 DAG，最多 20 个前置 |
 | labels | `board_labels` | `board.*` 保留；`board.task` 是状态标签 |
-| watcher | phase 3 `board_watchers` + durable consumer | 不用 Vercel watcher 注册/唤醒 |
-| schedule | phase 3 `board_schedules` + jobqueue | 不用 Vercel timer |
+| watcher | `board_watchers` + durable consumer | phase 0 随标准交付；不用 Vercel 注册/唤醒 |
+| schedule | `board_schedules` + durable worker | phase 0 随标准交付；不用 Vercel timer |
+| sync entry | `board_sync_entries`（key/platform/secret ref） | 每个平台账号一个 key；凭据不落 board 日志 |
+| external target | `board_sync_threads.target` | `key:channel[:thread]`；目标与 board thread 的绑定 |
+| origin / copy | `board_messages.origin` + `board_sync_copies` | 消息来自哪个平台线程；出去了哪一份 |
+| dedupe / delivery marker | `board_sync_inbox` / `board_sync_outbox` | 入站 occurrence ID；出站确定性 delivery ID；echo marker |
+| provider | `sync.Provider` Go 接口 | 原生 Slack/GitHub/Linear；Chat SDK 走 bridge |
+| webhook | `/v1/board/sync/webhooks/{key}` | adapter 验签，不走 board 会话认证 |
+| source read / typing | `/v1/board/sources/{key}/*` / ephemeral | 只读平台；typing 不落日志 |
 | profile | **Bot** | 命名执行身份；不是 Role，不授予权限 |
 | principal | **Account** | 认证与授权主体 |
 | actor | `account:<id>` 或 `account:<id>+bot:<id>` | 显示“Bot via Account” |
@@ -256,7 +303,7 @@ CREATE TABLE board_requests (
 );
 ```
 
-Phase 2 追加：
+Phase 1（keel 导入）追加：
 
 ```sql
 CREATE TABLE board_links (
@@ -274,7 +321,157 @@ CREATE UNIQUE INDEX board_links_task
     ON board_links (tenant_id, board_task_id, source, kind);
 ```
 
-Phase 3 追加 `board_watchers`、`board_watch_deliveries`、`board_schedules`（见 §15）。
+Phase 0（独立仓库，随标准交付）追加 watcher/schedule：
+
+```sql
+CREATE TABLE board_watchers (
+    tenant_id   uuid NOT NULL,
+    watcher_id  text NOT NULL,
+    channel     text NOT NULL,          -- path 或 path/ 子树
+    filter      jsonb NOT NULL DEFAULT '{}'::jsonb,
+    action      jsonb NOT NULL,         -- 部署时声明的动作，不接受运行时 URL
+    bot_id      uuid,
+    enabled     boolean NOT NULL DEFAULT true,
+    created_at  timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (tenant_id, watcher_id)
+);
+
+CREATE TABLE board_watch_deliveries (
+    tenant_id   uuid NOT NULL,
+    watcher_id  text NOT NULL,
+    event_seq   bigint NOT NULL,
+    status      text NOT NULL DEFAULT 'pending',
+    attempts    int NOT NULL DEFAULT 0,
+    next_at     timestamptz NOT NULL DEFAULT now(),
+    lease_until timestamptz,
+    last_error  text NOT NULL DEFAULT '',
+    PRIMARY KEY (tenant_id, watcher_id, event_seq)
+);
+
+CREATE TABLE board_schedules (
+    tenant_id      uuid NOT NULL,
+    schedule_id    uuid NOT NULL,
+    channel        text NOT NULL,
+    re             bigint,
+    text           text NOT NULL,
+    labels         jsonb NOT NULL DEFAULT '{}'::jsonb,
+    creator_actor  text NOT NULL,
+    next_run_at    timestamptz NOT NULL,
+    every_seconds  int,
+    until_at       timestamptz,
+    times          int,
+    sent           int NOT NULL DEFAULT 0,
+    status         text NOT NULL DEFAULT 'pending',
+    last_error     text NOT NULL DEFAULT '',
+    PRIMARY KEY (tenant_id, schedule_id)
+);
+CREATE INDEX board_schedules_due
+    ON board_schedules (tenant_id, next_run_at)
+    WHERE status = 'pending';
+```
+
+Phase 0 追加 sync：
+
+```sql
+CREATE TABLE board_sync_entries (
+    tenant_id   uuid NOT NULL,
+    key         text NOT NULL,          -- 用户选的 entry key，如 slack / github / acme
+    platform    text NOT NULL,          -- slack | github | linear | chatsdk
+    config      jsonb NOT NULL DEFAULT '{}'::jsonb,
+    secret_ref  text NOT NULL,          -- 只存引用，不存凭据
+    enabled     boolean NOT NULL DEFAULT true,
+    status      text NOT NULL DEFAULT 'active',
+    created_at  timestamptz NOT NULL DEFAULT now(),
+    updated_at  timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (tenant_id, key)
+);
+
+-- 入站先落盘再 ack。(tenant,key,dedupe) 是平台 occurrence 的唯一身份。
+CREATE TABLE board_sync_inbox (
+    tenant_id   uuid NOT NULL,
+    key         text NOT NULL,
+    dedupe      text NOT NULL,          -- ≤300；平台重投必须同值
+    event       jsonb NOT NULL,         -- 归一化事件
+    raw         jsonb NOT NULL DEFAULT '{}'::jsonb,
+    status      text NOT NULL DEFAULT 'pending',
+    attempts    int NOT NULL DEFAULT 0,
+    next_at     timestamptz NOT NULL DEFAULT now(),
+    lease_until timestamptz,
+    last_error  text NOT NULL DEFAULT '',
+    received_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (tenant_id, key, dedupe)
+);
+CREATE INDEX board_sync_inbox_due
+    ON board_sync_inbox (tenant_id, key, next_at)
+    WHERE status IN ('pending', 'retry');
+
+-- board thread ↔ external thread；target 是 key:channel[:thread]。
+CREATE TABLE board_sync_threads (
+    tenant_id       uuid NOT NULL,
+    target          text NOT NULL,
+    board_root_id   bigint NOT NULL,
+    board_channel   text NOT NULL,
+    kind            text NOT NULL,      -- channel | thread
+    cause           text NOT NULL,      -- config | manual | import
+    external_thread text NOT NULL,
+    created_at      timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (tenant_id, target)
+);
+CREATE INDEX board_sync_threads_root
+    ON board_sync_threads (tenant_id, board_root_id);
+
+-- 每个 board message 在每个 target 上的副本与文件 receipt。
+CREATE TABLE board_sync_copies (
+    tenant_id        uuid NOT NULL,
+    message_id       bigint NOT NULL,
+    target           text NOT NULL,
+    external_thread  text NOT NULL,
+    external_message text NOT NULL,
+    files            jsonb,
+    updated_at       timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (tenant_id, message_id, target)
+);
+
+-- 出站 durable 队列。delivery_id 由 thread+target+message+revision 决定。
+CREATE TABLE board_sync_outbox (
+    tenant_id    uuid NOT NULL,
+    delivery_id  text NOT NULL,
+    board_root_id bigint NOT NULL,
+    message_id   bigint NOT NULL,
+    target       text NOT NULL,
+    kind         text NOT NULL,         -- post | edit | delete | react | files
+    payload      jsonb NOT NULL DEFAULT '{}'::jsonb,
+    status       text NOT NULL DEFAULT 'pending',
+    attempts     int NOT NULL DEFAULT 0,
+    next_at      timestamptz NOT NULL DEFAULT now(),
+    lease_until  timestamptz,
+    last_error   text NOT NULL DEFAULT '',
+    PRIMARY KEY (tenant_id, delivery_id)
+);
+CREATE INDEX board_sync_outbox_lane
+    ON board_sync_outbox (tenant_id, board_root_id, next_at)
+    WHERE status IN ('pending', 'retry');
+
+CREATE TABLE board_sync_source_cursors (
+    tenant_id  uuid NOT NULL,
+    key        text NOT NULL,
+    stream     text NOT NULL,
+    cursor     text NOT NULL,
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (tenant_id, key, stream)
+);
+
+-- bridge 重放防护：nonce 在时间窗内唯一，过期可清。
+CREATE TABLE board_sync_bridge_nonces (
+    tenant_id  uuid NOT NULL,
+    key        text NOT NULL,
+    nonce      text NOT NULL,
+    seen_at    timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (tenant_id, key, nonce)
+);
+```
+
+所有 `board_*` 表（含 sync/watch/schedule）都带 `tenant_id` 并加入 RLS。
 
 ### 4.3 为什么不用 Session 账本/task-log
 
@@ -339,7 +536,7 @@ COMMIT
    `task.claimed`（`epoch+1`、`until`、`token_hash`），更新投影，提交。
 3. 第二个取得锁后读到 `state=claimed`，返回 409 `task_claimed`，不写事件。
 4. 若第一个在租约内崩溃，任务保持 `claimed` 直到 `claim_until`；之后任何任务请求按
-   §6.3 先写 `task.expired` 再 claim。
+   §5.4 先写 `task.expired` 再 claim。
 
 ### 5.3 崩溃与重试
 
@@ -375,10 +572,10 @@ Board 不依赖后台定时器保证正确性：
 - 任务 ID = 根消息 ID。回复是工作日志/讨论；回复不改变任务状态。
 - 一个线程最多是一个任务；重复 `re` 返回 409 `already_a_task`。
 - 根删除：若未 completed/canceled，追加 `task.canceled`（reason `deleted`）并清空标签；
-  已完成任务删除根不改变终态。根删除本身在 phase 2 的消息生命周期里交付。
+  已完成任务删除根不改变终态。根删除在 phase 0 的消息生命周期中交付。
 - 非 owner 编辑根：任务处于 waiting/ready/claimed 时追加 `task.blocked`（kind `edited`，
   reason 指向编辑），结束 claim；owner 读新文本后 unblock 或 cancel。已完成/已取消不变。
-  Phase 2 交付。
+  Phase 0 交付。
 
 ### 6.2 七态状态机
 
@@ -546,10 +743,10 @@ Board 不依赖后台定时器保证正确性：
 - `board.task` 由任务写操作维护，值 = 七态之一；它是根标签，因此按标签过滤线程时
   回复也命中。
 - 任务创建时允许携带普通标签；保留前缀即使出现在 `labels` 里也拒绝整个写，不静默丢弃。
-- phase 1 只开放任务创建时的标签与 `board.task` 过滤；独立的 `POST /messages/{id}/labels`
-  在 phase 2 与消息编辑一起交付。
+- phase 0 只开放任务创建时的标签与 `board.task` 过滤；独立的 `POST /messages/{id}/labels`
+  在 phase 0 与消息编辑一起交付。
 
-## 10. API（phase 1 最小闭集）
+## 10. API（phase 0 最小闭集）
 
 Base：`/v1/board`。认证沿用 keel；tenant 来自凭据，不出现在路径。所有响应 JSON；
 错误 `{ "error": "...", "code": "...", "hint"?: "..." }`。
@@ -580,9 +777,10 @@ Base：`/v1/board`。认证沿用 keel；tenant 来自凭据，不出现在路�
 | POST | `/tasks/{id}/cancel` | `{reason}` | `{task}` | owner/manage |
 | GET | `/events/stream` | `channel?`, `label?`, `state?`, `owner?`, `for?`, `after?`, `Last-Event-ID` | SSE | board.read + viewer |
 
-Phase 2 追加：`POST /tasks/batch`、`GET /tasks/batch/{id}`、`GET /threads`、
+Phase 0 追加（独立仓库）：`POST /tasks/batch`、`GET /tasks/batch/{id}`、`GET /threads`、
 `POST /messages/{id}/edit`、`POST /messages/{id}/delete`、`POST /messages/{id}/labels`、
-`GET /actors`。Phase 3 追加：`/watchers*`、`/schedules*`、`/attachments*`。
+`GET /actors`、`/watchers*`、`/schedules*`、`/attachments*`、`/reactions*`、`/sync/*`、
+`/sources/*`（见 §14.10）。Phase 2 只加 UI，不改这些路由。
 
 ### 10.2 游标与分页
 
@@ -617,7 +815,7 @@ Phase 2 追加：`POST /tasks/batch`、`GET /tasks/batch/{id}`、`GET /threads`�
 | 409 | `task_finished` | 对终态任务做不允许的变更 |
 | 409 | `already_a_task` | `re` 已是任务 |
 | 409 | `duplicate_id` | 同一幂等键不同请求 |
-| 429 | `rate_limited` | 超过写速率（可选，phase 1 打点不强制） |
+| 429 | `rate_limited` | 超过写速率（可选，phase 0 打点不强制） |
 | 503 | `unavailable` | DB/依赖不可用；不产生部分写入 |
 
 ### 10.4 幂等
@@ -637,7 +835,7 @@ Phase 2 追加：`POST /tasks/batch`、`GET /tasks/batch/{id}`、`GET /threads`�
 | --- | --- | --- |
 | `board.read` | 访问 board 读路由、列表、SSE | 仍需频道 viewer 关系才能看内容 |
 | `board.write` | 创建频道、发消息、创建任务、claim 与 claim 写操作、标签 | 仍需频道 editor/owner 关系 |
-| `board.manage` | 创建/管理频道访问、列出所有频道元数据、运维重建 | 在 board 路由上蕴含 board.read 与 board.write；不绕过频道内容读权限 |
+| `board.manage` | 创建/管理频道访问、sync entries/凭据/收件箱/源读取、列出所有频道元数据、运维重建 | 在 board 路由上蕴含 board.read 与 board.write；不绕过频道内容读权限 |
 
 ### 11.2 频道 ReBAC
 
@@ -677,6 +875,11 @@ Phase 2 追加：`POST /tasks/batch`、`GET /tasks/batch/{id}`、`GET /threads`�
 - 跨租户：404 `not_found`，不泄露租户。
 - `board_disabled`：404，避免枚举。
 - 越权写不产生事件；权限拒绝写 `auth_events`（kind `permission.denied`），detail 不含正文/token。
+- **Sync 例外**：平台 webhook 不走 board 会话认证，由 adapter 验签；bridge 走 HMAC。Sync 导入
+  的作者是平台 actor（`<key>:user:<id>`），写入沿用该 actor 的 board 权限边界，但 sync 作为
+  宿主内部能力可以写 `origin/from` 等客户端不能伪造的字段；普通调用者不能调用 sync 导入。
+- Sync 管理、原始收件箱、source read 需要 `board.manage`；普通成员只看自己可读频道的
+  copy/状态。凭据轮换还要求既有 `secret.write` 权限。
 
 ## 12. SSE 与读取
 
@@ -700,8 +903,8 @@ data: {"cursor":"123","type":"task.claimed","createdAt":"...","channel":"work","
 - 过滤：`channel`（子树）、`label`、`state`、`owner`、`for`。
 - **before/after 语义**：标签/任务状态事件在变更前后任一状态匹配过滤时投递。这样订阅
   `state=ready` 的 worker 能看到任务进入 ready，也能看到被 claim 后离开 ready。
-- **at-least-once**：断线重连从最后 cursor 之后重放；客户端按 cursor 去重。phase 1 不要求
-  ack；phase 3 watcher 才引入 delivery lease/ack。
+- **at-least-once**：断线重连从最后 cursor 之后重放；客户端按 cursor 去重。phase 0 的 SSE
+  不要求 ack；watcher 才引入 delivery lease/ack。
 
 ### 12.2 多副本
 
@@ -738,6 +941,10 @@ data: {"cursor":"123","type":"task.claimed","createdAt":"...","channel":"work","
 4. **BoardFilters**：channel 建议（含 `work/` 子树）、label key/value 建议（排除 `board.*`）、
    owner/for 选择；筛选是 URL 参数（web）与同一状态对象（TUI）。
 5. **LiveTailStatus**：connecting/live/reconnecting/offline + 最后事件时间；断线自动重连。
+6. **BoardSyncStatus**（phase 2）：entries/platform/状态、每个 target 的 last delivery、inbox/
+   outbox lag、失败与 dead letter、凭据状态、重试按钮；只对 `board.manage` 显示敏感字段。
+7. **BoardAutomation**（phase 2）：watchers/schedules 列表、启用/停用、最近运行/失败原因；
+   不在 UI 编辑任意运行时 URL。
 
 ### 13.3 动作
 
@@ -768,20 +975,302 @@ data: {"cursor":"123","type":"task.claimed","createdAt":"...","channel":"work","
 - 实时：SSE 新事件驱动队列/线程增量；不整页刷新；租约倒计时每秒本地重算，到点显示
   `lease ran out` 并出现 claim 动作。
 
-## 14. superagent 与 GitHub 适配
+## 14. Sync（全量，phase 0）
 
-### 14.1 分阶段，不制造第二真值
+Sync 不是附加功能，而是 board 标准的一半：一个 board thread 从一开始就要能双向映射到
+Slack thread、GitHub PR/issue、Linear issue，或任意 Chat SDK adapter 的线程。keel-board 在
+phase 0 自带完整 sync 引擎与三个原生适配器，keel phase 1 只把它接到自己的身份、权限、
+PG 与 secret 上。
+
+### 14.1 层级与真值
+
+```text
+platform webhook ──▶ provider.receive（验签/归一化/dedupe）
+                   ──▶ board_sync_inbox（先落盘，再 200/202）
+                   ──▶ sync function（import / 默认导入）
+                   ──▶ board_events（message.posted / edited / deleted / reaction / labels）
+
+board_events ──▶ sync engine（thread.synced / message.* / reaction / labels）
+             ──▶ board_sync_outbox（每 target 一个 delivery_id）
+             ──▶ sync function（deliver / start） ──▶ provider.post
+             ──▶ board_sync_copies + message.synced receipt；失败 → message.sync_failed
+```
+
+| 层 | 职责 | 持久化 |
+| --- | --- | --- |
+| provider | 平台验签、事件归一化、发消息、文件/typing/permalink/source read | SDK 缓存可有可无；凭据不落日志 |
+| sync engine | inbox/outbox、排序、去重、重试、receipt、copy、thread 绑定、echo 抑制 | `board_sync_*` + board 事件 |
+| sync function | 决定 import/deliver/start；默认 helper `mirror/into/render` | 纯代码/配置 |
+| board | 事件日志与投影 | `board_events`（唯一真值） |
+
+Sync 的持久状态全部在 board PG；provider/ adapter 重启后从 inbox/outbox 与 source cursor
+恢复，不依赖进程内队列。Sync 写入不是 Session 账本，不消耗模型上下文。
+
+### 14.2 Provider 契约（Go）
+
+`keel-board/sync.Provider`：
+
+| 方法 | 必需 | 作用 |
+| --- | --- | --- |
+| `Receive(key, request) ([]InboundEvent, error)` | 是 | 验签、限长、解析平台 webhook，返回归一化事件与稳定 dedupe；不通过返回 4xx/5xx |
+| `ResolveChannel(key, name) (id, error)` | 是 | 名称 → 平台 channel ID；未知 → `UnreadableError('channel_not_found')` |
+| `ResolveTarget(target) (target, channel, kind, error)` | 是 | thread 或 channel 目标；`kind ∈ {channel,thread}` |
+| `Post(target, kind, body) (Receipt, error)` | 是 | 发 root/reply；返回 `{thread, message, files?}` |
+| `Event(context) (Event, error)` | 是 | 构建 sync function 看到的 typed envelope |
+| `Edit/Delete/React/UploadFiles/FetchFile/StartTyping/Permalink/Locate/URL/Read/Join/Mention/FetchRoot` | 否 | 平台能力；缺失时按“不支持”跳过或降级，不得伪造成功 |
+
+- `InboundEvent` 统一形状：`kind`（message/edited/deleted/reaction/lifecycle）、`channel`、
+  `thread`、`subthread`、`message`、`text`、`author`、`isRoot`、`context`、`files`、`links`、
+  `mentioned`、`lifecycle{type,title,url,body,labels,unset,owns,reply,createRoot,retitled}`。
+- `OutboundBody`：`markdown`、`files`、`as`（验证作者）、`deployments`（可选）。
+- `Receipt`：`thread`、`message`、`files`（平台 ID）。
+- `canStartThreads`、`uploadsFiles`、`singleReaction` 是 provider 能力声明；channel 目标在
+  `canStartThreads=false` 时拒绝，已有 thread 目标仍可写。
+- provider MUST 在 `Receive` 里完成平台认证后才返回事件；board 不承担平台签名。
+- provider MUST 为同一 occurrence 返回同一个 `dedupe`，为不同 occurrence（如 reaction
+  add/remove/add）返回不同值；不得用当前时间兜底。
+- 原生 provider 用 Go 实现；不引入 Node/运行时。Chat SDK 走 §14.4 的外部 bridge。
+
+### 14.3 原生适配器
+
+| 能力 | Slack | GitHub | Linear |
+| --- | --- | --- | --- |
+| 入站 | `message.channels/groups`、edit/delete、reaction add/remove、files、link unfurl | PR/issue opened/closed/reopened、comments、review submitted/dismissed、workflow run→CI labels、label/assignee | issue created/updated、comments、properties/labels/assignee |
+| 出站 | root 起 thread、reply、edit/delete、reaction、files、typing | 已有 PR/issue thread 的 comment/edit/delete/reaction；状态标签重渲染 | board root 创建 issue、comment/edit/delete、状态/属性、reaction（尽力） |
+| 线程 ID | `slack:C123[:ts]` | `github:owner/repo:123`（PR）、`github:owner/repo:issue:45`、`…:123:rc:<comment>`（归组） | `linear:ENG:<issueUUID>`、`…:c:<comment>`（归组） |
+| 状态标签 | board 不自动写平台状态 | `state/review/head/tag.*/assignee.*`，按 GitHub 事件 reconcile | `state=<workflow type>`、`priority/project/tag.*/assignee.*` |
+| 源读取 | channel/thread/permalink，join 可选 | PR/issue/comment 读 | team/project/issue 读 |
+| 已知限制 | `chat.postMessage` 无 idempotency key：崩溃在“平台已接受、receipt 未写”之间可能重复一次 | 默认不因 board root 创建 issue（与 vercel/board 标准一致）；已有 thread 双向 | 平台 reaction webhook 不带 issue，入站 reaction 不同步；出站尽力 |
+
+- Slack 频道键支持名称（`#prs`）与 ID（`C0123`）；名称通过缓存 listing 解析，未知/私有
+  频道按 ID 映射；bot 只收到被邀请的频道；`chat:write.customize` 决定能否按作者名发；
+  webhook 需在 3 秒内回答，所以先落 inbox 再 ack。
+- GitHub 用 App 安装令牌；`botUserId` 用于识别自身评论，缺失时从 `viewer` 查一次；
+  review thread 归组到 PR；PR/issue 的 state/label/assignee 在每个事件 reconcile；
+  board labels 不反向写 GitHub（与标准一致），但 `state` 等由 GitHub 事件维护的标签可
+  驱动 reread/render。
+- Linear 用 app actor；team key 路由；issue 状态映射到 `triage/backlog/unstarted/started/
+  completed/canceled`；board root 的 first line 作为 title、全文作为 description；
+  comment thread 归组到 issue。
+- 三个原生 provider 都不使用 Vercel Connect/OIDC；凭据由 §14.8 的 `SecretResolver` 提供。
+
+### 14.4 Chat SDK 通用 bridge（不嵌入 Node）
+
+keel-board/keel 核心是 Go，不能嵌入 Chat SDK 的 Node 运行时；但“任意 Chat SDK adapter”
+仍必须支持。方案是**签名 HTTP bridge**：
+
+```text
+Chat SDK adapter sidecar（部署方自己的 Node 进程，可选）
+  ├─ 接收平台 webhook，构造 Chat SDK adapter
+  ├─ 调 adapter 解析/发送
+  └─ 与 keel-board 交换归一化事件/投递请求
+
+keel-board ── POST {bridge}/deliver ──▶ sidecar ──▶ 平台
+keel-board ── POST {bridge}/resolve ──▶ sidecar（channel/target 解析）
+keel-board ◀─ POST /v1/board/sync/bridge/{key}/events ── sidecar（平台 webhook 转归一化）
+```
+
+- **Inbound**：sidecar 验平台签名后，`POST /v1/board/sync/bridge/{key}/events`，body 是
+  归一化 `InboundEvent[]` + `dedupe`；header `X-Keel-Board-Timestamp`、`X-Keel-Board-Nonce`、
+  `X-Keel-Board-Signature = HMAC-SHA256(secret, timestamp + nonce + body)`。board 先查
+  nonce 重放窗口（5 分钟）再落 inbox；同 dedupe 幂等。
+- **Outbound**：board `POST {bridgeURL}/deliver`，HMAC 同上，body
+  `{deliveryId,target,kind,body}`；sidecar 用 Chat SDK adapter 发，返回
+  `{thread,message,files?}`。失败返回 5xx，board 按 §14.7 重试。
+- **Resolve**：`POST {bridgeURL}/resolve`，body `{name?|target?}`，返回 channel/target 元数据；
+  sidecar 可用 adapter 的 `channelIdFromThreadId`、`toChatId/fromChatId` 等。
+- **契约**：字段、大小上限、错误码（`unsupported`/`auth`/`rate_limited`/`transient`/
+  `permanent`）、HMAC 版本、nonce 窗口固定；bridge 不接收任意 URL，只接受配置里的 baseURL。
+- **为什么不是直接依赖 `chat`/`@chat-adapter/*`**：那会把 Node 运行时变成 keel 的部署依赖，
+  违反“不引入新语言/运行时”。bridge 让 adapter 留在部署方进程，board 只依赖一个签名 HTTP
+  契约；原生 Slack/GitHub/Linear 不经过 bridge。
+- **安全**：bridge secret 每 entry 独立；sidecar 不接触 board 的数据库/其他 tenant；board
+  不把平台 token 交给 bridge；bridge 不向 board 返回凭据。
+
+### 14.5 Thread 镜像生命周期
+
+- **绑定**：`sync <board-id> <target>` 或 root 在 mapped channel 内由 `start` 建立；
+  `board_sync_threads` 记录 `target → board_root/channel/kind/cause/external_thread`。
+- **root 起 thread**：board root 在 mapped channel 投递时，sync function 对每个
+  `canStartThreads` 平台收到一次 `target=null`；`start(channel)` 写 `thread.synced`
+  （cause `config`），随后 backfill root + replies；root 来自该平台 channel 时不回投。
+- **attach 已有 thread**：channel target 先 post root，再按序 backfill 全部回复；thread target
+  只接收 join 之后的消息（不 backfill 历史）。
+- **入站**：平台事件按 `thread`/`subthread` 找到 board thread；没有绑定则按 helper 路由创建
+  root；`import` 写 `message.posted/edited/deleted/reaction/labels`，带 `origin` 与 `from`。
+- **出站**：board thread 的每个 message/edit/delete/reaction/labels 事件，对每个 target
+  生成一条 outbox；跳过来源 target、来源 key、`noSync` 消息；默认 renderer 不读标签，
+  自定义 renderer 可读标签并触发 copy 更新。
+- **回复目标**：若 `replyTo` 来自外部 subthread（GitHub review thread、Linear comment），
+  回复回到该 subthread；否则回主 thread。board 不自动引用被回复消息，作者自己写 quote。
+- **labels**：board labels 默认不写平台；平台状态用 `state`/`review`/`tag.*`/`assignee.*`
+  等标签入站 reconcile；由平台拥有的 key 在下次平台事件时覆盖，board 侧手改会被纠正。
+- **files/links/mentions/typing**：见 §14.12。
+
+### 14.6 去重 marker 与幂等
+
+| 对象 | marker | 唯一约束/行为 |
+| --- | --- | --- |
+| 入站事件 | `dedupe` = 平台 occurrence ID（≤300） | `(tenant,key,dedupe)` 唯一；重投返回已处理结果，不二次导入 |
+| 导入消息 | `client_id = "sync:<key>:<dedupe>:<op>"` | board 写入幂等；同 ID 不同内容 409 `duplicate_id` |
+| 出站投递 | `delivery_id = "delivery:<thread>:<target>:<message>:<revision>"` | `board_sync_outbox` PK；重试复用同一 ID |
+| copy/receipt | `(message,target)` 唯一 | `message.synced` upsert；later success 清除 `undelivered` |
+| reaction occurrence | provider 的 reaction ID；无则 webhook ID+线程+消息+emoji+人 | add/remove/add 是三次不同 occurrence，不得合并 |
+| bridge | HMAC + timestamp + nonce | `board_sync_bridge_nonces` 5 分钟窗口内唯一 |
+
+**Echo 抑制**：
+
+1. 跳过平台自己的 bot 消息（Slack bot user、GitHub `botUserId`、Linear app actor）。
+2. 跳过来源 target/key：一条从 Slack A 进来的消息不回投 Slack A。
+3. 平台保留 markdown/metadata 时，出站 body 末尾带隐藏 marker：
+   `<!-- keel-board:<tenant>:<message>:<targetHash> -->`（GitHub/Linear/兼容平台）；
+   Slack 用 `metadata.event_type=keel_board`（`chat.postMessage` 支持时）。入站看到 marker
+   即视为 echo 丢弃，marker 在入库前剥离，永不显示。
+4. 平台既无 bot 身份又无隐藏 marker 时，provider MUST 配置 `botUserId`/等价身份，否则
+   outbound fail closed（不发送），避免自激循环。
+5. 两个 sync entry 同时映射同一平台频道是配置错误；启动时检测并告警，避免双导入/双投递。
+
+### 14.7 出站重试与失败恢复
+
+- **排序**：每个 board thread 一条 lane（`board_root_id`），同一 thread 的投递按事件顺序；
+  不同 thread 并行；一个 thread 的慢平台不阻塞其他 thread。
+- **重试**：attempt 1 失败后 1s、2s、4s、8s、16s（上限 30s），默认 5 次；429 遵守
+  `Retry-After`，5xx/网络错误重试，4xx（除 408/409/425/429）视为 permanent。
+- **终态**：5 次后写 `message.sync_failed`（含 target/error/attempts），继续后续事件；
+  该 target 的失败留在 `undelivered`，后续成功清除。失败可见、可重试（sync 管理 API）。
+- **编辑/删除/反应**：best-effort，失败跳过并记录；不阻塞消息投递。
+- **文件**：先 post 文本并记 receipt，再上传文件；文件失败按 target/文件重试，成功记
+  `message.files_synced`；平台不支持上传时在文本加附件说明行。
+- **入站**：webhook 先落 `board_sync_inbox` 再 ack；存储失败 500 让平台重试；事件语法
+  永久无效时 200 + `sync.rejected` 审计（避免平台无限重投）；处理失败按 1s 起退避，默认
+  5 次（function 10 次可配），之后 dead letter，只阻塞该 external thread lane。
+- **重启**：inbox/outbox 的 lease 到期后可被任意实例接管；source cursor 持久化；
+  重复事件由 dedupe 吸收；不依赖进程内状态。
+- **平台已知缺口**：Slack 无 idempotency key，崩溃窗口可能重复一次；文档与 UI 显示
+  `duplicate risk`，不假装 exactly-once。
+
+### 14.8 凭据隔离
+
+- `SecretResolver(tenant, key) (Credential, error)` 每 entry 取一次；原生 provider 只拿到
+  自己 entry 的凭据，不能读取其他 tenant/key 的 secret。
+- 凭据 MUST NOT 写入 board 事件、`board_sync_*` 行、指标、日志、错误体；DB 只存
+  `secret_ref`。若宿主选择加密存储，使用 tenant 级密钥，解密只在调用点。
+- webhook signing secret 与 API token 分开；bridge HMAC secret 独立于平台 token。
+- 最小 scope：Slack 只要事件/写/文件/typing 所需；GitHub App 只要 Issues/PR/Actions；
+  Linear 只要 read/write/comments/issues；source read/join 单独 opt-in。
+- 轮换：旧凭据可验证窗口内双活 → 新凭据生效 → 旧凭据停用；轮换失败 fail closed（不发送），
+  状态 `credential_invalid`，不静默降级到无认证。
+- sync 配置/凭据/收件箱/源读取需要 `board.manage` + 既有 secret 权限；普通频道成员只看到
+  自己可读的 copy/状态。
+- Webhook 路由不走 board 会话认证：平台请求由 provider 验签；未知 key/错误签名/超时 body
+  一律拒绝。board 不信任请求里的 tenant/key，tenant 由 entry 配置决定。
+
+### 14.9 不可信输入
+
+平台 payload 一律不可信；sync 是外部输入进入 board 的主要入口之一：
+
+- **大小**：webhook body ≤1 MB（可配）；单事件 raw ≤256 KB；文本 ≤10,000 字符（超出按码点
+  截断并标记 `truncated`，不切开代理项）；文件 ≤25 MB、每条消息 ≤10 个；links ≤10。
+- **字符**：NUL/孤立代理项/控制字符清洗；标签 key/value 按 board 文法；作者名/频道名
+  限长；mention 只解析已存在的 actor，未知 handle 保持文本。
+- **Markdown/HTML**：平台 HTML 先转纯文本/markdown；渲染时用现有 sanitizer，禁止
+  `<script>`/`<iframe>`/事件属性/`javascript:`；外链展示只允许 http/https，抓取只允许 https。
+- **URL/SSRF**：附件/链接抓取只允许 https，解析后拒绝 loopback/私网/link-local/云 metadata
+  地址；不跟随重定向到被拒地址；连接 5s、总 30s、最大 25 MB；DNS 重绑定在每次连接前复查。
+- **文件**：按 magic bytes 判类型；可执行/压缩炸弹/超大文件拒绝或降级为链接行；文件名
+  去路径/控制字符；上传走 blob lifecycle，不整文件进内存。
+- **同步函数**：只运行部署时声明的代码/插件动作，MUST NOT 在运行时接受 URL 或任意脚本；
+  bridge 只调用配置里的 baseURL。
+- **重放**：webhook timestamp ±5 分钟；bridge nonce 唯一；重复 dedupe 幂等。
+
+### 14.10 Sync 管理与源读取 API
+
+| Method | Path | 权限 | 作用 |
+| --- | --- | --- | --- |
+| POST | `/v1/board/sync/webhooks/{key}` | provider 验签（无 board token） | 平台 webhook 入口；先落 inbox 再 ack |
+| POST | `/v1/board/sync/bridge/{key}/events` | bridge HMAC | Chat SDK sidecar 推送归一化事件 |
+| GET | `/v1/board/sync/entries` | board.manage | 列出 entries/状态/平台 |
+| POST | `/v1/board/sync/entries` | board.manage + secret.write | 新建 entry（secret_ref，不传明文到日志） |
+| PATCH | `/v1/board/sync/entries/{key}` | board.manage + secret.write | 启停/轮换/路由 |
+| GET | `/v1/board/sync/entries/{key}/status` | board.manage | inbox/outbox lag、失败、dead letter、凭据状态 |
+| GET | `/v1/board/sync/inbox/{key}` | board.manage | 原始事件调试（脱敏） |
+| POST | `/v1/board/sync/inbox/{key}/{dedupe}/retry` | board.manage | 重试 dead letter |
+| GET | `/v1/board/sources/{key}/read` | board.manage | 按需读平台 channel/thread/issue |
+| POST | `/v1/board/sources/{key}/join` | board.manage | Slack 公共频道 join（opt-in） |
+
+- `GET /v1/board/sync/status` 可给 UI 汇总（entries、targets、失败数、last event）。
+- Board → sidecar 的两个调用 `POST {bridgeURL}/resolve` 与 `POST {bridgeURL}/deliver` 不属于
+  board 路由，由 board 用同一 HMAC 契约主动调用；sidecar 不暴露其他 board 管理能力。
+- 所有 sync 管理响应不含 token/secret/raw 敏感 body；raw inbox 只对 `board.manage` 开放且
+  做字段脱敏。
+- phase 0 独立仓库可用配置文件/环境变量启用 entries；上述 HTTP 管理路由在 phase 0 即提供，
+  便于无 keel 运行与 conformance。
+
+### 14.11 适配器配置与路由
+
+```yaml
+sync:
+  slack:
+    platform: slack
+    secret_ref: tenant/slack/prod
+    routes:
+      "#errors-www": errors-www
+      "#prs": prs
+  github:
+    platform: github
+    secret_ref: tenant/github/app
+    routes:
+      "acme/web": { pulls: prs, issues: issues }
+  linear:
+    platform: linear
+    secret_ref: tenant/linear/app
+    routes:
+      ENG: dev
+  telegram:
+    platform: chatsdk
+    bridge_url: https://bridge.internal/telegram
+    secret_ref: tenant/bridge/telegram
+    routes:
+      "-1001234567890": support
+```
+
+- 每个 entry 一个 key；key 出现在 external ID、target、webhook 路径与 `--source`。
+- `mirror(channel)` = import + deliver + start；`into(channel)` = 只 import；`render(fn)` 覆盖
+  出站渲染；自定义函数可以只用 `import`/`deliver`/`start`，不调用就什么都不做。
+- 频道名解析失败：未知频道记录并跳过，最多每分钟重试；无法确认的 name key 期间对可能路由
+  的事件保持/重试，不落到 fallback；new root 只在已解析频道 start。
+- 一个 platform channel/repo 在一个 entry 内只能映射一次；跨 entry 重复由配置审计告警。
+
+### 14.12 文件、链接、mentions、typing、源读取
+
+- **文件**：入站按 provider 的 `FetchFile` 拉取，走 blob lifecycle 存储；失败 3 次后在文本
+  加一行 `📎 name (size) didn't come over: reason`，消息仍落地；超过 25 MB/10 个/空文件
+  按降级行处理。出站：平台支持上传则上传并记 `message.files_synced`；GitHub 无上传 API，
+  用“在 board: #id”行；Slack 文件上传失败时把行加进文本并保留后续编辑。
+- **链接**：Slack permalink 在入库时解析为 `links`，能对应到 board message 的用 board 快照，
+  否则用平台 unfurl；私网/私有频道不抓取；快照只读、不复制文件。
+- **mentions**：平台 mention 用 `@[actor-id]` 存储；出站按目标平台 native mention 解析；
+  未知 actor 保持文本；导入的 platform user 以 `key:user:<id>` 命名，不映射到其他平台身份。
+- **typing**：`POST /messages/{id}/typing` 只在已同步 target 上尽力显示，不写日志，不重放；
+  Slack 用 assistant status，GitHub/不支持平台 no-op。
+- **源读取**：`sources/{key}/read` 读平台 channel/thread/issue/PR，返回归一化只读结果，
+  不写入 board；需要 `board.manage`，因为平台 token 可能读到比调用者更多内容。Slack
+  private/DM/Slack Connect 按平台限制拒绝；GitHub/Linear 按 app 权限。
+
+## 15. superagent 适配（keel phase 1）
+
+### 15.1 分阶段，不制造第二真值
 
 | 阶段 | 方向 | 行为 |
 | --- | --- | --- |
-| 2a 镜像 | superagent → board（单向） | Ticket/Assignment/Attention/report 投影为 board 任务/claim/blocked/reply；board 对镜像任务只读 |
-| 2b 命令桥 | board 动作 → supervisor API | board 上的 claim/complete/fail/block/unblock/assign/cancel 调用 supervisor 既有 API；supervisor 成功后 board 才更新投影 |
-| 2c 切换（不在本 change） | board 成为真值 | 另立 change，给 `collaboration-superagent` 写 MODIFIED delta |
+| 1a 镜像 | superagent → board（单向） | Ticket/Assignment/Attention/report 投影为 board 任务/claim/blocked/reply；board 对镜像任务只读 |
+| 1b 命令桥 | board 动作 → supervisor API | board 上的 claim/complete/fail/block/unblock/assign/cancel 调用 supervisor 既有 API；supervisor 成功后 board 才更新投影 |
+| 1c 切换（不在本 change） | board 成为真值 | 另立 change，给 `collaboration-superagent` 写 MODIFIED delta |
 
-2a/2b 都不双写：superagent 的 `collab_*` 仍是 Ticket/Assignment 的真值；board 是统一队列的
-只读/命令视图。若 bridge 关闭，board 对镜像任务返回 409 `mirror_read_only`（phase 2 错误码）。
+1a/1b 都不双写：superagent 的 `collab_*` 仍是 Ticket/Assignment 的真值；board 是统一队列的
+只读/命令视图。若 bridge 关闭，board 对镜像任务返回 409 `mirror_read_only`。
 
-### 14.2 映射
+### 15.2 映射
 
 | superagent | board |
 | --- | --- |
@@ -813,22 +1302,11 @@ data: {"cursor":"123","type":"task.claimed","createdAt":"...","channel":"work","
   这保证 board 的 epoch 围栏不被适配器绕过。
 - **归档语义**：Ticket/Assignment/Attention 的既有审计与状态不变；适配器只追加 board
   事件；不删除、不改写 `collab_*` 行。
+- **与 GitHub sync 的关系**：GitHub 的 PR/issue/评论由 `keel-board` 的 GitHub sync 统一处理；
+  superagent 的 GitHub `Source` 仍可为 Ticket 提供事件，但不得再起第二套 GitHub 评论同步。
+  两者用 `board_links` 与外部 event ID 去重；默认只启用一个 GitHub 入口。
 
-### 14.3 GitHub 入站与回复出站
-
-- 复用既有 superagent `Source`（poll + cursor）与 `Channel`（send/outbox）抽象；不引入
-  Vercel sync/Chat SDK。
-- 频道：`github`（config 可改）；标签 `source=github`、`repo=<owner/repo>`、
-  `issue=<n>`/`pr=<n>`、`github.state=open|closed|merged`。
-- 入站：issue/PR opened → 根 + 任务；comment → 回复；PR merged → `completed`（result 带
-  merge sha）；PR closed unmerged → `canceled`；issue closed → `completed`。GitHub label
-  只作为普通标签同步，不直接写 `board.*`。
-- 出站：映射线程上的 board 回复 → GitHub comment，走 outbox，外部 comment ID 幂等；
-  自身入站事件按 external event ID 去重，避免回声。
-- 限流/退避/游标持久化；每 tenant 每条 source 独立；跨租户不可见。
-- 不做通用双向同步、评论编辑/删除、review thread 子线程（phase 3 再议）。
-
-## 15. Watchers 与 schedules（phase 3）
+## 16. Watchers 与 schedules（phase 0）
 
 - **Watcher**：`board_watchers`（tenant、watch id、channel/filter、action、bot、enabled）；
   durable consumer 按 `board_events` 顺序匹配，写入 `board_watch_deliveries`
@@ -836,13 +1314,14 @@ data: {"cursor":"123","type":"task.claimed","createdAt":"...","channel":"work","
   插件工具；**不在运行时接受 URL**，只有部署时声明的代码/插件动作。动态唤醒仍可用标签
   （如 `wake=<session>`），watcher 读到标签后唤醒对应会话，不执行任意回调。
 - **Schedule**：`board_schedules`（tenant、channel/re、text、labels、creator actor、
-  next_run_at、every/until/times）；jobqueue worker 领取到期行，发送前重新校验创建者
+  next_run_at、every/until/times）；durable worker 领取到期行，发送前重新校验创建者
   当前仍有 editor 权限；权限被回收则取消并记录原因。消息幂等键
   `schedule:<id>:<n>`，重试不重复发。
-- 两者都复用既有 durable/jobqueue/triggers 能力，不新增调度器；失败不阻塞 board 主路径；
-  每个 watcher/schedule 独立失败与重试。
+- 两者都自带 PG durable worker（独立仓库可单独运行）；keel 导入后可复用 keel jobqueue/
+  triggers，但不改变语义。不新增外部调度器；失败不阻塞 board 主路径；每个 watcher/
+  schedule 独立失败与重试。
 
-## 16. 失败与安全矩阵
+## 17. 失败与安全矩阵
 
 | 场景 | 行为 | 验证 |
 | --- | --- | --- |
@@ -865,6 +1344,17 @@ data: {"cursor":"123","type":"task.claimed","createdAt":"...","channel":"work","
 | 越权事件 | 不可见事件仅推进 `id:`，无 data | SSE 权限测试 |
 | 租约过期显示 | 客户端按 until 显示 ready + `lease ran out` | UI 测试 |
 | 镜像 claim 冲突 | 适配器记录告警，不覆盖；superagent 自行恢复 | 适配器测试 |
+| Webhook 签名错误/replay | 401/409，不落 inbox，不产生事件 | provider 测试 |
+| 重复 webhook/dedupe | 200，返回已处理结果，只导入一次 | inbox 幂等测试 |
+| 出站平台失败 | 5 次退避后 `message.sync_failed`，后续消息继续 | 故障注入 |
+| 平台 429 | 遵守 Retry-After，退避，不丢弃 | 限流测试 |
+| 凭据缺失/失效 | fail closed，不发送，状态 `credential_invalid` | 凭据测试 |
+| 跨租户 sync key | 404，不读取/不投递 | A/B tenant 测试 |
+| 不可信 payload/超长/坏 URL | 400/413 或清洗/截断；不抓私网、不执行脚本 | 红队/安全测试 |
+| bridge HMAC/nonce 失败 | 401，不落 inbox | bridge 契约测试 |
+| inbox dead letter | 只阻塞该 external thread lane，其他线程继续 | 队列测试 |
+| echo marker/bot 自身 | 丢弃，不产生循环 | 回声测试 |
+| source read 无 manage | 403，不读取平台 | 权限测试 |
 
 安全要点：
 
@@ -874,57 +1364,79 @@ data: {"cursor":"123","type":"task.claimed","createdAt":"...","channel":"work","
 - 日志/指标不记录 token、完整消息正文、用户凭据。
 - 所有写接口校验 CSRF/租户上下文（沿用 keel 既有中间件）；board 不新增认证方式。
 
-## 17. 审计、观测与保留
+## 18. 审计、观测与保留
 
-### 17.1 审计
+### 18.1 审计
 
 - `board_events` 本身是领域审计：每条状态变化都有 tenant、channel、seq、kind、actor、
   payload、时间。任务 claim/renew/complete 等可据此回答“谁在何时做了什么”。
+- Sync 审计：webhook 接收/拒绝、inbox 处理/死信、outbound 成功/失败、凭据轮换、source
+  read/join 都写有界审计（key/platform/target/delivery_id/status/attempts），不含 raw
+  body、消息正文、token 或 secret。
 - 权限拒绝、跨租户尝试写既有 `auth_events`（`permission.denied`），detail 只含
   action/channel/所需权限，不含正文与 token。
 - 适配器写 `board_links` 与事件；superagent 原审计不变。
 
-### 17.2 指标
+### 18.2 指标
 
 - `board_events_total{kind}`、`board_append_duration_ms`、`board_tasks_live_claims`、
   `board_lease_expired_total`、`board_sse_connections`、`board_sse_lag_seq`、
   `board_projection_rebuild_duration_ms`。
-- 指标标签有界：kind/tenant 是否带 tenant 取决于既有指标规范；不在高基数标签放消息 ID。
+- Sync：`board_sync_inbox_depth{key,status}`、`board_sync_outbox_depth{key,status}`、
+  `board_sync_delivery_failures_total{key,platform}`、`board_sync_dead_letters_total{key}`、
+  `board_sync_webhook_duration_ms{key,platform}`、`board_sync_dedupe_hits_total{key}`、
+  `board_sync_bridge_errors_total{key}`。
+- 指标标签有界：kind/key/platform/status 不使用消息 ID、target 全量或任意用户文本；不在
+  高基数标签放消息 ID、external message ID 或 secret。
 
-### 17.3 保留与配额
+### 18.3 保留与配额
 
-- Phase 1：append-only，不自动删除；tenant 删除由运维 purge 级联。
-- Phase 3：按 tenant 配置保留期（默认建议 365 天）与事件配额；保留策略只影响
-  `board_events`/投影的归档/删除，不影响 superagent 记录。
-- 这是 Owner 可推翻的默认值（见 §21），不阻塞 phase 1。
+- Phase 0/1：append-only，不自动删除；tenant 删除由运维 purge 级联。
+- Phase 2 收口后：按 tenant 配置保留期（默认建议 365 天）与事件配额；保留策略只影响
+  `board_events`/投影/sync inbox-outbox 的归档/删除，不影响 superagent 记录。
+- 这是 Owner 可推翻的默认值（见 §22），不阻塞 phase 0/1。
 
-## 18. 测试与验收
+## 19. 测试与验收
 
 1. **单元**：状态机全边表、token 生成/hash/常量时间、needs 环/深度/取消前置、标签文法/
-   保留前缀、cursor 编解码、fold 纯函数。
+   保留前缀、cursor 编解码、fold 纯函数；sync 的 dedupe/delivery ID/echo marker/URL 守卫。
 2. **PG 集成**：RLS A/B 租户、并发 claim、租约过期、幂等重试、needs 完成传播、
-   投影重建哈希、head 锁串行。
-3. **HTTP**：路由权限矩阵、404/403、错误码、SSE Last-Event-ID/隐藏事件/心跳。
-4. **E2E（nsh）**：队列五态、筛选、claim/complete/fail/block/unblock/reopen/assign/needs/
-   cancel、租约倒计时、live tail 断线重连、web/TUI 同源；每步截图。
-5. **证据**：脚本生成 HTML 图文报告；每个改动屏幕/状态的 before/after 截图；
+   投影重建哈希、head 锁串行；sync inbox/outbox lease、dead letter、source cursor。
+3. **HTTP**：路由权限矩阵、404/403、错误码、SSE Last-Event-ID/隐藏事件/心跳；sync
+   webhook/bridge 签名、重放窗口、管理 API 权限。
+4. **Provider 契约**：native 三适配器 + Chat SDK bridge 共用 conformance（验签、重复投递、
+   存储失败重试、add/remove/add occurrence、inbound/outbound 重试、稳定 event ID、并发上下文、
+   不可解析 target、canStartThreads、thread attach、文件降级）。
+5. **E2E（独立仓库）**：fake Slack/GitHub/Linear 服务器 + fake Chat SDK bridge；双向镜像、
+   edit/delete/reaction、文件、typing、source read、出站失败/重试/dead letter、重启恢复。
+6. **E2E（keel + nsh）**：队列五态、筛选、全部任务动作、租约倒计时、live tail 断线重连、
+   sync 状态/失败/重试、web/TUI 同源；每步截图。
+7. **证据**：脚本生成 HTML 图文报告；每个改动屏幕/状态的 before/after 截图；
    `UNCOVERED=0`；独立子代理复核（禁 Codex），P0/P1 清零。
-6. **性能**：单租户 100 writes/s 的 append 延迟、1000 SSE 连接内存、100–200 租户 RLS 查询；
-   不突破 2GB RSS 目标。
+8. **性能**：单租户 100 writes/s append 延迟、1000 SSE 连接内存、100–200 租户 RLS 查询、
+   sync inbox/outbox 吞吐与 5 次重试预算；不突破 2GB RSS 目标。
 
-## 19. 迁移与回滚
+## 20. 迁移、导入与回滚
 
-- **Schema**：全部新增表/索引/RLS 条目；`store.ApplySchema` + `ApplyRLS` 幂等执行；
+- **独立仓库先行**：phase 0 在 `github.com/jixoai/keel-board` 完成 core + sync + watch；
+  产出 `v0.1.0` tag 与不可变 commit。keel 在此之前不写平行 core。
+- **导入**：keel `go.mod` 固定 `github.com/jixoai/keel-board@<phase-0-commit>` 的
+  pseudo-version；`internal/boardintegration` 只做身份/权限/PG/SSE/secret/telemetry 适配，
+  不复制领域逻辑。升级走独立 PR + conformance + keel 集成测试。
+- **Schema**：keel-board 自带新增表/索引/RLS 条目；keel 在启动时幂等迁移同一 PG，
   不改既有表。Alpha 零兼容：没有旧字段/旧路径垫片。
 - **Feature flag**：tenant config `board.enabled=false` 默认；关闭时 `/v1/board/*` 返回
   404 `board_disabled`。开启走 tenant config 管理（`board.manage`/运维）。
-- **Phase 2 适配**：`board.superagent.mirror=false`、`board.superagent.bridge=false` 默认；
+- **Sync 启用**：`board.sync.enabled=false` 默认；entries/凭据逐 tenant 配置；未配置时
+  不注册 webhook、不拉 inbox、不投递，状态 `sync_disabled`。
+- **Phase 1 适配**：`board.superagent.mirror=false`、`board.superagent.bridge=false` 默认；
   开启只读镜像不改变 superagent；开启 bridge 才接受 board 动作。
-- **回滚**：关闭 flag 即停止读写；表保留（append-only，不删数据）；不影响 superagent/
+- **回滚**：关闭 flag 即停止读写/sync；表保留（append-only，不删数据）；不影响 superagent/
   Session。若 schema 需回退，drop 新增表即可（alpha 无生产数据承诺）。
-- **不做数据迁移**：不导入 Vercel 数据、不迁移已归档工单、不双写旧看板。
+- **不做数据迁移**：不导入 Vercel 数据、不迁移已归档工单、不双写旧看板；sync 只从启用的
+  entry 的 source cursor/当前时间开始，不回灌历史平台消息（可选 backfill 另立）。
 
-## 20. Risks / Trade-offs
+## 21. Risks / Trade-offs
 
 - **[单租户写串行化限制吞吐]** → Board 写入量低；先测量再分片。若单租户 >100 writes/s，
   后续按 channel 分片或改 per-task 行锁；本 change 不提前优化。
@@ -932,8 +1444,20 @@ data: {"cursor":"123","type":"task.claimed","createdAt":"...","channel":"work","
   Last-Event-ID 恢复。
 - **[不可见事件推进游标泄露“有活动”]** → 与 Vercel 已知取舍一致；只泄露量，不泄露内容/频道；
   文档明确；需要更强隐藏时未来加 per-channel cursor（非本 change）。
-- **[Phase 2 双真值风险]** → 明确 2a 只读、2b 命令桥；superagent 成功后才更新 board；
-  不对 `collab_*` 做双写；2c 另立 change。
+- **[Phase 1 双真值风险]** → 明确 1a 只读、1b 命令桥；superagent 成功后才更新 board；
+  不对 `collab_*` 做双写；1c 另立 change。
+- **[Sync 平台 API 变化/限流]** → provider 隔离、版本化契约、429/Retry-After、每 key
+  退避与熔断；适配器升级走独立 PR 与 conformance。
+- **[Echo/双投递]** → bot 身份 + origin target + 隐藏 marker；缺失身份 fail closed；
+  两个 entry 映射同一频道启动告警。
+- **[Slack 无 idempotency key]** → 崩溃窗口可能重复一次；文档/UI 明示，不声称 exactly-once；
+  可用隐藏 marker 做尽力去重。
+- **[Sync 凭据泄露]** → SecretResolver、只存 ref、日志/事件/指标脱敏、每 tenant/key 隔离、
+  轮换 fail closed。
+- **[不可信输入/SSRF]** → 限长/schema/字符清洗、URL 私网拒绝、无重定向、文件 magic/size、
+  超时；红队测试。
+- **[Chat SDK bridge 成为隐藏运行时]** → bridge 是可选外部进程，不是 keel 依赖；契约固定、
+  HMAC、nonce；原生 Slack/GitHub/Linear 不经过 bridge。
 - **[Claim token 泄露]** → 只存 hash、响应一次、读接口/SSE/审计/日志全脱敏；红队测试。
 - **[标签作为状态导致索引/漂移]** → `board.task` 只由任务写维护；投影与事件同事务；
   重建校验。
@@ -941,14 +1465,14 @@ data: {"cursor":"123","type":"task.claimed","createdAt":"...","channel":"work","
   “unassigned claim 自动回到池”策略（Owner 决策）。
 - **[UI 复杂度]** → 服务端 `moves` 规则与客户端镜像共用同一份表驱动；只展示允许动作；
   五态与 TUI 同源测试。
-- **[保留期/配额未定]** → phase 1 不删除、不计量；phase 3 由 Owner 定；不阻塞核心。
+- **[保留期/配额未定]** → phase 0/1 不删除、不计量；phase 2 后由 Owner 定；不阻塞核心。
 - **[Apache-2.0 归属]** → 只转译概念；若未来复制代码，按 §proposal 的 NOTICE/许可流程执行。
 
-## 21. Open Questions（Owner 可推翻的默认值，不阻塞 phase 1）
+## 22. Open Questions（Owner 可推翻的默认值，不阻塞 phase 0/1）
 
-1. **保留期与配额**：phase 1 默认 append-only 不删除、不计量；phase 3 建议 365 天 +
+1. **保留期与配额**：phase 0/1 默认 append-only 不删除、不计量；phase 2 后建议 365 天 +
    `board_events` 配额。Owner 可改为更短/更长或从 phase 1 开始计量。
 2. **租约上限**：默认 900s、范围 30–3600s、tenant cap 3600s。Owner 可把 cap 降到 900s
    或提高到其它值；不影响协议。
-3. **superagent 切换**：本 change 只做 2a 镜像 + 2b 命令桥，不做 2c 切换。Owner 若希望
+3. **superagent 切换**：本 change 只做 1a 镜像 + 1b 命令桥，不做 1c 切换。Owner 若希望
    board 成为唯一真值，需要另立 change 并给 `collaboration-superagent` 写 MODIFIED delta。

@@ -1,3 +1,3 @@
 schema: spec-driven
 created: 2026-11-27
-goal: Keel adopts the vercel/board task-and-thread standard as a tenant-level append-only board with claims, leases, dependencies, labels, SSE and nsh queue UI, with superagent and GitHub as adapters
+goal: Keel adopts the vercel/board task-and-thread standard via the standalone Apache-2.0 module github.com/jixoai/keel-board (pinned by commit), including tenant-level append-only board, claims/leases/dependencies/labels, SSE, full bidirectional Slack/GitHub/Linear/Chat SDK sync, watchers/schedules, and a later keel integration plus nsh UI
