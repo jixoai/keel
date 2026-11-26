@@ -92,7 +92,9 @@ func (r *Runner) resolveImages(ctx context.Context, msgs agentcore.MessageList, 
 			if res.model != nil && !res.model.ImageInput {
 				// The model explicitly denies image input: no upload, no inline
 				// bytes, an explicit metadata fallback with the tools hint.
-				report.fallbacks = append(report.fallbacks, ref.BlobID)
+				report.fallbacks = append(report.fallbacks, imageFallback{
+					blobID: ref.BlobID, mime: ref.MimeType, size: ref.Size,
+				})
 				ensureCopy()
 				resolved = append(resolved, agentcore.NewTextContent(
 					imageFallbackText(ref, "the selected model does not declare image input")))
@@ -100,7 +102,9 @@ func (r *Runner) resolveImages(ctx context.Context, msgs agentcore.MessageList, 
 			}
 			wire, err := r.resolveOneImage(ctx, res, ref)
 			if err != nil {
-				report.failures = append(report.failures, imageFailure{blobID: ref.BlobID, err: err})
+				report.failures = append(report.failures, imageFailure{
+					blobID: ref.BlobID, mime: ref.MimeType, size: ref.Size, err: err,
+				})
 				resolved = append(resolved, agentcore.NewTextContent(imageOmittedNotice(ref, err)))
 				continue
 			}
@@ -153,11 +157,21 @@ type imageResolutionReport struct {
 	forms     map[string]int
 	degraded  []string
 	failures  []imageFailure
-	fallbacks []string
+	fallbacks []imageFallback
+}
+
+// imageFallback is one image the model refused to receive natively; the log
+// names the blob's MIME/size (never its display name or bytes).
+type imageFallback struct {
+	blobID string
+	mime   string
+	size   int64
 }
 
 type imageFailure struct {
 	blobID string
+	mime   string
+	size   int64
 	err    error
 }
 
@@ -263,10 +277,12 @@ func logImageResolution(logger *slog.Logger, lease kernel.Lease, model ActiveMod
 		"model", model.Model,
 	}
 	for _, failure := range report.failures {
-		logger.Warn("outbound image omitted", append(attrs, "blob_id", failure.blobID, "err", failure.err)...)
+		logger.Warn("outbound image omitted", append(attrs,
+			"blob_id", failure.blobID, "mime", failure.mime, "size", failure.size, "err", failure.err)...)
 	}
-	for _, blobID := range report.fallbacks {
-		logger.Info("outbound image sent as metadata text", append(attrs, "blob_id", blobID,
+	for _, fallback := range report.fallbacks {
+		logger.Info("outbound image sent as metadata text", append(attrs,
+			"blob_id", fallback.blobID, "mime", fallback.mime, "size", fallback.size,
 			"reason", "the selected model does not declare image input")...)
 	}
 	for _, note := range report.degraded {

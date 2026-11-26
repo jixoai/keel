@@ -8,13 +8,19 @@ package agent
 // is told to use file tools. No attachment is ever dropped silently.
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"testing"
 	"unicode/utf8"
 
+	"github.com/google/uuid"
+
 	"github.com/jixoai/keel/internal/agentcore"
+	"github.com/jixoai/keel/internal/kernel"
 	"github.com/jixoai/keel/internal/provider"
 	"github.com/jixoai/keel/internal/store"
 )
@@ -172,7 +178,7 @@ func TestAttachmentPDFWireCannotCarry(t *testing.T) {
 	})
 	resolver := &fakeMediaResolver{}
 	runner := &Runner{Logger: discardLog()}
-	_, report := runner.resolveAttachments(context.Background(), msgs, attachmentResolution{
+	resolved, report := runner.resolveAttachments(context.Background(), msgs, attachmentResolution{
 		resolver:  resolver,
 		workspace: "tenant-1",
 		model:     &ModelProperties{PDFInput: true},
@@ -183,6 +189,12 @@ func TestAttachmentPDFWireCannotCarry(t *testing.T) {
 	}
 	if len(report.fallbacks) != 1 || !strings.Contains(report.fallbacks[0].reason, "wire protocol cannot carry a PDF") {
 		t.Fatalf("report = %+v, want a wire-level fallback", report)
+	}
+	text := resolved[0].(agentcore.UserMessage).Content[1].(agentcore.TextContent).Text
+	for _, want := range []string{"blob-pdf-3", "application/pdf", "wire protocol cannot carry a PDF"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("fallback = %q, want %q", text, want)
+		}
 	}
 }
 
@@ -225,7 +237,7 @@ func TestAttachmentAudioFallbackWhereUnsupported(t *testing.T) {
 	})
 	resolver := &fakeMediaResolver{}
 	runner := &Runner{Logger: discardLog()}
-	_, report := runner.resolveAttachments(context.Background(), msgs, attachmentResolution{
+	resolved, report := runner.resolveAttachments(context.Background(), msgs, attachmentResolution{
 		resolver:  resolver,
 		workspace: "tenant-1",
 		model:     &ModelProperties{AudioInput: true},
@@ -236,6 +248,12 @@ func TestAttachmentAudioFallbackWhereUnsupported(t *testing.T) {
 	}
 	if len(report.fallbacks) != 1 || !strings.Contains(report.fallbacks[0].reason, "no audio input part") {
 		t.Fatalf("report = %+v, want the wire-level audio fallback", report)
+	}
+	text := resolved[0].(agentcore.UserMessage).Content[1].(agentcore.TextContent).Text
+	for _, want := range []string{"blob-audio-2", "audio/mpeg", "no audio input part"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("fallback = %q, want %q", text, want)
+		}
 	}
 }
 
@@ -256,8 +274,10 @@ func TestAttachmentVideoAlwaysFallsBack(t *testing.T) {
 		t.Fatalf("report = %+v, want one video fallback", report)
 	}
 	text := resolved[0].(agentcore.UserMessage).Content[1].(agentcore.TextContent).Text
-	if !strings.Contains(text, "clip.mp4") || !strings.Contains(text, "video/mp4") {
-		t.Fatalf("fallback = %q, want the attachment's name and MIME", text)
+	for _, want := range []string{"blob-video-1", "clip.mp4", "video/mp4", "no provider protocol"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("fallback = %q, want %q", text, want)
+		}
 	}
 }
 
@@ -342,8 +362,10 @@ func TestAttachmentNoResolverStillNamesTheBlob(t *testing.T) {
 		t.Fatalf("report = %+v, want the unwired degradation", report)
 	}
 	text := resolved[0].(agentcore.UserMessage).Content[1].(agentcore.TextContent).Text
-	if !strings.Contains(text, "blob-pdf-5") || !strings.Contains(text, "file tools") {
-		t.Fatalf("fallback = %q, want the blob id and the tools hint", text)
+	for _, want := range []string{"blob-pdf-5", "application/pdf", "10 bytes", "no attachment pipeline", "file tools"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("fallback = %q, want %q", text, want)
+		}
 	}
 }
 
@@ -701,5 +723,36 @@ func TestTrimReasonCutsOnARuneBoundary(t *testing.T) {
 	}
 	if !strings.HasSuffix(got, "…") {
 		t.Fatalf("trimReason = %q, want a visible truncation marker", got)
+	}
+}
+
+// TestAttachmentDegradationLogCarriesOnlySafeFacts pins the log contract: the
+// degradation line names the blob id, MIME, size and reason, never the display
+// name, the prompt text or any bytes.
+func TestAttachmentDegradationLogCarriesOnlySafeFacts(t *testing.T) {
+	var buffer bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&buffer, nil))
+	report := attachmentResolutionReport{
+		fallbacks: []attachmentFallback{{
+			blobID: "blob-1", kind: "pdf", modality: "pdf",
+			mime: "application/pdf", size: 2048,
+			reason: "the selected model does not declare PDF input",
+		}},
+		failures: []attachmentFailure{{
+			blobID: "blob-2", mime: "image/png", size: 10, err: errors.New("blob missing"),
+		}},
+	}
+	lease := kernel.Lease{Scope: kernel.Scope{SessionID: uuid.New()}}
+	logAttachmentResolution(logger, lease, ActiveModel{ProviderID: "provider-1", Model: "model-1"}, report)
+	line := buffer.String()
+	for _, want := range []string{"blob-1", "application/pdf", "2048", "does not declare PDF input", "blob-2"} {
+		if !strings.Contains(line, want) {
+			t.Fatalf("log line lacks %q: %s", want, line)
+		}
+	}
+	for _, forbidden := range []string{"secret.pdf", "please summarize", "base64", "JVBERi0"} {
+		if strings.Contains(line, forbidden) {
+			t.Fatalf("log line leaked %q: %s", forbidden, line)
+		}
 	}
 }

@@ -547,7 +547,7 @@ func (m *Manager) Install(ctx context.Context, req InstallRequest, audit AuditCo
 	if existing, ok := m.entries[entry.id]; ok {
 		if existing.hash == entry.hash && existing.manifestVersion() == entry.manifestVersion() {
 			m.auditLocked(ctx, audit, entry.id, pkg.Version(), store.PluginActionInstall, store.PluginResultOK,
-				map[string]any{"idempotent": true, "hash": entry.hash, "state": string(existing.state)})
+				withAttachmentClaimDetail(map[string]any{"idempotent": true, "hash": entry.hash, "state": string(existing.state)}, existing.extension))
 			return m.viewLocked(existing), nil
 		}
 		err := pluginErrf(ErrPluginExists, "install", entry.id,
@@ -570,7 +570,7 @@ func (m *Manager) Install(ctx context.Context, req InstallRequest, audit AuditCo
 		return PluginView{}, err
 	}
 	m.auditLocked(ctx, audit, entry.id, entry.manifestVersion(), store.PluginActionInstall, store.PluginResultOK,
-		map[string]any{"path": entry.dir, "hash": entry.hash, "source": req.Path, "bundled": false})
+		withAttachmentClaimDetail(map[string]any{"path": entry.dir, "hash": entry.hash, "source": req.Path, "bundled": false}, entry.extension))
 	m.bumpRevisionLocked()
 	m.log.Info("plugin installed", "plugin", entry.id, "version", entry.manifestVersion(), "hash", shortHash(entry.hash), "actor", audit.Actor)
 	return m.viewLocked(entry), nil
@@ -707,7 +707,7 @@ func (m *Manager) Enable(ctx context.Context, id string, audit AuditContext) (Pl
 			m.log.Warn("plugin enable reconnects a failed runtime", "plugin", id, "reason", reason)
 		} else {
 			m.auditLocked(ctx, audit, id, entry.manifestVersion(), store.PluginActionEnable, store.PluginResultOK,
-				map[string]any{"idempotent": true})
+				withAttachmentClaimDetail(map[string]any{"idempotent": true}, entry.extension))
 			return m.viewLocked(entry), nil
 		}
 	}
@@ -808,7 +808,7 @@ func (m *Manager) Enable(ctx context.Context, id string, audit AuditContext) (Pl
 		surface = "ui"
 	}
 	m.auditLocked(ctx, audit, id, entry.manifestVersion(), store.PluginActionEnable, store.PluginResultOK,
-		map[string]any{"surface": surface, "generation": m.runtime.Generation()})
+		withAttachmentClaimDetail(map[string]any{"surface": surface, "generation": m.runtime.Generation()}, entry.extension))
 	m.bumpRevisionLocked()
 	m.log.Info("plugin enabled", "plugin", id, "surface", surface, "generation", m.runtime.Generation(), "actor", audit.Actor)
 	return m.viewLocked(entry), nil
@@ -848,7 +848,8 @@ func (m *Manager) Disable(ctx context.Context, id string, audit AuditContext) (P
 	if err := m.persistLocked(ctx, entry); err != nil {
 		return m.viewLocked(entry), err
 	}
-	m.auditLocked(ctx, audit, id, entry.manifestVersion(), store.PluginActionDisable, store.PluginResultOK, nil)
+	m.auditLocked(ctx, audit, id, entry.manifestVersion(), store.PluginActionDisable, store.PluginResultOK,
+		withAttachmentClaimDetail(nil, entry.extension))
 	m.bumpRevisionLocked()
 	m.log.Info("plugin disabled", "plugin", id, "generation", m.runtime.Generation(), "actor", audit.Actor)
 	return m.viewLocked(entry), nil
@@ -922,7 +923,7 @@ func (m *Manager) Uninstall(ctx context.Context, id string, audit AuditContext) 
 		return view, err
 	}
 	m.auditLocked(ctx, audit, id, view.Version, store.PluginActionUninstall, store.PluginResultOK,
-		map[string]any{"removed": entry.dir != ""})
+		withAttachmentClaimDetail(map[string]any{"removed": entry.dir != ""}, entry.extension))
 	m.bumpRevisionLocked()
 	m.log.Info("plugin uninstalled", "plugin", id, "actor", audit.Actor)
 	return view, nil
@@ -1367,6 +1368,21 @@ func (m *Manager) persistLocked(ctx context.Context, entry *managerEntry) error 
 		return fmt.Errorf("harnessext: persist plugin %s: %w", entry.id, err)
 	}
 	return nil
+}
+
+// withAttachmentClaimDetail adds the plugin's attachment preview claims to a
+// lifecycle audit detail. The entry names pluginId/slot/form/MIME only — never
+// message content, file names or bytes (change keel-plugin-attachment).
+func withAttachmentClaimDetail(detail map[string]any, decl ExtensionDeclaration) map[string]any {
+	claims := AttachmentClaims(decl.Contributes)
+	if len(claims) == 0 {
+		return detail
+	}
+	if detail == nil {
+		detail = map[string]any{}
+	}
+	detail["attachmentClaims"] = claims
+	return detail
 }
 
 func (m *Manager) auditLocked(ctx context.Context, audit AuditContext, id, version, action, result string, detail map[string]any) {

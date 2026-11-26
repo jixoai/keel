@@ -636,3 +636,51 @@ func TestPermissionedBrokerWithAManagerAuditsThroughTheTrail(t *testing.T) {
 		t.Fatalf("unknown-plugin audit rows = %+v", rows)
 	}
 }
+
+// TestAttachmentPreviewToolCallIsRefusedAndAudited is the attachment negative
+// control: a preview plugin calling a tool outside permissions.tools is a typed
+// refusal, and the audit row names the attempt without any attachment content.
+func TestAttachmentPreviewToolCallIsRefusedAndAudited(t *testing.T) {
+	harness := permissionHarness(t)
+	ctx := context.Background()
+	addBuiltinPlugin(t, harness, &pluginpkg.Manifest{
+		ID:          "vendor.preview",
+		Version:     "1.0.0",
+		Kind:        pluginpkg.KindInProcess,
+		Description: "attachment preview fixture",
+		Provides: pluginpkg.Provides{
+			Tools: []string{"vendor.preview.render"},
+		},
+		Contributes: []pluginpkg.Contribution{{
+			Slot: pluginpkg.MessagePartSlotID, Form: pluginpkg.SlotFormChunk, Entry: "ui/preview.js",
+			Part: pluginpkg.AttachmentPartKind, Mime: []string{"application/pdf"},
+		}},
+	}, "vendor.preview.render")
+	if _, _, err := harness.manager.applyEnabledLocked(ctx); err != nil {
+		t.Fatalf("assemble: %v", err)
+	}
+	_, err := harness.manager.InvokePluginTool(ctx, "vendor.preview", "keel.other.other_tool", json.RawMessage(`{}`))
+	if !errors.Is(err, ErrPermissionDenied) {
+		t.Fatalf("undeclared preview tool call = %v, want ErrPermissionDenied", err)
+	}
+	rows, err := harness.manager.Audit(ctx, nil, "vendor.preview", 0, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 || rows[0].Action != PluginActionDeny || rows[0].Result != store.PluginResultRefused {
+		t.Fatalf("audit rows = %+v, want one deny/refused row", rows)
+	}
+	var detail struct {
+		Kind   string `json:"kind"`
+		Target string `json:"target"`
+	}
+	if err := json.Unmarshal(rows[0].Detail, &detail); err != nil {
+		t.Fatalf("denial detail = %s: %v", rows[0].Detail, err)
+	}
+	if detail.Kind != PermissionTool || detail.Target != "keel_other_other_tool" {
+		t.Fatalf("denial detail = %+v", detail)
+	}
+	if strings.Contains(string(rows[0].Detail), "application/pdf") {
+		t.Fatalf("the denial audit must not carry attachment metadata: %s", rows[0].Detail)
+	}
+}

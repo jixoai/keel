@@ -99,7 +99,9 @@ func (r *Runner) resolveAttachments(ctx context.Context, msgs agentcore.MessageL
 			}
 			native, fallback, err := r.resolveOneAttachment(ctx, res, ref)
 			if err != nil {
-				report.failures = append(report.failures, attachmentFailure{blobID: ref.BlobID, err: err})
+				report.failures = append(report.failures, attachmentFailure{
+					blobID: ref.BlobID, mime: ref.MimeType, size: ref.Size, err: err,
+				})
 				ensureCopy()
 				resolved = append(resolved, agentcore.NewTextContent(r.attachmentFallbackText(ctx, res, ref, err.Error())))
 				continue
@@ -134,11 +136,14 @@ func (r *Runner) resolveAttachments(ctx context.Context, msgs agentcore.MessageL
 }
 
 // attachmentFallback names the modality and the reason a native part was not
-// produced.
+// produced. Size and MIME are carried for the structured log line: the log
+// names the blob's cheap facts, never its display name or bytes.
 type attachmentFallback struct {
 	blobID   string
 	kind     string
 	modality string
+	mime     string
+	size     int64
 	reason   string
 }
 
@@ -146,6 +151,8 @@ type attachmentFallback struct {
 // example an upload error after the modality gate passed).
 type attachmentFailure struct {
 	blobID string
+	mime   string
+	size   int64
 	err    error
 }
 
@@ -177,6 +184,8 @@ func (r *Runner) resolveOneAttachment(ctx context.Context, res attachmentResolut
 	fallback := attachmentFallback{
 		blobID: ref.BlobID,
 		kind:   kind,
+		mime:   strings.TrimSpace(ref.MimeType),
+		size:   ref.Size,
 	}
 	switch kind {
 	case agentcore.MediaKindPDF:
@@ -405,14 +414,16 @@ func logAttachmentResolution(logger *slog.Logger, lease kernel.Lease, model Acti
 		"model", model.Model,
 	}
 	for _, failure := range report.failures {
-		logger.Warn("outbound attachment failed", append(attrs, "blob_id", failure.blobID, "err", failure.err)...)
+		logger.Warn("outbound attachment failed", append(attrs,
+			"blob_id", failure.blobID, "mime", failure.mime, "size", failure.size, "err", failure.err)...)
 	}
 	for _, note := range report.degraded {
 		logger.Warn("outbound attachment degraded", append(attrs, "reason", note)...)
 	}
 	for _, fallback := range report.fallbacks {
 		logger.Info("outbound attachment sent as metadata text", append(attrs,
-			"blob_id", fallback.blobID, "kind", fallback.kind, "reason", fallback.reason)...)
+			"blob_id", fallback.blobID, "kind", fallback.kind, "mime", fallback.mime,
+			"size", fallback.size, "reason", fallback.reason)...)
 	}
 	if len(report.forms) > 0 {
 		logger.Info("outbound attachments resolved", append(attrs, "forms", report.forms)...)

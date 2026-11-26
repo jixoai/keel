@@ -10,8 +10,10 @@ package agent
 //     or as an explicit text notice naming why not — never silently.
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"log/slog"
 	"strings"
 	"testing"
 
@@ -322,5 +324,29 @@ func TestImageWorkspaceDefaultsToTheTenant(t *testing.T) {
 	}
 	if got := (&Runner{ImageWorkspace: "custom"}).imageWorkspace(lease); got != "custom" {
 		t.Fatalf("workspace = %q, want the override", got)
+	}
+}
+
+// TestImageDegradationLogCarriesOnlySafeFacts is the image half of the
+// attachment log contract: blob id, MIME and size reach the log; the display
+// name and bytes do not.
+func TestImageDegradationLogCarriesOnlySafeFacts(t *testing.T) {
+	var buffer bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&buffer, nil))
+	report := imageResolutionReport{
+		fallbacks: []imageFallback{{blobID: "blob-img", mime: "image/png", size: 4096}},
+	}
+	logImageResolution(logger, kernel.Lease{Scope: kernel.Scope{SessionID: uuid.New()}},
+		ActiveModel{ProviderID: "provider-1", Model: "model-1"}, report)
+	line := buffer.String()
+	for _, want := range []string{"blob-img", "image/png", "4096", "does not declare image input"} {
+		if !strings.Contains(line, want) {
+			t.Fatalf("log line lacks %q: %s", want, line)
+		}
+	}
+	for _, forbidden := range []string{"screenshot.png", "iVBORw0KGgo"} {
+		if strings.Contains(line, forbidden) {
+			t.Fatalf("log line leaked %q: %s", forbidden, line)
+		}
 	}
 }

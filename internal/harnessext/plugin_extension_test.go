@@ -15,6 +15,7 @@ import (
 	"testing"
 
 	"github.com/jixoai/keel/internal/pluginpkg"
+	"github.com/jixoai/keel/internal/store"
 )
 
 func writeExtensionPackage(t *testing.T, id string, extension string) string {
@@ -402,6 +403,90 @@ func TestManagerViewCarriesAttachmentClaims(t *testing.T) {
 	for _, needle := range []string{`"part":"attachment"`, `"mime":["application/pdf","image/*"]`} {
 		if !strings.Contains(string(raw), needle) {
 			t.Fatalf("view JSON lacks %s: %s", needle, raw)
+		}
+	}
+}
+
+// TestAttachmentPreviewLifecycleWithdrawsAndAudits is the backend half of the
+// lifecycle requirement: install an attachment preview plugin, see the claim in
+// the inventory, enable/disable/uninstall, and every lifecycle audit row names
+// the claim (slot/form/MIME) while the contribution disappears with the plugin.
+func TestAttachmentPreviewLifecycleWithdrawsAndAudits(t *testing.T) {
+	root := t.TempDir()
+	harness := newManagerHarness(t, root, nil)
+	ctx := context.Background()
+	if err := harness.manager.Boot(ctx); err != nil {
+		t.Fatal(err)
+	}
+	source := attachmentPackage(t, "vendor.preview", `{"slot": "keel.ui.message-part", "form": "chunk", "entry": "ui/panel.js",
+     "part": "attachment", "mime": ["application/pdf", "image/*"]}`)
+	view, err := harness.manager.Install(ctx, InstallRequest{Path: source}, AuditContext{Actor: "tester"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(view.Contributes) != 1 || view.Contributes[0].Part != pluginpkg.AttachmentPartKind {
+		t.Fatalf("installed view = %+v", view.Contributes)
+	}
+	if _, err := harness.manager.Enable(ctx, "vendor.preview", AuditContext{Actor: "tester"}); err != nil {
+		t.Fatal(err)
+	}
+	enabled := harness.manager.Snapshot()
+	if len(enabled.Enabled) != 1 || enabled.Enabled[0] != "vendor.preview" {
+		t.Fatalf("enabled after enable = %+v", enabled.Enabled)
+	}
+	generation := enabled.Generation
+	if _, err := harness.manager.Disable(ctx, "vendor.preview", AuditContext{Actor: "tester"}); err != nil {
+		t.Fatal(err)
+	}
+	disabled := harness.manager.Snapshot()
+	if len(disabled.Enabled) != 0 {
+		t.Fatalf("enabled after disable = %+v", disabled.Enabled)
+	}
+	if disabled.Generation <= generation {
+		t.Fatalf("disable did not advance the runtime generation: %d -> %d", generation, disabled.Generation)
+	}
+	if len(disabled.Plugins) != 1 || disabled.Plugins[0].State != LifecycleDisabled {
+		t.Fatalf("plugin row after disable = %+v", disabled.Plugins)
+	}
+	if _, err := harness.manager.Uninstall(ctx, "vendor.preview", AuditContext{Actor: "tester"}); err != nil {
+		t.Fatal(err)
+	}
+	if plugins := harness.manager.Snapshot().Plugins; len(plugins) != 0 {
+		t.Fatalf("uninstall left residue: %+v", plugins)
+	}
+	if _, err := os.Stat(pluginpkg.PackageDirFor(root, "vendor.preview")); !os.IsNotExist(err) {
+		t.Fatalf("managed directory survived uninstall: %v", err)
+	}
+
+	rows, err := harness.manager.Audit(ctx, nil, "vendor.preview", 0, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]bool{}
+	for _, row := range rows {
+		if row.Result != store.PluginResultOK {
+			continue
+		}
+		switch row.Action {
+		case store.PluginActionInstall, store.PluginActionEnable, store.PluginActionDisable, store.PluginActionUninstall:
+		default:
+			continue
+		}
+		seen[row.Action] = true
+		var detail struct {
+			Claims []AttachmentClaim `json:"attachmentClaims"`
+		}
+		if err := json.Unmarshal(row.Detail, &detail); err != nil || len(detail.Claims) != 1 {
+			t.Fatalf("%s audit detail = %s (%v)", row.Action, row.Detail, err)
+		}
+		if detail.Claims[0].Slot != pluginpkg.MessagePartSlotID || detail.Claims[0].Form != "chunk" ||
+			len(detail.Claims[0].Mime) != 2 {
+			t.Fatalf("%s claim detail = %+v", row.Action, detail.Claims[0])
+		}
+	}
+	for _, action := range []string{store.PluginActionInstall, store.PluginActionEnable, store.PluginActionDisable, store.PluginActionUninstall} {
+		if !seen[action] {
+			t.Fatalf("no %s audit row: %+v", action, rows)
 		}
 	}
 }
