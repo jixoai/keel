@@ -1,0 +1,306 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Keel · Super-agent 工单看板验收</title>
+<style>
+  :root{
+    --ink:#141821; --dim:#5b6472; --faint:#8a93a1; --hair:#dde2e9;
+    --bg:#f4f6f9; --card:#ffffff; --navy:#101725;
+    --accent:#e8a23a; --accent-deep:#a86912; --accent-soft:#fdf1dc;
+    --ok:#177a45; --ok-soft:#e5f4eb; --run:#1d5fa8; --run-soft:#e6f0fb;
+    --warn:#a86912; --warn-soft:#fdf1dc; --fail:#b3261e; --fail-soft:#fbe9e7;
+    --stop:#5b6472; --stop-soft:#eef1f5;
+    --mono:"SFMono-Regular",ui-monospace,"JetBrains Mono",Menlo,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB",sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.6 var(--sans)}
+  a{color:inherit}
+  .top{background:var(--navy);color:#f3f6fb;padding:0 28px;display:flex;align-items:center;gap:18px;min-height:56px}
+  .brand{font-weight:700;letter-spacing:.04em;font-size:15px;white-space:nowrap}
+  .brand span{color:var(--accent)}
+  .top .sub{color:#9aa6b8;font-size:12px;white-space:nowrap}
+  .nav{margin-left:auto;display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-end}
+  .nav a{font-size:12px;color:#b7c2d2;text-decoration:none;padding:5px 9px;border-radius:7px;white-space:nowrap}
+  .nav a:hover{background:rgba(255,255,255,.09);color:#fff}
+  .nav a[aria-current="page"]{background:var(--accent);color:#17130a;font-weight:700}
+  main{max-width:1180px;margin:0 auto;padding:28px 24px 56px}
+  .lede{display:flex;align-items:flex-end;gap:18px;flex-wrap:wrap;margin-bottom:20px}
+  .lede h1{font-size:25px;line-height:1.25;margin:0}
+  .lede .hint{color:var(--dim);font-size:13px;max-width:640px}
+  .badge{display:inline-flex;align-items:center;gap:6px;border:1px solid rgba(166,105,18,.35);background:var(--accent-soft);color:var(--accent-deep);font-size:11px;font-weight:700;letter-spacing:.06em;padding:3px 9px;border-radius:999px}
+  .grid{display:grid;grid-template-columns:minmax(0,1.65fr) minmax(300px,1fr);gap:18px;align-items:start}
+  .panel{background:var(--card);border:1px solid var(--hair);border-radius:14px;overflow:hidden}
+  .panel-head{display:flex;align-items:center;gap:10px;padding:14px 18px;border-bottom:1px solid var(--hair)}
+  .panel-head h2{font-size:15px;margin:0}
+  .panel-head .count{margin-left:auto;font:12px var(--mono);color:var(--faint)}
+  .panel-body{padding:14px 18px 18px}
+  .stats{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px;margin-bottom:18px}
+  .stat{border:1px solid var(--hair);border-radius:12px;background:var(--card);padding:12px 14px 10px;min-height:82px}
+  .stat .n{font-size:26px;font-weight:700;line-height:1.15;font-variant-numeric:tabular-nums}
+  .stat .label{color:var(--faint);font-size:11px;letter-spacing:.06em}
+  .stat.hot{border-color:rgba(166,105,18,.4);background:linear-gradient(180deg,#fffaf1,#fff)}
+  .stat.hot .n{color:var(--accent-deep)}
+  .stat.ok .n{color:var(--ok)} .stat.run .n{color:var(--run)} .stat.bad .n{color:var(--fail)}
+  .tickets{display:flex;flex-direction:column;gap:9px}
+  .ticket{border:1px solid var(--hair);border-radius:11px;padding:12px 14px;display:grid;grid-template-columns:minmax(0,1fr) 158px;gap:12px;background:linear-gradient(90deg,#fff,#fff)}
+  .ticket.active{border-left:3px solid var(--run)} .ticket.blocked{border-left:3px solid var(--accent)}
+  .ticket.done{border-left:3px solid var(--ok)} .ticket.failed{border-left:3px solid var(--fail)}
+  .ticket h3{font-size:14px;margin:0 0 3px;line-height:1.4}
+  .ticket .meta-line{color:var(--faint);font-size:11.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .ticket .side{display:grid;gap:3px;align-content:center;border-left:1px dashed var(--hair);padding-left:12px;font-size:11px;color:var(--faint)}
+  .ticket .side b{color:var(--dim);font:11.5px var(--mono);font-weight:600;overflow:hidden;text-overflow:ellipsis}
+  .pill{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:700;border-radius:999px;padding:2px 9px;margin-right:7px;vertical-align:2px}
+  .pill.active{background:var(--run-soft);color:var(--run)} .pill.blocked{background:var(--warn-soft);color:var(--warn)}
+  .pill.done{background:var(--ok-soft);color:var(--ok)} .pill.failed{background:var(--fail-soft);color:var(--fail)}
+  .pill.open,.pill.cancelled{background:var(--stop-soft);color:var(--stop)}
+  .inbox{display:flex;flex-direction:column;gap:10px}
+  .attention{border:1px solid rgba(166,105,18,.38);background:linear-gradient(180deg,#fffaf1,#fff);border-radius:11px;padding:13px 14px}
+  .attention .kicker{font-size:10.5px;font-weight:700;letter-spacing:.12em;color:var(--accent-deep);text-transform:uppercase}
+  .attention h3{font-size:14px;line-height:1.45;margin:5px 0 4px}
+  .attention .ctx{color:var(--dim);font-size:12px}
+  .options{display:flex;gap:6px;flex-wrap:wrap;margin-top:9px}
+  .opt{border:1px solid var(--hair);background:#fff;border-radius:8px;padding:3px 9px;font-size:11.5px;color:var(--dim)}
+  .attention .foot{margin-top:9px;padding-top:8px;border-top:1px dashed var(--hair);font:11px var(--mono);color:var(--faint);display:flex;gap:10px;flex-wrap:wrap}
+  .readonly{margin-top:10px;font-size:11px;color:var(--faint);border-left:2px solid var(--hair);padding-left:8px}
+  .empty,.state{display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;min-height:280px;padding:28px;border:1px dashed var(--hair);border-radius:12px;background:rgba(255,255,255,.55)}
+  .empty .glyph,.state .glyph{font-size:40px;line-height:1;color:var(--faint);margin-bottom:10px}
+  .empty h3,.state h3{margin:0 0 5px;font-size:16px}
+  .empty p,.state p{margin:0;color:var(--dim);font-size:12.5px;max-width:520px}
+  .state.error .glyph{color:var(--fail)} .state.denied .glyph{color:var(--warn)}
+  .state code,.empty code{font:12px var(--mono);background:rgba(20,24,33,.06);padding:1px 6px;border-radius:4px}
+  .retry{margin-top:14px;border:0;border-radius:8px;background:var(--navy);color:#fff;padding:7px 15px;font:12px var(--sans);cursor:pointer}
+  .retry:hover{background:#1e2a40}
+  .skeleton{border-radius:9px;background:linear-gradient(90deg,#eef1f5 25%,#f7f9fb 37%,#eef1f5 63%);background-size:400% 100%;animation:sh 1.3s ease infinite}
+  @keyframes sh{0%{background-position:100% 0}100%{background-position:0 0}}
+  .sk-row{height:58px;margin-bottom:9px}
+  .sk-stat{height:82px}
+  .sk-line{height:12px;margin:7px 0}
+  .loading-note{display:flex;align-items:center;gap:8px;color:var(--faint);font-size:12px;margin-bottom:12px}
+  .dot{width:7px;height:7px;border-radius:50%;background:var(--accent);animation:pulse 1s ease infinite}
+  @keyframes pulse{50%{opacity:.25}}
+  .tui{border-radius:14px;background:#0d1219;color:#d7e2ef;border:1px solid #1c2838;overflow:hidden}
+  .tui-bar{display:flex;gap:7px;align-items:center;padding:9px 13px;background:#141c27;border-bottom:1px solid #1c2838;color:#7e8da3;font:11px var(--mono)}
+  .tui-bar i{width:9px;height:9px;border-radius:50%;background:#2b394b;display:inline-block}
+  .tui pre{margin:0;padding:18px 20px 24px;font:12px/1.55 var(--mono);color:#c9d7e8;white-space:pre-wrap;overflow-wrap:anywhere}
+  .tui pre b{color:#f0b95e;font-weight:700}
+  footer{margin-top:26px;color:var(--faint);font-size:11.5px;display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap}
+  footer code{font:11px var(--mono);background:rgba(20,24,33,.05);padding:1px 5px;border-radius:4px}
+  .note{font-size:11.5px;color:var(--faint);margin-top:12px}
+  @media (max-width:900px){
+    .grid{grid-template-columns:1fr}
+    .stats{grid-template-columns:repeat(2,minmax(0,1fr))}
+    .ticket{grid-template-columns:1fr}
+    .ticket .meta-line{white-space:normal;overflow:visible}
+    .ticket .side{border-left:0;border-top:1px dashed var(--hair);padding-left:0;padding-top:8px;grid-template-columns:repeat(3,auto);justify-content:start;column-gap:18px}
+    .top{padding:0 16px;gap:8px;flex-wrap:wrap;min-height:auto;padding-top:8px;padding-bottom:8px}
+    .nav{margin-left:0;width:100%;justify-content:flex-start;overflow-x:auto}
+    main{padding:20px 14px 44px}
+    .lede h1{font-size:21px}
+  }
+</style>
+</head>
+<body data-state="loading">
+<header class="top">
+  <div class="brand">Keel <span>·</span> Super-agent</div>
+  <div class="sub">工单看板 / Attention 收件箱 · 验收 Harness</div>
+  <nav class="nav" aria-label="状态场景">
+    <a href="?scenario=success" data-scenario="success">Success</a>
+    <a href="?scenario=empty" data-scenario="empty">Empty</a>
+    <a href="?scenario=loading" data-scenario="loading">Loading</a>
+    <a href="?scenario=error" data-scenario="error">Error</a>
+    <a href="?scenario=denied" data-scenario="denied">Denied</a>
+    <a href="?scenario=tui" data-scenario="tui">TUI</a>
+  </nav>
+</header>
+<main>
+  <section class="lede">
+    <div>
+      <span class="badge">验收 Harness · 非产品 UI</span>
+      <h1>工单看板 / Attention 收件箱</h1>
+    </div>
+    <div class="hint" id="lede-hint">真实 <code>/v1/superagent</code> API · fixture Source · 本地 PostgreSQL 临时库。看板只读；写入口尚未接入产品 UI。</div>
+  </section>
+  <div id="content"></div>
+  <footer>
+    <span id="foot-tenant">tenant —</span>
+    <span>数据源 <code>/v1/superagent/tickets</code> · <code>/v1/superagent/attention</code> · 公网未部署</span>
+  </footer>
+</main>
+<script>
+window.__ACCEPTANCE__ = __ACCEPTANCE_CONFIG__;
+</script>
+<script>
+(function(){
+  const cfg = window.__ACCEPTANCE__ || {};
+  const params = new URLSearchParams(location.search);
+  const scenario = params.get('scenario') || 'success';
+  const content = document.getElementById('content');
+  const footTenant = document.getElementById('foot-tenant');
+  const statusLabels = {open:'待接单', active:'执行中', blocked:'待人工', done:'已完成', failed:'失败', cancelling:'停止中', cancelled:'已停止'};
+  const statusClass = {open:'open', active:'active', blocked:'blocked', done:'done', failed:'failed', cancelling:'cancelled', cancelled:'cancelled'};
+  const tenant = scenario === 'empty' ? cfg.emptyTenant : scenario === 'denied' ? cfg.deniedTenant : cfg.seededTenant;
+  footTenant.textContent = 'tenant ' + (tenant || '—') + ' · scenario ' + scenario;
+  document.querySelectorAll('.nav a').forEach(a => {
+    if (a.dataset.scenario === scenario) a.setAttribute('aria-current','page');
+  });
+  document.body.dataset.state = scenario;
+
+  function esc(value){
+    return String(value == null ? '' : value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+  function shortID(value){ return value ? String(value).slice(0,8) : '—'; }
+  function label(status){ return statusLabels[status] || status || '未知'; }
+  function statusPill(status){ return '<span class="pill ' + (statusClass[status] || 'open') + '">' + esc(label(status)) + '</span>'; }
+  function timeText(value){ if(!value) return '—'; const d = new Date(value); if (Number.isNaN(d.getTime())) return '—'; return d.toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}); }
+
+  function skeleton(){
+    content.innerHTML = [
+      '<div class="stats">', Array.from({length:5},()=>'<div class="stat sk-stat skeleton"></div>').join(''), '</div>',
+      '<div class="loading-note"><span class="dot"></span>正在读取 /v1/superagent/tickets 与 /v1/superagent/attention…</div>',
+      '<div class="grid"><section class="panel"><div class="panel-head"><h2>工单</h2></div><div class="panel-body">',
+      Array.from({length:4},()=>'<div class="sk-row skeleton"></div>').join(''),
+      '</div></section><section class="panel"><div class="panel-head"><h2>Attention 收件箱</h2></div><div class="panel-body">',
+      '<div class="sk-row skeleton"></div><div class="sk-line skeleton"></div><div class="sk-line skeleton"></div>',
+      '</div></section></div>'
+    ].join('');
+  }
+
+  function statePanel(kind, glyph, title, body, extra){
+    return '<div class="state ' + kind + '"><div class="glyph">' + glyph + '</div><h3>' + esc(title) + '</h3><p>' + body + '</p>' + (extra || '') + '</div>';
+  }
+
+  function errorPanel(detail, status){
+    content.innerHTML = '<div class="stats">' + Array.from({length:5},()=>'<div class="stat sk-stat" style="display:flex;align-items:center;justify-content:center;color:var(--faint)">—</div>').join('') + '</div>' +
+      statePanel('error','!','看板读取失败','API 返回 <code>' + esc(status || 'network error') + '</code>：' + esc(detail) + '。重试不会改动任何工单。','<button class="retry" onclick="location.reload()">重试</button>');
+  }
+
+  function deniedPanel(status, detail){
+    content.innerHTML = statePanel('denied','⌁','权限不足 · 403','当前主体缺少 <code>task.read</code>（tenant scope），无法读取工单看板与 Attention 收件箱。<br><br>服务端返回：<code>' + esc(status) + '</code> ' + esc(detail || '') + '。',
+      '<div class="readonly" style="max-width:560px;text-align:left">这是能力门而非空数据：看板不会用 0 条工单伪装成「没有权限」。租户 <code>' + esc(tenant) + '</code> 的鉴权在 API 层被拒绝。</div>');
+  }
+
+  function statCards(counts){
+    const items = [
+      ['blocked','待人工','hot'], ['active','执行中','run'], ['done','已完成','ok'], ['failed','失败','bad'], ['cancelled','已停止','']
+    ];
+    return '<div class="stats">' + items.map(([key,text,cls]) => '<div class="stat ' + cls + '"><div class="n">' + (counts && typeof counts[key] === 'number' ? counts[key] : 0) + '</div><div class="label">' + text + '</div></div>').join('') + '</div>';
+  }
+
+  function ticketRow(t){
+    const status = t.status || 'open';
+    const assign = t.activeAssignment ? (t.activeAssignment.botId || 'worker') + '/' + shortID(t.activeAssignment.sessionId) : (['done','failed','cancelled'].includes(status) ? '已结束' : '未派工');
+    const mandate = t.mandate && t.mandate.strength ? t.mandate.strength : '—';
+    const requester = t.mandate && t.mandate.requester ? (t.mandate.requester.login || t.mandate.requester.id || '—') : '—';
+    return '<article class="ticket ' + (statusClass[status] || '') + '">' +
+      '<div><h3>' + statusPill(status) + esc(t.title || '未命名工单') + '</h3>' +
+      '<div class="meta-line">' + esc(t.thread && t.thread.id || 'no-thread') + ' · 发起人 ' + esc(requester) + ' · mandate ' + esc(mandate) + ' · 更新 ' + esc(timeText(t.updatedAt)) + '</div></div>' +
+      '<div class="side"><span>assignment</span><b>' + esc(assign) + '</b><span>open attention</span><b>' + (t.openAttentionCount || 0) + ' · 共 ' + (t.attentionCount || 0) + '</b></div>' +
+      '</article>';
+  }
+
+  function inboxItem(item){
+    const options = (item.options || []).map(o => '<span class="opt">' + esc(o.label || o.id) + '</span>').join('');
+    return '<article class="attention">' +
+      '<div class="kicker">' + esc(item.kind || 'attention') + ' · ' + esc(item.status || 'open') + '</div>' +
+      '<h3>' + esc(item.prompt || '（无问题文本）') + '</h3>' +
+      '<div class="ctx">' + esc(item.ticketTitle || '—') + ' · ' + esc(item.thread && item.thread.id || '—') + '</div>' +
+      '<div class="options">' + (options || '<span class="opt">free text</span>') + '</div>' +
+      '<div class="foot"><span>deadline ' + esc(timeText(item.deadline)) + '</span><span>request ' + esc(item.requestId || '—') + '</span></div>' +
+      '<div class="readonly">答复写入口 <code>POST /v1/superagent/attention/{id}/answer</code> 已存在；本验收页未接线，产品 UI 尚未实现。</div>' +
+      '</article>';
+  }
+
+  function renderBoard(board, inbox){
+    const tickets = board.tickets || [];
+    const items = (inbox && inbox.items) || [];
+    const ticketPanel = tickets.length ? '<div class="tickets">' + tickets.map(ticketRow).join('') + '</div>' :
+      '<div class="empty"><div class="glyph">∅</div><h3>暂无工单</h3><p>这个租户还没有被 Source 事件触发的 Ticket。事件、Ticket 与 Assignment 都来自 durable store，不显示假数据。</p></div>';
+    const inboxPanel = items.length ? '<div class="inbox">' + items.map(inboxItem).join('') + '</div>' :
+      '<div class="empty" style="min-height:200px"><div class="glyph">✓</div><h3>收件箱为空</h3><p>当前没有 open 的 Attention。完成/取消的 Attention 不会出现在收件箱。</p></div>';
+    content.innerHTML = statCards(board.counts || {}) +
+      '<div class="grid">' +
+      '<section class="panel"><div class="panel-head"><h2>工单</h2><span class="count">' + tickets.length + ' 条 · 按最新</span></div><div class="panel-body">' + ticketPanel + '</div></section>' +
+      '<section class="panel"><div class="panel-head"><h2>Attention 收件箱</h2><span class="count">' + items.length + ' open</span></div><div class="panel-body">' + inboxPanel + '</div></section>' +
+      '</div>' +
+      '<p class="note">本页只读渲染 <code>/v1/superagent</code> 的真实响应；写操作（report/ask/answer/resume/stop）只存在于 API 与 orchestrator，不在本验收页。</p>';
+  }
+
+  function renderTUI(board, inbox){
+    const tickets = board.tickets || [];
+    const items = (inbox && inbox.items) || [];
+    const lines = [];
+    lines.push('KEEL SUPER-AGENT / TUI FALLBACK');
+    lines.push('tenant   ' + tenant);
+    lines.push('mode     ' + (board.modeId || 'superagent'));
+    lines.push('updated  ' + new Date().toISOString());
+    lines.push('');
+    lines.push('TICKETS (' + tickets.length + ')');
+    lines.push('STATUS     ID        TITLE' + ' '.repeat(28) + 'ASSIGNMENT       OPEN');
+    lines.push('-'.repeat(96));
+    for (const t of tickets) {
+      const status = (label(t.status) + '        ').slice(0,10);
+      const id = shortID(t.id).padEnd(9);
+      const title = (t.title || '').slice(0,34).padEnd(35);
+      const assign = t.activeAssignment ? ((t.activeAssignment.botId || 'worker') + '/' + shortID(t.activeAssignment.sessionId)).padEnd(17) : 'unassigned'.padEnd(17);
+      lines.push(status + ' ' + id + ' ' + title + ' ' + assign + ' ' + (t.openAttentionCount || 0));
+    }
+    lines.push('');
+    lines.push('ATTENTION INBOX (' + items.length + ' open)');
+    lines.push('-'.repeat(96));
+    if (!items.length) lines.push('(empty)');
+    for (const item of items) {
+      lines.push('[' + (item.status || 'open') + '] ' + (item.kind || 'attention') + ' request=' + (item.requestId || '—'));
+      lines.push('  prompt: ' + (item.prompt || ''));
+      lines.push('  ticket: ' + (item.ticketTitle || '—'));
+      lines.push('  options: ' + ((item.options || []).map(o => o.id + (o.label ? '/' + o.label : '')).join('  ') || '(none)'));
+      lines.push('  deadline: ' + (item.deadline || '—'));
+    }
+    lines.push('');
+    lines.push('BOARD COUNTS ' + JSON.stringify(board.counts || {}));
+    content.innerHTML = '<div class="tui"><div class="tui-bar"><i></i><i></i><i></i><span>keel superagent board --tenant ' + esc(tenant) + '</span></div><pre>' + esc(lines.join('\n')) + '</pre></div>' +
+      '<p class="note">TUI 降级：同一份 API 数据在无浏览器/窄带宽下以纯文本呈现。产品 TUI 尚未提供 superagent 看板，这是验收兜底形态。</p>';
+  }
+
+  async function fetchJSON(path, tenantID){
+    const response = await fetch(path, { headers: { 'X-Tenant-ID': tenantID }, cache: 'no-store' });
+    const text = await response.text();
+    let body = null;
+    try { body = text ? JSON.parse(text) : null; } catch (_) { body = null; }
+    if (!response.ok) {
+      const err = new Error((body && (body.error || body.detail)) || text || ('HTTP ' + response.status));
+      err.status = response.status;
+      err.body = body;
+      throw err;
+    }
+    return body;
+  }
+
+  async function load(){
+    skeleton();
+    const ticketQuery = scenario === 'error' ? '?fail=1' : scenario === 'loading' ? '?delay=2500' : '';
+    const attentionQuery = scenario === 'loading' ? '?delay=2500' : '';
+    try {
+      if (scenario === 'denied') {
+        await fetchJSON('/v1/superagent/tickets', tenant);
+        errorPanel('expected 403 but the request succeeded', 200);
+        return;
+      }
+      const [board, inbox] = await Promise.all([
+        fetchJSON('/v1/superagent/tickets' + ticketQuery, tenant),
+        fetchJSON('/v1/superagent/attention' + attentionQuery, tenant)
+      ]);
+      if (scenario === 'tui') renderTUI(board, inbox); else renderBoard(board, inbox);
+    } catch (err) {
+      if (err.status === 403) { deniedPanel(err.status, err.message); return; }
+      errorPanel(err.message || String(err), err.status || 'network error');
+    }
+  }
+
+  load();
+})();
+</script>
+</body>
+</html>
