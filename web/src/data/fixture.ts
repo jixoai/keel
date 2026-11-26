@@ -51,6 +51,11 @@ import type {
   SessionSummary,
   SessionTasksView,
   SettingsApi,
+  SuperagentAnswerInput,
+  SuperagentAttentionInboxView,
+  SuperagentAttentionView,
+  SuperagentBoardView,
+  SuperagentTicketView,
   FilePreviewView,
   TaskPanelView,
   SettingsIssue,
@@ -70,10 +75,12 @@ import { providerCredentialSecretName } from "./model-catalog";
 import {
   FixtureIdentity,
   fixtureAccountId,
+  fixtureBotId,
   fixtureCurrentAccountId,
   fixtureFileHash,
   fixtureForkSessionId,
   fixtureRunSessionId,
+  fixtureTenantId,
 } from "./fixture-identity";
 import { demoOarEvents, demoOarProjection, FIXTURE_OAR_SESSION_ID } from "./fixture-oar";
 import type {
@@ -292,6 +299,9 @@ interface DemoModelResolution {
 }
 
 const nowISO = () => new Date().toISOString();
+/** An ISO instant relative to this boot (`-3_600_000` is an hour ago). The
+ * demo's sample rows read as recent work without pinning a clock. */
+const isoAt = (offsetMs: number) => new Date(Date.now() + offsetMs).toISOString();
 
 /** A deterministic 64-hex stand-in for a bundle hash (the demo never computes
  * real content identity; the shapes are what the UI consumes). */
@@ -498,6 +508,255 @@ export class FixtureClient implements SettingsApi {
     },
   ];
   private triggerFires = 12;
+
+  /** The development transport's super-agent board: one ticket per headline
+   * state (待人工 / 执行中 / 完成 / 失败), plus a second blocked ticket whose
+   * Attention has expired. It is a working in-memory service: answer, resume
+   * and stop mutate these rows, so the demo exercises the real UI transitions
+   * instead of frozen sample output. */
+  private superagentTickets: SuperagentTicketView[] = [
+    {
+      id: "6a2f1c3e-4b5d-4e6f-8a90-1b2c3d4e5f01",
+      tenantId: fixtureTenantId,
+      modeId: "superagent",
+      title: "渠道 B 退款重复扣款排查",
+      status: "blocked",
+      source: { kind: "github", id: "1042", uri: "https://github.com/acme/refunds/issues/1042" },
+      request: "用户反馈渠道 B 在 24 小时内出现两次退款扣款；请核对账单流水，并给出对客户的处理建议。",
+      workerBot: fixtureBotId("refund"),
+      thread: {
+        source: "github",
+        kind: "issue",
+        id: "1042",
+        url: "https://github.com/acme/refunds/issues/1042",
+      },
+      mandate: {
+        requester: { id: fixtureAccountId("chenmo"), login: "chenmo", display: "陈墨", isBot: false },
+        source: "github",
+        thread: {
+          source: "github",
+          kind: "issue",
+          id: "1042",
+          url: "https://github.com/acme/refunds/issues/1042",
+        },
+        strength: "write",
+        policyVersion: "policy-7",
+        acceptedAt: isoAt(-7_200_000),
+        acceptedBy: "orchestrator",
+      },
+      createdAt: isoAt(-7_200_000),
+      updatedAt: isoAt(-360_000),
+      assignmentCount: 1,
+      activeAssignment: {
+        id: "0d4b7a3c-5e6f-4a8b-9c0d-1e2f3a4b5c61",
+        workItemId: "6a2f1c3e-4b5d-4e6f-8a90-1b2c3d4e5f01",
+        botId: fixtureBotId("refund"),
+        sessionId: "9c8b7a6d-5e4f-4a3b-8c2d-1e0f9a8b7c61",
+        status: "active",
+        title: "核对退款流水",
+        result: { state: "progress", summary: "已核对 3 笔流水，其中 1 笔确实重复，等待处理口径。" },
+        createdAt: isoAt(-7_000_000),
+        updatedAt: isoAt(-360_000),
+      },
+      attentionCount: 1,
+      openAttentionCount: 1,
+    },
+    {
+      id: "6a2f1c3e-4b5d-4e6f-8a90-1b2c3d4e5f02",
+      tenantId: fixtureTenantId,
+      modeId: "superagent",
+      title: "准备新客户入驻清单",
+      status: "active",
+      source: { kind: "manual", id: "manual-77" },
+      request: "为新签约的连锁客户准备入驻清单和第一周检查项，交付给客户成功团队。",
+      workerBot: fixtureBotId("butler"),
+      thread: { source: "manual", kind: "conversation", id: "manual-77" },
+      mandate: {
+        requester: { id: fixtureCurrentAccountId, login: "lina", display: "李娜", isBot: false },
+        source: "manual",
+        thread: { source: "manual", kind: "conversation", id: "manual-77" },
+        strength: "comment",
+        policyVersion: "policy-7",
+        acceptedAt: isoAt(-3_000_000),
+        acceptedBy: "orchestrator",
+      },
+      createdAt: isoAt(-3_000_000),
+      updatedAt: isoAt(-180_000),
+      assignmentCount: 1,
+      activeAssignment: {
+        id: "1e5c8b4d-6f7a-4b9c-8d1e-2f3a4b5c6d72",
+        workItemId: "6a2f1c3e-4b5d-4e6f-8a90-1b2c3d4e5f02",
+        botId: fixtureBotId("butler"),
+        sessionId: "8d7c6b5a-4e3f-4a2b-9c1d-0e9f8a7b6c72",
+        status: "active",
+        title: "整理入驻清单",
+        result: { state: "progress", summary: "已完成 4 项中的 2 项，正在补充第一周检查项。" },
+        createdAt: isoAt(-2_900_000),
+        updatedAt: isoAt(-180_000),
+      },
+      attentionCount: 0,
+      openAttentionCount: 0,
+    },
+    {
+      id: "6a2f1c3e-4b5d-4e6f-8a90-1b2c3d4e5f03",
+      tenantId: fixtureTenantId,
+      modeId: "superagent",
+      title: "补充退款审计日志",
+      status: "done",
+      source: { kind: "github", id: "1039", uri: "https://github.com/acme/refunds/issues/1039" },
+      request: "在退款流程的关键节点补齐审计日志，并在 PR 里说明字段。",
+      workerBot: fixtureBotId("knowledge"),
+      thread: {
+        source: "github",
+        kind: "issue",
+        id: "1039",
+        url: "https://github.com/acme/refunds/issues/1039",
+      },
+      mandate: {
+        requester: { id: fixtureAccountId("zhaoym"), login: "zhaoym", display: "赵一鸣", isBot: false },
+        source: "github",
+        thread: {
+          source: "github",
+          kind: "issue",
+          id: "1039",
+          url: "https://github.com/acme/refunds/issues/1039",
+        },
+        strength: "write",
+        policyVersion: "policy-6",
+        acceptedAt: isoAt(-86_400_000),
+        acceptedBy: "orchestrator",
+      },
+      createdAt: isoAt(-86_400_000),
+      updatedAt: isoAt(-18_000_000),
+      assignmentCount: 2,
+      attentionCount: 1,
+      openAttentionCount: 0,
+    },
+    {
+      id: "6a2f1c3e-4b5d-4e6f-8a90-1b2c3d4e5f04",
+      tenantId: fixtureTenantId,
+      modeId: "superagent",
+      title: "同步渠道对账数据",
+      status: "failed",
+      source: { kind: "manual", id: "manual-76" },
+      request: "把渠道 B 的日终对账文件同步到财务库；接口恢复后重试。",
+      workerBot: fixtureBotId("order"),
+      thread: { source: "manual", kind: "conversation", id: "manual-76" },
+      mandate: {
+        requester: { id: fixtureCurrentAccountId, login: "lina", display: "李娜", isBot: false },
+        source: "manual",
+        thread: { source: "manual", kind: "conversation", id: "manual-76" },
+        strength: "write",
+        policyVersion: "policy-7",
+        acceptedAt: isoAt(-5_400_000),
+        acceptedBy: "orchestrator",
+      },
+      createdAt: isoAt(-5_400_000),
+      updatedAt: isoAt(-1_800_000),
+      assignmentCount: 1,
+      attentionCount: 0,
+      openAttentionCount: 0,
+    },
+    {
+      id: "6a2f1c3e-4b5d-4e6f-8a90-1b2c3d4e5f05",
+      tenantId: fixtureTenantId,
+      modeId: "superagent",
+      title: "确认发票抬头与合同主体",
+      status: "blocked",
+      source: { kind: "github", id: "1038", uri: "https://github.com/acme/refunds/issues/1038" },
+      request: "客户要求把发票抬头改为另一家公司，需要确认与合同主体是否一致。",
+      workerBot: fixtureBotId("support"),
+      thread: {
+        source: "github",
+        kind: "issue",
+        id: "1038",
+        url: "https://github.com/acme/refunds/issues/1038",
+      },
+      mandate: {
+        requester: { id: fixtureAccountId("linke"), login: "linke", display: "林可", isBot: false },
+        source: "github",
+        thread: {
+          source: "github",
+          kind: "issue",
+          id: "1038",
+          url: "https://github.com/acme/refunds/issues/1038",
+        },
+        strength: "comment",
+        policyVersion: "policy-7",
+        acceptedAt: isoAt(-14_400_000),
+        acceptedBy: "orchestrator",
+      },
+      createdAt: isoAt(-14_400_000),
+      updatedAt: isoAt(-10_800_000),
+      assignmentCount: 1,
+      activeAssignment: {
+        id: "2f6d9c5e-7a8b-4c0d-9e2f-3a4b5c6d7e83",
+        workItemId: "6a2f1c3e-4b5d-4e6f-8a90-1b2c3d4e5f05",
+        botId: fixtureBotId("support"),
+        sessionId: "7c6b5a49-3d2e-4f1a-8b9c-0d9e8f7a6b83",
+        status: "active",
+        title: "核对合同主体",
+        createdAt: isoAt(-14_000_000),
+        updatedAt: isoAt(-10_800_000),
+      },
+      attentionCount: 1,
+      openAttentionCount: 1,
+    },
+  ];
+
+  private superagentAttentions: SuperagentAttentionView[] = [
+    {
+      id: "b7c1d2e3-f4a5-4b6c-9d7e-8f90a1b2c301",
+      tenantId: fixtureTenantId,
+      workItemId: "6a2f1c3e-4b5d-4e6f-8a90-1b2c3d4e5f01",
+      assignmentId: "0d4b7a3c-5e6f-4a8b-9c0d-1e2f3a4b5c61",
+      sessionId: "9c8b7a6d-5e4f-4a3b-8c2d-1e0f9a8b7c61",
+      kind: "decision",
+      prompt: "渠道 B 的重复扣款是否按「先退款、后追偿」处理？",
+      options: [
+        { id: "refund-first", label: "先退款，再向渠道追偿", description: "客户优先；追偿由财务发起。" },
+        { id: "verify-first", label: "先核对渠道流水", description: "确认是重复扣款后再退。" },
+        { id: "escalate", label: "暂缓并升级财务", description: "本班次不处理，升级到财务负责人。" },
+      ],
+      allowFreeText: true,
+      route: "channel",
+      channel: "1042",
+      status: "open",
+      createdAt: isoAt(-600_000),
+      deadline: isoAt(7_200_000),
+      ticketTitle: "渠道 B 退款重复扣款排查",
+      thread: {
+        source: "github",
+        kind: "issue",
+        id: "1042",
+        url: "https://github.com/acme/refunds/issues/1042",
+      },
+    },
+    {
+      id: "b7c1d2e3-f4a5-4b6c-9d7e-8f90a1b2c302",
+      tenantId: fixtureTenantId,
+      workItemId: "6a2f1c3e-4b5d-4e6f-8a90-1b2c3d4e5f05",
+      assignmentId: "2f6d9c5e-7a8b-4c0d-9e2f-3a4b5c6d7e83",
+      sessionId: "7c6b5a49-3d2e-4f1a-8b9c-0d9e8f7a6b83",
+      kind: "clarify",
+      prompt: "客户希望发票抬头写「上海某某科技有限公司」，请确认是否与合同主体一致。",
+      allowFreeText: true,
+      route: "channel",
+      channel: "1038",
+      status: "open",
+      createdAt: isoAt(-3_600_000),
+      deadline: isoAt(-1_200_000),
+      ticketTitle: "确认发票抬头与合同主体",
+      thread: {
+        source: "github",
+        kind: "issue",
+        id: "1038",
+        url: "https://github.com/acme/refunds/issues/1038",
+      },
+    },
+  ];
+
+  private superagentSequence = 2;
 
   constructor(
     private readonly imageURL: string = demoShot.url,
@@ -1449,6 +1708,141 @@ export class FixtureClient implements SettingsApi {
     const requestId = `retry:${this.sequence++}-${Math.random().toString(36).slice(2, 8)}`;
     await this.send(peer, source.text ?? "", "queue", requestId, undefined, source.selection);
     return { created: true, seq: peer.nextSeq - 1, requestId };
+  }
+
+  // ---- super-agent board (change keel-collab-superagent, 4.2/4.3) ---------
+  //
+  // A working in-memory service, not frozen sample output: the reads project
+  // the same TicketView/AttentionView shapes the server sends, and answer /
+  // resume / stop mutate the rows so the page's refresh path is exercised.
+
+  private clone<T>(value: T): T {
+    return JSON.parse(JSON.stringify(value)) as T;
+  }
+
+  private superagentTicket(id: string): SuperagentTicketView {
+    const ticket = this.superagentTickets.find((row) => row.id === id);
+    if (!ticket) throw new KeelApiError(404, `ticket ${id} was not found`);
+    return ticket;
+  }
+
+  private superagentCountsOf(ticket: SuperagentTicketView): void {
+    const rows = this.superagentAttentions.filter((row) => row.workItemId === ticket.id);
+    ticket.attentionCount = rows.length;
+    ticket.openAttentionCount = rows.filter((row) => row.status === "open").length;
+  }
+
+  async superagentBoard(filter: { status?: string; limit?: number } = {}): Promise<SuperagentBoardView> {
+    const rows = this.superagentTickets
+      .filter((ticket) => !filter.status || ticket.status === filter.status)
+      .slice()
+      .sort((left, right) => (right.updatedAt ?? "").localeCompare(left.updatedAt ?? ""));
+    const limited = filter.limit && filter.limit > 0 ? rows.slice(0, filter.limit) : rows;
+    const counts: Record<string, number> = {};
+    for (const ticket of this.superagentTickets) {
+      counts[ticket.status] = (counts[ticket.status] ?? 0) + 1;
+    }
+    return {
+      tenantId: fixtureTenantId,
+      modeId: "superagent",
+      tickets: limited.map((ticket) => this.clone(ticket)),
+      counts,
+    };
+  }
+
+  async superagentAttention(): Promise<SuperagentAttentionInboxView> {
+    const items = this.superagentAttentions
+      .filter((row) => row.status === "open")
+      .map((row) => {
+        const view = this.clone(row);
+        const ticket = this.superagentTickets.find((entry) => entry.id === row.workItemId);
+        if (!view.ticketTitle) view.ticketTitle = ticket?.title;
+        if (!view.thread) view.thread = this.clone(ticket?.thread);
+        return view;
+      });
+    return { tenantId: fixtureTenantId, items };
+  }
+
+  async answerSuperagentAttention(
+    attentionId: string,
+    answer: SuperagentAnswerInput,
+  ): Promise<SuperagentAttentionView> {
+    const attention = this.superagentAttentions.find((row) => row.id === attentionId);
+    if (!attention) throw new KeelApiError(404, `attention ${attentionId} was not found`);
+    if (attention.status !== "open") {
+      throw new KeelApiError(409, "这条问题已经答复或已关闭。", [], undefined, "attention_closed");
+    }
+    if (attention.deadline && Date.parse(attention.deadline) <= Date.now()) {
+      throw new KeelApiError(409, "这条问题已过截止时间，服务端会拒绝答复。", [], undefined, "attention_expired");
+    }
+    const optionId = (answer.optionId ?? "").trim();
+    const text = (answer.text ?? "").trim();
+    if (!optionId && !text) throw new KeelApiError(400, "需要选择一个选项或填写答复。");
+    if (optionId && !(attention.options ?? []).some((option) => option.id === optionId)) {
+      throw new KeelApiError(400, `选项 ${optionId} 不属于这个问题。`);
+    }
+    if (text && attention.allowFreeText !== true && !optionId) {
+      throw new KeelApiError(400, "这个问题没有允许自由文本答复。");
+    }
+    attention.status = "answered";
+    attention.answer = {
+      optionId: optionId || undefined,
+      text: text || undefined,
+      actor: "李娜",
+      at: nowISO(),
+    };
+    const ticket = this.superagentTickets.find((row) => row.id === attention.workItemId);
+    if (ticket) {
+      if (ticket.status === "blocked") ticket.status = "active";
+      ticket.updatedAt = nowISO();
+      if (ticket.activeAssignment) ticket.activeAssignment.updatedAt = nowISO();
+      this.superagentCountsOf(ticket);
+    }
+    return this.clone(attention);
+  }
+
+  async resumeSuperagentTicket(ticketId: string, reason?: string): Promise<SuperagentTicketView> {
+    const ticket = this.superagentTicket(ticketId);
+    if (ticket.mandate?.revokedAt || ticket.status === "cancelled" || ticket.status === "cancelling") {
+      throw new KeelApiError(409, "这张工单已停止，恢复会被服务端拒绝。", [], undefined, "work_item_closed");
+    }
+    const now = nowISO();
+    if (ticket.status === "blocked" || ticket.status === "done" || ticket.status === "failed") {
+      ticket.status = "active";
+      const suffix = (++this.superagentSequence).toString().padStart(2, "0");
+      ticket.activeAssignment = {
+        id: `3a7e0d6f-8b9c-4d1e-af30-4b5c6d7e8f${suffix}`,
+        workItemId: ticket.id,
+        botId: ticket.workerBot,
+        sessionId: `6b5a4938-2c1d-4e0f-9a8b-7c6d5e4f3a${suffix}`,
+        status: "active",
+        title: reason?.trim() || "人工跟进",
+        createdAt: now,
+        updatedAt: now,
+      };
+      ticket.assignmentCount = (ticket.assignmentCount ?? 0) + 1;
+    }
+    ticket.updatedAt = now;
+    this.superagentCountsOf(ticket);
+    return this.clone(ticket);
+  }
+
+  async stopSuperagentTicket(ticketId: string, reason?: string): Promise<void> {
+    const ticket = this.superagentTicket(ticketId);
+    if (ticket.status === "cancelled") return;
+    const now = nowISO();
+    const mandate = ticket.mandate ?? {};
+    mandate.revokedAt = now;
+    mandate.revokedBy = "李娜";
+    mandate.revocationCause = reason?.trim() || "operator stop";
+    ticket.mandate = mandate;
+    ticket.status = "cancelled";
+    if (ticket.activeAssignment) ticket.activeAssignment.status = "cancelled";
+    for (const attention of this.superagentAttentions) {
+      if (attention.workItemId === ticket.id && attention.status === "open") attention.status = "cancelled";
+    }
+    ticket.updatedAt = now;
+    this.superagentCountsOf(ticket);
   }
 
   // ---- identity & access (change keel-bot-identity-access, A4.4a) ---------

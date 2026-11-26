@@ -40,6 +40,7 @@ import { resetBotsUi } from "./src/screens/books/bots";
 import { resetTeamsUi } from "./src/screens/books/teams";
 import { resetRunUi } from "./src/screens/books/run";
 import { taskPanelAccess } from "./src/data/tasks";
+import { superagentAccess } from "./src/data/superagent";
 import { CommandPalette } from "./src/screens/command-palette";
 import { Conversation } from "./src/screens/conversation";
 import { deleteRequest } from "./src/screens/delete-dialog";
@@ -561,6 +562,9 @@ function App() {
     // The panel is session-scoped and can hold another account's tree; drop it
     // with the other identity reads.
     taskPanelAccess.reset();
+    // The ticket board is tenant-scoped: the next account must not see the
+    // previous one's tickets or open questions.
+    superagentAccess.reset();
   });
   // One scrollbar language for the whole app: a quiet, token-coloured thumb
   // instead of the platform's light indicator on the dark surface.

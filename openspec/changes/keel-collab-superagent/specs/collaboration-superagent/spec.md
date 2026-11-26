@@ -13,7 +13,8 @@
 > `.../stop`, and `POST /v1/superagent/attention/{id}/answer`. Operator actions
 > require `task.write` plus the independent `OperatorAuthorizer` seam;
 > policy-allowed Source comments may answer one unambiguous open Attention.
-> Web/TUI boards, GitHub CI status, Feishu and auto-merge remain out of scope.
+> The web/TUI operator board (read, answer, resume, stop over this HTTP surface) is implemented in
+> `web/src/screens/books/superagent.tsx`; GitHub CI status, Feishu and auto-merge remain out of scope.
 
 ### Requirement: Worker 模型工具不得越权 Ticket
 

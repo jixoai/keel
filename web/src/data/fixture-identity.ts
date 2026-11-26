@@ -399,6 +399,11 @@ const CURRENT_ACCOUNT: AccountView = account("lina", "lina", "李娜", "human", 
 /** The fixture's own ids, exported so the session fixture can attribute its
  * sample sessions to the same accounts the share dialogs list. */
 export const fixtureAccountId = (key: string): string => id(key);
+/** One fixture Bot's id (the board's worker and Mandate references name a Bot
+ * by id; the fixture seed and the UI resolve the same value). */
+export const fixtureBotId = (key: string): string => id(`bot-${key}`);
+/** The fixture tenant, for projections that carry a tenant id. */
+export const fixtureTenantId: string = TENANT_ID;
 export const fixtureCurrentAccountId: string = CURRENT_ACCOUNT.accountId;
 /** The fixture run's stable session ids, exported so the development transport
  * can key its run-scoped reads (the file manifest's attribution) to them. */
@@ -431,6 +436,8 @@ const CURRENT_PERMISSIONS: Record<string, PermissionScope> = {
   "mcp.read": "tenant",
   "notification.read": "tenant",
   "trigger.read": "tenant",
+  "task.read": "team",
+  "task.write": "team",
 };
 
 export class FixtureIdentity implements IdentityApi {

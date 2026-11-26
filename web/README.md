@@ -55,10 +55,12 @@ web/
 │   │   ├── contract.ts        冻结契约的 type re-export + UI 侧扩展类型（含 settings/secrets/plugins/selection）
 │   │   ├── wire.ts            事件 payload 解析/格式化 + selection/模型能力格式化
 │   │   ├── core.ts            @keel/chat-surface 核心的宿主适配层（附件索引/partial 访问）
-│   │   ├── http.ts            fetch + SSE EventSource、SurfaceCommands、设置/密钥/插件 API
-│   │   ├── fixture.ts         本地 scripted keel 服务（演示/QA，含设置面演示数据）
+│   │   ├── http.ts            fetch + SSE EventSource、SurfaceCommands、设置/密钥/插件/任务看板 API
+│   │   ├── fixture.ts         本地 scripted keel 服务（演示/QA，含设置面与任务看板演示数据）
+│   │   ├── superagent.ts      任务看板状态：四类计数、收件箱、answer/resume/stop 与刷新
 │   │   └── store.ts           会话列表、打开/发送/停止/审批、模式切换、重连、路由、设置/密钥/插件状态
 │   ├── screens/               session-list / conversation / messages / composer / settings / model-picker
+│   │   └── books/             工作区外章节：任务看板 / 员工 / 团队 / 身份 / 记录
 │   └── ui/                    theme tokens、lucide 风格单色 Canvas 图标、primitives
 ```
 
@@ -124,6 +126,35 @@ web/
   验证缺口补发与去重。
 - **通知**：web 构建通过 `host.js` 的 `keel.notify` 在审批到达时发系统通知（需权限）；
   非 web 宿主自动 no-op。
+
+## 任务看板（change keel-collab-superagent, 4.2/4.3 产品 UI）
+
+「02 任务」是 superagent 工单模式的产品面，web 与 TUI 共用同一份 TSX：
+
+- **路由与入口**：`/superagent`（深链 `/superagent/<ticketId>`），主导航「任务」与命令面板
+  「打开任务看板」都按 `task.read` 能力门显示；窄屏底部标签同语义。
+- **数据面**：`GET /v1/superagent/tickets`（Ticket + Mandate + 当前 Assignment + 计数）与
+  `GET /v1/superagent/attention`（开放问题收件箱）；写入口是
+  `POST /v1/superagent/attention/{id}/answer`、`POST /v1/superagent/tickets/{id}/resume|stop`。
+  `src/data/http.ts` 用现有 CSRF/`KeelApiError` 词汇实现，`src/data/superagent.ts` 持有页面状态与
+  读写动作（单一 transport seam：`store.superagentApi()`），不另建 fetch 通道。
+- **五态**：加载骨架、空（说明来源事件如何产生工单 + 刷新/去工作区）、错误（服务端原因 +
+  请求编号 + 重试；503 说「未接通」）、权限不足（缺 `task.read`，四段式说明 + 申请入口）、
+  成功（四类计数、工单列表、Ticket 详情、待人工收件箱）。空/错/权限态不注入任何示例行；
+  fixture 只在 `?fixture=1` / `host.params.fixture` 下提供。
+- **四类计数**：待人工（blocked 或有开放 Attention）/ 执行中 / 完成 / 失败（failed 或 cancelled），
+  一票只进一个桶，未知状态单列 `other`，四个数加总等于可见行数。
+- **Ticket 详情**：Mandate（发起人/来源/强度/策略/撤销）、Worker（当前 Assignment、Bot、Session、
+  最近 report 的 summary 或原始 JSON、错误）、开放 Attention，以及恢复/停止动作。
+- **收件箱**：问题正文、来源线程、选项与自由文本、截止时间（过期就地禁用并说明服务端会拒绝）；
+  作答走 durable 写，成功后与看板/计数一起刷新；失败按卡片显示服务端原因（403 另说明 operator 授权）。
+- **权限门**：读=`task.read`；写=`task.write` 且服务端 `OperatorAuthorizer` 另行判定。只读账号
+  看得到看板，但答复/恢复/停止控件不渲染，页面明确写出缺少 `task.write`；服务端 403 原样呈现。
+- **视觉**：计数瓦片 + 收件箱卡片 + 工单行/详情 band，全部 solid-glass 令牌 + lucide 单色；
+  ≥1024 列表与详情同屏（详情 420px），<1024 列表/详情分屏，≤767 单列、计数 2×2、44px 控件。
+- **验证**：`src/screens/books/superagent.tui.test.tsx`（成功面、answer 选项/自由文本、resume/stop、
+  五态、只读、写失败、390/768）与 `src/data/superagent.test.ts`（计数/时限/词表）；
+  `nsh test --target tui --filter 'superagent'` 13/13。
 
 ## 设置页与会话模型选择（change keel-model-settings）
 

@@ -37,6 +37,16 @@ import type {
   SendOptions,
   DeliverablesOptions,
   DeliverablesView,
+  SuperagentAnswerInput,
+  SuperagentAssignmentView,
+  SuperagentAttentionInboxView,
+  SuperagentAttentionOptionView,
+  SuperagentAttentionView,
+  SuperagentBoardView,
+  SuperagentMandateView,
+  SuperagentTicketView,
+  SuperagentThreadView,
+  SuperagentActorView,
   SessionExportOptions,
   SessionExportView,
   SessionFilesQuery,
@@ -653,6 +663,210 @@ const textOr = (value: unknown): string | undefined =>
 
 const objectOr = (value: unknown): Record<string, unknown> | undefined =>
   value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined;
+
+// ---- super-agent board normalization -------------------------------------
+//
+// The shapes are `internal/superagent/domain.go` + `orchestrator.go`
+// (`BoardView`, `TicketView`, `AttentionView`) flattened by Go's embedded
+// structs. A row without an id cannot be opened or acted on, so it is dropped;
+// every other missing field is coerced (the page renders what the server said,
+// never an invented status).
+
+function parseSuperagentThread(value: unknown): SuperagentThreadView | undefined {
+  const row = asRecord(value);
+  const source = asText(row.source);
+  const id = asText(row.id);
+  if (!source && !id) return undefined;
+  const thread: SuperagentThreadView = { source, id };
+  const kind = asText(row.kind);
+  if (kind) thread.kind = kind;
+  const url = asText(row.url);
+  if (url) thread.url = url;
+  return thread;
+}
+
+function parseSuperagentActor(value: unknown): SuperagentActorView | undefined {
+  const row = asRecord(value);
+  const id = asText(row.id);
+  if (!id) return undefined;
+  const actor: SuperagentActorView = { id };
+  const login = asText(row.login);
+  if (login) actor.login = login;
+  const display = asText(row.display);
+  if (display) actor.display = display;
+  if (typeof row.isBot === "boolean") actor.isBot = row.isBot;
+  return actor;
+}
+
+function parseSuperagentMandate(value: unknown): SuperagentMandateView | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const row = asRecord(value);
+  const mandate: SuperagentMandateView = {};
+  const requester = parseSuperagentActor(row.requester);
+  if (requester) mandate.requester = requester;
+  const thread = parseSuperagentThread(row.thread);
+  const source = asText(row.source);
+  const strength = asText(row.strength);
+  const policyVersion = asText(row.policyVersion);
+  const acceptedAt = asText(row.acceptedAt);
+  const acceptedBy = asText(row.acceptedBy);
+  const revokedAt = asText(row.revokedAt);
+  const revokedBy = asText(row.revokedBy);
+  const revocationCause = asText(row.revocationCause);
+  if (source) mandate.source = source;
+  if (thread) mandate.thread = thread;
+  if (strength) mandate.strength = strength;
+  if (policyVersion) mandate.policyVersion = policyVersion;
+  if (acceptedAt) mandate.acceptedAt = acceptedAt;
+  if (acceptedBy) mandate.acceptedBy = acceptedBy;
+  if (revokedAt) mandate.revokedAt = revokedAt;
+  if (revokedBy) mandate.revokedBy = revokedBy;
+  if (revocationCause) mandate.revocationCause = revocationCause;
+  return mandate;
+}
+
+function parseSuperagentAssignment(value: unknown): SuperagentAssignmentView | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const row = asRecord(value);
+  const id = asText(row.id);
+  if (!id) return undefined;
+  const assignment: SuperagentAssignmentView = { id };
+  const workItemId = asText(row.workItemId);
+  if (workItemId) assignment.workItemId = workItemId;
+  const botId = asText(row.botId);
+  if (botId) assignment.botId = botId;
+  const sessionId = asText(row.sessionId);
+  if (sessionId) assignment.sessionId = sessionId;
+  const status = asText(row.status);
+  if (status) assignment.status = status;
+  const title = asText(row.title);
+  if (title) assignment.title = title;
+  const error = asText(row.error);
+  if (error) assignment.error = error;
+  const createdAt = asText(row.createdAt);
+  if (createdAt) assignment.createdAt = createdAt;
+  const updatedAt = asText(row.updatedAt);
+  if (updatedAt) assignment.updatedAt = updatedAt;
+  if ("result" in row && row.result !== null && row.result !== undefined) assignment.result = row.result;
+  return assignment;
+}
+
+function parseSuperagentTicket(value: unknown): SuperagentTicketView | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const row = asRecord(value);
+  const id = asText(row.id);
+  if (!id) return undefined;
+  const source = asRecord(row.source);
+  const ticket: SuperagentTicketView = {
+    id,
+    title: asText(row.title),
+    status: asText(row.status) || "unknown",
+  };
+  const tenantId = asText(row.tenantId);
+  if (tenantId) ticket.tenantId = tenantId;
+  const modeId = asText(row.modeId);
+  if (modeId) ticket.modeId = modeId;
+  const sourceKind = asText(source.kind);
+  const sourceId = asText(source.id);
+  const sourceUri = asText(source.uri);
+  if (sourceKind || sourceId || sourceUri) {
+    ticket.source = {};
+    if (sourceKind) ticket.source.kind = sourceKind;
+    if (sourceId) ticket.source.id = sourceId;
+    if (sourceUri) ticket.source.uri = sourceUri;
+  }
+  const request = asText(row.request);
+  if (request) ticket.request = request;
+  const workerBot = asText(row.workerBot);
+  if (workerBot) ticket.workerBot = workerBot;
+  const mandate = parseSuperagentMandate(row.mandate);
+  if (mandate) ticket.mandate = mandate;
+  const thread = parseSuperagentThread(row.thread);
+  if (thread) ticket.thread = thread;
+  const ownerSessionId = asText(row.ownerSessionId);
+  if (ownerSessionId) ticket.ownerSessionId = ownerSessionId;
+  const createdAt = asText(row.createdAt);
+  if (createdAt) ticket.createdAt = createdAt;
+  const updatedAt = asText(row.updatedAt);
+  if (updatedAt) ticket.updatedAt = updatedAt;
+  const assignmentCount = row.assignmentCount;
+  if (typeof assignmentCount === "number" && Number.isFinite(assignmentCount)) {
+    ticket.assignmentCount = assignmentCount;
+  }
+  const activeAssignment = parseSuperagentAssignment(row.activeAssignment);
+  if (activeAssignment) ticket.activeAssignment = activeAssignment;
+  const attentionCount = row.attentionCount;
+  if (typeof attentionCount === "number" && Number.isFinite(attentionCount)) {
+    ticket.attentionCount = attentionCount;
+  }
+  const openAttentionCount = row.openAttentionCount;
+  if (typeof openAttentionCount === "number" && Number.isFinite(openAttentionCount)) {
+    ticket.openAttentionCount = openAttentionCount;
+  }
+  return ticket;
+}
+
+function parseSuperagentAttention(value: unknown): SuperagentAttentionView | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const row = asRecord(value);
+  const id = asText(row.id);
+  if (!id) return undefined;
+  const attention: SuperagentAttentionView = {
+    id,
+    workItemId: asText(row.workItemId),
+    prompt: asText(row.prompt),
+  };
+  const tenantId = asText(row.tenantId);
+  if (tenantId) attention.tenantId = tenantId;
+  const assignmentId = asText(row.assignmentId);
+  if (assignmentId) attention.assignmentId = assignmentId;
+  const sessionId = asText(row.sessionId);
+  if (sessionId) attention.sessionId = sessionId;
+  const requestId = asText(row.requestId);
+  if (requestId) attention.requestId = requestId;
+  const kind = asText(row.kind);
+  if (kind) attention.kind = kind;
+  const options = listOf(row.options).flatMap((entry): SuperagentAttentionOptionView[] => {
+    const option = asRecord(entry);
+    const optionId = asText(option.id);
+    if (!optionId) return [];
+    const view: SuperagentAttentionOptionView = { id: optionId };
+    const label = asText(option.label);
+    if (label) view.label = label;
+    const description = asText(option.description);
+    if (description) view.description = description;
+    return [view];
+  });
+  if (options.length) attention.options = options;
+  if (typeof row.allowFreeText === "boolean") attention.allowFreeText = row.allowFreeText;
+  const route = asText(row.route);
+  if (route) attention.route = route;
+  const channel = asText(row.channel);
+  if (channel) attention.channel = channel;
+  const status = asText(row.status);
+  if (status) attention.status = status;
+  const answer = asRecord(row.answer);
+  if (asText(answer.at) || asText(answer.optionId) || asText(answer.text)) {
+    attention.answer = {};
+    const optionId = asText(answer.optionId);
+    const text = asText(answer.text);
+    const actor = asText(answer.actor);
+    const at = asText(answer.at);
+    if (optionId) attention.answer.optionId = optionId;
+    if (text) attention.answer.text = text;
+    if (actor) attention.answer.actor = actor;
+    if (at) attention.answer.at = at;
+  }
+  const createdAt = asText(row.createdAt);
+  if (createdAt) attention.createdAt = createdAt;
+  const deadline = asText(row.deadline);
+  if (deadline) attention.deadline = deadline;
+  const ticketTitle = asText(row.ticketTitle);
+  if (ticketTitle) attention.ticketTitle = ticketTitle;
+  const thread = parseSuperagentThread(row.thread);
+  if (thread) attention.thread = thread;
+  return attention;
+}
 
 /** The CSRF token of the app's live session. KeelHttp keeps it current; the
  * media module (which writes through its own fetch) reads it so every non-GET
@@ -1784,6 +1998,104 @@ export class KeelHttp implements SettingsApi {
     });
     const body = asRecord(await response.json());
     return asRecord(body.result).triggerId ? (asRecord(body.result) as FireResultView) : (body as FireResultView);
+  }
+
+  // ---- super-agent board (change keel-collab-superagent, 4.2/4.3) --------
+  //
+  // Reads need `task.read`; every write needs `task.write` plus the server's
+  // independent operator authorization. The client offers actions only under
+  // `task.write`, but the server decides — a 403 keeps its `requiredKey` so a
+  // page can say exactly what is missing instead of a generic failure.
+
+  /** `GET /v1/superagent/tickets` — the tenant's ticket board. */
+  async superagentBoard(filter: { status?: string; limit?: number } = {}): Promise<SuperagentBoardView> {
+    const query = new URLSearchParams();
+    if (filter.status) query.set("status", filter.status);
+    if (filter.limit !== undefined) query.set("limit", String(filter.limit));
+    const suffix = query.toString() ? `?${query.toString()}` : "";
+    const response = await this.request(`/v1/superagent/tickets${suffix}`);
+    const body = asRecord(await response.json());
+    const counts: Record<string, number> = {};
+    for (const [status, value] of Object.entries(asRecord(body.counts))) {
+      if (typeof value === "number" && Number.isFinite(value)) counts[status] = value;
+    }
+    const view: SuperagentBoardView = {
+      tickets: listOf(body.tickets).flatMap((row): SuperagentTicketView[] => {
+        const ticket = parseSuperagentTicket(row);
+        return ticket ? [ticket] : [];
+      }),
+      counts,
+    };
+    const tenantId = asText(body.tenantId);
+    if (tenantId) view.tenantId = tenantId;
+    const modeId = asText(body.modeId);
+    if (modeId) view.modeId = modeId;
+    return view;
+  }
+
+  /** `GET /v1/superagent/attention` — the open attention inbox. */
+  async superagentAttention(): Promise<SuperagentAttentionInboxView> {
+    const response = await this.request("/v1/superagent/attention");
+    const body = asRecord(await response.json());
+    const view: SuperagentAttentionInboxView = {
+      items: listOf(body.items).flatMap((row): SuperagentAttentionView[] => {
+        const attention = parseSuperagentAttention(row);
+        return attention ? [attention] : [];
+      }),
+    };
+    const tenantId = asText(body.tenantId);
+    if (tenantId) view.tenantId = tenantId;
+    return view;
+  }
+
+  /** `POST /v1/superagent/attention/{id}/answer` — one durable operator
+   * answer (an option, free text, or both when the question allowed it). */
+  async answerSuperagentAttention(
+    attentionId: string,
+    answer: SuperagentAnswerInput,
+  ): Promise<SuperagentAttentionView> {
+    const body: Record<string, string> = {};
+    if (answer.optionId) body.optionId = answer.optionId;
+    if (answer.text) body.text = answer.text;
+    const response = await this.request(
+      `/v1/superagent/attention/${encodeURIComponent(attentionId)}/answer`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      },
+    );
+    const document = asRecord(await response.json());
+    const attention = parseSuperagentAttention(document.attention);
+    if (!attention) throw new KeelApiError(500, "服务端返回了无法识别的答复结果");
+    return attention;
+  }
+
+  /** `POST /v1/superagent/tickets/{id}/resume` — reopen a blocked/finished
+   * ticket with a human-follow-up assignment. */
+  async resumeSuperagentTicket(ticketId: string, reason?: string): Promise<SuperagentTicketView> {
+    const response = await this.request(
+      `/v1/superagent/tickets/${encodeURIComponent(ticketId)}/resume`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(reason ? { reason } : {}),
+      },
+    );
+    const body = asRecord(await response.json());
+    const ticket = parseSuperagentTicket(body.ticket);
+    if (!ticket) throw new KeelApiError(500, "服务端返回了无法识别的工单");
+    return ticket;
+  }
+
+  /** `POST /v1/superagent/tickets/{id}/stop` — the human stop: the mandate is
+   * revoked and every bound session is cancelled through the core Host. */
+  async stopSuperagentTicket(ticketId: string, reason?: string): Promise<void> {
+    await this.request(`/v1/superagent/tickets/${encodeURIComponent(ticketId)}/stop`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(reason ? { reason } : {}),
+    });
   }
 
   // ---- identity & access (A4.3) -----------------------------------------

@@ -50,8 +50,12 @@
       Ticket 不重开；重试走 Outbox；Source 评论可匹配唯一 open Attention 作答）
 - [x] 4.2 工单看板 API 与最小写入口：待人工/执行中/完成/失败计数、Ticket 详情、
       Assignment、worker report/ask、operator answer/resume/stop。写路由需 `task.write`；
-      operator 再走独立 `OperatorAuthorizer`。web 看板未做。
-- [x] 4.3 Attention 收件箱 API 与来源跳转字段；web/TUI/headless 五态未做。
+      operator 再走独立 `OperatorAuthorizer`。产品看板已做（web/TUI 同屏同语义：`/superagent`
+      路由 + 主导航「任务」、四类计数、Ticket 详情、收件箱、answer/resume/stop；
+      `web/src/screens/books/superagent.tsx`、`web/src/data/superagent.ts`）。
+- [x] 4.3 Attention 收件箱 API 与来源跳转字段；web/TUI 五态已做（loading/empty/error/denied/
+      success，另含只读与写失败反馈；`superagent.tui.test.tsx` 13/13、
+      `nsh test --target tui --filter 'superagent'`）。
       （`GET /v1/superagent/attention`）
 - [x] 4.4 不提供“新建 Super Agent Bot”入口；只提供 mode/角色配置。
 - [x] 4.5 Worker 模型工具适配（`report`/`ask` product extra tool）：

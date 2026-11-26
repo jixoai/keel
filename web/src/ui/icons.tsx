@@ -54,6 +54,7 @@ export type IconName =
   | "activity"
   | "download"
   | "lock"
+  | "inbox"
   | "user-plus";
 
 const paths: Record<Exclude<IconName, "stop" | "dots">, string[]> = {
@@ -91,6 +92,10 @@ const paths: Record<Exclude<IconName, "stop" | "dots">, string[]> = {
   volume: ["M11 5L6 9H2v6h4l5 4V5z", "M15.54 8.46a5 5 0 0 1 0 7.07", "M19.07 4.93a10 10 0 0 1 0 14.14"],
   "volume-off": ["M11 5L6 9H2v6h4l5 4V5z", "M22 9l-6 6", "M16 9l6 6"],
   bell: ["M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9", "M13.73 21a2 2 0 0 1-3.46 0"],
+  inbox: [
+    "M22 12h-6l-2 3h-4l-2-3H2",
+    "M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z",
+  ],
   command: ["M18 3a3 3 0 0 0-3 3v12a3 3 0 1 0 3-3H6a3 3 0 1 0 3 3V6a3 3 0 1 0-3 3h12a3 3 0 0 0 0-6z"],
   minus: ["M5 12h14"],
   square: ["M5 5h14v14H5z"],

@@ -18,6 +18,10 @@ test("路由：章节与深链一一对应", () => {
 
   expect(at("/bots").route).toBe("bots");
   expect(at("/teams").route).toBe("teams");
+  const board = at("/superagent");
+  expect(board.route).toBe("superagent");
+  expect(board.objectId).toBe(null);
+  expect(at("/superagent/ticket-1").objectId).toBe("ticket-1");
   expect(at("/bots/bot-1").objectId).toBe("bot-1");
   const team = at("/teams/team-1");
   expect(team.route).toBe("teams");
@@ -53,4 +57,6 @@ test("路由：路径生成与反解一致（含编码）", () => {
   expect(routePath(routeState("teams", "accounts", "team-1"))).toBe("/teams/team-1");
   expect(routePath(routeState("teams", "accounts", "team-1", "run-1"))).toBe("/teams/team-1/runs/run-1");
   expect(resolveRoute("/teams/team-1/runs/run-1").runId).toBe("run-1");
+  expect(routePath(routeState("superagent"))).toBe("/superagent");
+  expect(routePath(routeState("superagent", "accounts", "ticket-1"))).toBe("/superagent/ticket-1");
 });

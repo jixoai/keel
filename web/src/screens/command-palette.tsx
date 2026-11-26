@@ -35,6 +35,7 @@ import { keymap, openUrl, platform, signal, View, windowSize } from "nsh";
 import type { CommandItem } from "../ui/kit";
 import { Command, Dialog, Empty, EmptyDescription, EmptyTitle, space } from "../ui/kit";
 import { store } from "../data/store";
+import { can } from "../data/permissions";
 import { sessionTitle } from "../ui/session-title";
 import { pluginPaletteEntries, pluginSlots, type PluginActionHandlers } from "../plugins";
 import { openModelPicker } from "./model-picker";
@@ -62,9 +63,10 @@ export const closePalette = () => paletteOpen.set(false);
  * (350 ms) plus its history step. */
 const CLOSE_SETTLE_MS = 400;
 
-/** The four section headings, in the order the rows appear. */
+/** The section headings, in the order the rows appear. */
 const GROUP = {
   sessions: "会话",
+  tasks: "任务",
   model: "模型",
   settings: "设置",
   plugins: "插件",
@@ -166,6 +168,21 @@ const paletteActions = (openSession: OpenPaletteSession): PaletteAction[] => {
       },
       run: chooseModel,
     },
+    // The 任务 chapter exists only for an account holding `task.read`: a row
+    // that cannot open its destination is not offered (hide, never grey).
+    ...(can("task.read")
+      ? [
+          {
+            item: {
+              id: "route:superagent",
+              label: "打开任务看板",
+              keywords: ["任务", "工单", "ticket", "superagent", "看板"],
+              group: GROUP.tasks,
+            },
+            run: () => store.openChapter("superagent"),
+          },
+        ]
+      : []),
     {
       item: {
         id: "route:settings",

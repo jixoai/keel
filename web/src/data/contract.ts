@@ -701,6 +701,154 @@ export interface FilePreviewView {
   matchesReference?: boolean;
 }
 
+// ---- super-agent ticket board (change keel-collab-superagent, 4.2/4.3) ----
+//
+// The board is `GET /v1/superagent/tickets` (a `superagent.BoardView`) and the
+// inbox is `GET /v1/superagent/attention` (a `superagent.AttentionInbox`).
+// Ticket/Assignment/Mandate/Thread are the JSON shapes the Go structs already
+// publish (the embedded WorkItem is flattened), parsed tolerantly here so a
+// missing field never crashes a row. Every action the operator console offers
+// has one route: answer (`attention/{id}/answer`), resume and stop
+// (`tickets/{id}/resume|stop`).
+
+/** `superagent.ThreadRef` — where a Ticket came from. `key` is the server's
+ * subscription identity; the UI only names it. */
+export interface SuperagentThreadView {
+  source: string;
+  kind?: string;
+  id: string;
+  url?: string;
+}
+
+/** `superagent.Actor` — the requester recorded in the Mandate. It is identity
+ * metadata, never an authorization shortcut. */
+export interface SuperagentActorView {
+  id: string;
+  login?: string;
+  display?: string;
+  isBot?: boolean;
+}
+
+/** `superagent.Mandate` — the recorded authorization of an accepted ticket. */
+export interface SuperagentMandateView {
+  requester?: SuperagentActorView;
+  source?: string;
+  thread?: SuperagentThreadView;
+  strength?: string;
+  policyVersion?: string;
+  acceptedAt?: string;
+  acceptedBy?: string;
+  revokedAt?: string;
+  revokedBy?: string;
+  revocationCause?: string;
+}
+
+/** `collab.Assignment` — one Ticket → Bot/Session binding. `result` is the
+ * worker's terminal report payload (raw JSON) when the assignment finished. */
+export interface SuperagentAssignmentView {
+  id: string;
+  workItemId?: string;
+  botId?: string;
+  sessionId?: string;
+  status?: string;
+  title?: string;
+  result?: unknown;
+  error?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+/** One row of the board (`superagent.TicketView`): the ticket, its mandate and
+ * the counts the row projects. */
+export interface SuperagentTicketView {
+  id: string;
+  tenantId?: string;
+  modeId?: string;
+  title: string;
+  status: string;
+  source?: { kind?: string; id?: string; uri?: string };
+  request?: string;
+  workerBot?: string;
+  mandate?: SuperagentMandateView;
+  thread?: SuperagentThreadView;
+  ownerSessionId?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  assignmentCount?: number;
+  activeAssignment?: SuperagentAssignmentView;
+  attentionCount?: number;
+  openAttentionCount?: number;
+}
+
+export interface SuperagentBoardView {
+  tenantId?: string;
+  modeId?: string;
+  tickets: SuperagentTicketView[];
+  /** The server's raw status → count map (kept for diagnostics; the page's
+   * four headline counters are derived from the rows themselves). */
+  counts?: Record<string, number>;
+}
+
+/** `collab.AttentionOption` — one selectable answer. */
+export interface SuperagentAttentionOptionView {
+  id: string;
+  label?: string;
+  description?: string;
+}
+
+/** The recorded answer, once a human answered. */
+export interface SuperagentAnswerView {
+  optionId?: string;
+  text?: string;
+  actor?: string;
+  at?: string;
+}
+
+/** `collab.Attention` plus the inbox's own `ticketTitle`/`thread` fields. */
+export interface SuperagentAttentionView {
+  id: string;
+  tenantId?: string;
+  workItemId: string;
+  assignmentId?: string;
+  sessionId?: string;
+  requestId?: string;
+  kind?: string;
+  prompt: string;
+  options?: SuperagentAttentionOptionView[];
+  allowFreeText?: boolean;
+  route?: string;
+  channel?: string;
+  status?: string;
+  answer?: SuperagentAnswerView;
+  createdAt?: string;
+  deadline?: string;
+  ticketTitle?: string;
+  thread?: SuperagentThreadView;
+}
+
+export interface SuperagentAttentionInboxView {
+  tenantId?: string;
+  items: SuperagentAttentionView[];
+}
+
+/** The answer route's body. `optionId` and `text` are independent: the server
+ * records whichever the question allowed. */
+export interface SuperagentAnswerInput {
+  optionId?: string;
+  text?: string;
+}
+
+/** The super-agent board/write surface. `KeelHttp` and the fixture client both
+ * implement it, so the page and its tests run against one transport contract.
+ * All writes go through the shared CSRF/error path. */
+export interface SuperagentApi {
+  superagentBoard(filter?: { status?: string; limit?: number }): Promise<SuperagentBoardView>;
+  superagentAttention(): Promise<SuperagentAttentionInboxView>;
+  answerSuperagentAttention(attentionId: string, answer: SuperagentAnswerInput): Promise<SuperagentAttentionView>;
+  resumeSuperagentTicket(ticketId: string, reason?: string): Promise<SuperagentTicketView>;
+  stopSuperagentTicket(ticketId: string, reason?: string): Promise<void>;
+}
+
 /** A trigger as the plugin manifest declares it. */
 export interface TriggerSpecView {
   id: string;

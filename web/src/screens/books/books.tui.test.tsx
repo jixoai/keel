@@ -31,12 +31,13 @@ const openManagement = async (
   await view.press(`id:books-chapter-${chapter}`);
 };
 
-test("TUI: 系统栏是全局壳，章节只留三个日常章；身份/记录在设置页入口", async () => {
+test("TUI: 系统栏是全局壳，章节只留四个日常章；身份/记录在设置页入口", async () => {
   const wide = await app(1440);
   expect(wide.shows("id:keel-system-bar")).toBe(true);
   expect(wide.shows("id:books-rail")).toBe(true);
-  // The daily rail: exactly the three daily chapters.
+  // The daily rail: exactly the four daily chapters.
   expect(wide.shows("id:books-chapter-workspace")).toBe(true);
+  expect(wide.shows("id:books-chapter-superagent")).toBe(true);
   expect(wide.shows("id:books-chapter-bots")).toBe(true);
   expect(wide.shows("id:books-chapter-teams")).toBe(true);
   expect(wide.shows("id:books-chapter-identity")).toBe(false);
@@ -54,6 +55,7 @@ test("TUI: 系统栏是全局壳，章节只留三个日常章；身份/记录�
   await phone.waitFor("id:books-tabbar");
   expect(phone.shows("id:books-rail")).toBe(false);
   expect(phone.shows("id:books-tab-workspace")).toBe(true);
+  expect(phone.shows("id:books-tab-superagent")).toBe(true);
   expect(phone.shows("id:books-tab-bots")).toBe(true);
   expect(phone.shows("id:books-tab-teams")).toBe(true);
   expect(phone.shows("id:books-tab-identity")).toBe(false);

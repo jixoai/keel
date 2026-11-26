@@ -4,7 +4,7 @@
 // parameters (the identity sub-page, the open object, an open team run), and
 // vice versa. The store holds the signals and calls these; a test can exercise
 // the deep-link table without booting the app.
-export type Route = "workspace" | "settings" | "plugins" | "kit" | "bots" | "teams" | "identity" | "records";
+export type Route = "workspace" | "settings" | "plugins" | "kit" | "superagent" | "bots" | "teams" | "identity" | "records";
 
 /** The identity chapter's two sub-pages (the 280 index column's segmented). */
 export type IdentitySection = "accounts" | "groups";
@@ -44,15 +44,19 @@ const decodePart = (part: string | undefined): string | null => {
 
 /** The route a page path names: the web host's `keel.route` answer and its
  * back/forward events both arrive as paths, so a deep link
- * (`/identity/accounts/:id`, `/records/:id`, `/bots/:id`,
- * `/teams/:id/runs/:runId`, `/settings`, `/plugins`) and the address bar agree
- * with the shell. `/kit` is the kit gallery — a developer route, mapped only for
- * a dev launch (`?fixture=1` / `host.params.fixture`); no product link enters it
- * and a product URL falls back to the workspace. */
+ * (`/superagent/:ticketId`, `/identity/accounts/:id`, `/records/:id`,
+ * `/bots/:id`, `/teams/:id/runs/:runId`, `/settings`, `/plugins`) and the
+ * address bar agree with the shell. `/kit` is the kit gallery — a developer
+ * route, mapped only for a dev launch (`?fixture=1` / `host.params.fixture`);
+ * no product link enters it and a product URL falls back to the workspace. */
 export const resolveRoute = (path: string, dev = false): RouteState => {
   if (path.startsWith("/settings")) return routeState("settings");
   if (path.startsWith("/plugins")) return routeState("plugins");
   if (dev && path.startsWith("/kit")) return routeState("kit");
+  if (path === "/superagent" || path.startsWith("/superagent/")) {
+    const parts = path.split("/").filter((part) => part !== "");
+    return routeState("superagent", "accounts", decodePart(parts[1]));
+  }
   if (path === "/identity" || path.startsWith("/identity/")) {
     const parts = path.split("/").filter((part) => part !== "");
     const section: IdentitySection = parts[1] === "groups" ? "groups" : "accounts";
@@ -84,6 +88,8 @@ export const routePath = (state: RouteState): string => {
       return "/plugins";
     case "kit":
       return "/kit";
+    case "superagent":
+      return state.objectId ? `/superagent/${encodeURIComponent(state.objectId)}` : "/superagent";
     case "bots":
       return state.objectId ? `/bots/${encodeURIComponent(state.objectId)}` : "/bots";
     case "teams": {

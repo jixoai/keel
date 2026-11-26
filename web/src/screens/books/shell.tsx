@@ -1,12 +1,12 @@
 // The 账簿 shell — change keel-bot-identity-access, A4.4a; top refactor A4.4f;
-// shell IA change: three daily chapters.
+// shell IA change: four daily chapters (工作区 / 任务 / 员工 / 团队).
 //
 // The global system bar (App.tsx's `SystemBar`) is the app's top-level chrome:
 // brand, plugin top-band slot, sound, notifications, theme, command palette and
 // host-gated window controls. This shell owns only what is below it: the left
 // rail on desktop (labels from 1280px, an icon rail from 768–1279) carrying the
-// three daily chapters — 工作区 / 员工 / 团队 — and the three bottom tabs on a
-// phone plus the settings entry.
+// four daily chapters — 工作区 / 任务 / 员工 / 团队 — and the four bottom tabs on
+// a phone plus the settings entry.
 //
 // 身份 and 记录 are management faces, not daily destinations: the settings
 // page's 通用 section carries their entries (with the old `books-chapter-*`
@@ -16,7 +16,7 @@
 // to filter.
 //
 // A chapter the reader may not read is not rendered at all (design §6.1: hide,
-// never grey a destination without a path). The rail keeps the three daily
+// never grey a destination without a path). The rail keeps the daily
 // destinations' test ids (`books-chapter-*`); the phone's bottom tabs keep
 // theirs (`books-tab-*`).
 import type { JSX } from "nsh";
@@ -46,9 +46,9 @@ import {
   isMobile,
   touchStyle,
 } from "./common";
-import { MANAGEMENT_KEYS } from "./management";
+import { MANAGEMENT_KEYS, TASK_KEYS } from "./management";
 
-export type ChapterId = "workspace" | "bots" | "teams" | "identity" | "records";
+export type ChapterId = "workspace" | "superagent" | "bots" | "teams" | "identity" | "records";
 
 interface ChapterEntry {
   id: ChapterId;
@@ -61,8 +61,9 @@ interface ChapterEntry {
 
 const CHAPTERS: ChapterEntry[] = [
   { id: "workspace", num: "01", label: "工作区", icon: "message" },
-  { id: "bots", num: "02", label: "员工", icon: "bot", keys: MANAGEMENT_KEYS.bots },
-  { id: "teams", num: "03", label: "团队", icon: "users", keys: MANAGEMENT_KEYS.teams },
+  { id: "superagent", num: "02", label: "任务", icon: "inbox", keys: TASK_KEYS },
+  { id: "bots", num: "03", label: "员工", icon: "bot", keys: MANAGEMENT_KEYS.bots },
+  { id: "teams", num: "04", label: "团队", icon: "users", keys: MANAGEMENT_KEYS.teams },
 ];
 
 const chapterVisible = (chapter: ChapterEntry): boolean => !chapter.keys || canAny(chapter.keys);

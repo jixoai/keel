@@ -57,6 +57,7 @@ import type {
   TriggersView,
   TurnErrorState,
   UiCommands,
+  SuperagentApi,
   WireEvent,
 } from "./contract";
 import type { ExternalProjectionView } from "./oar-projection";
@@ -105,7 +106,8 @@ export interface PendingAttachment {
  * (A4.3/A4.4a) is optional: a transport that predates it answers nothing, and
  * the identity pages say so instead of inventing rows. */
 type Client = SettingsApi &
-  Partial<IdentityApi> & {
+  Partial<IdentityApi> &
+  Partial<SuperagentApi> & {
   probe(): Promise<"ok" | "auth" | "down">;
   capabilities(): Promise<Record<string, unknown>>;
   /** `GET /v1/mcp/apps`: the app catalogue. Optional because a transport that
@@ -471,6 +473,10 @@ class KeelStore {
    * memory so the real `KeelHttp` parsing runs without a network). `null` uses
    * the app's transport. */
   private skillsClient: SettingsApi | null = null;
+  /** Test/host seam for the super-agent board (a harness answers it in memory
+   * so the page's five states and write feedback run through the real store).
+   * `null` uses the app's transport. */
+  private superagentClient: SuperagentApi | null = null;
   /** Bumped per boot probe; a probe that loses the race must not overwrite a
    * stage a caller (a harness, a reconnect) has since decided. */
   private detectToken = 0;
@@ -997,9 +1003,22 @@ class KeelStore {
 
   /** Enter a chapter. Identity keeps whichever sub-page the reader was on; the
    * object chapters open their index (a deep link keeps its own object). */
-  openChapter(route: "workspace" | "bots" | "teams" | "identity" | "records") {
+  openChapter(route: "workspace" | "superagent" | "bots" | "teams" | "identity" | "records") {
     const section: IdentitySection = route === "identity" ? this.routeSection() : "accounts";
     this.go(routeState(route, section, null));
+  }
+
+  /** One super-agent ticket (`/superagent/<ticketId>`). The board keeps the
+   * list; the route names the detail so the phone's back button and a deep
+   * link agree with the visible pane. */
+  openSuperagentTicket(ticketId: string) {
+    this.go(routeState("superagent", "accounts", ticketId));
+  }
+
+  /** Back from the ticket detail to the board list. */
+  closeSuperagentTicket() {
+    if (this.route() !== "superagent") return;
+    this.go(routeState("superagent"));
   }
 
   /** One Bot page (`/bots/<id>`). */
@@ -1768,6 +1787,20 @@ class KeelStore {
    * `null` restores the app's own transport. */
   setPluginTransport(client: PluginTransport | null): void {
     this.pluginClient = client;
+  }
+
+  /** Test/host seam: answer the super-agent board without a network. `null`
+   * restores the app's own transport. */
+  setSuperagentTransport(client: SuperagentApi | null): void {
+    this.superagentClient = client;
+  }
+
+  /** The super-agent board transport in force, or null when this transport
+   * does not serve the surface (the page then says so instead of rendering
+   * invented rows). The fixture and `KeelHttp` both implement it. */
+  superagentApi(): SuperagentApi | null {
+    const client = this.superagentClient ?? this.client;
+    return typeof client.superagentBoard === "function" ? (client as SuperagentApi) : null;
   }
 
   private resetSettingsState() {
