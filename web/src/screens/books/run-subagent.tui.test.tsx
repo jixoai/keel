@@ -94,7 +94,7 @@ test("TUI: 子代理节点取消/重试——取消子树、重试同一会话�
   // be retried through the resume path.
   await wide.waitFor("id:run-node-retry");
   await wide.press("id:run-node-retry");
-  await wide.waitFor("id:run-node-action-notice");
+  await wide.waitFor("text:/已重新排队/");
   expect(wide.texts().join("\n")).toContain("已重新排队");
 }, 240_000);
 
@@ -105,7 +105,7 @@ test("TUI: 子代理节点取消/重试——390 时间线检查器 Sheet", asyn
   await phone.waitFor("id:run-node-actions");
   expect(phone.shows("id:run-node-retry")).toBe(true);
   await phone.press("id:run-node-retry");
-  await phone.waitFor("id:run-node-action-notice");
+  await phone.waitFor("text:/已重新排队/");
   expect(phone.texts().join("\n")).toContain("已重新排队");
 
   // A fresh app for the cancel flow: the retry sheet is still open and would
@@ -117,7 +117,7 @@ test("TUI: 子代理节点取消/重试——390 时间线检查器 Sheet", asyn
   await cancelled.press("id:run-node-cancel");
   await cancelled.waitFor("id:run-node-cancel-dialog");
   await cancelled.press("id:run-node-cancel-dialog-confirm");
-  await cancelled.waitFor("id:run-node-action-notice");
+  await cancelled.waitFor("text:/已取消/");
   expect(cancelled.texts().join("\n")).toContain("已取消");
 }, 240_000);
 

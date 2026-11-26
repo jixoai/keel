@@ -115,7 +115,7 @@ test("subagent tree evidence", async () => {
   await success.waitFor("id:run-node-actions");
   await shot(success, "21-node-actions-1440");
   await success.press("id:run-node-retry");
-  await success.waitFor("id:run-node-action-notice");
+  await success.waitFor("text:/已重新排队/");
   await shot(success, "22-node-retry-done-1440");
   await success.press("label:查看节点 深度不限，运行中");
   await success.waitFor("id:run-node-cancel");
@@ -124,7 +124,7 @@ test("subagent tree evidence", async () => {
   await success.waitFor("id:run-node-cancel-dialog");
   await shot(success, "24-node-cancel-dialog-1440");
   await success.press("id:run-node-cancel-dialog-confirm");
-  await success.waitFor("id:run-node-action-notice");
+  await success.waitFor("text:/已取消/");
   await shot(success, "25-node-cancel-done-1440");
 
   const phoneNode = await harness(390, "run-success");
@@ -133,7 +133,7 @@ test("subagent tree evidence", async () => {
   await phoneNode.waitFor("id:run-node-actions");
   await shot(phoneNode, "26-node-actions-390");
   await phoneNode.press("id:run-node-retry");
-  await phoneNode.waitFor("id:run-node-action-notice");
+  await phoneNode.waitFor("text:/已重新排队/");
   await shot(phoneNode, "27-node-retry-done-390");
 
   const phoneCancelNode = await harness(390, "run-success");
@@ -144,7 +144,7 @@ test("subagent tree evidence", async () => {
   await phoneCancelNode.waitFor("id:run-node-cancel-dialog");
   await shot(phoneCancelNode, "28-node-cancel-dialog-390");
   await phoneCancelNode.press("id:run-node-cancel-dialog-confirm");
-  await phoneCancelNode.waitFor("id:run-node-action-notice");
+  await phoneCancelNode.waitFor("text:/已取消/");
   await shot(phoneCancelNode, "29-node-cancel-done-390");
 
   // ---- action-state faces: loading / error / no permission ----
