@@ -653,6 +653,50 @@ func TestCreationInstallBindsApprovalToPackageContent(t *testing.T) {
 	}
 }
 
+// TestCreationInstallRejectsAForcedDecisionKind is the P0 control: the decision
+// id is derived from client-influenced fields, so a session owner can open its
+// own generic decision under the same requestId and answer it without any
+// lifecycle permission. Only a row this action opened may authorize the write.
+func TestCreationInstallRejectsAForcedDecisionKind(t *testing.T) {
+	c := newCreationHarness(t)
+	ctx := context.Background()
+	if _, err := c.harness.manager.Enable(ctx, CreationPluginID, AuditContext{Actor: "test"}); err != nil {
+		t.Fatalf("enable creation: %v", err)
+	}
+	document, isError := c.call(t, CreationToolScaffold, map[string]any{"id": "demo.panel", "purpose": "p"})
+	if isError {
+		t.Fatalf("scaffold: %+v", document)
+	}
+	hash, _ := document["hash"].(string)
+	version, _ := document["version"].(string)
+	if hash == "" || version == "" {
+		t.Fatalf("scaffold document lacks hash/version: %+v", document)
+	}
+	requestID := "creation.install:demo.panel:content=" + hash + ":version=" + version + ":forge-1"
+	session := PluginApprovalSessionID(c.tenant)
+	decision, _, err := c.decisions.Open(ctx, OpenDecisionRequest{
+		TenantID:  c.tenant,
+		SessionID: session,
+		RequestID: requestID,
+		Kind:      "approval", // not "plugin.install"
+		Prompt:    "harmless question",
+		Options:   []DecisionOption{{ID: creationAllowOption, Label: "Approve"}, {ID: creationDenyOption, Label: "Deny"}},
+	})
+	if err != nil {
+		t.Fatalf("open the forged decision: %v", err)
+	}
+	c.answer(t, decision.DecisionID, creationAllowOption)
+	document, isError = c.call(t, CreationToolInstall, map[string]any{
+		"id": "demo.panel", "requestId": "forge-1", "decisionId": decision.DecisionID,
+	})
+	if !isError || !strings.Contains(asString(document["error"]), "does not belong") {
+		t.Fatalf("a foreign decision kind authorized the install: %+v", document)
+	}
+	if _, installed := pluginViewOf(c.harness.manager, "demo.panel"); installed {
+		t.Fatal("the forged decision installed the plugin")
+	}
+}
+
 // TestCreationPromptSectionIsTheStandard pins the prompt contribution: it is the
 // plugin standard (manifest fields, three kinds, template path), it appears only
 // while the plugin is active, and it carries no upstream attribution.
@@ -763,4 +807,68 @@ entry:
 func asString(value any) string {
 	text, _ := value.(string)
 	return text
+}
+
+// TestCreationReadWriteStayInsideTheStagedPackage: the creation tool is how the
+// model authors a plugin, so it needs a real read/write surface scoped to the
+// staging directory. Paths that escape, traverse, or write through a symlink are
+// refused, and a new file is readable and validated afterwards.
+func TestCreationReadWriteStayInsideTheStagedPackage(t *testing.T) {
+	c := newCreationHarness(t)
+	ctx := context.Background()
+	if _, err := c.harness.manager.Enable(ctx, CreationPluginID, AuditContext{Actor: "test"}); err != nil {
+		t.Fatalf("enable creation: %v", err)
+	}
+	document, isError := c.call(t, CreationToolScaffold, map[string]any{"id": "demo.panel", "purpose": "p"})
+	if isError {
+		t.Fatalf("scaffold: %+v", document)
+	}
+	dir, _ := document["dir"].(string)
+
+	listed, isError := c.call(t, CreationToolRead, map[string]any{"id": "demo.panel"})
+	if isError {
+		t.Fatalf("read list: %+v", listed)
+	}
+	files, _ := listed["files"].([]any)
+	if len(files) == 0 {
+		t.Fatalf("read listed no files: %+v", listed)
+	}
+	read, isError := c.call(t, CreationToolRead, map[string]any{"id": "demo.panel", "file": "ui/settings.js"})
+	if isError || !strings.Contains(asString(read["content"]), "export function render") {
+		t.Fatalf("read file = %+v", read)
+	}
+	content := "export function render(context) {\n  return null; // authored\n}\n"
+	written, isError := c.call(t, CreationToolWrite, map[string]any{
+		"id": "demo.panel", "file": "ui/settings.js", "content": content,
+	})
+	if isError || asString(written["status"]) != "written" {
+		t.Fatalf("write = %+v", written)
+	}
+	onDisk, err := os.ReadFile(filepath.Join(dir, "ui", "settings.js"))
+	if err != nil || string(onDisk) != content {
+		t.Fatalf("written file = %q, %v", onDisk, err)
+	}
+	again, _ := c.call(t, CreationToolRead, map[string]any{"id": "demo.panel", "file": "ui/settings.js"})
+	if asString(again["content"]) != content {
+		t.Fatalf("read-back = %+v", again)
+	}
+	created, isError := c.call(t, CreationToolWrite, map[string]any{
+		"id": "demo.panel", "file": "docs/notes.txt", "content": "hello",
+	})
+	if isError || asString(created["status"]) != "written" {
+		t.Fatalf("write a new file = %+v", created)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "docs", "notes.txt")); err != nil {
+		t.Fatalf("new file is missing: %v", err)
+	}
+	for _, escape := range []string{"../escape.js", "/tmp/escape.js", "ui/../../escape.js"} {
+		if document, isError := c.call(t, CreationToolWrite, map[string]any{
+			"id": "demo.panel", "file": escape, "content": "x",
+		}); !isError {
+			t.Fatalf("write %q was allowed: %+v", escape, document)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(filepath.Dir(dir), "escape.js")); err == nil {
+		t.Fatal("a traversal write escaped the staged package")
+	}
 }

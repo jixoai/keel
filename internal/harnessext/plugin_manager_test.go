@@ -789,6 +789,12 @@ func TestPluginManagerUpdateSwapsAndRollsBack(t *testing.T) {
 	harness.loader.mu.Lock()
 	delete(harness.loader.perVersion, "2.0.0")
 	harness.loader.mu.Unlock()
+	// The approval is bound to a content hash; a package swapped after the
+	// human answered must be refused, not installed.
+	if _, err := harness.manager.Update(ctx, "vendor.panel",
+		UpdateRequest{Path: upgrade, ExpectedHash: "deadbeef"}, AuditContext{Actor: "tester"}); err == nil {
+		t.Fatal("an update whose content changed after approval must be refused")
+	}
 	view, err := harness.manager.Update(ctx, "vendor.panel", UpdateRequest{Path: upgrade}, AuditContext{Actor: "tester"})
 	if err != nil {
 		t.Fatal(err)

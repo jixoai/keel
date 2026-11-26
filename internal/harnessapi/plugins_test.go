@@ -104,6 +104,15 @@ func (f *fakePluginManager) Uninstall(_ context.Context, id string, audit harnes
 	return harnessext.PluginView{ID: id, State: harnessext.LifecycleUninstalled}, nil
 }
 
+func (f *fakePluginManager) ResolveUpdateTarget(id, path string) (string, string, string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.updateErr != nil {
+		return "", "", "", f.updateErr
+	}
+	return path, "test-content-hash", "2.0.0", nil
+}
+
 func (f *fakePluginManager) Update(_ context.Context, id string, req harnessext.UpdateRequest, audit harnessext.AuditContext) (harnessext.PluginView, error) {
 	f.record("update:"+id, audit)
 	f.mu.Lock()

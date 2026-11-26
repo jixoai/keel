@@ -1027,6 +1027,10 @@ type UpdateRequest struct {
 	// Path is a new package directory. Empty picks the highest version different
 	// from the installed one from the plugins root (the multi-version layout).
 	Path string
+	// ExpectedHash, when set, is the content hash the update approval was bound
+	// to. The manager refuses a package whose tree hash differs, so an approved
+	// "update to X" cannot be redirected to another package.
+	ExpectedHash string
 }
 
 // Update replaces a plugin's version: disable, swap the package, enable.
@@ -1049,6 +1053,13 @@ func (m *Manager) Update(ctx context.Context, id string, req UpdateRequest, audi
 	staged, pkg, err := m.stageUpdateLocked(id, req.Path)
 	if err != nil {
 		m.auditLocked(ctx, audit, id, entry.manifestVersion(), store.PluginActionUpdate, store.PluginResultFailed, detailOf(err))
+		return m.viewLocked(entry), err
+	}
+	if expected := strings.TrimSpace(req.ExpectedHash); expected != "" && pkg.Hash != expected {
+		err := pluginErrf(ErrPluginPath, "update", id,
+			"the package content changed after approval (approved %s, got %s); ask again", expected, pkg.Hash)
+		m.auditLocked(ctx, audit, id, entry.manifestVersion(), store.PluginActionUpdate, store.PluginResultRefused,
+			map[string]any{"reason": "content hash changed after approval"})
 		return m.viewLocked(entry), err
 	}
 	previous := *entry
@@ -1133,6 +1144,60 @@ func wasEnabledState(wasEnabled bool, previous LifecycleState) LifecycleState {
 		return LifecycleEnabled
 	}
 	return previous
+}
+
+// ResolveUpdateTarget returns the package an update would stage: its directory,
+// content hash and version, without copying or changing anything. The API calls
+// it before asking for approval so the question binds the package the caller is
+// actually about to install.
+func (m *Manager) ResolveUpdateTarget(id, path string) (string, string, string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	entry, ok := m.entries[id]
+	if !ok {
+		return "", "", "", pluginErrf(ErrPluginNotFound, "update", id, "plugin is not installed")
+	}
+	if entry.bundled {
+		return "", "", "", pluginErrf(ErrPluginBundled, "update", id, "bundled plugins are updated with the binary")
+	}
+	if strings.TrimSpace(path) != "" {
+		pkg := pluginpkg.LoadDir(path, m.environment())
+		if !pkg.Usable() {
+			return "", "", "", pluginErrf(ErrPluginPath, "update", id, "the package at %s is not usable: %s", path, problemReasonOf(pkg))
+		}
+		if pkg.ID() != id {
+			return "", "", "", pluginErrf(ErrPluginPath, "update", id,
+				"the package at %s declares %s, not %s", path, pkg.ID(), id)
+		}
+		return pkg.Dir, pkg.Hash, pkg.Version(), nil
+	}
+	if m.root == "" {
+		return "", "", "", pluginErrf(ErrPluginState, "update", id, "no package path was given and this deployment has no plugins root")
+	}
+	scan := pluginpkg.Discover(m.root, m.environment())
+	best := pluginpkg.Package{}
+	for _, pkg := range scan.Packages {
+		if pkg.ID() != id || pkg.Version() == entry.manifestVersion() {
+			continue
+		}
+		if best.Manifest == nil || pkg.Manifest.ParsedVersion.Compare(best.Manifest.ParsedVersion) > 0 {
+			best = pkg
+		}
+	}
+	if best.Manifest == nil {
+		return "", "", "", pluginErrf(ErrPluginState, "update", id,
+			"no other version of %s is available under %s: give a path or drop the new version there", id, m.root)
+	}
+	return best.Dir, best.Hash, best.Version(), nil
+}
+
+// problemReasonOf is the short reason of an unusable package (the manager's
+// field errors carry the detail separately).
+func problemReasonOf(pkg pluginpkg.Package) string {
+	if pkg.Problem != nil && pkg.Problem.Reason != "" {
+		return pkg.Problem.Reason
+	}
+	return "the manifest or an entry file is invalid"
 }
 
 // stageUpdateLocked resolves the replacement package (explicit path or the

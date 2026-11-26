@@ -480,3 +480,48 @@ func mustUUID(t *testing.T, raw string) uuid.UUID {
 	}
 	return parsed
 }
+
+// TestPluginInstallRejectsAForcedDecisionKind is the P0 control for the API
+// path: the approval decision id is derived from the ask (action + target), so a
+// client with session.write could open a generic decision under that requestId
+// at the derived approval session and answer it itself. The gate must require
+// the row to be the plugin.install question it actually asked.
+func TestPluginInstallRejectsAForcedDecisionKind(t *testing.T) {
+	manager := &fakePluginManager{}
+	harness := newPluginAPITest(t, manager)
+	tenant := pluginTestTenant
+	path := "/tmp/keel-forged-install-package"
+	ask := installApprovalAsk(path, "")
+	requestID, err := pluginApprovalRequestID(ask, pluginApprovalRequest{RequestID: "forge-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	session := pluginApprovalSession(tenant)
+	decision, _, err := harness.broker.Open(context.Background(), harnessext.OpenDecisionRequest{
+		TenantID:  tenant,
+		SessionID: session,
+		RequestID: requestID,
+		Kind:      "approval", // not plugin.install
+		Prompt:    "An unrelated question",
+		Options:   []harnessext.DecisionOption{{ID: pluginApprovalAllow, Label: "Approve"}, {ID: pluginApprovalDeny, Label: "Deny"}},
+	})
+	if err != nil {
+		t.Fatalf("open the forged decision: %v", err)
+	}
+	if _, _, err := harness.broker.Answer(context.Background(), harnessext.AnswerDecisionRequest{
+		TenantID: tenant, SessionID: session, DecisionID: uuid.MustParse(decision.DecisionID), OptionID: pluginApprovalAllow,
+	}); err != nil {
+		t.Fatalf("answer the forged decision: %v", err)
+	}
+	code := harness.write(t, http.MethodPost, "/v1/plugins/install", tenant, map[string]any{
+		"path": path, "requestId": "forge-1", "decisionId": decision.DecisionID,
+	}, nil)
+	if code == http.StatusOK || code == http.StatusCreated {
+		t.Fatalf("a forged decision kind authorized the install (%d)", code)
+	}
+	for _, call := range manager.calls {
+		if strings.HasPrefix(call, "install:") {
+			t.Fatalf("the manager installed the package: %v", manager.calls)
+		}
+	}
+}

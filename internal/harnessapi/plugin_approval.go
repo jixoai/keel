@@ -189,7 +189,7 @@ func (s *Server) gatePluginApproval(w http.ResponseWriter, r *http.Request, audi
 			return harnessext.Decision{}, false
 		}
 		switch {
-		case isPluginApprovalGrant(decision):
+		case isPluginApprovalGrant(decision, pluginApprovalKind(ask.Action), requestID):
 			return decision, true
 		case decision.Status == harnessext.DecisionOpen:
 			writeJSON(w, http.StatusConflict, pluginApprovalPendingBody(decision))
@@ -238,8 +238,13 @@ func trimActor(actor string) string {
 }
 
 // isPluginApprovalGrant reports whether an answered decision allows the action.
-func isPluginApprovalGrant(decision harnessext.Decision) bool {
-	return decision.Status == harnessext.DecisionAnswered &&
+// The answer alone is not enough: the row must be the question this action
+// asked (kind and derived requestId). A client can open generic decisions under
+// a chosen requestId, and the derived decision id is therefore not a secret.
+func isPluginApprovalGrant(decision harnessext.Decision, kind, requestID string) bool {
+	return decision.Kind == kind &&
+		decision.RequestID == requestID &&
+		decision.Status == harnessext.DecisionAnswered &&
 		decision.Answer != nil && decision.Answer.OptionID == pluginApprovalAllow
 }
 
@@ -393,7 +398,11 @@ func pluginApprovalPrompt(ask pluginApprovalAsk) string {
 	case store.PluginActionEnable:
 		return fmt.Sprintf("Enable plugin %s? Enabling runs what the plugin declares (tools, hooks, triggers, UI).", label)
 	case store.PluginActionUpdate:
-		return fmt.Sprintf("Update plugin %s to a new package? The running version is replaced.", label)
+		prompt := fmt.Sprintf("Update plugin %s to a new package? The running version is replaced.", label)
+		if ask.ContentHash != "" {
+			prompt += fmt.Sprintf("\nContent hash: %s", ask.ContentHash)
+		}
+		return prompt
 	}
 	return fmt.Sprintf("Approve plugin %s of %s?", ask.Action, label)
 }

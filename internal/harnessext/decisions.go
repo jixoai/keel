@@ -45,6 +45,20 @@ type DecisionOption struct {
 	Description string `json:"description,omitempty"`
 }
 
+// sameDecisionOptions compares the menu a retry asks for with the menu already
+// stored under its requestId. Order matters: the UI renders the stored order.
+func sameDecisionOptions(a, b []DecisionOption) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i].ID != b[i].ID || a[i].Label != b[i].Label || a[i].Description != b[i].Description {
+			return false
+		}
+	}
+	return true
+}
+
 // DecisionAnswer is the recorded answer: an option for a menu, free text for a
 // clarify question, or both when the decision allows free text. AnsweredBy*
 // names the authenticated approver (account id or the operator label) and its
@@ -278,7 +292,17 @@ func (b *DecisionBroker) Open(ctx context.Context, req OpenDecisionRequest) (Dec
 
 	if row, err := b.store.Get(ctx, req.TenantID, req.SessionID, decisionID); err == nil {
 		// Already opened: the retry gets the stored decision (with whatever
-		// terminal state it reached meanwhile).
+		// terminal state it reached meanwhile). The identity of the question is
+		// (requestId, kind, prompt, options): a different question cannot reuse
+		// an existing row, or a caller could squat an approval's derived id with
+		// a harmless-looking prompt and then answer it. An omitted options list
+		// is the API's "re-address the same question" shape, so it reuses the
+		// stored menu instead of conflicting.
+		optionsMatch := len(req.Options) == 0 || sameDecisionOptions(row.Options, req.Options)
+		if row.Kind != req.Kind || row.Prompt != req.Prompt || !optionsMatch {
+			return Decision{}, false, fmt.Errorf(
+				"%w: requestId %q was already opened with a different kind/prompt", ErrDecisionConflict, requestID)
+		}
 		row = b.normalize(ctx, row)
 		return rowToDecision(row), false, nil
 	} else if !errors.Is(err, ErrDecisionNotFound) {

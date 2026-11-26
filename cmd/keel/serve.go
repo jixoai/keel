@@ -1043,6 +1043,11 @@ func runServe(parent context.Context, opts serveOptions) error {
 		Product:         product.api,
 		SessionOwner:    newSessionOwner(st, product.access),
 		SessionCreator:  newAccountSessionOwner(st, product.access),
+		// Plugin approvals live in a per-tenant derived session; a client must
+		// not be able to create that row and mint questions there.
+		ReservedSessionID: func(tenantID, sessionID uuid.UUID) bool {
+			return sessionID == harnessext.PluginApprovalSessionID(tenantID)
+		},
 		// A tenant created through the operator API gets the same built-in
 		// permission-group presets as the serving tenant at boot (idempotent).
 		TenantCreated: func(ctx context.Context, tenantID uuid.UUID) error {

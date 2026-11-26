@@ -111,3 +111,26 @@ func TestCreateSessionWithBotIDUnwired(t *testing.T) {
 		t.Fatalf("plain create: %d", code)
 	}
 }
+
+// TestCreateSessionRejectsReservedSessionID: plugin approvals live in a derived
+// per-tenant session. A client that could create that row could also mint
+// questions in the approval namespace.
+func TestCreateSessionRejectsReservedSessionID(t *testing.T) {
+	reserved := uuid.New()
+	hs, _ := newTestServer(t, func(cfg *Config) {
+		cfg.ReservedSessionID = func(_, sessionID uuid.UUID) bool { return sessionID == reserved }
+	})
+	hc := hs.Client()
+	tenant := uuid.NewString()
+	if code := createTestTenant(t, hc, hs.URL, tenant, "t"); code != 201 {
+		t.Fatalf("create tenant: %d", code)
+	}
+	if code := doJSON(t, hc, "POST", hs.URL+"/v1/sessions", tenant,
+		map[string]string{"sessionId": reserved.String()}, nil); code != http.StatusBadRequest {
+		t.Fatalf("reserved sessionId create = %d, want 400", code)
+	}
+	if code := doJSON(t, hc, "POST", hs.URL+"/v1/sessions", tenant,
+		map[string]string{"sessionId": uuid.NewString()}, nil); code != http.StatusCreated {
+		t.Fatalf("ordinary client id create = %d, want 201", code)
+	}
+}

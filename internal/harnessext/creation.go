@@ -90,6 +90,8 @@ const (
 const (
 	CreationToolCatalog  = "keel.creation.catalog"
 	CreationToolScaffold = "keel.creation.scaffold"
+	CreationToolRead     = "keel.creation.read"
+	CreationToolWrite    = "keel.creation.write"
 	CreationToolValidate = "keel.creation.validate"
 	CreationToolInstall  = "keel.creation.install"
 	CreationToolList     = "keel.creation.list"
@@ -204,9 +206,11 @@ Workflow, in order:
    complete package to the staging directory and validates it with the real
    validator.
 2. Edit the staged package when the purpose needs more than the template:
-   backend/server.mjs for the tool, ui/app.jsx (+ rebuild ui/app.js) for the panel,
-   ui/settings.js for the Native chunk contribution. Keep extensibility.json in
-   step with plugin.yaml.
+   creation {action:"read", id} lists it, creation {action:"read", id, file}
+   returns one file, and creation {action:"write", id, file, content} replaces
+   it. Build the backend (backend/server.mjs), the panel (ui/app.jsx +
+   ui/app.js) and the Native chunk (ui/settings.js) you actually need, and keep
+   extensibility.json in step with plugin.yaml.
 3. creation {action:"validate", id} returns field-level problems. Fix them; do not ignore.
 4. creation {action:"install", id} asks for a durable approval and answers
    approval_required with a decisionId and an answerUrl. Have it answered, then
@@ -307,6 +311,39 @@ func (c *creationPlugin) tools() []ToolSpec {
 			Execute:    c.scaffold,
 		},
 		{
+			Name:        CreationToolRead,
+			Description: "Read a staged package: with file, returns that file's UTF-8 text; without file, lists the package files with sizes. The staged package is the creation workspace, so this is how you inspect what scaffold wrote before editing it.",
+			Schema: json.RawMessage(`{
+  "type": "object",
+  "properties": {
+    "id": {"type": "string", "description": "plugin id of a staged package"},
+    "file": {"type": "string", "description": "path relative to the package (default: list the files)"}
+  },
+  "required": ["id"],
+  "additionalProperties": false
+}`),
+			Sequential: true,
+			Internal:   true,
+			Execute:    c.read,
+		},
+		{
+			Name:        CreationToolWrite,
+			Description: "Write one UTF-8 file inside a staged package. The path is relative to the package; it cannot leave the staging directory. Use it to make the package do what the purpose needs, then call validate.",
+			Schema: json.RawMessage(`{
+  "type": "object",
+  "properties": {
+    "id": {"type": "string", "description": "plugin id of a staged package"},
+    "file": {"type": "string", "description": "path relative to the package, e.g. ui/settings.js"},
+    "content": {"type": "string", "description": "the complete new file content"}
+  },
+  "required": ["id", "file", "content"],
+  "additionalProperties": false
+}`),
+			Sequential: true,
+			Internal:   true,
+			Execute:    c.write,
+		},
+		{
 			Name:        CreationToolValidate,
 			Description: "Validate a staged plugin package with the real package validator (manifest fields, UI entry, engine gate) and the template's structural checks.",
 			Schema: json.RawMessage(`{
@@ -385,6 +422,17 @@ type creationScaffoldArgs struct {
 type creationValidateArgs struct {
 	ID   string `json:"id"`
 	Path string `json:"path"`
+}
+
+type creationReadArgs struct {
+	ID   string `json:"id"`
+	File string `json:"file"`
+}
+
+type creationWriteArgs struct {
+	ID      string `json:"id"`
+	File    string `json:"file"`
+	Content string `json:"content"`
 }
 
 type creationApprovalArgs struct {
@@ -611,6 +659,167 @@ func (c *creationPlugin) scaffold(ctx context.Context, _ string, raw json.RawMes
 // stagingDir is the staged package path of one id.
 func (c *creationPlugin) stagingDir(root, id string) string {
 	return filepath.Join(root, CreationStagingDir, id)
+}
+
+// --- read / write ---------------------------------------------------------
+
+// creationMaxFileBytes bounds one read or write through the creation tool. A
+// generated package is source code and manifests; 512 KiB is far above any
+// template file and keeps a mistaken binary write out of the staging tree.
+const creationMaxFileBytes = 512 << 10
+
+// creationMaxListFiles bounds the listing a read without a file returns.
+const creationMaxListFiles = 200
+
+func (c *creationPlugin) read(ctx context.Context, _ string, raw json.RawMessage, _ agentcore.ToolUpdateFunc) (agentcore.AgentToolResult, error) {
+	var args creationReadArgs
+	if err := json.Unmarshal(raw, &args); err != nil {
+		return creationResult(failureDocument("invalid arguments: "+err.Error(), nil), true), nil
+	}
+	manager := c.manager()
+	if manager == nil {
+		return creationResult(failureDocument("the plugin manager is not wired in this deployment", nil), true), nil
+	}
+	if failure := c.tenantFailure(ctx, manager); failure != nil {
+		return creationResult(*failure, true), nil
+	}
+	id := strings.TrimSpace(args.ID)
+	dir, failure := c.resolveStaged(manager, id, "")
+	if failure != nil {
+		return creationResult(*failure, true), nil
+	}
+	name := strings.TrimSpace(args.File)
+	if name == "" {
+		files := make([]map[string]any, 0, 16)
+		walkErr := filepath.WalkDir(dir, func(path string, entry os.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if entry.IsDir() {
+				return nil
+			}
+			if len(files) >= creationMaxListFiles {
+				return filepath.SkipAll
+			}
+			relative, err := filepath.Rel(dir, path)
+			if err != nil {
+				return err
+			}
+			info, err := entry.Info()
+			if err != nil {
+				return err
+			}
+			files = append(files, map[string]any{
+				"file":  filepath.ToSlash(relative),
+				"bytes": info.Size(),
+			})
+			return nil
+		})
+		if walkErr != nil {
+			return creationResult(failureDocument("list the staged package: "+walkErr.Error(), nil), true), nil
+		}
+		return creationResult(map[string]any{
+			"status": "ok",
+			"id":     id,
+			"dir":    dir,
+			"files":  files,
+		}, false), nil
+	}
+	target, err := creationFileTarget(dir, name, false)
+	if err != nil {
+		return creationResult(fieldFailure("file", err.Error()), true), nil
+	}
+	data, err := os.ReadFile(target)
+	if err != nil {
+		return creationResult(failureDocument("read "+name+": "+err.Error(), nil), true), nil
+	}
+	if len(data) > creationMaxFileBytes {
+		return creationResult(fieldFailure("file", fmt.Sprintf("file is %d bytes; the read limit is %d", len(data), creationMaxFileBytes)), true), nil
+	}
+	return creationResult(map[string]any{
+		"status":  "ok",
+		"id":      id,
+		"file":    filepath.ToSlash(name),
+		"content": string(data),
+	}, false), nil
+}
+
+func (c *creationPlugin) write(ctx context.Context, _ string, raw json.RawMessage, _ agentcore.ToolUpdateFunc) (agentcore.AgentToolResult, error) {
+	var args creationWriteArgs
+	if err := json.Unmarshal(raw, &args); err != nil {
+		return creationResult(failureDocument("invalid arguments: "+err.Error(), nil), true), nil
+	}
+	manager := c.manager()
+	if manager == nil {
+		return creationResult(failureDocument("the plugin manager is not wired in this deployment", nil), true), nil
+	}
+	if failure := c.tenantFailure(ctx, manager); failure != nil {
+		return creationResult(*failure, true), nil
+	}
+	id := strings.TrimSpace(args.ID)
+	dir, failure := c.resolveStaged(manager, id, "")
+	if failure != nil {
+		return creationResult(*failure, true), nil
+	}
+	name := strings.TrimSpace(args.File)
+	if name == "" {
+		return creationResult(fieldFailure("file", "file is required (a path relative to the staged package)"), true), nil
+	}
+	if len(args.Content) > creationMaxFileBytes {
+		return creationResult(fieldFailure("content", fmt.Sprintf("content is %d bytes; the write limit is %d", len(args.Content), creationMaxFileBytes)), true), nil
+	}
+	target, err := creationFileTarget(dir, name, true)
+	if err != nil {
+		return creationResult(fieldFailure("file", err.Error()), true), nil
+	}
+	if info, statErr := os.Lstat(target); statErr == nil && info.Mode()&os.ModeSymlink != 0 {
+		return creationResult(fieldFailure("file", "refusing to write through a symlink"), true), nil
+	}
+	if err := os.WriteFile(target, []byte(args.Content), 0o644); err != nil {
+		return creationResult(failureDocument("write "+name+": "+err.Error(), nil), true), nil
+	}
+	c.audit(ctx, manager, id, "", "creation.write", store.PluginResultOK,
+		map[string]any{"file": filepath.ToSlash(name), "bytes": len(args.Content)})
+	return creationResult(map[string]any{
+		"status": "written",
+		"id":     id,
+		"file":   filepath.ToSlash(name),
+		"bytes":  len(args.Content),
+		"next":   "creation {action:\"validate\", id} re-checks the package before install",
+	}, false), nil
+}
+
+// creationFileTarget resolves a package-relative file inside the staging
+// directory. It refuses absolute paths, traversal and (for writes) parent
+// directories that resolve outside the package through a symlink.
+func creationFileTarget(dir, name string, createParent bool) (string, error) {
+	clean := filepath.Clean(filepath.FromSlash(strings.TrimSpace(name)))
+	if clean == "." || filepath.IsAbs(clean) || clean == ".." ||
+		strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+		return "", errors.New("path must stay inside the staged package")
+	}
+	target := filepath.Join(dir, clean)
+	if !pluginpkg.IsInside(dir, target) || filepath.Clean(target) == filepath.Clean(dir) {
+		return "", errors.New("path must stay inside the staged package")
+	}
+	parent := filepath.Dir(target)
+	if createParent {
+		if err := os.MkdirAll(parent, 0o755); err != nil {
+			return "", fmt.Errorf("create the parent directory: %w", err)
+		}
+	}
+	resolvedDir, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		return "", fmt.Errorf("resolve the staged package: %w", err)
+	}
+	resolvedParent, err := filepath.EvalSymlinks(parent)
+	if err != nil {
+		return "", fmt.Errorf("resolve the target directory: %w", err)
+	}
+	if filepath.Clean(resolvedParent) != filepath.Clean(resolvedDir) && !pluginpkg.IsInside(resolvedDir, resolvedParent) {
+		return "", errors.New("the target directory resolves outside the staged package")
+	}
+	return target, nil
 }
 
 // --- validate -------------------------------------------------------------
@@ -1103,20 +1312,25 @@ func (c *creationPlugin) approve(ctx context.Context, tenant uuid.UUID, action, 
 		return PluginApprovalAnswerURL(decisionID)
 	}
 	given := strings.TrimSpace(args.DecisionID)
+	kind := "plugin." + action
+	options := []DecisionOption{
+		{ID: creationAllowOption, Label: "Approve"},
+		{ID: creationDenyOption, Label: "Deny"},
+	}
 	if given == "" {
 		decision, _, err := broker.Open(ctx, OpenDecisionRequest{
 			TenantID:  tenant,
 			SessionID: session,
 			RequestID: requestID,
-			Kind:      "plugin." + action,
+			Kind:      kind,
 			Prompt:    prompt,
-			Options: []DecisionOption{
-				{ID: creationAllowOption, Label: "Approve"},
-				{ID: creationDenyOption, Label: "Deny"},
-			},
+			Options:   options,
 		})
 		if err != nil {
 			return false, nil, err
+		}
+		if !creationApprovalMatches(decision, kind, requestID, prompt, options) {
+			return false, nil, errors.New("approval decision does not belong to this request")
 		}
 		return false, approvalDocument("approval_required", decision, answerURL(decision.DecisionID), id, action), nil
 	}
@@ -1130,6 +1344,13 @@ func (c *creationPlugin) approve(ctx context.Context, tenant uuid.UUID, action, 
 	decision, found := broker.Get(ctx, tenant, session, expected)
 	if !found {
 		return false, nil, errors.New("approval decision not found")
+	}
+	// The id is derived from (tenant, session, requestId), so an id match alone
+	// is not enough: a client with session.write can open its own decision under
+	// the derived requestId. Only a row that this action opened (kind, prompt and
+	// menu all match) may authorize the lifecycle write.
+	if !creationApprovalMatches(decision, kind, requestID, prompt, options) {
+		return false, nil, errors.New("approval decision does not belong to this request")
 	}
 	switch {
 	case decision.Status == DecisionOpen:
@@ -1146,6 +1367,17 @@ func (c *creationPlugin) approve(ctx context.Context, tenant uuid.UUID, action, 
 		document["refused"] = true
 		return false, document, nil
 	}
+}
+
+// creationApprovalMatches pins a decision row to the exact question this
+// lifecycle action asked: same kind, derived requestId, prompt and menu. The
+// decision id alone is derived from client-influenced fields, so it cannot be
+// the whole authorization fact.
+func creationApprovalMatches(decision Decision, kind, requestID, prompt string, options []DecisionOption) bool {
+	return decision.Kind == kind &&
+		decision.RequestID == requestID &&
+		decision.Prompt == prompt &&
+		sameDecisionOptions(decision.Options, options)
 }
 
 // approvalDocument renders the not-yet-authorized answer.

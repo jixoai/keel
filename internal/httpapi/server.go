@@ -107,6 +107,11 @@ type Config struct {
 	// though it has no Bot owner. Nil keeps the legacy unowned row, which the
 	// relation gate then makes unreachable (fail closed).
 	SessionCreator SessionCreatorFunc
+	// ReservedSessionID rejects a client-supplied sessionId that belongs to a
+	// server-owned namespace. Plugin approvals live in a per-tenant derived
+	// session; letting a client create that row would let it mint questions in
+	// the approval namespace. Nil allows every id.
+	ReservedSessionID func(tenantID, sessionID uuid.UUID) bool
 	// Access is the route authorization seam. When set, every /v1 request is
 	// gated by the accessgate matrix before the mux; nil keeps the pre-A4.2a
 	// behavior for unit tests only (cmd/keel refuses to start without it).
@@ -349,6 +354,10 @@ func (s *Server) createSession(w http.ResponseWriter, r *http.Request) {
 		parsed, err := uuid.Parse(body.SessionID)
 		if err != nil {
 			writeErr(w, 400, fmt.Errorf("bad sessionId: %w", err))
+			return
+		}
+		if s.cfg.ReservedSessionID != nil && s.cfg.ReservedSessionID(tenantID, parsed) {
+			writeErr(w, 400, errors.New("sessionId is reserved for a server-owned namespace"))
 			return
 		}
 		id = parsed

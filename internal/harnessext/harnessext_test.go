@@ -103,6 +103,18 @@ func TestDecisionOpenAnswerIdempotent(t *testing.T) {
 	if err != nil || created || again.DecisionID != first.DecisionID {
 		t.Fatalf("idempotent open: err=%v created=%v id=%s", err, created, again.DecisionID)
 	}
+	// A different question cannot ride the same requestId: that is how a caller
+	// would squat an approval's derived decision id with its own prompt.
+	forged := req
+	forged.Kind = "other"
+	if _, _, err := broker.Open(context.Background(), forged); !errors.Is(err, ErrDecisionConflict) {
+		t.Fatalf("kind change under the same requestId: %v", err)
+	}
+	forged = req
+	forged.Prompt = "A harmless-looking question"
+	if _, _, err := broker.Open(context.Background(), forged); !errors.Is(err, ErrDecisionConflict) {
+		t.Fatalf("prompt change under the same requestId: %v", err)
+	}
 	decisionID := uuid.MustParse(first.DecisionID)
 
 	answered, duplicate, err := broker.Answer(context.Background(), AnswerDecisionRequest{

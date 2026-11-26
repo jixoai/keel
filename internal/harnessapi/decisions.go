@@ -74,6 +74,13 @@ func (s *Server) openDecision(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err)
 		return
 	}
+	// The plugin.* namespace is server-owned: lifecycle approvals open through
+	// the plugin approval gate, never through the generic session question API.
+	// Allowing a client to mint one lets it craft its own "approval" row.
+	if strings.HasPrefix(body.Kind, "plugin.") {
+		writeErr(w, http.StatusBadRequest, errors.New("decision kind namespace \"plugin.\" is reserved for server-owned approvals"))
+		return
+	}
 	decision, created, err := s.cfg.Decisions.Open(r.Context(), harnessext.OpenDecisionRequest{
 		TenantID:      tenantID,
 		SessionID:     sessionID,

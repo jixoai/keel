@@ -49,6 +49,9 @@ type PluginManager interface {
 	Disable(ctx context.Context, id string, audit harnessext.AuditContext) (harnessext.PluginView, error)
 	Uninstall(ctx context.Context, id string, audit harnessext.AuditContext) (harnessext.PluginView, error)
 	Update(ctx context.Context, id string, req harnessext.UpdateRequest, audit harnessext.AuditContext) (harnessext.PluginView, error)
+	// ResolveUpdateTarget answers which package an update would stage, without
+	// changing anything, so the approval can bind its content hash.
+	ResolveUpdateTarget(id, path string) (dir, hash, version string, err error)
 	Audit(ctx context.Context, tenantID *uuid.UUID, pluginID string, after int64, limit int) ([]store.PluginAuditEntry, error)
 }
 
@@ -252,11 +255,29 @@ func (s *Server) updatePlugin(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	manager, audit, ok := s.pluginWriteContext(w, r, s.pluginIDApprovalAsk(store.PluginActionUpdate, id), body.pluginApprovalRequest)
+	// Resolve the package before asking: the question must name the content the
+	// caller is about to install, or an approval for "the update" could be
+	// pointed at a different package after the human answered.
+	if s.cfg.PluginManager == nil {
+		writeErr(w, http.StatusServiceUnavailable, errors.New("plugin management is not wired"))
+		return
+	}
+	dir, hash, version, err := s.cfg.PluginManager.ResolveUpdateTarget(id, body.Path)
+	if err != nil {
+		s.writePluginError(w, err)
+		return
+	}
+	ask := s.pluginIDApprovalAsk(store.PluginActionUpdate, id)
+	ask.ContentHash = hash
+	ask.Version = version
+	if version != "" {
+		ask.Label = id + " " + version
+	}
+	manager, audit, ok := s.pluginWriteContext(w, r, ask, body.pluginApprovalRequest)
 	if !ok {
 		return
 	}
-	view, err := manager.Update(r.Context(), id, harnessext.UpdateRequest{Path: body.Path}, audit)
+	view, err := manager.Update(r.Context(), id, harnessext.UpdateRequest{Path: dir, ExpectedHash: hash}, audit)
 	if err != nil {
 		s.writePluginError(w, err)
 		return
