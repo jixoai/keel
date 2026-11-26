@@ -381,6 +381,20 @@ func (s routedService) StopTicket(ctx context.Context, tenantID, ticketID uuid.U
 	return s.primary.StopTicket(ctx, tenantID, ticketID, actor, reason)
 }
 
+func (s routedService) RetryPending(ctx context.Context, tenantID, ticketID uuid.UUID, pendingID, actor string) (superagent.Ticket, error) {
+	if tenantID != s.primaryTenant {
+		return superagent.Ticket{}, fmt.Errorf("acceptance: pending input is only wired for the seeded tenant")
+	}
+	return s.primary.RetryPending(ctx, tenantID, ticketID, pendingID, actor)
+}
+
+func (s routedService) DismissPending(ctx context.Context, tenantID, ticketID uuid.UUID, pendingID, actor string) (superagent.Ticket, error) {
+	if tenantID != s.primaryTenant {
+		return superagent.Ticket{}, fmt.Errorf("acceptance: pending input is only wired for the seeded tenant")
+	}
+	return s.primary.DismissPending(ctx, tenantID, ticketID, pendingID, actor)
+}
+
 // acceptanceServer serves the harness page, its config and the real /v1
 // super-agent routes. fail/delay are harness-only query switches used to
 // capture the error and loading states; the product API never sees them in a

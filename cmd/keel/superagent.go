@@ -124,6 +124,20 @@ func newSuperagentRuntime(ctx context.Context, tenantID uuid.UUID, st *store.Sto
 	if tenantID == uuid.Nil || registry.TenantID() != tenantID {
 		return nil, fmt.Errorf("super-agent tenant mismatch: assembly tenant %s, registry tenant %s", tenantID, registry.TenantID())
 	}
+	// Single-writer ownership comes first: the startup pass below interrupts the
+	// previous process's worker sessions, so a second replica must be refused
+	// before it can disturb the first one. Run releases the lease on shutdown (a
+	// crashed process releases it with its connection).
+	lease, err := st.AcquireWriterLease(ctx, tenantID)
+	if err != nil {
+		return nil, fmt.Errorf("super-agent single-writer lease: %w", err)
+	}
+	leaseHeld := true
+	defer func() {
+		if leaseHeld {
+			_ = lease.Release(context.Background())
+		}
+	}()
 	orchestratorOwner, archived, err := bridge.BotOwnerAccount(ctx, tenantID, cfg.OrchestratorBot)
 	if err != nil {
 		return nil, fmt.Errorf("super-agent orchestrator bot: %w", err)
@@ -250,6 +264,7 @@ func newSuperagentRuntime(ctx context.Context, tenantID uuid.UUID, st *store.Sto
 		OrchestratorSession: sessionID,
 		OrchestratorBot:     cfg.OrchestratorBot,
 		WorkerBot:           cfg.WorkerBot,
+		Lease:               lease,
 		Logger:              log,
 		Changed:             changed,
 	})
@@ -259,6 +274,7 @@ func newSuperagentRuntime(ctx context.Context, tenantID uuid.UUID, st *store.Sto
 	if err := registry.SetEnabled(superagentModeID, true); err != nil {
 		return nil, fmt.Errorf("enable %s mode: %w", superagentModeID, err)
 	}
+	leaseHeld = false // Run owns and releases it
 	go orchestrator.Run(ctx, cfg.Interval)
 	log.Info("super-agent queue enabled",
 		"source", cfg.Source, "repo", cfg.Repo, "orchestratorBot", cfg.OrchestratorBot,

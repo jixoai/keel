@@ -3,6 +3,7 @@ package superagent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -49,6 +50,34 @@ type Store interface {
 	EnqueueOutbox(ctx context.Context, message OutboxMessage) (OutboxMessage, error)
 	ListOutbox(ctx context.Context, tenantID uuid.UUID, status OutboxStatus, limit int) ([]OutboxMessage, error)
 	UpdateOutbox(ctx context.Context, message OutboxMessage) (OutboxMessage, error)
+
+	// ListAttentionsByStatus lists the newest attention rows in the named states
+	// (all states for an empty list), newest first, bounded by limit. The answer
+	// recovery scan uses it to find a recorded answer with no delivery evidence.
+	ListAttentionsByStatus(ctx context.Context, tenantID uuid.UUID, limit int, statuses ...collab.AttentionStatus) ([]collab.Attention, error)
+
+	// AcquireWriterLease takes the tenant's single-writer guard. Run holds it for
+	// the process lifetime; a second orchestrator against the same tenant fails
+	// closed instead of polling and delivering in parallel.
+	AcquireWriterLease(ctx context.Context, tenantID uuid.UUID) (WriterLease, error)
+}
+
+// ErrWriterLeaseHeld is the fail-closed answer of a second writer: another
+// process owns this tenant's queue.
+var ErrWriterLeaseHeld = errors.New("superagent: another orchestrator owns this tenant's queue")
+
+// WriterLease is the durable single-writer ownership of one tenant's queue. It
+// is released on shutdown; a crashed process's lease expires with its
+// connection, so recovery does not need a manual unlock step.
+type WriterLease interface {
+	Release(ctx context.Context) error
+}
+
+// WriterLeaseStore is the narrow capability Run requires. It is a separate
+// interface so a read-only test double can state that it cannot host a queue
+// instead of silently running a second writer.
+type WriterLeaseStore interface {
+	AcquireWriterLease(ctx context.Context, tenantID uuid.UUID) (WriterLease, error)
 }
 
 // MemoryStore is the in-process Store used by tests and a deployment that has
@@ -67,6 +96,7 @@ type MemoryStore struct {
 	outboxKeys  map[string]uuid.UUID
 	reports     map[uuid.UUID]WorkerReport
 	reportKeys  map[string]uuid.UUID
+	leases      map[string]bool
 }
 
 // NewMemoryStore builds an empty store. A nil clock uses time.Now (UTC).
@@ -86,6 +116,7 @@ func NewMemoryStore(now func() time.Time) *MemoryStore {
 		outboxKeys:  make(map[string]uuid.UUID),
 		reports:     make(map[uuid.UUID]WorkerReport),
 		reportKeys:  make(map[string]uuid.UUID),
+		leases:      make(map[string]bool),
 	}
 }
 
@@ -187,6 +218,68 @@ func (m *MemoryStore) ListOpenAttentions(_ context.Context, tenantID uuid.UUID) 
 		return out[i].ID.String() < out[j].ID.String()
 	})
 	return out, nil
+}
+
+// ListAttentionsByStatus lists the newest attention rows in the named states
+// (all states for an empty list), newest first, bounded by limit.
+func (m *MemoryStore) ListAttentionsByStatus(_ context.Context, tenantID uuid.UUID, limit int, statuses ...collab.AttentionStatus) ([]collab.Attention, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	wanted := make(map[collab.AttentionStatus]bool, len(statuses))
+	for _, status := range statuses {
+		wanted[status] = true
+	}
+	out := make([]collab.Attention, 0)
+	for _, attention := range m.attentions {
+		if attention.TenantID != tenantID {
+			continue
+		}
+		if len(wanted) > 0 && !wanted[attention.Status] {
+			continue
+		}
+		out = append(out, cloneAttention(attention))
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if !out[i].CreatedAt.Equal(out[j].CreatedAt) {
+			return out[i].CreatedAt.After(out[j].CreatedAt)
+		}
+		return out[i].ID.String() > out[j].ID.String()
+	})
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}
+
+// AcquireWriterLease grants one process-local writer for a tenant. The memory
+// store is a test/demo store, so the lease is process-local by construction.
+func (m *MemoryStore) AcquireWriterLease(_ context.Context, tenantID uuid.UUID) (WriterLease, error) {
+	if tenantID == uuid.Nil {
+		return nil, fmt.Errorf("%w: tenant is required", collab.ErrTenantRequired)
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	key := tenantKey(tenantID)
+	if m.leases[key] {
+		return nil, ErrWriterLeaseHeld
+	}
+	m.leases[key] = true
+	return &memoryWriterLease{store: m, key: key}, nil
+}
+
+type memoryWriterLease struct {
+	store *MemoryStore
+	key   string
+}
+
+func (l *memoryWriterLease) Release(context.Context) error {
+	if l == nil || l.store == nil {
+		return nil
+	}
+	l.store.mu.Lock()
+	defer l.store.mu.Unlock()
+	delete(l.store.leases, l.key)
+	return nil
 }
 
 func (m *MemoryStore) ListAssignmentsByStatus(_ context.Context, tenantID uuid.UUID, statuses ...collab.AssignmentStatus) ([]collab.Assignment, error) {

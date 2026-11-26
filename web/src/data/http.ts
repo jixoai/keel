@@ -38,12 +38,15 @@ import type {
   DeliverablesOptions,
   DeliverablesView,
   SuperagentAnswerInput,
+  SuperagentAnswerReceiptView,
+  SuperagentAnswerResult,
   SuperagentAssignmentView,
   SuperagentAttentionInboxView,
   SuperagentAttentionOptionView,
   SuperagentAttentionView,
   SuperagentBoardView,
   SuperagentMandateView,
+  SuperagentPendingView,
   SuperagentTicketView,
   SuperagentThreadView,
   SuperagentActorView,
@@ -751,6 +754,43 @@ function parseSuperagentAssignment(value: unknown): SuperagentAssignmentView | u
   return assignment;
 }
 
+function parseSuperagentPending(value: unknown): SuperagentPendingView | undefined {
+  const row = asRecord(value);
+  const id = asText(row.id);
+  if (!id) return undefined;
+  const pending: SuperagentPendingView = { id };
+  if (asText(row.kind)) pending.kind = asText(row.kind);
+  if (asText(row.text)) pending.text = asText(row.text);
+  if (asText(row.title)) pending.title = asText(row.title);
+  if (asText(row.body)) pending.body = asText(row.body);
+  if (asText(row.attentionId)) pending.attentionId = asText(row.attentionId);
+  if (asText(row.optionId)) pending.optionId = asText(row.optionId);
+  if (asText(row.answerText)) pending.answerText = asText(row.answerText);
+  if (asText(row.nextAttemptAt)) pending.nextAttemptAt = asText(row.nextAttemptAt);
+  if (asText(row.lastError)) pending.lastError = asText(row.lastError);
+  if (asText(row.createdAt)) pending.createdAt = asText(row.createdAt);
+  if (row.trusted === true) pending.trusted = true;
+  if (row.allowDispatch === true) pending.allowDispatch = true;
+  if (row.failed === true) pending.failed = true;
+  if (typeof row.attempts === "number" && Number.isFinite(row.attempts)) pending.attempts = row.attempts;
+  return pending;
+}
+
+function parseSuperagentReceipt(value: unknown): SuperagentAnswerReceiptView | undefined {
+  const row = asRecord(value);
+  const attentionId = asText(row.attentionId);
+  if (!attentionId) return undefined;
+  const receipt: SuperagentAnswerReceiptView = { attentionId };
+  if (asText(row.optionId)) receipt.optionId = asText(row.optionId);
+  if (asText(row.text)) receipt.text = asText(row.text);
+  if (asText(row.actor)) receipt.actor = asText(row.actor);
+  if (asText(row.deliveredAt)) receipt.deliveredAt = asText(row.deliveredAt);
+  if (asText(row.via)) receipt.via = asText(row.via);
+  if (row.commentQueued === true) receipt.commentQueued = true;
+  if (row.dismissed === true) receipt.dismissed = true;
+  return receipt;
+}
+
 function parseSuperagentTicket(value: unknown): SuperagentTicketView | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
   const row = asRecord(value);
@@ -803,6 +843,25 @@ function parseSuperagentTicket(value: unknown): SuperagentTicketView | undefined
   if (typeof openAttentionCount === "number" && Number.isFinite(openAttentionCount)) {
     ticket.openAttentionCount = openAttentionCount;
   }
+  ticket.pending = listOf(row.pending).flatMap((item): SuperagentPendingView[] => {
+    const pending = parseSuperagentPending(item);
+    return pending ? [pending] : [];
+  });
+  if (typeof row.pendingCount === "number" && Number.isFinite(row.pendingCount)) {
+    ticket.pendingCount = row.pendingCount;
+  } else {
+    ticket.pendingCount = ticket.pending.length;
+  }
+  const failedPending = ticket.pending.filter((entry) => entry.failed === true).length;
+  if (typeof row.failedPendingCount === "number" && Number.isFinite(row.failedPendingCount)) {
+    ticket.failedPendingCount = row.failedPendingCount;
+  } else {
+    ticket.failedPendingCount = failedPending;
+  }
+  ticket.answers = listOf(row.answers).flatMap((item): SuperagentAnswerReceiptView[] => {
+    const receipt = parseSuperagentReceipt(item);
+    return receipt ? [receipt] : [];
+  });
   return ticket;
 }
 
@@ -2046,26 +2105,66 @@ export class KeelHttp implements SettingsApi {
   }
 
   /** `POST /v1/superagent/attention/{id}/answer` — one durable operator
-   * answer (an option, free text, or both when the question allowed it). */
+   * answer (an option, free text, or both when the question allowed it). 202
+   * means the decision is recorded but the worker has not received it yet; 409
+   * `answer_delivery_failed` means it is recorded and its delivery needs an
+   * operator retry on the board. Both are "recorded" facts, not lost answers. */
   async answerSuperagentAttention(
     attentionId: string,
     answer: SuperagentAnswerInput,
-  ): Promise<SuperagentAttentionView> {
+  ): Promise<SuperagentAnswerResult> {
     const body: Record<string, string> = {};
     if (answer.optionId) body.optionId = answer.optionId;
     if (answer.text) body.text = answer.text;
+    try {
+      const response = await this.request(
+        `/v1/superagent/attention/${encodeURIComponent(attentionId)}/answer`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        },
+      );
+      const document = asRecord(await response.json());
+      const attention = parseSuperagentAttention(document.attention);
+      if (!attention) throw new KeelApiError(500, "服务端返回了无法识别的答复结果");
+      return { attention, deliveryPending: document.deliveryPending === true };
+    } catch (error) {
+      if (
+        error instanceof KeelApiError &&
+        error.status === 409 &&
+        (error.code === "answer_delivery_failed" || error.code === "answer_not_delivered")
+      ) {
+        return { deliveryFailed: true, deliveryCode: error.code };
+      }
+      throw error;
+    }
+  }
+
+  /** `POST /v1/superagent/tickets/{id}/pending/{pendingId}/retry` — re-arm a
+   * durable input whose delivery failed permanently. */
+  async retrySuperagentPending(ticketId: string, pendingId: string): Promise<SuperagentTicketView> {
     const response = await this.request(
-      `/v1/superagent/attention/${encodeURIComponent(attentionId)}/answer`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      },
+      `/v1/superagent/tickets/${encodeURIComponent(ticketId)}/pending/${encodeURIComponent(pendingId)}/retry`,
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" },
     );
-    const document = asRecord(await response.json());
-    const attention = parseSuperagentAttention(document.attention);
-    if (!attention) throw new KeelApiError(500, "服务端返回了无法识别的答复结果");
-    return attention;
+    const body = asRecord(await response.json());
+    const ticket = parseSuperagentTicket(body.ticket);
+    if (!ticket) throw new KeelApiError(500, "服务端返回了无法识别的工单");
+    return ticket;
+  }
+
+  /** `POST /v1/superagent/tickets/{id}/pending/{pendingId}/dismiss` — drop a
+   * durable input at the operator's explicit request. */
+  async dismissSuperagentPending(ticketId: string, pendingId: string): Promise<SuperagentTicketView> {
+    const response = await this.request(
+      `/v1/superagent/tickets/${encodeURIComponent(ticketId)}/pending/${encodeURIComponent(pendingId)}/dismiss`,
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" },
+    );
+    const body = asRecord(await response.json());
+    const ticket = parseSuperagentTicket(body.ticket);
+    if (!ticket) throw new KeelApiError(500, "服务端返回了无法识别的工单");
+    return ticket;
   }
 
   /** `POST /v1/superagent/tickets/{id}/resume` — reopen a blocked/finished

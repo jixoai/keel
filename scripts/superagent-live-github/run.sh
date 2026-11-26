@@ -133,9 +133,11 @@ say "gh account: $LOGIN"
 # ---- test repository (only a keel-test-* repository is ever written) -------
 REPO="${KEEL_LIVE_REPO:-}"
 if [[ -z "$REPO" ]]; then
-  REPO="keel-test-superagent-e2e-$STAMP"
-  say "creating test repository $LOGIN/$REPO"
-  gh repo create "$LOGIN/$REPO" --public --add-readme \
+  # The deployment and the driver both use owner/name (the Channel key is
+  # "owner/repo#issue"), so the created repository keeps its owner prefix.
+  REPO="$LOGIN/keel-test-superagent-e2e-$STAMP"
+  say "creating test repository $REPO"
+  gh repo create "$REPO" --public --add-readme \
     --description "Keel super-agent live GitHub E2E (throwaway)" >/dev/null || fail "gh repo create failed"
 fi
 [[ "$REPO" == *"/keel-test-"* || "$REPO" == keel-test-* ]] || fail "refusing repo $REPO: the name must contain keel-test-"

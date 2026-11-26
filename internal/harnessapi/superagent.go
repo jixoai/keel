@@ -33,11 +33,16 @@ type SuperagentService interface {
 	AnswerAttention(ctx context.Context, tenantID, attentionID uuid.UUID, optionID, text, actor string) (collab.Attention, error)
 	ResumeTicket(ctx context.Context, tenantID, ticketID uuid.UUID, actor, reason string) (superagent.Ticket, error)
 	StopTicket(ctx context.Context, tenantID, ticketID uuid.UUID, actor, reason string) error
+	// RetryPending/DismissPending are the operator recovery for a durable input
+	// whose delivery failed permanently. The Board already shows the entry; these
+	// are the two explicit decisions an operator can take on it.
+	RetryPending(ctx context.Context, tenantID, ticketID uuid.UUID, pendingID, actor string) (superagent.Ticket, error)
+	DismissPending(ctx context.Context, tenantID, ticketID uuid.UUID, pendingID, actor string) (superagent.Ticket, error)
 }
 
 // superagentRoutes mounts the read projections and the minimal write loop:
-// worker report/ask, operator answer/resume/stop. Ticket creation remains a
-// Source event, never an HTTP create route.
+// worker report/ask, operator answer/resume/stop and the pending-input recovery.
+// Ticket creation remains a Source event, never an HTTP create route.
 func (s *Server) superagentRoutes() {
 	s.mux.HandleFunc("GET /v1/superagent/tickets", s.listSuperagentTickets)
 	s.mux.HandleFunc("GET /v1/superagent/attention", s.listSuperagentAttention)
@@ -46,6 +51,8 @@ func (s *Server) superagentRoutes() {
 	s.mux.HandleFunc("POST /v1/superagent/attention/{id}/answer", s.superagentAnswer)
 	s.mux.HandleFunc("POST /v1/superagent/tickets/{id}/resume", s.superagentResume)
 	s.mux.HandleFunc("POST /v1/superagent/tickets/{id}/stop", s.superagentStop)
+	s.mux.HandleFunc("POST /v1/superagent/tickets/{id}/pending/{pendingId}/retry", s.superagentRetryPending)
+	s.mux.HandleFunc("POST /v1/superagent/tickets/{id}/pending/{pendingId}/dismiss", s.superagentDismissPending)
 }
 
 func (s *Server) superagentReady(w http.ResponseWriter, r *http.Request, key string) (uuid.UUID, access.Principal, bool) {
@@ -204,10 +211,88 @@ func (s *Server) superagentAnswer(w http.ResponseWriter, r *http.Request) {
 	}
 	attention, err := s.cfg.Superagent.AnswerAttention(r.Context(), tenantID, attentionID, body.OptionID, body.Text, operatorActor(principal))
 	if err != nil {
+		switch {
+		case errors.Is(err, superagent.ErrAnswerDeliveryPending):
+			// The decision is durable; the worker has not received it yet. 202 is
+			// the honest answer, and the body carries both facts so a client can
+			// say "recorded, waiting for delivery" instead of "answer failed".
+			writeJSON(w, http.StatusAccepted, map[string]any{
+				"attention":       attention,
+				"deliveryPending": true,
+			})
+			return
+		case errors.Is(err, superagent.ErrAnswerDeliveryFailed):
+			writeJSON(w, http.StatusConflict, map[string]any{
+				"error":          "the answer is recorded but delivery failed; retry or dismiss it on the ticket board",
+				"code":           "answer_delivery_failed",
+				"attention":      attention,
+				"deliveryFailed": true,
+			})
+			return
+		case errors.Is(err, superagent.ErrAnswerNotDelivered):
+			writeJSON(w, http.StatusConflict, map[string]any{
+				"error":          "the answer is recorded but the ticket closed before a worker received it",
+				"code":           "answer_not_delivered",
+				"attention":      attention,
+				"deliveryFailed": true,
+			})
+			return
+		case errors.Is(err, superagent.ErrPendingNotDeliverable):
+			writeErr(w, http.StatusServiceUnavailable, err)
+			return
+		}
 		writeSuperagentError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"attention": attention})
+}
+
+// superagentRetryPending re-arms one durable pending input (the operator's
+// explicit recovery from a permanently failed delivery).
+func (s *Server) superagentRetryPending(w http.ResponseWriter, r *http.Request) {
+	tenantID, principal, ok := s.superagentReady(w, r, access.KeyTaskWrite)
+	if !ok {
+		return
+	}
+	ticketID, ok := superagentTicketID(w, r)
+	if !ok {
+		return
+	}
+	pendingID := strings.TrimSpace(r.PathValue("pendingId"))
+	if pendingID == "" {
+		writeErr(w, http.StatusBadRequest, errors.New("pendingId is required"))
+		return
+	}
+	ticket, err := s.cfg.Superagent.RetryPending(r.Context(), tenantID, ticketID, pendingID, operatorActor(principal))
+	if err != nil {
+		writeSuperagentError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ticket": ticket})
+}
+
+// superagentDismissPending removes one durable pending input at the operator's
+// request; an undelivered answer leaves a durable abandonment marker.
+func (s *Server) superagentDismissPending(w http.ResponseWriter, r *http.Request) {
+	tenantID, principal, ok := s.superagentReady(w, r, access.KeyTaskWrite)
+	if !ok {
+		return
+	}
+	ticketID, ok := superagentTicketID(w, r)
+	if !ok {
+		return
+	}
+	pendingID := strings.TrimSpace(r.PathValue("pendingId"))
+	if pendingID == "" {
+		writeErr(w, http.StatusBadRequest, errors.New("pendingId is required"))
+		return
+	}
+	ticket, err := s.cfg.Superagent.DismissPending(r.Context(), tenantID, ticketID, pendingID, operatorActor(principal))
+	if err != nil {
+		writeSuperagentError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ticket": ticket})
 }
 
 type superagentOperatorBody struct {

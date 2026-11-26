@@ -228,6 +228,9 @@ var rules = []Rule{
 	route(http.MethodPost, "/v1/superagent/tickets/{id}/resume", ModeHeldKey, access.KeyTaskWrite),
 	route(http.MethodPost, "/v1/superagent/tickets/{id}/stop", ModeHeldKey, access.KeyTaskWrite),
 	route(http.MethodPost, "/v1/superagent/attention/{id}/answer", ModeHeldKey, access.KeyTaskWrite),
+	// The operator recovery for a durable input whose delivery failed.
+	route(http.MethodPost, "/v1/superagent/tickets/{id}/pending/{pendingId}/retry", ModeHeldKey, access.KeyTaskWrite),
+	route(http.MethodPost, "/v1/superagent/tickets/{id}/pending/{pendingId}/dismiss", ModeHeldKey, access.KeyTaskWrite),
 
 	// --- realtime voice bridge ---------------------------------------------
 	resource(http.MethodGet, "/v1/realtime", access.KeySessionRead, "session", "query:session_id"),

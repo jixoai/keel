@@ -148,6 +148,21 @@ const TICKETS: SuperagentTicketView[] = [
     activeAssignment: { id: "as-4", botId: "bot-order", status: "failed", error: "对账接口返回 502" },
     attentionCount: 0,
     openAttentionCount: 0,
+    pending: [
+      {
+        id: "fixture:manual-76:edit-1",
+        kind: "followup",
+        text: "Issue body: 日终对账文件改走手工上传。",
+        trusted: true,
+        allowDispatch: true,
+        attempts: 12,
+        lastError: "superagent: this deployment cannot deliver input to a worker",
+        failed: true,
+        createdAt: "2026-11-26T08:02:00Z",
+      },
+    ],
+    pendingCount: 1,
+    failedPendingCount: 1,
   },
   {
     id: "t-expired",
@@ -262,6 +277,22 @@ const API = (name: string): SuperagentApi => ({
   async stopSuperagentTicket(_ticketId: string) {
     if (name === "board-write-error") throw new KeelApiError(500, "停止传播失败", [], undefined, undefined, {}, "k-stop-1");
     return;
+  },
+  async retrySuperagentPending(ticketId: string, pendingId: string) {
+    if (name === "board-write-error") throw operatorForbidden();
+    const ticket = TICKETS.find((row) => row.id === ticketId);
+    if (!ticket) throw new KeelApiError(404, "ticket not found");
+    const pending = (ticket.pending ?? []).map((entry) =>
+      entry.id === pendingId ? { ...entry, failed: false, attempts: (entry.attempts ?? 0) + 1 } : entry,
+    );
+    return { ...ticket, pending, failedPendingCount: pending.filter((entry) => entry.failed === true).length };
+  },
+  async dismissSuperagentPending(ticketId: string, pendingId: string) {
+    if (name === "board-write-error") throw operatorForbidden();
+    const ticket = TICKETS.find((row) => row.id === ticketId);
+    if (!ticket) throw new KeelApiError(404, "ticket not found");
+    const pending = (ticket.pending ?? []).filter((entry) => entry.id !== pendingId);
+    return { ...ticket, pending, pendingCount: pending.length, failedPendingCount: 0 };
   },
 });
 

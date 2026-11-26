@@ -1,0 +1,3 @@
+schema: spec-driven
+created: 2026-11-27
+goal: Answer/pending durability, trusted dispatch and operator recovery for the super-agent queue

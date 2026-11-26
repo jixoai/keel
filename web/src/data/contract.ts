@@ -758,6 +758,40 @@ export interface SuperagentAssignmentView {
   updatedAt?: string;
 }
 
+/** `superagent.PendingFollowUp` — one durable input that has not reached a
+ * worker yet. `failed` is the permanent state an operator can retry or dismiss;
+ * `allowDispatch` is false for untrusted thread context (it may ride an existing
+ * worker, never start one). */
+export interface SuperagentPendingView {
+  id: string;
+  kind?: string;
+  text?: string;
+  title?: string;
+  body?: string;
+  attentionId?: string;
+  trusted?: boolean;
+  allowDispatch?: boolean;
+  optionId?: string;
+  answerText?: string;
+  attempts?: number;
+  nextAttemptAt?: string;
+  lastError?: string;
+  failed?: boolean;
+  createdAt?: string;
+}
+
+/** `superagent.AnswerReceipt` — durable delivery evidence of one answer. */
+export interface SuperagentAnswerReceiptView {
+  attentionId: string;
+  optionId?: string;
+  text?: string;
+  actor?: string;
+  deliveredAt?: string;
+  via?: string;
+  commentQueued?: boolean;
+  dismissed?: boolean;
+}
+
 /** One row of the board (`superagent.TicketView`): the ticket, its mandate and
  * the counts the row projects. */
 export interface SuperagentTicketView {
@@ -778,6 +812,10 @@ export interface SuperagentTicketView {
   activeAssignment?: SuperagentAssignmentView;
   attentionCount?: number;
   openAttentionCount?: number;
+  pending?: SuperagentPendingView[];
+  pendingCount?: number;
+  failedPendingCount?: number;
+  answers?: SuperagentAnswerReceiptView[];
 }
 
 export interface SuperagentBoardView {
@@ -838,15 +876,27 @@ export interface SuperagentAnswerInput {
   text?: string;
 }
 
+/** The answer route's answer. A recorded answer that has not reached a worker
+ * is `deliveryPending` (202); a permanent refusal is `deliveryFailed` (409) and
+ * the board's pending entry is the retry surface. */
+export interface SuperagentAnswerResult {
+  attention?: SuperagentAttentionView;
+  deliveryPending?: boolean;
+  deliveryFailed?: boolean;
+  deliveryCode?: string;
+}
+
 /** The super-agent board/write surface. `KeelHttp` and the fixture client both
  * implement it, so the page and its tests run against one transport contract.
  * All writes go through the shared CSRF/error path. */
 export interface SuperagentApi {
   superagentBoard(filter?: { status?: string; limit?: number }): Promise<SuperagentBoardView>;
   superagentAttention(): Promise<SuperagentAttentionInboxView>;
-  answerSuperagentAttention(attentionId: string, answer: SuperagentAnswerInput): Promise<SuperagentAttentionView>;
+  answerSuperagentAttention(attentionId: string, answer: SuperagentAnswerInput): Promise<SuperagentAnswerResult>;
   resumeSuperagentTicket(ticketId: string, reason?: string): Promise<SuperagentTicketView>;
   stopSuperagentTicket(ticketId: string, reason?: string): Promise<void>;
+  retrySuperagentPending(ticketId: string, pendingId: string): Promise<SuperagentTicketView>;
+  dismissSuperagentPending(ticketId: string, pendingId: string): Promise<SuperagentTicketView>;
 }
 
 /** A trigger as the plugin manifest declares it. */

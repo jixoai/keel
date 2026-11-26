@@ -52,6 +52,7 @@ import type {
   SessionTasksView,
   SettingsApi,
   SuperagentAnswerInput,
+  SuperagentAnswerResult,
   SuperagentAttentionInboxView,
   SuperagentAttentionView,
   SuperagentBoardView,
@@ -656,6 +657,21 @@ export class FixtureClient implements SettingsApi {
       assignmentCount: 1,
       attentionCount: 0,
       openAttentionCount: 0,
+      pending: [
+        {
+          id: "fixture:manual-76:edit-1",
+          kind: "followup",
+          text: "Issue body: 接口恢复后重试；日终对账文件改走手工上传。",
+          trusted: true,
+          allowDispatch: true,
+          attempts: 12,
+          lastError: "superagent: this deployment cannot deliver input to a worker",
+          failed: true,
+          createdAt: isoAt(-1_800_000),
+        },
+      ],
+      pendingCount: 1,
+      failedPendingCount: 1,
     },
     {
       id: "6a2f1c3e-4b5d-4e6f-8a90-1b2c3d4e5f05",
@@ -1768,7 +1784,7 @@ export class FixtureClient implements SettingsApi {
   async answerSuperagentAttention(
     attentionId: string,
     answer: SuperagentAnswerInput,
-  ): Promise<SuperagentAttentionView> {
+  ): Promise<SuperagentAnswerResult> {
     const attention = this.superagentAttentions.find((row) => row.id === attentionId);
     if (!attention) throw new KeelApiError(404, `attention ${attentionId} was not found`);
     if (attention.status !== "open") {
@@ -1800,7 +1816,34 @@ export class FixtureClient implements SettingsApi {
       if (ticket.activeAssignment) ticket.activeAssignment.updatedAt = nowISO();
       this.superagentCountsOf(ticket);
     }
-    return this.clone(attention);
+    return { attention: this.clone(attention) };
+  }
+
+  /** The demo's retry succeeds and removes the entry (the live server may keep
+   * it with a fresh attempt/error; the UI reads whatever the board says). */
+  async retrySuperagentPending(ticketId: string, pendingId: string): Promise<SuperagentTicketView> {
+    const ticket = this.superagentTicket(ticketId);
+    const entry = (ticket.pending ?? []).find((row) => row.id === pendingId);
+    if (!entry) throw new KeelApiError(404, `pending ${pendingId} was not found`);
+    ticket.pending = (ticket.pending ?? []).filter((row) => row.id !== pendingId);
+    ticket.pendingCount = ticket.pending.length;
+    ticket.failedPendingCount = ticket.pending.filter((row) => row.failed === true).length;
+    ticket.updatedAt = nowISO();
+    this.superagentCountsOf(ticket);
+    return this.clone(ticket);
+  }
+
+  async dismissSuperagentPending(ticketId: string, pendingId: string): Promise<SuperagentTicketView> {
+    const ticket = this.superagentTicket(ticketId);
+    if (!(ticket.pending ?? []).some((row) => row.id === pendingId)) {
+      throw new KeelApiError(404, `pending ${pendingId} was not found`);
+    }
+    ticket.pending = (ticket.pending ?? []).filter((row) => row.id !== pendingId);
+    ticket.pendingCount = ticket.pending.length;
+    ticket.failedPendingCount = ticket.pending.filter((row) => row.failed === true).length;
+    ticket.updatedAt = nowISO();
+    this.superagentCountsOf(ticket);
+    return this.clone(ticket);
   }
 
   async resumeSuperagentTicket(ticketId: string, reason?: string): Promise<SuperagentTicketView> {

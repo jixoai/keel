@@ -1,7 +1,13 @@
 # collaboration-superagent Specification
 
 ## Purpose
-TBD - created by archiving change keel-collab-superagent. Update Purpose after archive.
+The super-agent collaboration mode: an orchestrator Bot turns external Source
+events into Tickets with a recorded Mandate, dispatches them to Worker Bot
+sessions through the guarded collaboration Host, routes structured Attention back
+to the source thread, and writes results back through a durable Channel outbox.
+Tickets, Assignments and Attentions are tenant-scoped durable records independent
+of any Worker session's lifetime; answers and follow-ups are durable inputs with
+at-least-once delivery and an operator recovery surface.
 
 ## Requirements
 

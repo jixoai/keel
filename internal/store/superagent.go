@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jixoai/keel/internal/collab"
 	"github.com/jixoai/keel/internal/superagent"
 )
@@ -1198,6 +1200,96 @@ func (s *Store) ActiveInMode(ctx context.Context, tenantID uuid.UUID, modeID str
 		return 0, fmt.Errorf("store: count active mode sessions: %w", err)
 	}
 	return count, nil
+}
+
+// ListAttentionsByStatus lists the newest attention rows in the named states
+// (all states for an empty list), newest first, bounded by limit. The answer
+// recovery scan uses one query instead of walking every ticket.
+func (s *Store) ListAttentionsByStatus(ctx context.Context, tenantID uuid.UUID, limit int, statuses ...collab.AttentionStatus) ([]collab.Attention, error) {
+	values := make([]string, 0, len(statuses))
+	for _, status := range statuses {
+		values = append(values, string(status))
+	}
+	if limit <= 0 {
+		limit = 200
+	}
+	return s.listAttentions(ctx, `
+		SELECT tenant_id, attention_id, work_item_id, assignment_id, mode_id, session_id, request_id,
+		       kind, prompt, options, allow_free_text, route, channel, status, answer, created_at, deadline
+		  FROM collab_attentions
+		 WHERE tenant_id = $1 AND (cardinality($2::text[]) = 0 OR status = ANY($2::text[]))
+		 ORDER BY created_at DESC, attention_id DESC
+		 LIMIT $3`, tenantID, values, limit)
+}
+
+// AcquireWriterLease takes a session-scoped PostgreSQL advisory lock for this
+// tenant's super-agent queue. The lock lives on a dedicated pooled connection
+// for the process lifetime: a second process gets ErrWriterLeaseHeld and fails
+// closed (it never polls or delivers), and a crashed process's lock is released
+// with its connection. No row is written, so there is nothing to garbage
+// collect after a kill -9.
+func (s *Store) AcquireWriterLease(ctx context.Context, tenantID uuid.UUID) (superagent.WriterLease, error) {
+	if tenantID == uuid.Nil {
+		return nil, collabError(collab.ErrTenantRequired, collab.CodeTenantRequired, "acquire_writer_lease", "tenant is required")
+	}
+	if s.pool == nil {
+		return nil, fmt.Errorf("store: acquire writer lease: no database pool")
+	}
+	key := superagentWriterLockKey(tenantID)
+	conn, err := s.pool.Acquire(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("store: acquire writer lease connection: %w", err)
+	}
+	var locked bool
+	if err := conn.QueryRow(ctx, "SELECT pg_try_advisory_lock($1)", key).Scan(&locked); err != nil {
+		conn.Release()
+		return nil, fmt.Errorf("store: acquire writer lease: %w", err)
+	}
+	if !locked {
+		conn.Release()
+		return nil, superagent.ErrWriterLeaseHeld
+	}
+	return &superagentWriterLease{conn: conn, key: key}, nil
+}
+
+// superagentWriterLockKey is a stable 64-bit key per tenant. The advisory lock
+// space is shared by the whole database, so the constant namespace separates
+// this lock from the MCP OAuth session locks.
+func superagentWriterLockKey(tenantID uuid.UUID) int64 {
+	hash := fnv.New64a()
+	_, _ = hash.Write([]byte("keel.superagent.writer|" + tenantID.String()))
+	return int64(hash.Sum64())
+}
+
+type superagentWriterLease struct {
+	conn *pgxpool.Conn
+	key  int64
+}
+
+// Release unlocks the advisory lock and returns the connection. A failed unlock
+// destroys the connection instead of pooling it, so a lock can never leak to a
+// later holder.
+func (l *superagentWriterLease) Release(context.Context) error {
+	if l == nil || l.conn == nil {
+		return nil
+	}
+	conn := l.conn
+	l.conn = nil
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	var unlocked bool
+	err := conn.QueryRow(ctx, "SELECT pg_advisory_unlock($1)", l.key).Scan(&unlocked)
+	if err == nil && unlocked {
+		conn.Release()
+		return nil
+	}
+	if raw := conn.Hijack(); raw != nil {
+		_ = raw.Close(context.Background())
+	}
+	if err != nil {
+		return fmt.Errorf("store: release writer lease: %w", err)
+	}
+	return fmt.Errorf("store: writer lease was not held at release")
 }
 
 func collabError(kind error, code collab.ErrorCode, operation, detail string) *collab.Error {

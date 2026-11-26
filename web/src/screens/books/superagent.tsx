@@ -1055,8 +1055,124 @@ function TicketDetailBody() {
         )}
       </Each>
 
+      <SectionLabel text="待投递输入" note={`${ticket().failedPendingCount ?? 0} 个失败 / ${ticket().pendingCount ?? (ticket().pending?.length ?? 0)} 个待投递`} />
+      <PendingInputs />
+
       <Hairline />
       <TicketActions />
+    </View>
+  );
+}
+
+/** A pending input's id is a server fact ("fixture:e1", "attention:<uuid>");
+ * the DOM/test id keeps it readable without its separators. */
+const pendingDomId = (id: string): string => id.replace(/[^a-zA-Z0-9_-]+/g, "-");
+
+/** The durable input queue of one ticket: an answer or follow-up captured for a
+ * worker but not yet delivered. A failed entry is the operator's decision point
+ * (retry after fixing the seam, or dismiss); it is never silently dropped. */
+function PendingInputs() {
+  const ticket = () => activeTicket() ?? emptyTicket("");
+  const entries = () => ticket().pending ?? [];
+  const writable = () => can("task.write");
+  const actionOf = (id: string) => {
+    const action = superagentAccess.action();
+    return action?.id === id ? action.kind : null;
+  };
+  const failureOf = (id: string) => {
+    const failure = superagentAccess.actionError();
+    return failure && failure.id === id ? failure : null;
+  };
+  return (
+    <View testID="superagent-detail-pending" style={{ flexDirection: "column", gap: space.sm }}>
+      <If when={entries().length === 0}>
+        <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>没有等待投递的输入。</Text>
+      </If>
+      <Each of={entries()} key={(entry) => entry.id}>
+        {(entry) => {
+          const domId = `superagent-pending-${pendingDomId(entry().id)}`;
+          return (
+            <View
+              testID={domId}
+              style={{
+                flexDirection: "column",
+                gap: space.xs,
+                padding: space.sm,
+                borderRadius: radius.sm,
+                borderWidth: 1,
+                borderColor: entry().failed ? color.danger : color.border,
+                backgroundColor: color.muted,
+              }}
+            >
+              <View style={{ flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: space.sm }}>
+                <Badge
+                  variant={entry().failed ? "destructive" : "warning"}
+                  label={entry().failed ? "投递失败" : "等待投递"}
+                  testID={`${domId}-status`}
+                />
+                <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>
+                  {entry().kind === "attention_answer" ? "人工答复" : entry().allowDispatch ? "人类跟进" : "不可信上下文"}
+                  {" · "}尝试 {entry().attempts ?? 0} 次
+                </Text>
+              </View>
+              <Text style={{ fontSize: typeScale.sm, lineHeight: Math.round(typeScale.sm * lineHeight.normal), color: color.foreground }}>
+                {entry().text || "（没有正文）"}
+              </Text>
+              <If when={entry().lastError}>
+                <Text testID={`${domId}-error`} style={{ fontSize: typeScale.sm, color: color.danger }}>
+                  错误：{entry().lastError}
+                </Text>
+              </If>
+              <If when={writable()}>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm }}>
+                  <Button
+                    testID={`${domId}-retry`}
+                    size="field"
+                    icon="play"
+                    label={actionOf(entry().id) === "retry" ? "重试中…" : "重试投递"}
+                    accessibilityLabel="重试投递"
+                    disabled={actionOf(entry().id) !== null}
+                    loading={actionOf(entry().id) === "retry"}
+                    onPress={() => {
+                      const current = ticket();
+                      if (current) void superagentAccess.retryPending(current.id, entry().id);
+                    }}
+                    style={touchStyle()}
+                  />
+                  <Button
+                    testID={`${domId}-dismiss`}
+                    variant="destructive"
+                    size="field"
+                    icon="trash"
+                    label={actionOf(entry().id) === "dismiss" ? "清除中…" : "清除"}
+                    accessibilityLabel="清除这条待投递输入"
+                    disabled={actionOf(entry().id) !== null}
+                    loading={actionOf(entry().id) === "dismiss"}
+                    onPress={() => {
+                      const current = ticket();
+                      if (current) void superagentAccess.dismissPending(current.id, entry().id);
+                    }}
+                    style={touchStyle()}
+                  />
+                </View>
+              </If>
+              <If when={failureOf(entry().id) !== null}>
+                <StateNote
+                  testID={`${domId}-action-error`}
+                  tone="danger"
+                  icon="alert"
+                  text={failureOf(entry().id)?.failure.message ?? ""}
+                />
+              </If>
+            </View>
+          );
+        }}
+      </Each>
+      <If when={!writable() && entries().length > 0}>
+        <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>
+          你的账号缺少「写任务」（task.write）能力，不能重试或清除待投递输入。{permissionHint("task.write")}
+        </Text>
+      </If>
     </View>
   );
 }

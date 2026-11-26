@@ -159,6 +159,8 @@ type recordingSink struct {
 	delivered []superagent.InputRequest
 	// failNext makes the next n Deliver calls fail (retry tests).
 	failNext int
+	// failWith is the error failNext returns (nil = a generic channel error).
+	failWith error
 }
 
 func (s *recordingSink) Deliver(_ context.Context, request superagent.InputRequest) error {
@@ -166,6 +168,9 @@ func (s *recordingSink) Deliver(_ context.Context, request superagent.InputReque
 	defer s.mu.Unlock()
 	if s.failNext > 0 {
 		s.failNext--
+		if s.failWith != nil {
+			return s.failWith
+		}
 		return errors.New("delivery channel down")
 	}
 	s.delivered = append(s.delivered, request)
@@ -228,12 +233,17 @@ type envOpts struct {
 	tree          superagent.WorkerTreeCanceller
 	// inputs overrides the recording sink (a NoopInputSink test).
 	inputs superagent.InputSink
+	// store wraps the memory store for the outbox and orchestrator (fault
+	// injection). The Host keeps the raw store, so only product-side writes are
+	// injected.
+	store func(*superagent.MemoryStore) superagent.Store
 }
 
 type testEnv struct {
 	tenant              uuid.UUID
 	clock               *time.Time
 	store               *superagent.MemoryStore
+	work                superagent.Store
 	registry            *collab.ModeRegistry
 	sessions            *collab.MemorySessionIndex
 	launcher            *fakeLauncher
@@ -267,6 +277,10 @@ func newEnv(t *testing.T, opts envOpts) *testEnv {
 	}
 	env.registry = registry
 	env.store = superagent.NewMemoryStore(func() time.Time { return *env.clock })
+	env.work = env.store
+	if opts.store != nil {
+		env.work = opts.store(env.store)
+	}
 	env.sessions = collab.NewMemorySessionIndex()
 	env.launcher = &fakeLauncher{}
 	env.permissions = &fakePermissions{}
@@ -282,7 +296,7 @@ func newEnv(t *testing.T, opts envOpts) *testEnv {
 		t.Fatalf("put orchestrator session: %v", err)
 	}
 	outbox, err := superagent.NewOutbox(superagent.OutboxOptions{
-		Store: env.store, Channel: env.source, Now: func() time.Time { return *env.clock },
+		Store: env.work, Channel: env.source, Now: func() time.Time { return *env.clock },
 		Backoff: func(int) time.Duration { return time.Second }, Audit: env.audit,
 	})
 	if err != nil {
@@ -306,7 +320,7 @@ func (e *testEnv) newOrchestrator(t *testing.T, opts envOpts) *superagent.Orches
 	t.Helper()
 	var slots *superagent.Slots
 	if opts.slots > 0 {
-		slots = superagent.NewSlots(e.store, superagent.SlotPolicy{Max: opts.slots, HumanReserved: opts.humanReserved})
+		slots = superagent.NewSlots(e.work, superagent.SlotPolicy{Max: opts.slots, HumanReserved: opts.humanReserved})
 	}
 	var operator superagent.OperatorAuthorizer = allowOperator{}
 	if opts.noOperator {
@@ -323,7 +337,7 @@ func (e *testEnv) newOrchestrator(t *testing.T, opts envOpts) *superagent.Orches
 		inputs = opts.inputs
 	}
 	orch, err := superagent.NewOrchestrator(superagent.Config{
-		TenantID: e.tenant, Store: e.store, Host: e.host, Source: e.source, Channel: e.source,
+		TenantID: e.tenant, Store: e.work, Host: e.host, Source: e.source, Channel: e.source,
 		Policy:              policy,
 		Inputs:              inputs,
 		Sessions:            e.sessions,

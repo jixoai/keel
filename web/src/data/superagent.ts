@@ -274,7 +274,7 @@ export interface SuperagentFailure {
   requiredKey?: string;
 }
 
-export type SuperagentActionKind = "answer" | "resume" | "stop";
+export type SuperagentActionKind = "answer" | "resume" | "stop" | "retry" | "dismiss";
 
 export interface SuperagentActionState {
   id: string;
@@ -438,7 +438,9 @@ class SuperagentAccess {
   }
 
   /** Answer one question. The refresh is part of the operation: an answered
-   * question leaves the inbox and its ticket moves on in the same turn. */
+   * question leaves the inbox and its ticket moves on in the same turn. A 202
+   * (`deliveryPending`) keeps the answer and says it is waiting for the worker;
+   * a recorded-but-failed delivery points at the ticket board's retry entry. */
   async answer(attentionId: string, input: SuperagentAnswerInput): Promise<boolean> {
     if (!this.canWrite()) return false;
     if (this.action()) return false;
@@ -448,15 +450,65 @@ class SuperagentAccess {
     this.notice.set(null);
     try {
       if (!api) throw new Error("这个部署没有接通超级助理看板。");
-      await api.answerSuperagentAttention(attentionId, input);
+      const result = await api.answerSuperagentAttention(attentionId, input);
       await this.load();
-      this.notice.set(this.error() ? "答复已提交；看板刷新失败，请点「刷新」。" : "答复已提交，工单已继续执行。");
+      if (result.deliveryFailed) {
+        this.notice.set("答复已记录，但投递失败；请在这张工单的「待投递输入」里重试或清除。");
+      } else if (result.deliveryPending) {
+        this.notice.set("答复已记录，等待投递到员工；投递成功后工单会自动继续。");
+      } else {
+        this.notice.set(this.error() ? "答复已提交；看板刷新失败，请点「刷新」。" : "答复已提交，工单已继续执行。");
+      }
       return true;
     } catch (error) {
       this.actionError.set({ id: attentionId, kind: "answer", failure: failureOf(error, "action") });
       return false;
     } finally {
       this.clearAction(attentionId, "answer");
+    }
+  }
+
+  /** Re-arm one durable pending input whose delivery failed permanently. */
+  async retryPending(ticketId: string, pendingId: string): Promise<boolean> {
+    if (!this.canWrite()) return false;
+    if (this.action()) return false;
+    const api = store.superagentApi();
+    this.action.set({ id: pendingId, kind: "retry" });
+    this.actionError.set(null);
+    this.notice.set(null);
+    try {
+      if (!api) throw new Error("这个部署没有接通超级助理看板。");
+      await api.retrySuperagentPending(ticketId, pendingId);
+      await this.load();
+      this.notice.set(this.error() ? "重试请求已提交；看板刷新失败，请点「刷新」。" : "已重新投递；仍未成功时入口会保留并显示服务端的错误。");
+      return true;
+    } catch (error) {
+      this.actionError.set({ id: pendingId, kind: "retry", failure: failureOf(error, "action") });
+      return false;
+    } finally {
+      this.clearAction(pendingId, "retry");
+    }
+  }
+
+  /** Drop one durable pending input at the operator's explicit request. */
+  async dismissPending(ticketId: string, pendingId: string): Promise<boolean> {
+    if (!this.canWrite()) return false;
+    if (this.action()) return false;
+    const api = store.superagentApi();
+    this.action.set({ id: pendingId, kind: "dismiss" });
+    this.actionError.set(null);
+    this.notice.set(null);
+    try {
+      if (!api) throw new Error("这个部署没有接通超级助理看板。");
+      await api.dismissSuperagentPending(ticketId, pendingId);
+      await this.load();
+      this.notice.set(this.error() ? "清除请求已提交；看板刷新失败，请点「刷新」。" : "待投递输入已清除。");
+      return true;
+    } catch (error) {
+      this.actionError.set({ id: pendingId, kind: "dismiss", failure: failureOf(error, "action") });
+      return false;
+    } finally {
+      this.clearAction(pendingId, "dismiss");
     }
   }
 

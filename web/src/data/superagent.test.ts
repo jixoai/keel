@@ -6,7 +6,8 @@
 // These cases pin the decisions the page draws; rendering is covered by
 // `superagent.tui.test.tsx`.
 import { expect, test } from "nsh/test";
-import type { SuperagentApi, SuperagentTicketView } from "./contract";
+import type { SuperagentAnswerResult, SuperagentApi, SuperagentBoardView, SuperagentTicketView } from "./contract";
+import { setEffectivePermissions } from "./permissions";
 import { superagentAccess, superagentCounts, superagentDeadline, superagentSourceText, superagentStatusLabel } from "./superagent";
 import { store } from "./store";
 
@@ -96,6 +97,12 @@ test("superagent 后台重读保留写反馈，只有手动刷新才清空", asy
     async stopSuperagentTicket() {
       throw new Error("not used");
     },
+    async retrySuperagentPending() {
+      throw new Error("not used");
+    },
+    async dismissSuperagentPending() {
+      throw new Error("not used");
+    },
   };
   store.setSuperagentTransport(transport);
   superagentAccess.reset();
@@ -124,6 +131,129 @@ test("superagent 后台重读保留写反馈，只有手动刷新才清空", asy
   expect(inboxCalls).toBe(3);
   expect(superagentAccess.notice()).toBe(null);
   expect(superagentAccess.actionError()).toBe(null);
+
+  store.setSuperagentTransport(null);
+  superagentAccess.reset();
+});
+
+// The answer route's two recorded-not-delivered states must reach the page as
+// "recorded, waiting" / "recorded, failed" instead of a blank failure.
+test("superagent 答复：202 等待投递与 409 投递失败都是已记录事实", async () => {
+  setEffectivePermissions({ "task.write": "team" }, false);
+  let result: SuperagentAnswerResult = {
+    attention: { id: "a-1", workItemId: "t-1", prompt: "q" },
+    deliveryPending: true,
+  };
+  const transport: SuperagentApi = {
+    async superagentBoard() {
+      return { tenantId: "t-1", modeId: "superagent", tickets: [] };
+    },
+    async superagentAttention() {
+      return { tenantId: "t-1", items: [] };
+    },
+    async answerSuperagentAttention() {
+      return result;
+    },
+    async resumeSuperagentTicket() {
+      throw new Error("not used");
+    },
+    async stopSuperagentTicket() {
+      throw new Error("not used");
+    },
+    async retrySuperagentPending() {
+      throw new Error("not used");
+    },
+    async dismissSuperagentPending() {
+      throw new Error("not used");
+    },
+  };
+  store.setSuperagentTransport(transport);
+  superagentAccess.reset();
+  await superagentAccess.refresh();
+
+  expect(await superagentAccess.answer("a-1", { text: "yes" })).toBe(true);
+  expect(superagentAccess.notice()).toContain("等待投递");
+  expect(superagentAccess.actionError()).toBe(null);
+
+  result = { deliveryFailed: true, deliveryCode: "answer_delivery_failed" };
+  expect(await superagentAccess.answer("a-1", { text: "yes" })).toBe(true);
+  expect(superagentAccess.notice()).toContain("投递失败");
+
+  store.setSuperagentTransport(null);
+  superagentAccess.reset();
+});
+
+// The board carries the durable pending row itself; retry/dismiss are the two
+// operator decisions and each calls its own route.
+test("superagent 待投递入口：失败行透传，重试/清除调用各自路由", async () => {
+  setEffectivePermissions({ "task.write": "team" }, false);
+  const calls: string[] = [];
+  const current: SuperagentBoardView = {
+    tenantId: "t-1",
+    modeId: "superagent",
+    tickets: [
+      {
+        id: "t-1",
+        title: "对账",
+        status: "failed",
+        pending: [
+          {
+            id: "fixture:manual-76:edit-1",
+            kind: "followup",
+            text: "body",
+            trusted: true,
+            allowDispatch: true,
+            attempts: 12,
+            lastError: "deployment cannot deliver",
+            failed: true,
+          },
+        ],
+        pendingCount: 1,
+        failedPendingCount: 1,
+      },
+    ],
+  };
+  const transport: SuperagentApi = {
+    async superagentBoard() {
+      return current;
+    },
+    async superagentAttention() {
+      return { tenantId: "t-1", items: [] };
+    },
+    async answerSuperagentAttention() {
+      throw new Error("not used");
+    },
+    async resumeSuperagentTicket() {
+      throw new Error("not used");
+    },
+    async stopSuperagentTicket() {
+      throw new Error("not used");
+    },
+    async retrySuperagentPending(ticketId: string, pendingId: string) {
+      calls.push(`retry:${ticketId}:${pendingId}`);
+      return current.tickets[0];
+    },
+    async dismissSuperagentPending(ticketId: string, pendingId: string) {
+      calls.push(`dismiss:${ticketId}:${pendingId}`);
+      return current.tickets[0];
+    },
+  };
+  store.setSuperagentTransport(transport);
+  superagentAccess.reset();
+  await superagentAccess.refresh();
+  const row = superagentAccess.board()?.tickets[0];
+  expect(row?.pending?.[0]?.failed).toBe(true);
+  expect(row?.failedPendingCount).toBe(1);
+  expect(row?.pending?.[0]?.lastError).toBe("deployment cannot deliver");
+
+  expect(await superagentAccess.retryPending("t-1", "fixture:manual-76:edit-1")).toBe(true);
+  expect(superagentAccess.notice()).toContain("重新投递");
+  expect(await superagentAccess.dismissPending("t-1", "fixture:manual-76:edit-1")).toBe(true);
+  expect(superagentAccess.notice()).toContain("已清除");
+  expect(calls).toEqual([
+    "retry:t-1:fixture:manual-76:edit-1",
+    "dismiss:t-1:fixture:manual-76:edit-1",
+  ]);
 
   store.setSuperagentTransport(null);
   superagentAccess.reset();

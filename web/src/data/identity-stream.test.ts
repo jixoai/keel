@@ -287,6 +287,12 @@ test("identity stream: a superagent fact re-reads only an already-loaded board/i
     async stopSuperagentTicket() {
       throw new Error("not used");
     },
+    async retrySuperagentPending() {
+      throw new Error("not used");
+    },
+    async dismissSuperagentPending() {
+      throw new Error("not used");
+    },
   };
   store.setSuperagentTransport(transport);
 
@@ -361,6 +367,12 @@ test("identity stream: a superagent fact during the first load re-reads once it 
     async stopSuperagentTicket() {
       throw new Error("not used");
     },
+    async retrySuperagentPending() {
+      throw new Error("not used");
+    },
+    async dismissSuperagentPending() {
+      throw new Error("not used");
+    },
   };
   store.setSuperagentTransport(transport);
 
@@ -423,6 +435,12 @@ test("identity stream: a superagent fact recovers a failed board read without a 
       throw new Error("not used");
     },
     async stopSuperagentTicket() {
+      throw new Error("not used");
+    },
+    async retrySuperagentPending() {
+      throw new Error("not used");
+    },
+    async dismissSuperagentPending() {
       throw new Error("not used");
     },
   };

@@ -19,21 +19,23 @@ const DefaultModeID = collab.ModeSuperagent
 // Audit event kinds written by the orchestrator. They are structured
 // (kind + result + ids); no row contains source bodies or credentials.
 const (
-	AuditEventSeen       = "collab.superagent.event_seen"
-	AuditEventIgnored    = "collab.superagent.event_ignored"
-	AuditTicketAccepted  = "collab.superagent.ticket_accepted"
-	AuditTicketAttached  = "collab.superagent.event_attached"
-	AuditTicketStopped   = "collab.superagent.ticket_stopped"
-	AuditTicketResumed   = "collab.superagent.ticket_resumed"
-	AuditDispatch        = "collab.superagent.dispatch"
-	AuditDispatchFailed  = "collab.superagent.dispatch_failed"
-	AuditRecovered       = "collab.superagent.assignment_recovered"
-	AuditAttentionAnswer = "collab.superagent.attention_answered"
-	AuditAttentionOpen   = "collab.superagent.attention_opened"
-	AuditAttentionExpire = "collab.superagent.attention_expired"
-	AuditOutboxSent      = "collab.superagent.outbox_sent"
-	AuditOutboxFailed    = "collab.superagent.outbox_failed"
-	AuditReport          = "collab.superagent.worker_report"
+	AuditEventSeen        = "collab.superagent.event_seen"
+	AuditEventIgnored     = "collab.superagent.event_ignored"
+	AuditTicketAccepted   = "collab.superagent.ticket_accepted"
+	AuditTicketAttached   = "collab.superagent.event_attached"
+	AuditTicketStopped    = "collab.superagent.ticket_stopped"
+	AuditTicketResumed    = "collab.superagent.ticket_resumed"
+	AuditDispatch         = "collab.superagent.dispatch"
+	AuditDispatchFailed   = "collab.superagent.dispatch_failed"
+	AuditRecovered        = "collab.superagent.assignment_recovered"
+	AuditAttentionAnswer  = "collab.superagent.attention_answered"
+	AuditAttentionOpen    = "collab.superagent.attention_opened"
+	AuditAttentionExpire  = "collab.superagent.attention_expired"
+	AuditOutboxSent       = "collab.superagent.outbox_sent"
+	AuditOutboxFailed     = "collab.superagent.outbox_failed"
+	AuditReport           = "collab.superagent.worker_report"
+	AuditPendingRetried   = "collab.superagent.pending_retried"
+	AuditPendingDismissed = "collab.superagent.pending_dismissed"
 )
 
 // Source kinds used by the built-in adapters. They are open strings: a plugin
@@ -304,6 +306,11 @@ type PendingKind string
 // must not block the Source page, and the text must survive a restart until a
 // worker actually receives it. The delivered snapshot advances only when the
 // entry is removed, so a duplicate Source event re-captures by ID and re-tries.
+//
+// Trust is recorded at capture time, never inferred later: an untrusted thread
+// comment may be delivered to a worker that already exists, but AllowDispatch
+// is false, so neither housekeeping nor a retry can turn it into "start a new
+// worker" authority.
 type PendingFollowUp struct {
 	// ID is the idempotency identity: "<sourceID>:<eventID>" for a follow-up or
 	// "attention:<attentionID>" for an answer.
@@ -316,14 +323,55 @@ type PendingFollowUp struct {
 	Body  string `json:"body,omitempty"`
 	// Snapshot marks an issue_updated input whose Title/Body must advance the
 	// delivered snapshot on success (including a deliberately cleared body).
-	Snapshot      bool      `json:"snapshot,omitempty"`
+	Snapshot bool `json:"snapshot,omitempty"`
+	// Trusted records the Policy verdict that captured this input. It is a fact
+	// about the Source event, not an authorization the text can claim.
+	Trusted bool `json:"trusted,omitempty"`
+	// AllowDispatch records capture-time authority to start a Worker for this
+	// entry. Only a policy-accepted follow-up or a human answer may set it.
+	AllowDispatch bool      `json:"allowDispatch,omitempty"`
 	AttentionID   uuid.UUID `json:"attentionId,omitempty"`
+	// OptionID/AnswerText/AnswerActor are the recorded answer intent. They are
+	// written before the Attention row is answered, so a crash between the two
+	// writes is replayable instead of leaving "answered, no delivery evidence".
+	OptionID   string `json:"optionId,omitempty"`
+	AnswerText string `json:"answerText,omitempty"`
+	// AnswerActor is the operator identity that produced the answer.
+	AnswerActor   string    `json:"answerActor,omitempty"`
 	Attempts      int       `json:"attempts,omitempty"`
 	NextAttemptAt time.Time `json:"nextAttemptAt,omitempty"`
 	LastError     string    `json:"lastError,omitempty"`
 	Failed        bool      `json:"failed,omitempty"`
 	CreatedAt     time.Time `json:"createdAt,omitempty"`
 }
+
+// AnswerReceipt is the durable delivery evidence of one Attention answer. It
+// is appended in the same WorkItem write that removes the pending answer input,
+// so "Attention answered" plus "no pending input" plus "no receipt" is a
+// repairable inconsistency, never a silently successful answer.
+type AnswerReceipt struct {
+	AttentionID uuid.UUID `json:"attentionId"`
+	OptionID    string    `json:"optionId,omitempty"`
+	Text        string    `json:"text,omitempty"`
+	Actor       string    `json:"actor,omitempty"`
+	DeliveredAt time.Time `json:"deliveredAt"`
+	// Via names the delivery channel: "session" (the live worker) or "dispatch"
+	// (the answer became the new assignment's task context).
+	Via string `json:"via,omitempty"`
+	// CommentQueued records that the Channel answer comment's durable outbox row
+	// exists. False means the compensation scan still owes that comment.
+	CommentQueued bool `json:"commentQueued,omitempty"`
+	// Dismissed records the operator's explicit decision to abandon an answer
+	// that could not be delivered. DeliveredAt stays zero; neither the startup
+	// scan nor a retry re-arms it.
+	Dismissed   bool      `json:"dismissed,omitempty"`
+	DismissedAt time.Time `json:"dismissedAt,omitempty"`
+	DismissedBy string    `json:"dismissedBy,omitempty"`
+}
+
+// Delivered reports whether the receipt is delivery evidence (as opposed to an
+// operator's abandonment mark).
+func (r AnswerReceipt) Delivered() bool { return !r.DeliveredAt.IsZero() }
 
 // ticketDoc is the WorkItem.Input document for super-agent tickets. Keeping it
 // in the generic WorkItem store means the core package needs no super-agent
@@ -336,6 +384,7 @@ type ticketDoc struct {
 	Event     *Event            `json:"event,omitempty"`
 	Delivered *ThreadSnapshot   `json:"delivered,omitempty"`
 	Pending   []PendingFollowUp `json:"pending,omitempty"`
+	Answers   []AnswerReceipt   `json:"answers,omitempty"`
 }
 
 // Ticket is a collab.WorkItem whose work unit is a ticket. It is independent of
@@ -349,6 +398,7 @@ type Ticket struct {
 	WorkerBot string            `json:"workerBot,omitempty"`
 	Delivered *ThreadSnapshot   `json:"delivered,omitempty"`
 	Pending   []PendingFollowUp `json:"pending,omitempty"`
+	Answers   []AnswerReceipt   `json:"answers,omitempty"`
 }
 
 // TicketFromWorkItem projects a stored WorkItem into a Ticket. A malformed
@@ -369,6 +419,7 @@ func TicketFromWorkItem(item collab.WorkItem) Ticket {
 	ticket.WorkerBot = doc.WorkerBot
 	ticket.Delivered = doc.Delivered
 	ticket.Pending = doc.Pending
+	ticket.Answers = doc.Answers
 	return ticket
 }
 
@@ -376,11 +427,34 @@ func TicketFromWorkItem(item collab.WorkItem) Ticket {
 // Input with the ticket document.
 func (t Ticket) Record() collab.WorkItem {
 	item := t.WorkItem
-	doc := ticketDoc{Mandate: t.Mandate, Thread: t.Thread, Request: t.Request, WorkerBot: t.WorkerBot, Delivered: t.Delivered, Pending: t.Pending}
+	doc := ticketDoc{Mandate: t.Mandate, Thread: t.Thread, Request: t.Request, WorkerBot: t.WorkerBot, Delivered: t.Delivered, Pending: t.Pending, Answers: t.Answers}
 	if raw, err := json.Marshal(doc); err == nil {
 		item.Input = raw
 	}
 	return item
+}
+
+// AnswerReceiptFor returns the durable delivery evidence of one attention, or
+// nil when no worker is known to have received the answer.
+func (t Ticket) AnswerReceiptFor(attentionID uuid.UUID) *AnswerReceipt {
+	for i := range t.Answers {
+		if t.Answers[i].AttentionID == attentionID {
+			return &t.Answers[i]
+		}
+	}
+	return nil
+}
+
+// recordAnswerReceipt appends (or replaces) one receipt in place. Replacing by
+// attention id keeps the document bounded and idempotent.
+func (t *Ticket) recordAnswerReceipt(receipt AnswerReceipt) {
+	for i := range t.Answers {
+		if t.Answers[i].AttentionID == receipt.AttentionID {
+			t.Answers[i] = receipt
+			return
+		}
+	}
+	t.Answers = append(t.Answers, receipt)
 }
 
 // LastDelivered is the thread content the worker has already seen. A ticket
@@ -391,6 +465,23 @@ func (t Ticket) LastDelivered() ThreadSnapshot {
 		return *t.Delivered
 	}
 	return ThreadSnapshot{Title: strings.TrimSpace(t.Title), Body: strings.TrimSpace(t.Request)}
+}
+
+// LastKnownThread is the newest thread content the ticket has committed to
+// deliver: the last captured pending snapshot when one exists (even a failed
+// one: its content was still captured, so a same-content bump must not become a
+// second row), otherwise the delivered snapshot. Comparing a new issue_updated
+// event with it makes a repeated bump (GitHub updates updated_at for every
+// comment) a no-op even before the first edit reached the worker.
+func (t Ticket) LastKnownThread() ThreadSnapshot {
+	for i := len(t.Pending) - 1; i >= 0; i-- {
+		entry := t.Pending[i]
+		if !entry.Snapshot {
+			continue
+		}
+		return ThreadSnapshot{Title: strings.TrimSpace(entry.Title), Body: strings.TrimSpace(entry.Body), At: entry.CreatedAt}
+	}
+	return t.LastDelivered()
 }
 
 // NewTicket builds an open Ticket from an accepted event and a verdict.
