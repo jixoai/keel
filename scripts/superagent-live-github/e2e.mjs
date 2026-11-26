@@ -603,8 +603,8 @@ async function main() {
     },
     {
       severity: 'P2',
-      title: 'issue_updated 事件按正文是否变化才投递',
-      detail: 'GitHub 每次评论都会 bump issue.updated_at；同正文的 issue_updated 被当作无新输入丢弃，真实编辑正文仍会投递。',
+      title: 'issue_updated 按持久化「已投递标题/正文」快照去重',
+      detail: 'GitHub 每次评论都会 bump issue.updated_at；Source 会产出 issue_updated。工单文档保存最近一次真正送达 worker 的标题+正文，同内容的事件被丢弃；正文或标题真实变化投递一次并推进快照，重启后规则不变。',
     },
     {
       severity: 'P2',
