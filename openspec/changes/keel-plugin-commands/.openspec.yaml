@@ -1,0 +1,3 @@
+schema: spec-driven
+created: 2026-11-26
+goal: Slash commands are a permissioned, durable invocation surface shared by builtins, plugins and skills

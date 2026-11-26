@@ -1,0 +1,3 @@
+schema: spec-driven
+created: 2026-11-26
+goal: PI telemetry becomes an optional, auditable plugin with bounded, redacted OTLP export
