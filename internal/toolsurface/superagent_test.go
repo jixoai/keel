@@ -58,7 +58,7 @@ func (f *fakeSuperagentBackend) ReportFromWorker(_ context.Context, scope harnes
 	if f.reportResult.TicketID == "" {
 		return SuperagentReportResult{
 			TicketID: "ticket-1", TicketStatus: "active",
-			AssignmentID: "assignment-1", AssignmentStatus: "active", State: input.State,
+			AssignmentID: "assignment-1", AssignmentStatus: "active", State: input.State, Created: true,
 		}, nil
 	}
 	return f.reportResult, nil
@@ -261,6 +261,135 @@ func TestSuperagentToolsUnavailableWithoutBackend(t *testing.T) {
 			t.Fatalf("%s code = %v, want %s", tool.Name(), code, CodeSuperagentUnavailable)
 		}
 	}
+}
+
+func TestReportToolReturnsStoredStateAndCreated(t *testing.T) {
+	backend := &fakeSuperagentBackend{reportResult: SuperagentReportResult{
+		TicketID: "ticket-1", TicketStatus: "active",
+		AssignmentID: "assignment-1", AssignmentStatus: "active",
+		State: "ready", Created: false,
+	}}
+	tool := newReportTool(backend)
+	result, err := tool.Execute(workerToolContext(uuid.New()), "call-1", json.RawMessage(`{"state":"progress"}`), nil)
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	document := successDocument(t, result)
+	if document["state"] != "ready" {
+		t.Fatalf("state = %v, want the stored state (the input was progress)", document["state"])
+	}
+	if document["created"] != false {
+		t.Fatalf("created = %v, want false", document["created"])
+	}
+}
+
+func TestWorkerToolInputBounds(t *testing.T) {
+	ctx := workerToolContext(uuid.New())
+
+	reportAccepted := func(t *testing.T, args map[string]any) {
+		t.Helper()
+		raw, err := json.Marshal(args)
+		if err != nil {
+			t.Fatal(err)
+		}
+		backend := &fakeSuperagentBackend{}
+		result, err := newReportTool(backend).Execute(ctx, "call-1", raw, nil)
+		if err != nil {
+			t.Fatalf("execute: %v", err)
+		}
+		successDocument(t, result)
+		if backend.reportCalls != 1 {
+			t.Fatalf("backend calls = %d", backend.reportCalls)
+		}
+	}
+	reportRejected := func(t *testing.T, args map[string]any) {
+		t.Helper()
+		raw, err := json.Marshal(args)
+		if err != nil {
+			t.Fatal(err)
+		}
+		backend := &fakeSuperagentBackend{}
+		result, err := newReportTool(backend).Execute(ctx, "call-1", raw, nil)
+		if err != nil {
+			t.Fatalf("execute: %v", err)
+		}
+		if code := errorDoc(t, result)["code"]; code != CodeInvalidArguments {
+			t.Fatalf("code = %v, want %s", code, CodeInvalidArguments)
+		}
+		if backend.reportCalls != 0 {
+			t.Fatalf("an out-of-bounds report reached the backend")
+		}
+	}
+
+	reportAccepted(t, map[string]any{"state": "progress", "summary": strings.Repeat("s", maxWorkerReportSummaryBytes)})
+	reportRejected(t, map[string]any{"state": "progress", "summary": strings.Repeat("s", maxWorkerReportSummaryBytes+1)})
+
+	askAccepted := func(t *testing.T, args map[string]any) {
+		t.Helper()
+		raw, err := json.Marshal(args)
+		if err != nil {
+			t.Fatal(err)
+		}
+		backend := &fakeSuperagentBackend{}
+		result, err := newAskTool(backend).Execute(ctx, "call-1", raw, nil)
+		if err != nil {
+			t.Fatalf("execute: %v", err)
+		}
+		successDocument(t, result)
+		if backend.askCalls != 1 {
+			t.Fatalf("backend calls = %d", backend.askCalls)
+		}
+	}
+	askRejected := func(t *testing.T, args map[string]any) {
+		t.Helper()
+		raw, err := json.Marshal(args)
+		if err != nil {
+			t.Fatal(err)
+		}
+		backend := &fakeSuperagentBackend{}
+		result, err := newAskTool(backend).Execute(ctx, "call-1", raw, nil)
+		if err != nil {
+			t.Fatalf("execute: %v", err)
+		}
+		if code := errorDoc(t, result)["code"]; code != CodeInvalidArguments {
+			t.Fatalf("code = %v, want %s", code, CodeInvalidArguments)
+		}
+		if backend.askCalls != 0 {
+			t.Fatalf("an out-of-bounds ask reached the backend")
+		}
+	}
+
+	askAccepted(t, map[string]any{
+		"prompt": strings.Repeat("p", maxWorkerAskPromptBytes), "allowFreeText": true,
+	})
+	askRejected(t, map[string]any{
+		"prompt": strings.Repeat("p", maxWorkerAskPromptBytes+1), "allowFreeText": true,
+	})
+	options := func(count int) []map[string]any {
+		out := make([]map[string]any, 0, count)
+		for index := 0; index < count; index++ {
+			out = append(out, map[string]any{"id": "opt-" + strings.Repeat("x", index%5) + string(rune('a'+index%26))})
+		}
+		return out
+	}
+	askAccepted(t, map[string]any{"prompt": "q", "options": options(maxWorkerAskOptions)})
+	askRejected(t, map[string]any{"prompt": "q", "options": options(maxWorkerAskOptions + 1)})
+	askRejected(t, map[string]any{"prompt": "q", "options": []map[string]any{{
+		"id": strings.Repeat("i", maxWorkerAskOptionIDBytes+1),
+	}}})
+	askRejected(t, map[string]any{"prompt": "q", "options": []map[string]any{{
+		"id": "a", "label": strings.Repeat("l", maxWorkerAskOptionLabelBytes+1),
+	}}})
+	askRejected(t, map[string]any{"prompt": "q", "options": []map[string]any{{
+		"id": "a", "description": strings.Repeat("d", maxWorkerAskOptionDescBytes+1),
+	}}})
+	overTotal := make([]map[string]any, 0, 9)
+	for index := 0; index < 9; index++ {
+		overTotal = append(overTotal, map[string]any{
+			"id": "o" + string(rune('a'+index)), "description": strings.Repeat("d", maxWorkerAskOptionDescBytes),
+		})
+	}
+	askRejected(t, map[string]any{"prompt": "q", "options": overTotal})
 }
 
 func TestSuperagentToolsAreProductExtrasNotBuiltins(t *testing.T) {

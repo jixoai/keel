@@ -985,84 +985,255 @@ type ReportRequest struct {
 // Report applies a worker report. Ready/failed are Ticket decisions; a report
 // never silently changes another tenant's row.
 func (o *Orchestrator) Report(ctx context.Context, request ReportRequest) error {
-	_, _, err := o.report(ctx, request, false)
+	_, err := o.report(ctx, request, false)
 	return err
 }
 
-// report applies one report and returns the resulting ticket/assignment. The
-// model-facing worker path passes requireOpen=true: a blocked or closed ticket
-// refuses the report instead of applying a partial transition.
-func (o *Orchestrator) report(ctx context.Context, request ReportRequest, requireOpen bool) (Ticket, collab.Assignment, error) {
+// report applies one report and returns the resulting ticket/assignment plus
+// the stored report fact. The model-facing worker path passes
+// requireOpen=true: a blocked or closed ticket refuses the report instead of
+// applying a partial transition.
+//
+// A report with a requestId is a two-phase durable claim:
+//
+//  1. the claim row is inserted (assignment+session+request id scoped);
+//  2. its audit row is written and marked on the claim;
+//  3. the state transition is applied and marked on the claim.
+//
+// A retry resumes only the missing phases, so a crash between them can neither
+// duplicate the audit nor strand the state. A completed claim returns its
+// stored state and does not re-audit or re-apply.
+func (o *Orchestrator) report(ctx context.Context, request ReportRequest, requireOpen bool) (WorkerReportOutcome, error) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	if err := o.checkTenant(request.TenantID); err != nil {
-		return Ticket{}, collab.Assignment{}, err
+		return WorkerReportOutcome{}, err
 	}
 	if !request.State.Valid() {
-		return Ticket{}, collab.Assignment{}, fmt.Errorf("superagent: report state %q is not in the closed vocabulary", request.State)
+		return WorkerReportOutcome{}, fmt.Errorf("superagent: report state %q is not in the closed vocabulary", request.State)
 	}
 	ticket, err := o.loadTicket(ctx, request.TenantID, request.WorkItemID)
 	if err != nil {
-		return Ticket{}, collab.Assignment{}, err
+		return WorkerReportOutcome{}, err
 	}
 	assignment, err := o.cfg.Store.GetAssignment(ctx, request.TenantID, request.AssignmentID)
 	if err != nil {
-		return Ticket{}, collab.Assignment{}, err
+		return WorkerReportOutcome{}, err
 	}
 	if assignment.WorkItemID != ticket.ID {
-		return Ticket{}, collab.Assignment{}, fmt.Errorf("superagent: assignment does not belong to the ticket")
+		return WorkerReportOutcome{}, fmt.Errorf("superagent: assignment does not belong to the ticket")
 	}
 	if request.CallerSessionID != uuid.Nil && request.CallerSessionID != assignment.SessionID {
-		return Ticket{}, collab.Assignment{}, fmt.Errorf("%w: the caller session is not the assignment worker", collab.ErrPermissionDenied)
+		return WorkerReportOutcome{}, fmt.Errorf("%w: the caller session is not the assignment worker", collab.ErrPermissionDenied)
 	}
-	// A terminal assignment is a stale worker. Only the exact retry of the
-	// report that ended it may pass; otherwise a replaced worker could finish a
-	// ticket the queue already handed to someone else.
+	requestID := strings.TrimSpace(request.RequestID)
+	if requestID == "" {
+		if err := o.ensureReportPermitted(ctx, request, ticket, assignment, requireOpen); err != nil {
+			return WorkerReportOutcome{}, err
+		}
+		if err := o.auditRequiredWorker(ctx, AuditReport, "accepted", ticket, assignment, "state="+string(request.State)); err != nil {
+			return WorkerReportOutcome{}, err
+		}
+		ticket, assignment, err = o.applyReportLocked(ctx, request, ticket, assignment)
+		if err != nil {
+			return WorkerReportOutcome{}, err
+		}
+		return WorkerReportOutcome{Ticket: ticket, Assignment: assignment, Created: true}, nil
+	}
+	sessionID := request.CallerSessionID
+	if sessionID == uuid.Nil {
+		sessionID = assignment.SessionID
+	}
+	if sessionID == uuid.Nil {
+		return WorkerReportOutcome{}, fmt.Errorf("superagent: a report requestId needs a worker session")
+	}
+	stored, err := o.cfg.Store.GetWorkerReport(ctx, request.TenantID, ticket.ID, assignment.ID, sessionID, requestID)
+	existed := err == nil
+	if err != nil && !errors.Is(err, ErrReportNotFound) {
+		return WorkerReportOutcome{}, err
+	}
+	effective := request
+	created := false
+	if existed {
+		effective = reportRequestFromStored(stored)
+	}
+	if !existed {
+		if err := o.ensureReportPermitted(ctx, effective, ticket, assignment, requireOpen); err != nil {
+			return WorkerReportOutcome{}, err
+		}
+		claim := WorkerReport{
+			ID:           uuid.New(),
+			TenantID:     request.TenantID,
+			WorkItemID:   ticket.ID,
+			AssignmentID: assignment.ID,
+			SessionID:    sessionID,
+			RequestID:    requestID,
+			State:        effective.State,
+			Summary:      strings.TrimSpace(effective.Summary),
+			AttentionID:  effective.AttentionID,
+			Result:       append(json.RawMessage(nil), effective.Result...),
+			CreatedAt:    o.cfg.Now(),
+		}
+		stored, created, err = o.cfg.Store.ClaimWorkerReport(ctx, claim)
+		if err != nil {
+			return WorkerReportOutcome{}, err
+		}
+		if !created {
+			// Another process claimed the same scoped key first. Its stored
+			// payload is the fact; re-check the guards against that payload.
+			existed = true
+			effective = reportRequestFromStored(stored)
+			if err := o.ensureReportPermitted(ctx, effective, ticket, assignment, requireOpen); err != nil {
+				return WorkerReportOutcome{}, err
+			}
+		}
+	}
+	if existed {
+		// A previous attempt may have stopped after the claim. Complete only the
+		// missing phases, in order.
+		if stored.AuditedAt == nil {
+			if err := o.auditRequiredWorker(ctx, AuditReport, "accepted", ticket, assignment, "state="+string(stored.State)); err != nil {
+				return WorkerReportOutcome{}, err
+			}
+			at := o.cfg.Now()
+			marked, err := o.cfg.Store.MarkWorkerReportAudited(ctx, o.cfg.TenantID, stored.ID, at)
+			if err != nil {
+				return WorkerReportOutcome{}, err
+			}
+			if marked {
+				stored.AuditedAt = &at
+			}
+		}
+		if stored.AppliedAt == nil {
+			if err := o.ensureReportPermitted(ctx, effective, ticket, assignment, requireOpen); err != nil {
+				return WorkerReportOutcome{}, err
+			}
+			ticket, assignment, err = o.applyReportLocked(ctx, effective, ticket, assignment)
+			if err != nil {
+				return WorkerReportOutcome{}, err
+			}
+			at := o.cfg.Now()
+			marked, err := o.cfg.Store.MarkWorkerReportApplied(ctx, o.cfg.TenantID, stored.ID, at)
+			if err != nil {
+				return WorkerReportOutcome{}, err
+			}
+			if marked {
+				stored.AppliedAt = &at
+			}
+		}
+		return WorkerReportOutcome{Ticket: ticket, Assignment: assignment, Report: stored, Created: created}, nil
+	}
+	// This call created the claim. Audit it, apply the state and mark the claim.
+	if err := o.auditRequiredWorker(ctx, AuditReport, "accepted", ticket, assignment, "state="+string(effective.State)); err != nil {
+		return WorkerReportOutcome{}, err
+	}
+	at := o.cfg.Now()
+	marked, err := o.cfg.Store.MarkWorkerReportAudited(ctx, o.cfg.TenantID, stored.ID, at)
+	if err != nil {
+		return WorkerReportOutcome{}, err
+	}
+	if marked {
+		stored.AuditedAt = &at
+	}
+	ticket, assignment, err = o.applyReportLocked(ctx, effective, ticket, assignment)
+	if err != nil {
+		return WorkerReportOutcome{}, err
+	}
+	appliedAt := o.cfg.Now()
+	if marked, err := o.cfg.Store.MarkWorkerReportApplied(ctx, o.cfg.TenantID, stored.ID, appliedAt); err != nil {
+		return WorkerReportOutcome{}, err
+	} else if marked {
+		stored.AppliedAt = &appliedAt
+	}
+	return WorkerReportOutcome{Ticket: ticket, Assignment: assignment, Report: stored, Created: true}, nil
+}
+
+// reportRequestFromStored projects an idempotency claim onto the request the
+// state transition consumes. A retry may carry different text; the stored fact
+// wins exactly like the HTTP idempotency key semantics.
+func reportRequestFromStored(stored WorkerReport) ReportRequest {
+	return ReportRequest{
+		TenantID:        stored.TenantID,
+		WorkItemID:      stored.WorkItemID,
+		AssignmentID:    stored.AssignmentID,
+		State:           stored.State,
+		Summary:         stored.Summary,
+		AttentionID:     stored.AttentionID,
+		Result:          stored.Result,
+		CallerSessionID: stored.SessionID,
+		RequestID:       stored.RequestID,
+	}
+}
+
+// ensureReportPermitted applies the shared guards: a terminal assignment is a
+// stale worker, the model path refuses blocked/closed tickets, and a waiting
+// report must name an open Attention owned by this assignment/session.
+func (o *Orchestrator) ensureReportPermitted(ctx context.Context, request ReportRequest, ticket Ticket, assignment collab.Assignment, requireOpen bool) error {
 	if assignment.Status.Terminal() && !reportAlreadyApplied(ticket, assignment, request.State) {
-		return Ticket{}, collab.Assignment{}, &WorkerToolError{
+		return &WorkerToolError{
 			Code:         WorkerToolTicketClosed,
 			Message:      "the worker assignment has already ended; no further report is accepted",
 			TicketID:     ticket.ID,
 			TicketStatus: ticket.Status,
 		}
 	}
-	// Idempotent retry: the original report is the fact. It returns the current
-	// state even if the ticket has since moved on (for example the waiting
-	// report that blocked the ticket, retried after the human answered).
-	if exists, err := o.workerReportExists(ctx, request.TenantID, ticket.ID, request.RequestID); err != nil {
-		return Ticket{}, collab.Assignment{}, err
-	} else if exists {
-		return ticket, assignment, nil
-	}
 	if requireOpen {
-		// A retried terminal/waiting report whose state is already realized is
-		// allowed through: the report row may be missing because its write
-		// failed after the state change, and refusing it would strand the
-		// timeline fact forever.
 		if refusal := openTicketRefusal(ticket); refusal != nil && !reportAlreadyApplied(ticket, assignment, request.State) {
-			return Ticket{}, collab.Assignment{}, refusal
+			return refusal
 		}
 	}
-	if err := o.auditRequiredWorker(ctx, AuditReport, "accepted", ticket, assignment, "state="+string(request.State)); err != nil {
-		return Ticket{}, collab.Assignment{}, err
+	if request.State != ReportWaiting && request.State != ReportBlocked {
+		return nil
 	}
+	if request.AttentionID == uuid.Nil {
+		if request.State == ReportWaiting {
+			return fmt.Errorf("superagent: a waiting report must name a structured attention")
+		}
+		return nil
+	}
+	attention, err := o.cfg.Store.GetAttention(ctx, request.TenantID, request.AttentionID)
+	if err != nil {
+		return err
+	}
+	if attention.WorkItemID != ticket.ID {
+		return &WorkerToolError{
+			Code:         WorkerToolAttentionInvalid,
+			Message:      "the attention belongs to a different ticket",
+			TicketID:     ticket.ID,
+			TicketStatus: ticket.Status,
+		}
+	}
+	caller := request.CallerSessionID
+	if caller == uuid.Nil {
+		caller = assignment.SessionID
+	}
+	if attention.AssignmentID != assignment.ID || (attention.SessionID != uuid.Nil && attention.SessionID != caller) {
+		return &WorkerToolError{
+			Code:         WorkerToolAttentionInvalid,
+			Message:      "the attention belongs to a different worker assignment or session",
+			TicketID:     ticket.ID,
+			TicketStatus: ticket.Status,
+		}
+	}
+	if attention.Status != collab.AttentionOpen {
+		return &WorkerToolError{
+			Code:         WorkerToolAttentionInvalid,
+			Message:      "the attention is not open; it was answered, timed out or cancelled",
+			TicketID:     ticket.ID,
+			TicketStatus: ticket.Status,
+		}
+	}
+	return nil
+}
+
+// applyReportLocked applies the state transition and reloads the resulting
+// ticket/assignment. It performs no audit and no idempotency bookkeeping.
+func (o *Orchestrator) applyReportLocked(ctx context.Context, request ReportRequest, ticket Ticket, assignment collab.Assignment) (Ticket, collab.Assignment, error) {
 	switch request.State {
 	case ReportProgress:
-		// A progress report has no state edge; the durable report row below is
-		// its fact.
+		// A progress report has no state edge; the durable report claim is its
+		// fact.
 	case ReportWaiting, ReportBlocked:
-		if request.State == ReportWaiting && request.AttentionID == uuid.Nil {
-			return Ticket{}, collab.Assignment{}, fmt.Errorf("superagent: a waiting report must name a structured attention")
-		}
-		if request.AttentionID != uuid.Nil {
-			attention, err := o.cfg.Store.GetAttention(ctx, request.TenantID, request.AttentionID)
-			if err != nil {
-				return Ticket{}, collab.Assignment{}, err
-			}
-			if attention.WorkItemID != ticket.ID {
-				return Ticket{}, collab.Assignment{}, fmt.Errorf("superagent: attention does not belong to the ticket")
-			}
-		}
 		if ticket.Status == collab.WorkItemActive || ticket.Status == collab.WorkItemOpen {
 			if err := o.setTicketStatus(ctx, &ticket, collab.WorkItemBlocked, request.Summary); err != nil {
 				return Ticket{}, collab.Assignment{}, err
@@ -1107,11 +1278,8 @@ func (o *Orchestrator) report(ctx context.Context, request ReportRequest, requir
 			return Ticket{}, collab.Assignment{}, err
 		}
 	}
-	if err := o.recordWorkerReport(ctx, request, ticket, assignment); err != nil {
-		return Ticket{}, collab.Assignment{}, err
-	}
 	// Reload so the caller sees the applied assignment/ticket state.
-	ticket, err = o.loadTicket(ctx, request.TenantID, ticket.ID)
+	ticket, err := o.loadTicket(ctx, request.TenantID, ticket.ID)
 	if err != nil {
 		return Ticket{}, collab.Assignment{}, err
 	}
@@ -1196,25 +1364,6 @@ func (o *Orchestrator) ask(ctx context.Context, ticketID, assignmentID uuid.UUID
 	if err != nil {
 		return collab.Attention{}, Ticket{}, err
 	}
-	if requireOpen {
-		// A retried question with the original request id is the existing
-		// Attention: return it without reopening the guard (a waiting report
-		// may have blocked the ticket after the question was created).
-		if requestID := strings.TrimSpace(request.RequestID); requestID != "" {
-			attentions, err := o.cfg.Store.ListAttentions(ctx, o.cfg.TenantID, ticket.ID)
-			if err != nil {
-				return collab.Attention{}, Ticket{}, err
-			}
-			for _, existing := range attentions {
-				if existing.RequestID == requestID {
-					return existing, ticket, nil
-				}
-			}
-		}
-		if refusal := openTicketRefusal(ticket); refusal != nil {
-			return collab.Attention{}, Ticket{}, refusal
-		}
-	}
 	if request.Route == "" {
 		request.Route = collab.AttentionRouteChannel
 	}
@@ -1235,21 +1384,57 @@ func (o *Orchestrator) ask(ctx context.Context, ticketID, assignmentID uuid.UUID
 	if assignment.SessionID == uuid.Nil {
 		return collab.Attention{}, Ticket{}, fmt.Errorf("superagent: assignment has no worker session")
 	}
-	if assignment.Status.Terminal() && requireOpen {
-		return collab.Attention{}, Ticket{}, &WorkerToolError{
-			Code:         WorkerToolTicketClosed,
-			Message:      "the worker assignment has already ended; no new question is accepted",
-			TicketID:     ticket.ID,
-			TicketStatus: ticket.Status,
-		}
-	}
 	if request.CallerSessionID != uuid.Nil && request.CallerSessionID != assignment.SessionID {
 		return collab.Attention{}, Ticket{}, fmt.Errorf("%w: the caller session is not the assignment worker", collab.ErrPermissionDenied)
+	}
+	callerSession := assignment.SessionID
+	if request.CallerSessionID != uuid.Nil {
+		callerSession = request.CallerSessionID
+	}
+	// The requestId is scoped to this assignment/session. A retried question
+	// returns the same Attention; a stale worker reusing an id from another
+	// assignment gets a conflict instead of its predecessor's question.
+	if requestID := strings.TrimSpace(request.RequestID); requestID != "" {
+		attentions, err := o.cfg.Store.ListAttentions(ctx, o.cfg.TenantID, ticket.ID)
+		if err != nil {
+			return collab.Attention{}, Ticket{}, err
+		}
+		for _, existing := range attentions {
+			if existing.RequestID != requestID {
+				continue
+			}
+			if existing.AssignmentID == assignment.ID &&
+				(existing.SessionID == uuid.Nil || existing.SessionID == callerSession) {
+				return existing, ticket, nil
+			}
+			if requireOpen {
+				return collab.Attention{}, Ticket{}, &WorkerToolError{
+					Code:         WorkerToolInvalidRequest,
+					Message:      "the requestId already belongs to another worker assignment; use a new requestId",
+					TicketID:     ticket.ID,
+					TicketStatus: ticket.Status,
+				}
+			}
+			return collab.Attention{}, Ticket{}, fmt.Errorf("%w: the requestId already belongs to another worker assignment", collab.ErrAttentionConflict)
+		}
+	}
+	if requireOpen {
+		if assignment.Status.Terminal() {
+			return collab.Attention{}, Ticket{}, &WorkerToolError{
+				Code:         WorkerToolTicketClosed,
+				Message:      "the worker assignment has already ended; no new question is accepted",
+				TicketID:     ticket.ID,
+				TicketStatus: ticket.Status,
+			}
+		}
+		if refusal := openTicketRefusal(ticket); refusal != nil {
+			return collab.Attention{}, Ticket{}, refusal
+		}
 	}
 	if err := o.auditRequiredWorker(ctx, AuditAttentionOpen, "accepted", ticket, assignment, "attention requested"); err != nil {
 		return collab.Attention{}, Ticket{}, err
 	}
-	request.CallerSessionID = assignment.SessionID
+	request.CallerSessionID = callerSession
 	request.AssignmentID = assignment.ID
 	attention, err := o.cfg.Host.Ask(ctx, o.cfg.TenantID, ticketID, request)
 	return attention, ticket, err

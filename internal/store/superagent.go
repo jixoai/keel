@@ -184,6 +184,13 @@ func rawInput(raw json.RawMessage) any {
 	return string(raw)
 }
 
+func nullableTime(at *time.Time) any {
+	if at == nil || at.IsZero() {
+		return nil
+	}
+	return *at
+}
+
 // --- Assignment -----------------------------------------------------------
 
 // CreateAssignment inserts one assignment. A repeated idempotency key returns
@@ -315,13 +322,19 @@ func scanAssignment(row workItemScanner) (collab.Assignment, error) {
 
 // --- Worker reports -------------------------------------------------------
 
-// RecordWorkerReport inserts one worker report at most once per
-// (tenant, work item, request id). The unique index is the durable
-// idempotency key; a duplicate returns the original row with created=false.
-func (s *Store) RecordWorkerReport(ctx context.Context, report superagent.WorkerReport) (superagent.WorkerReport, bool, error) {
-	if report.TenantID == uuid.Nil || report.WorkItemID == uuid.Nil || report.AssignmentID == uuid.Nil {
+// ClaimWorkerReport inserts one worker report claim at most once per
+// (tenant, work item, assignment, session, request id). The unique index is the
+// durable idempotency key; a duplicate returns the original row with
+// created=false. The claim is inserted before its audit row so a retry can
+// complete an interrupted audit without writing a second state change.
+func (s *Store) ClaimWorkerReport(ctx context.Context, report superagent.WorkerReport) (superagent.WorkerReport, bool, error) {
+	if report.TenantID == uuid.Nil || report.WorkItemID == uuid.Nil || report.AssignmentID == uuid.Nil || report.SessionID == uuid.Nil {
 		return superagent.WorkerReport{}, false, collabError(collab.ErrTenantRequired, collab.CodeTenantRequired,
-			"record_worker_report", "tenant, work item and assignment ids are required")
+			"claim_worker_report", "tenant, work item, assignment and session ids are required")
+	}
+	if report.RequestID == "" {
+		return superagent.WorkerReport{}, false, collabError(collab.ErrInvalidRequest, collab.CodeInvalidRequest,
+			"claim_worker_report", "a worker report claim needs a request id")
 	}
 	if report.ID == uuid.Nil {
 		report.ID = uuid.New()
@@ -332,37 +345,40 @@ func (s *Store) RecordWorkerReport(ctx context.Context, report superagent.Worker
 	row, err := scanWorkerReport(s.pool.QueryRow(ctx, `
 		INSERT INTO collab_worker_reports
 		    (tenant_id, report_id, work_item_id, assignment_id, session_id, request_id,
-		     state, summary, attention_id, result, created_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11)
-		ON CONFLICT (tenant_id, work_item_id, request_id)
+		     state, summary, attention_id, result, audited_at, applied_at, created_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11,$12,$13)
+		ON CONFLICT (tenant_id, work_item_id, assignment_id, session_id, request_id)
 		    WHERE request_id <> '' DO NOTHING
 		RETURNING tenant_id, report_id, work_item_id, assignment_id, session_id, request_id,
-		          state, summary, attention_id, result, created_at`,
+		          state, summary, attention_id, result, audited_at, applied_at, created_at`,
 		report.TenantID, report.ID, report.WorkItemID, report.AssignmentID,
-		nullableUUID(report.SessionID), report.RequestID, string(report.State),
-		report.Summary, nullableUUID(report.AttentionID), rawInput(report.Result), report.CreatedAt))
-	if errors.Is(err, pgx.ErrNoRows) && report.RequestID != "" {
-		existing, lookupErr := s.GetWorkerReport(ctx, report.TenantID, report.WorkItemID, report.RequestID)
+		report.SessionID, report.RequestID, string(report.State),
+		report.Summary, nullableUUID(report.AttentionID), rawInput(report.Result),
+		nullableTime(report.AuditedAt), nullableTime(report.AppliedAt), report.CreatedAt))
+	if errors.Is(err, pgx.ErrNoRows) {
+		existing, lookupErr := s.GetWorkerReport(ctx, report.TenantID, report.WorkItemID,
+			report.AssignmentID, report.SessionID, report.RequestID)
 		return existing, false, lookupErr
 	}
 	if err != nil {
-		return superagent.WorkerReport{}, false, fmt.Errorf("store: record worker report: %w", err)
+		return superagent.WorkerReport{}, false, fmt.Errorf("store: claim worker report: %w", err)
 	}
 	return row, true, nil
 }
 
-// GetWorkerReport reads one report by its request id. A foreign tenant's row
-// and a missing row are the same not-found answer.
-func (s *Store) GetWorkerReport(ctx context.Context, tenantID, workItemID uuid.UUID, requestID string) (superagent.WorkerReport, error) {
-	if tenantID == uuid.Nil || workItemID == uuid.Nil || requestID == "" {
+// GetWorkerReport reads one report by its assignment/session/request-id key. A
+// foreign tenant's row and a missing row are the same not-found answer.
+func (s *Store) GetWorkerReport(ctx context.Context, tenantID, workItemID, assignmentID, sessionID uuid.UUID, requestID string) (superagent.WorkerReport, error) {
+	if tenantID == uuid.Nil || workItemID == uuid.Nil || assignmentID == uuid.Nil || sessionID == uuid.Nil || requestID == "" {
 		return superagent.WorkerReport{}, superagent.ErrReportNotFound
 	}
 	row, err := scanWorkerReport(s.pool.QueryRow(ctx, `
 		SELECT tenant_id, report_id, work_item_id, assignment_id, session_id, request_id,
-		       state, summary, attention_id, result, created_at
+		       state, summary, attention_id, result, audited_at, applied_at, created_at
 		  FROM collab_worker_reports
-		 WHERE tenant_id = $1 AND work_item_id = $2 AND request_id = $3`,
-		tenantID, workItemID, requestID))
+		 WHERE tenant_id = $1 AND work_item_id = $2 AND assignment_id = $3
+		   AND session_id = $4 AND request_id = $5`,
+		tenantID, workItemID, assignmentID, sessionID, requestID))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return superagent.WorkerReport{}, superagent.ErrReportNotFound
 	}
@@ -372,14 +388,79 @@ func (s *Store) GetWorkerReport(ctx context.Context, tenantID, workItemID uuid.U
 	return row, nil
 }
 
+// MarkWorkerReportAudited transitions an unaudited claim. It returns true when
+// this call performed the transition and false when the claim was already
+// audited; a missing claim is ErrReportNotFound.
+func (s *Store) MarkWorkerReportAudited(ctx context.Context, tenantID, reportID uuid.UUID, at time.Time) (bool, error) {
+	if tenantID == uuid.Nil || reportID == uuid.Nil {
+		return false, superagent.ErrReportNotFound
+	}
+	if at.IsZero() {
+		at = time.Now().UTC()
+	}
+	tag, err := s.pool.Exec(ctx, `
+		UPDATE collab_worker_reports
+		   SET audited_at = $3
+		 WHERE tenant_id = $1 AND report_id = $2 AND audited_at IS NULL`,
+		tenantID, reportID, at)
+	if err != nil {
+		return false, fmt.Errorf("store: mark worker report audited: %w", err)
+	}
+	if tag.RowsAffected() > 0 {
+		return true, nil
+	}
+	var exists bool
+	if err := s.pool.QueryRow(ctx, `
+		SELECT EXISTS (SELECT 1 FROM collab_worker_reports WHERE tenant_id = $1 AND report_id = $2)`,
+		tenantID, reportID).Scan(&exists); err != nil {
+		return false, fmt.Errorf("store: read worker report: %w", err)
+	}
+	if !exists {
+		return false, superagent.ErrReportNotFound
+	}
+	return false, nil
+}
+
+// MarkWorkerReportApplied transitions a claim whose state transition landed.
+func (s *Store) MarkWorkerReportApplied(ctx context.Context, tenantID, reportID uuid.UUID, at time.Time) (bool, error) {
+	if tenantID == uuid.Nil || reportID == uuid.Nil {
+		return false, superagent.ErrReportNotFound
+	}
+	if at.IsZero() {
+		at = time.Now().UTC()
+	}
+	tag, err := s.pool.Exec(ctx, `
+		UPDATE collab_worker_reports
+		   SET applied_at = $3
+		 WHERE tenant_id = $1 AND report_id = $2 AND applied_at IS NULL`,
+		tenantID, reportID, at)
+	if err != nil {
+		return false, fmt.Errorf("store: mark worker report applied: %w", err)
+	}
+	if tag.RowsAffected() > 0 {
+		return true, nil
+	}
+	var exists bool
+	if err := s.pool.QueryRow(ctx, `
+		SELECT EXISTS (SELECT 1 FROM collab_worker_reports WHERE tenant_id = $1 AND report_id = $2)`,
+		tenantID, reportID).Scan(&exists); err != nil {
+		return false, fmt.Errorf("store: read worker report: %w", err)
+	}
+	if !exists {
+		return false, superagent.ErrReportNotFound
+	}
+	return false, nil
+}
+
 func scanWorkerReport(row workItemScanner) (superagent.WorkerReport, error) {
 	var report superagent.WorkerReport
 	var sessionID, attentionID uuid.NullUUID
+	var auditedAt, appliedAt *time.Time
 	var state string
 	var result []byte
 	if err := row.Scan(&report.TenantID, &report.ID, &report.WorkItemID, &report.AssignmentID,
 		&sessionID, &report.RequestID, &state, &report.Summary, &attentionID, &result,
-		&report.CreatedAt); err != nil {
+		&auditedAt, &appliedAt, &report.CreatedAt); err != nil {
 		return superagent.WorkerReport{}, err
 	}
 	report.State = superagent.ReportState(state)
@@ -388,6 +469,12 @@ func scanWorkerReport(row workItemScanner) (superagent.WorkerReport, error) {
 	}
 	if attentionID.Valid {
 		report.AttentionID = attentionID.UUID
+	}
+	if auditedAt != nil {
+		report.AuditedAt = auditedAt
+	}
+	if appliedAt != nil {
+		report.AppliedAt = appliedAt
 	}
 	report.Result = append(json.RawMessage(nil), result...)
 	return report, nil

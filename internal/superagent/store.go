@@ -38,11 +38,13 @@ type Store interface {
 	ListSubscriptions(ctx context.Context, tenantID, workItemID uuid.UUID) ([]Subscription, error)
 	ListThreadSubscriptions(ctx context.Context, tenantID uuid.UUID, thread ThreadRef) ([]Subscription, error)
 
-	// Worker reports are the ticket timeline facts and the idempotency ledger
-	// of the model-facing `report` tool. A repeated request id returns the
-	// original row with created=false.
-	GetWorkerReport(ctx context.Context, tenantID, workItemID uuid.UUID, requestID string) (WorkerReport, error)
-	RecordWorkerReport(ctx context.Context, report WorkerReport) (WorkerReport, bool, error)
+	// Worker reports are the ticket timeline facts and the durable idempotency
+	// ledger of the model-facing `report` tool. A claim is scoped by
+	// assignment+session+request id; a duplicate returns created=false.
+	GetWorkerReport(ctx context.Context, tenantID, workItemID, assignmentID, sessionID uuid.UUID, requestID string) (WorkerReport, error)
+	ClaimWorkerReport(ctx context.Context, report WorkerReport) (WorkerReport, bool, error)
+	MarkWorkerReportAudited(ctx context.Context, tenantID, reportID uuid.UUID, at time.Time) (bool, error)
+	MarkWorkerReportApplied(ctx context.Context, tenantID, reportID uuid.UUID, at time.Time) (bool, error)
 
 	EnqueueOutbox(ctx context.Context, message OutboxMessage) (OutboxMessage, error)
 	ListOutbox(ctx context.Context, tenantID uuid.UUID, status OutboxStatus, limit int) ([]OutboxMessage, error)
@@ -395,16 +397,17 @@ func (m *MemoryStore) UpdateOutbox(_ context.Context, message OutboxMessage) (Ou
 	return message, nil
 }
 
-// GetWorkerReport reads one report by its idempotency key. A foreign tenant's
-// row and a missing row are the same not-found answer.
-func (m *MemoryStore) GetWorkerReport(_ context.Context, tenantID, workItemID uuid.UUID, requestID string) (WorkerReport, error) {
-	requestID = strings.TrimSpace(requestID)
-	if tenantID == uuid.Nil || workItemID == uuid.Nil || requestID == "" {
+// GetWorkerReport reads one report by its assignment/session/request-id
+// idempotency key. A foreign tenant's row and a missing row are the same
+// not-found answer.
+func (m *MemoryStore) GetWorkerReport(_ context.Context, tenantID, workItemID, assignmentID, sessionID uuid.UUID, requestID string) (WorkerReport, error) {
+	key, ok := workerReportKey(tenantID, workItemID, assignmentID, sessionID, requestID)
+	if !ok {
 		return WorkerReport{}, ErrReportNotFound
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	id, ok := m.reportKeys[tenantKey(tenantID)+"|"+workItemID.String()+"|"+requestID]
+	id, ok := m.reportKeys[key]
 	if !ok {
 		return WorkerReport{}, ErrReportNotFound
 	}
@@ -415,19 +418,25 @@ func (m *MemoryStore) GetWorkerReport(_ context.Context, tenantID, workItemID uu
 	return cloneWorkerReport(report), nil
 }
 
-// RecordWorkerReport inserts one report at most once per request id.
-func (m *MemoryStore) RecordWorkerReport(_ context.Context, report WorkerReport) (WorkerReport, bool, error) {
-	if report.TenantID == uuid.Nil || report.WorkItemID == uuid.Nil || report.AssignmentID == uuid.Nil {
-		return WorkerReport{}, false, fmt.Errorf("%w: tenant, work item and assignment ids are required", collab.ErrTenantRequired)
+// ClaimWorkerReport inserts one report at most once per
+// assignment/session/request-id key. The row is the idempotency claim; it is
+// inserted before the audit and the state transition.
+func (m *MemoryStore) ClaimWorkerReport(_ context.Context, report WorkerReport) (WorkerReport, bool, error) {
+	if report.TenantID == uuid.Nil || report.WorkItemID == uuid.Nil || report.AssignmentID == uuid.Nil || report.SessionID == uuid.Nil {
+		return WorkerReport{}, false, fmt.Errorf("%w: tenant, work item, assignment and session ids are required", collab.ErrTenantRequired)
 	}
 	report.RequestID = strings.TrimSpace(report.RequestID)
+	if report.RequestID == "" {
+		return WorkerReport{}, false, fmt.Errorf("superagent: a worker report claim needs a request id")
+	}
+	key, ok := workerReportKey(report.TenantID, report.WorkItemID, report.AssignmentID, report.SessionID, report.RequestID)
+	if !ok {
+		return WorkerReport{}, false, fmt.Errorf("superagent: invalid worker report claim key")
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if report.RequestID != "" {
-		key := tenantKey(report.TenantID) + "|" + report.WorkItemID.String() + "|" + report.RequestID
-		if id, ok := m.reportKeys[key]; ok {
-			return cloneWorkerReport(m.reports[id]), false, nil
-		}
+	if id, ok := m.reportKeys[key]; ok {
+		return cloneWorkerReport(m.reports[id]), false, nil
 	}
 	if report.ID == uuid.Nil {
 		report.ID = uuid.New()
@@ -436,10 +445,45 @@ func (m *MemoryStore) RecordWorkerReport(_ context.Context, report WorkerReport)
 		report.CreatedAt = m.now()
 	}
 	m.reports[report.ID] = cloneWorkerReport(report)
-	if report.RequestID != "" {
-		m.reportKeys[tenantKey(report.TenantID)+"|"+report.WorkItemID.String()+"|"+report.RequestID] = report.ID
-	}
+	m.reportKeys[key] = report.ID
 	return cloneWorkerReport(report), true, nil
+}
+
+// MarkWorkerReportAudited transitions an unaudited claim. It returns true when
+// this call performed the transition and false when another attempt already
+// did; a missing claim is ErrReportNotFound.
+func (m *MemoryStore) MarkWorkerReportAudited(_ context.Context, tenantID, reportID uuid.UUID, at time.Time) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	report, ok := m.reports[reportID]
+	if !ok || report.TenantID != tenantID {
+		return false, ErrReportNotFound
+	}
+	if report.AuditedAt != nil {
+		return false, nil
+	}
+	stamp := at.UTC()
+	report.AuditedAt = &stamp
+	m.reports[reportID] = report
+	return true, nil
+}
+
+// MarkWorkerReportApplied transitions a claim whose state transition landed.
+// It returns true when this call performed the transition.
+func (m *MemoryStore) MarkWorkerReportApplied(_ context.Context, tenantID, reportID uuid.UUID, at time.Time) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	report, ok := m.reports[reportID]
+	if !ok || report.TenantID != tenantID {
+		return false, ErrReportNotFound
+	}
+	if report.AppliedAt != nil {
+		return false, nil
+	}
+	stamp := at.UTC()
+	report.AppliedAt = &stamp
+	m.reports[reportID] = report
+	return true, nil
 }
 
 func sortSubscriptions(subs []Subscription) {
@@ -452,6 +496,17 @@ func sortSubscriptions(subs []Subscription) {
 }
 
 func tenantKey(tenantID uuid.UUID) string { return tenantID.String() }
+
+// workerReportKey is the assignment/session-scoped idempotency key. A replaced
+// worker's request id lives in its old assignment's key space, so it can never
+// collide with the replacement assignment's report.
+func workerReportKey(tenantID, workItemID, assignmentID, sessionID uuid.UUID, requestID string) (string, bool) {
+	requestID = strings.TrimSpace(requestID)
+	if tenantID == uuid.Nil || workItemID == uuid.Nil || assignmentID == uuid.Nil || sessionID == uuid.Nil || requestID == "" {
+		return "", false
+	}
+	return tenantKey(tenantID) + "|" + workItemID.String() + "|" + assignmentID.String() + "|" + sessionID.String() + "|" + requestID, true
+}
 
 func cloneAssignment(assignment collab.Assignment) collab.Assignment {
 	copied := assignment

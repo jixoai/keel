@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jixoai/keel/internal/collab"
@@ -17,12 +18,13 @@ import (
 // cannot silently turn a typed refusal into a generic backend error.
 func TestWorkerToolCodesMatchToolSurface(t *testing.T) {
 	pairs := map[superagent.WorkerToolCode]string{
-		superagent.WorkerToolUnavailable:    toolsurface.CodeSuperagentUnavailable,
-		superagent.WorkerToolScopeRequired:  toolsurface.CodeSuperagentScopeRequired,
-		superagent.WorkerToolNotWorker:      toolsurface.CodeSuperagentNotWorker,
-		superagent.WorkerToolTicketBlocked:  toolsurface.CodeSuperagentTicketBlocked,
-		superagent.WorkerToolTicketClosed:   toolsurface.CodeSuperagentTicketClosed,
-		superagent.WorkerToolInvalidRequest: toolsurface.CodeSuperagentInvalid,
+		superagent.WorkerToolUnavailable:      toolsurface.CodeSuperagentUnavailable,
+		superagent.WorkerToolScopeRequired:    toolsurface.CodeSuperagentScopeRequired,
+		superagent.WorkerToolNotWorker:        toolsurface.CodeSuperagentNotWorker,
+		superagent.WorkerToolTicketBlocked:    toolsurface.CodeSuperagentTicketBlocked,
+		superagent.WorkerToolTicketClosed:     toolsurface.CodeSuperagentTicketClosed,
+		superagent.WorkerToolInvalidRequest:   toolsurface.CodeSuperagentInvalid,
+		superagent.WorkerToolAttentionInvalid: toolsurface.CodeSuperagentAttention,
 	}
 	for code, surface := range pairs {
 		if string(code) != surface {
@@ -134,11 +136,14 @@ func TestWorkerReportResolvesSessionTicketAndIsIdempotent(t *testing.T) {
 	if again.Ticket.Status != collab.WorkItemActive || env.audit.count(superagent.AuditReport) != reportsBefore {
 		t.Fatalf("retried report changed state or audited twice: %+v", again.Ticket)
 	}
-	recorded, err := env.store.GetWorkerReport(context.Background(), env.tenant, ticket.ID, "report:1")
+	if again.Created || again.Report.State != superagent.ReportProgress || again.Report.Summary != "reading the repository" {
+		t.Fatalf("retried report fact = %+v, want the stored first report", again)
+	}
+	recorded, err := env.store.GetWorkerReport(context.Background(), env.tenant, ticket.ID, ticket.ActiveAssignment.ID, sessionID, "report:1")
 	if err != nil {
 		t.Fatalf("GetWorkerReport: %v", err)
 	}
-	if recorded.State != superagent.ReportProgress || recorded.SessionID != sessionID {
+	if recorded.State != superagent.ReportProgress || recorded.SessionID != sessionID || recorded.AppliedAt == nil || recorded.AuditedAt == nil {
 		t.Fatalf("recorded report = %+v", recorded)
 	}
 
@@ -356,6 +361,225 @@ func TestStaleWorkerAssignmentCannotFinishTheTicket(t *testing.T) {
 	after := boardTicket(t, env, ticket.ID)
 	if after.Status != collab.WorkItemActive || after.ActiveAssignment == nil || after.ActiveAssignment.ID != board.ActiveAssignment.ID {
 		t.Fatalf("the stale worker changed the ticket: %+v", after)
+	}
+}
+
+func TestReportClaimResumesAfterAuditFailureWithoutDoubleAudit(t *testing.T) {
+	env := newEnv(t, envOpts{})
+	ticket := activeTicket(t, env, "e1", "issue#1")
+	sessionID := ticket.ActiveAssignment.SessionID
+
+	env.audit.err = errors.New("audit store is down")
+	if _, err := env.orchestrator.ReportFromWorker(context.Background(), env.tenant, sessionID, superagent.WorkerReportInput{
+		State: superagent.ReportProgress, Summary: "first attempt", RequestID: "retry:1",
+	}); err == nil {
+		t.Fatal("report should fail while the audit sink is down")
+	}
+	stored, err := env.store.GetWorkerReport(context.Background(), env.tenant, ticket.ID, ticket.ActiveAssignment.ID, sessionID, "retry:1")
+	if err != nil {
+		t.Fatalf("claim was not written before the audit: %v", err)
+	}
+	if stored.AuditedAt != nil || stored.AppliedAt != nil {
+		t.Fatalf("failed audit left a completed claim: %+v", stored)
+	}
+	if got := env.audit.count(superagent.AuditReport); got != 0 {
+		t.Fatalf("audit count after failure = %d, want 0", got)
+	}
+
+	env.audit.err = nil
+	outcome, err := env.orchestrator.ReportFromWorker(context.Background(), env.tenant, sessionID, superagent.WorkerReportInput{
+		State: superagent.ReportProgress, Summary: "second attempt", RequestID: "retry:1",
+	})
+	if err != nil {
+		t.Fatalf("retry after audit recovery: %v", err)
+	}
+	if outcome.Created || outcome.Report.State != superagent.ReportProgress || outcome.Report.ID != stored.ID {
+		t.Fatalf("retry outcome = %+v", outcome)
+	}
+	if got := env.audit.count(superagent.AuditReport); got != 1 {
+		t.Fatalf("audit count after retry = %d, want exactly 1", got)
+	}
+	stored, err = env.store.GetWorkerReport(context.Background(), env.tenant, ticket.ID, ticket.ActiveAssignment.ID, sessionID, "retry:1")
+	if err != nil || stored.AuditedAt == nil || stored.AppliedAt == nil {
+		t.Fatalf("claim after retry = %+v err=%v", stored, err)
+	}
+
+	// A completed claim is authoritative: a retry with a different payload
+	// returns the stored state and does not apply the new one.
+	again, err := env.orchestrator.ReportFromWorker(context.Background(), env.tenant, sessionID, superagent.WorkerReportInput{
+		State: superagent.ReportReady, Summary: "different request", RequestID: "retry:1",
+	})
+	if err != nil {
+		t.Fatalf("completed claim retry: %v", err)
+	}
+	if again.Created || again.Report.State != superagent.ReportProgress {
+		t.Fatalf("completed claim retry = %+v", again)
+	}
+	if status := boardTicket(t, env, ticket.ID).Status; status != collab.WorkItemActive {
+		t.Fatalf("a completed claim retry changed the ticket to %s", status)
+	}
+	if got := env.audit.count(superagent.AuditReport); got != 1 {
+		t.Fatalf("completed claim retry audited again: %d", got)
+	}
+}
+
+func TestWaitingReportRequiresOpenAttentionOwnedByWorker(t *testing.T) {
+	env := newEnv(t, envOpts{})
+	ticket := activeTicket(t, env, "e1", "issue#1")
+	sessionID := ticket.ActiveAssignment.SessionID
+	ctx := context.Background()
+
+	attention, _, err := env.orchestrator.AskFromWorker(ctx, env.tenant, sessionID, collab.AttentionRequest{
+		RequestID: "q:answered", Prompt: "Proceed?", AllowFreeText: true,
+	})
+	if err != nil {
+		t.Fatalf("AskFromWorker: %v", err)
+	}
+	if _, err := env.orchestrator.AnswerAttention(ctx, env.tenant, attention.ID, "", "yes", "alice"); err != nil {
+		t.Fatalf("AnswerAttention: %v", err)
+	}
+	_, err = env.orchestrator.ReportFromWorker(ctx, env.tenant, sessionID, superagent.WorkerReportInput{
+		State: superagent.ReportWaiting, AttentionID: attention.ID, RequestID: "wait:answered",
+	})
+	if code := workerToolCode(t, err); code != string(superagent.WorkerToolAttentionInvalid) {
+		t.Fatalf("answered attention report code = %q", code)
+	}
+	if _, err := env.store.GetWorkerReport(ctx, env.tenant, ticket.ID, ticket.ActiveAssignment.ID, sessionID, "wait:answered"); !errors.Is(err, superagent.ErrReportNotFound) {
+		t.Fatalf("refused report left a claim: %v", err)
+	}
+
+	// An expired attention is equally unusable.
+	expiring, _, err := env.orchestrator.AskFromWorker(ctx, env.tenant, sessionID, collab.AttentionRequest{
+		RequestID: "q:expiring", Prompt: "Still there?", AllowFreeText: true, Timeout: time.Minute,
+	})
+	if err != nil {
+		t.Fatalf("AskFromWorker expiring: %v", err)
+	}
+	*env.clock = env.clock.Add(2 * time.Minute)
+	if _, err := env.orchestrator.ExpireAttentions(ctx); err != nil {
+		t.Fatalf("ExpireAttentions: %v", err)
+	}
+	_, err = env.orchestrator.ReportFromWorker(ctx, env.tenant, sessionID, superagent.WorkerReportInput{
+		State: superagent.ReportWaiting, AttentionID: expiring.ID, RequestID: "wait:expired",
+	})
+	if code := workerToolCode(t, err); code != string(superagent.WorkerToolAttentionInvalid) {
+		t.Fatalf("expired attention report code = %q", code)
+	}
+}
+
+func TestWaitingReportRejectsAnotherAssignmentsAttention(t *testing.T) {
+	env := newEnv(t, envOpts{})
+	ticket := activeTicket(t, env, "e1", "issue#1")
+	oldSession := ticket.ActiveAssignment.SessionID
+	oldAssignment := ticket.ActiveAssignment.ID
+	ctx := context.Background()
+
+	attention, _, err := env.orchestrator.AskFromWorker(ctx, env.tenant, oldSession, collab.AttentionRequest{
+		RequestID: "q:old-worker", Prompt: "Old question?", AllowFreeText: true,
+	})
+	if err != nil {
+		t.Fatalf("AskFromWorker: %v", err)
+	}
+	if _, err := env.orchestrator.ReportFromWorker(ctx, env.tenant, oldSession, superagent.WorkerReportInput{
+		State: superagent.ReportDropped, Summary: "hand back", RequestID: "drop:old",
+	}); err != nil {
+		t.Fatalf("drop: %v", err)
+	}
+	replacement := boardTicket(t, env, ticket.ID).ActiveAssignment
+	if replacement == nil || replacement.ID == oldAssignment || replacement.SessionID == oldSession {
+		t.Fatalf("replacement assignment = %+v", replacement)
+	}
+	_, err = env.orchestrator.ReportFromWorker(ctx, env.tenant, replacement.SessionID, superagent.WorkerReportInput{
+		State: superagent.ReportWaiting, AttentionID: attention.ID, RequestID: "wait:stolen",
+	})
+	if code := workerToolCode(t, err); code != string(superagent.WorkerToolAttentionInvalid) {
+		t.Fatalf("foreign attention report code = %q", code)
+	}
+}
+
+func TestReportRequestIDIsAssignmentScoped(t *testing.T) {
+	env := newEnv(t, envOpts{})
+	ticket := activeTicket(t, env, "e1", "issue#1")
+	oldSession := ticket.ActiveAssignment.SessionID
+	oldAssignment := ticket.ActiveAssignment.ID
+	ctx := context.Background()
+
+	first, err := env.orchestrator.ReportFromWorker(ctx, env.tenant, oldSession, superagent.WorkerReportInput{
+		State: superagent.ReportProgress, Summary: "old worker progress", RequestID: "shared:1",
+	})
+	if err != nil || !first.Created {
+		t.Fatalf("old worker report = %+v err=%v", first, err)
+	}
+	if _, err := env.orchestrator.ReportFromWorker(ctx, env.tenant, oldSession, superagent.WorkerReportInput{
+		State: superagent.ReportDropped, Summary: "hand back", RequestID: "drop:1",
+	}); err != nil {
+		t.Fatalf("drop: %v", err)
+	}
+	replacement := boardTicket(t, env, ticket.ID).ActiveAssignment
+	if replacement == nil || replacement.ID == oldAssignment {
+		t.Fatalf("replacement assignment = %+v", replacement)
+	}
+	second, err := env.orchestrator.ReportFromWorker(ctx, env.tenant, replacement.SessionID, superagent.WorkerReportInput{
+		State: superagent.ReportProgress, Summary: "new worker progress", RequestID: "shared:1",
+	})
+	if err != nil || !second.Created {
+		t.Fatalf("replacement report = %+v err=%v; the old request id must not swallow it", second, err)
+	}
+	if second.Report.AssignmentID != replacement.ID || second.Report.Summary != "new worker progress" {
+		t.Fatalf("replacement report fact = %+v", second.Report)
+	}
+	oldStored, err := env.store.GetWorkerReport(ctx, env.tenant, ticket.ID, oldAssignment, oldSession, "shared:1")
+	if err != nil || oldStored.Summary != "old worker progress" {
+		t.Fatalf("old claim changed: %+v err=%v", oldStored, err)
+	}
+}
+
+func TestAskRequestIDIsAssignmentScoped(t *testing.T) {
+	env := newEnv(t, envOpts{})
+	ticket := activeTicket(t, env, "e1", "issue#1")
+	oldSession := ticket.ActiveAssignment.SessionID
+	oldAssignment := ticket.ActiveAssignment.ID
+	ctx := context.Background()
+
+	oldAttention, _, err := env.orchestrator.AskFromWorker(ctx, env.tenant, oldSession, collab.AttentionRequest{
+		RequestID: "question:1", Prompt: "Old worker question?", AllowFreeText: true,
+	})
+	if err != nil {
+		t.Fatalf("old ask: %v", err)
+	}
+	// A same-assignment retry returns the original Attention (idempotent).
+	retried, _, err := env.orchestrator.AskFromWorker(ctx, env.tenant, oldSession, collab.AttentionRequest{
+		RequestID: "question:1", Prompt: "Old worker question?", AllowFreeText: true,
+	})
+	if err != nil || retried.ID != oldAttention.ID {
+		t.Fatalf("old ask retry = %+v err=%v", retried, err)
+	}
+	if _, err := env.orchestrator.ReportFromWorker(ctx, env.tenant, oldSession, superagent.WorkerReportInput{
+		State: superagent.ReportDropped, Summary: "hand back", RequestID: "drop:ask",
+	}); err != nil {
+		t.Fatalf("drop: %v", err)
+	}
+	replacement := boardTicket(t, env, ticket.ID).ActiveAssignment
+	if replacement == nil || replacement.ID == oldAssignment {
+		t.Fatalf("replacement assignment = %+v", replacement)
+	}
+	// The replacement worker may not reuse the old request id and must not
+	// receive its predecessor's Attention.
+	_, _, err = env.orchestrator.AskFromWorker(ctx, env.tenant, replacement.SessionID, collab.AttentionRequest{
+		RequestID: "question:1", Prompt: "New worker question?", AllowFreeText: true,
+	})
+	if code := workerToolCode(t, err); code != string(superagent.WorkerToolInvalidRequest) {
+		t.Fatalf("replacement ask code = %q", code)
+	}
+	attentions, err := env.store.ListAttentions(ctx, env.tenant, ticket.ID)
+	if err != nil || len(attentions) != 1 {
+		t.Fatalf("attentions = %d err=%v, want only the old one", len(attentions), err)
+	}
+	// The HTTP-shaped path gets the conflict error, not the old Attention.
+	if _, err := env.orchestrator.Ask(ctx, ticket.ID, replacement.ID, collab.AttentionRequest{
+		RequestID: "question:1", Prompt: "New worker question?", CallerSessionID: replacement.SessionID, AllowFreeText: true,
+	}); !errors.Is(err, collab.ErrAttentionConflict) {
+		t.Fatalf("http-shaped scoped ask err = %v, want attention conflict", err)
 	}
 }
 

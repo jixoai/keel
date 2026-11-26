@@ -56,7 +56,8 @@
 - [x] 4.4 不提供“新建 Super Agent Bot”入口；只提供 mode/角色配置。
 - [x] 4.5 Worker 模型工具适配（`report`/`ask` product extra tool）：
       RunScope → `collab_session_index` → assignment 解析 Ticket，schema 无 ticketId/assignmentId；
-      非 worker fail closed，`task.write` + worker-actor 审计，report/ask 均幂等，blocked/closed 拒绝。
+      非 worker fail closed，`task.write` + worker-actor 审计，report/ask 均幂等且 requestId
+      按 assignment+session 定作用域，waiting 校验 open/归属，输入有硬上限，blocked/closed 拒绝。
       （`internal/toolsurface/superagent.go` + `internal/superagent/worker_tools.go` +
       `cmd/keel/superagent_tools.go`；默认部署仍只有 11 个 builtin tool）
 

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"strings"
 	"time"
 
@@ -27,7 +26,15 @@ type WorkerReport struct {
 	Summary      string          `json:"summary,omitempty"`
 	AttentionID  uuid.UUID       `json:"attentionId,omitempty"`
 	Result       json.RawMessage `json:"result,omitempty"`
-	CreatedAt    time.Time       `json:"createdAt"`
+	// AuditedAt is the two-phase claim marker. A claim is inserted before its
+	// audit row; a retry that finds it unaudited completes the audit before
+	// applying the stored fact, so a crash cannot duplicate or lose the audit.
+	AuditedAt *time.Time `json:"auditedAt,omitempty"`
+	// AppliedAt records that the claim's state transition landed. A retry that
+	// finds an audited-but-unapplied claim resumes the transition; a completed
+	// claim returns its stored fact without re-auditing or re-applying.
+	AppliedAt *time.Time `json:"appliedAt,omitempty"`
+	CreatedAt time.Time  `json:"createdAt"`
 }
 
 // ErrReportNotFound is the store's not-found answer for one report request id.
@@ -57,6 +64,9 @@ const (
 	WorkerToolTicketClosed WorkerToolCode = "superagent_ticket_closed"
 	// WorkerToolInvalidRequest means the tool arguments are malformed.
 	WorkerToolInvalidRequest WorkerToolCode = "superagent_invalid_request"
+	// WorkerToolAttentionInvalid means the Attention a report names is closed
+	// or belongs to a different assignment/session.
+	WorkerToolAttentionInvalid WorkerToolCode = "superagent_attention_invalid"
 )
 
 // WorkerToolError is a worker-tool refusal with a stable code. The tool surface
@@ -114,10 +124,14 @@ type WorkerReportInput struct {
 	RequestID   string          `json:"requestId,omitempty"`
 }
 
-// WorkerReportOutcome is the ticket/assignment state after a report.
+// WorkerReportOutcome is the ticket/assignment state after a report, plus the
+// stored report fact. Created is false when an existing claim (same
+// assignment/session/request id) produced the result.
 type WorkerReportOutcome struct {
 	Ticket     Ticket
 	Assignment collab.Assignment
+	Report     WorkerReport
+	Created    bool
 }
 
 // ReportFromWorker applies a report for the session in scope. The ticket and
@@ -135,7 +149,7 @@ func (o *Orchestrator) ReportFromWorker(ctx context.Context, tenantID, sessionID
 	if err != nil {
 		return WorkerReportOutcome{}, err
 	}
-	ticket, assignment, err = o.report(ctx, ReportRequest{
+	return o.report(ctx, ReportRequest{
 		TenantID:        tenantID,
 		WorkItemID:      ticket.ID,
 		AssignmentID:    assignment.ID,
@@ -146,10 +160,6 @@ func (o *Orchestrator) ReportFromWorker(ctx context.Context, tenantID, sessionID
 		Result:          input.Result,
 		RequestID:       strings.TrimSpace(input.RequestID),
 	}, true)
-	if err != nil {
-		return WorkerReportOutcome{}, err
-	}
-	return WorkerReportOutcome{Ticket: ticket, Assignment: assignment}, nil
 }
 
 // AskFromWorker opens one structured Attention for the session in scope. The
@@ -233,52 +243,4 @@ func notWorker() *WorkerToolError {
 		Code:    WorkerToolNotWorker,
 		Message: "this session is not an active super-agent worker assignment; the tool only acts on the ticket bound to the calling worker session",
 	}
-}
-
-// workerReportExists answers the idempotency lookup. A store failure is an
-// error, never "not seen": retrying an unknown state could duplicate a report.
-func (o *Orchestrator) workerReportExists(ctx context.Context, tenantID, ticketID uuid.UUID, requestID string) (bool, error) {
-	requestID = strings.TrimSpace(requestID)
-	if requestID == "" {
-		return false, nil
-	}
-	_, err := o.cfg.Store.GetWorkerReport(ctx, tenantID, ticketID, requestID)
-	if err == nil {
-		return true, nil
-	}
-	if errors.Is(err, ErrReportNotFound) {
-		return false, nil
-	}
-	return false, err
-}
-
-// recordWorkerReport persists the report fact after its state changes landed.
-// A failure is returned so the model can retry; the retry re-applies idempotent
-// transitions and then records the row.
-func (o *Orchestrator) recordWorkerReport(ctx context.Context, request ReportRequest, ticket Ticket, assignment collab.Assignment) error {
-	requestID := strings.TrimSpace(request.RequestID)
-	if requestID == "" {
-		return nil
-	}
-	sessionID := request.CallerSessionID
-	if sessionID == uuid.Nil {
-		sessionID = assignment.SessionID
-	}
-	_, _, err := o.cfg.Store.RecordWorkerReport(ctx, WorkerReport{
-		ID:           uuid.New(),
-		TenantID:     o.cfg.TenantID,
-		WorkItemID:   ticket.ID,
-		AssignmentID: assignment.ID,
-		SessionID:    sessionID,
-		RequestID:    requestID,
-		State:        request.State,
-		Summary:      strings.TrimSpace(request.Summary),
-		AttentionID:  request.AttentionID,
-		Result:       append(json.RawMessage(nil), request.Result...),
-		CreatedAt:    o.cfg.Now(),
-	})
-	if err != nil {
-		return fmt.Errorf("superagent: record worker report: %w", err)
-	}
-	return nil
 }

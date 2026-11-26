@@ -105,6 +105,7 @@ func TestSuperagentFixtureEndToEnd(t *testing.T) {
 	if err := orch.Report(ctx, superagent.ReportRequest{
 		TenantID: tenant, WorkItemID: ticket.ID, AssignmentID: ticket.ActiveAssignment.ID,
 		State: superagent.ReportWaiting, Summary: "waiting for approval", AttentionID: attention.ID,
+		RequestID: "e2e-wait",
 	}); err != nil {
 		t.Fatalf("Report waiting: %v", err)
 	}
@@ -132,7 +133,7 @@ func TestSuperagentFixtureEndToEnd(t *testing.T) {
 
 	if err := orch.Report(ctx, superagent.ReportRequest{
 		TenantID: tenant, WorkItemID: ticket.ID, AssignmentID: ticket.ActiveAssignment.ID,
-		State: superagent.ReportReady, Summary: "plan applied and verified",
+		State: superagent.ReportReady, Summary: "plan applied and verified", RequestID: "e2e-ready",
 	}); err != nil {
 		t.Fatalf("Report ready: %v", err)
 	}

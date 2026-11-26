@@ -83,12 +83,17 @@ func (b *superagentToolBackend) ReportFromWorker(ctx context.Context, scope harn
 	if err != nil {
 		return toolsurface.SuperagentReportResult{}, err
 	}
+	state := string(outcome.Report.State)
+	if state == "" {
+		state = strings.TrimSpace(input.State)
+	}
 	return toolsurface.SuperagentReportResult{
 		TicketID:         outcome.Ticket.ID.String(),
 		TicketStatus:     string(outcome.Ticket.Status),
 		AssignmentID:     outcome.Assignment.ID.String(),
 		AssignmentStatus: string(outcome.Assignment.Status),
-		State:            strings.TrimSpace(input.State),
+		State:            state,
+		Created:          outcome.Created,
 	}, nil
 }
 

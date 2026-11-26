@@ -234,8 +234,9 @@ policy 允许且恰好一个 open Attention 时按选项/自由文本作答；�
 
 - **工具入口**：启用模式时 `report`/`ask` 作为 product extra tool 追加到工具面（不属于恒定
   11 个 builtin，所以默认部署的清单哈希不变）；`report` 的状态是
-  `progress|waiting|ready|blocked|failed|dropped`，`waiting` 必须带 `attentionId`；`ask` 的问题
-  回到 Ticket 的 Source thread，答复以新 turn 投递。
+  `progress|waiting|ready|blocked|failed|dropped`，`waiting` 必须带一个仍为 open、且
+  assignment/session 都属于调用者的 `attentionId`（已答/超时/他人的 Attention 拒绝）；`ask`
+  的问题回到 Ticket 的 Source thread，答复以新 turn 投递。
 - **上下文解析**：工具只读 `RunScope` 的 tenant/session，再经 durable `collab_session_index`
   找到 `mode_id=superagent` 与 `work_item_id`，并要求 `collab_assignments` 有一行
   `session_id` 恰为该会话；**schema 没有 ticketId/assignmentId 入参**，模型多传的同名字段被忽略。
@@ -245,10 +246,16 @@ policy 允许且恰好一个 open Attention 时按选项/自由文本作答；�
   answer/resume/stop 仍走独立 `OperatorAuthorizer`。`auth_events` 的 worker 行记录
   session/bot（actor）、tenant、ticket、assignment 与 action/state；不写报告 summary、
   Attention prompt 或任何正文。
-- **幂等与失败**：`report` 的 `requestId`（缺省由工具调用 id 派生）落在
-  `collab_worker_reports` 的唯一键，重复调用返回原事实；`ask` 用 Attention 的 `request_id`
-  复用同一问题。blocked/closed Ticket 拒绝报告/新问题（`superagent_ticket_blocked` /
+- **幂等与失败**：`report` 的 `requestId`（缺省由工具调用 id 派生）与 `ask` 的 request id
+  都按 assignment+session 定作用域。`report` 先落 `collab_worker_reports` 的幂等 claim
+  （`audited_at`/`applied_at` 两阶段标记），重试只补未完成阶段，不重复审计或状态迁移；
+  工具结果返回 claim 里已存的 `state` 与 `created`，不回显本次输入。`ask` 复用同一
+  assignment/session 的 Attention；被替换 worker 复用旧 id 得到冲突，不会拿到前任的问题。
+  blocked/closed Ticket 拒绝报告/新问题（`superagent_ticket_blocked` /
   `superagent_ticket_closed`），工具结果只返回本 Ticket/Assignment 的状态，不泄露其他工单。
+  模型输入有硬上限：report `result` 64KiB / summary 8KiB，ask prompt 8KiB、options 20 条
+  （单 option id/label/description 200/500/2KiB，总 16KiB）。已答/超时/他人的 Attention
+  返回 `superagent_attention_invalid`，不改变 Ticket 状态。
 
 CI 状态、Feishu、自动 merge、市场与完整 web 看板不在本切片。
 

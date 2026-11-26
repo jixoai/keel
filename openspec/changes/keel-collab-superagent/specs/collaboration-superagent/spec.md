@@ -25,6 +25,11 @@ sub-agent）MUST fail closed 并返回明确错误，MUST NOT 静默成功或改
 MUST 走 `task.write`，审计 MUST 记录 actor/tenant/ticket/action 且 MUST NOT 包含报告正文或
 问题正文；blocked/closed Ticket MUST 拒绝新的报告/问题。`report` 与 `ask` MUST 幂等：重复
 requestId MUST 返回同一事实（报告行或 Attention），MUST NOT 产生第二条终态通知或第二个问题。
+requestId MUST 以 assignment+session 定作用域：被替换 worker 的旧 id MUST NOT 命中替换
+assignment 的报告或前任 Attention。`waiting` 报告 MUST 引用一个仍为 open、且
+assignment/session 都属于调用者的 Attention；已答/超时/他人的 Attention MUST 拒绝，MUST NOT
+把 Ticket 置为 blocked 却没有 askable 的问题。模型输入的 summary/prompt/options/result MUST
+有硬上限（字节/数量）。
 
 #### Scenario: 非 worker 会话调用
 - **WHEN** 普通会话或 worker 的 sub-agent 调用 `report`/`ask`

@@ -476,6 +476,38 @@ func TestUnknownAgentActionStillChecksItsTarget(t *testing.T) {
 	}
 }
 
+// TestSuperagentWorkerToolsNeedTaskWrite pins the two product extra tools to
+// the same worker boundary as the HTTP report/ask routes: task.write on the
+// ambient session. A denial must not be audited as accepted.
+func TestSuperagentWorkerToolsNeedTaskWrite(t *testing.T) {
+	for _, tool := range []string{toolsurface.Report, toolsurface.Ask} {
+		t.Run(tool, func(t *testing.T) {
+			fake := &fakeAccess{
+				principal: access.Principal{TenantID: testTenant, AccountID: testAccount, BotID: "worker-1"},
+				decisions: map[string]access.Decision{
+					access.KeyTaskWrite + "/" + testSession.String(): {
+						Allow: false, Key: access.KeyTaskWrite, Reason: access.ReasonMissingKey,
+						Detail: "the worker harness does not include task.write",
+					},
+				},
+			}
+			auth := newTestAuthorizer(t, fake)
+			refusal := wantAccessError(t,
+				auth.AuthorizeToolCall(context.Background(), testScope, call(tool, `{"prompt":"q","state":"progress"}`)),
+				agent.ToolAccessPermissionDenied)
+			if refusal.Key != access.KeyTaskWrite {
+				t.Fatalf("%s refusal key = %q, want %q", tool, refusal.Key, access.KeyTaskWrite)
+			}
+			if len(fake.authorized) != 1 || fake.authorized[0].Resource.Type != "session" || fake.authorized[0].Resource.ID != testSession.String() {
+				t.Fatalf("%s authorization resource = %+v", tool, fake.authorized)
+			}
+			if len(fake.audits) != 0 {
+				t.Fatalf("%s denial was audited as accepted: %+v", tool, fake.audits)
+			}
+		})
+	}
+}
+
 // TestEveryDeclaredToolAuthorizes is the surface-level completeness check: a
 // call for every declared tool/action reaches the engine with a key from the
 // access registry. It catches a tool that was added to the surface but left

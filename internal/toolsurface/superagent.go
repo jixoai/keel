@@ -33,14 +33,21 @@ const (
 	CodeSuperagentTicketBlocked = "superagent_ticket_blocked"
 	CodeSuperagentTicketClosed  = "superagent_ticket_closed"
 	CodeSuperagentInvalid       = "superagent_invalid_request"
+	CodeSuperagentAttention     = "superagent_attention_invalid"
 )
 
-// maxWorkerReportResultBytes bounds one terminal report payload and
-// maxWorkerToolRequestID bounds the request id, so a tool call cannot grow a
-// durable row without limit.
+// Hard input bounds. They are enforced before the backend and mirror the
+// durable row limits: a bounded result, summary, prompt and option list.
 const (
-	maxWorkerReportResultBytes = 64 << 10
-	maxWorkerToolRequestID     = 200
+	maxWorkerReportResultBytes   = 64 << 10
+	maxWorkerReportSummaryBytes  = 8 << 10
+	maxWorkerAskPromptBytes      = 8 << 10
+	maxWorkerAskOptions          = 20
+	maxWorkerAskOptionIDBytes    = 200
+	maxWorkerAskOptionLabelBytes = 500
+	maxWorkerAskOptionDescBytes  = 2 << 10
+	maxWorkerAskOptionsBytes     = 16 << 10
+	maxWorkerToolRequestID       = 200
 )
 
 // CodedToolError is the seam a backend uses to return a typed refusal without
@@ -64,13 +71,16 @@ type SuperagentReport struct {
 	RequestID   string
 }
 
-// SuperagentReportResult is the applied ticket/assignment state.
+// SuperagentReportResult is the applied ticket/assignment state plus the stored
+// report fact. State/Created come from the backend claim, never echoed from the
+// model's input.
 type SuperagentReportResult struct {
 	TicketID         string
 	TicketStatus     string
 	AssignmentID     string
 	AssignmentStatus string
 	State            string
+	Created          bool
 }
 
 // SuperagentOption is one selectable attention answer.
@@ -206,6 +216,9 @@ func newReportTool(backend SuperagentBackend) *workerTool {
 			if !validReportState(input.State) {
 				return invalidArguments(Report, "state must be one of "+strings.Join(SuperagentReportStates, ", "))
 			}
+			if len(input.Summary) > maxWorkerReportSummaryBytes {
+				return invalidArguments(Report, fmt.Sprintf("summary exceeds %d bytes", maxWorkerReportSummaryBytes))
+			}
 			attentionID := strings.TrimSpace(input.AttentionID)
 			if attentionID != "" {
 				if _, err := uuid.Parse(attentionID); err != nil {
@@ -233,7 +246,8 @@ func newReportTool(backend SuperagentBackend) *workerTool {
 			}
 			return jsonResult(Report, map[string]any{
 				"reported": true,
-				"state":    input.State,
+				"created":  outcome.Created,
+				"state":    outcome.State,
 				"ticket": map[string]any{
 					"id":     outcome.TicketID,
 					"status": outcome.TicketStatus,
@@ -269,8 +283,14 @@ func newAskTool(backend SuperagentBackend) *workerTool {
 			if input.Prompt == "" {
 				return invalidArguments(Ask, "prompt is required")
 			}
+			if len(input.Prompt) > maxWorkerAskPromptBytes {
+				return invalidArguments(Ask, fmt.Sprintf("prompt exceeds %d bytes", maxWorkerAskPromptBytes))
+			}
 			if input.TimeoutMS < 0 {
 				return invalidArguments(Ask, "timeoutMs must be non-negative")
+			}
+			if len(input.Options) > maxWorkerAskOptions {
+				return invalidArguments(Ask, fmt.Sprintf("options exceeds %d entries", maxWorkerAskOptions))
 			}
 			options, problem := normalizeAttentionOptions(input.Options)
 			if problem != "" {
@@ -352,11 +372,16 @@ func validReportState(state string) bool {
 
 // normalizeAttentionOptions validates the model's options before the durable
 // Attention is created; the core Host repeats the validation as the authority.
+// The per-field and total byte caps keep one tool call from growing the
+// Attention row without bound.
 func normalizeAttentionOptions(options []SuperagentOption) ([]SuperagentOption, string) {
 	out := make([]SuperagentOption, 0, len(options))
 	seen := make(map[string]bool, len(options))
+	total := 0
 	for _, option := range options {
 		id := strings.TrimSpace(option.ID)
+		label := strings.TrimSpace(option.Label)
+		description := strings.TrimSpace(option.Description)
 		if id == "" {
 			return nil, "attention option ids are required"
 		}
@@ -364,11 +389,20 @@ func normalizeAttentionOptions(options []SuperagentOption) ([]SuperagentOption, 
 			return nil, "attention option ids must be unique"
 		}
 		seen[id] = true
-		out = append(out, SuperagentOption{
-			ID:          id,
-			Label:       strings.TrimSpace(option.Label),
-			Description: strings.TrimSpace(option.Description),
-		})
+		if len(id) > maxWorkerAskOptionIDBytes {
+			return nil, fmt.Sprintf("attention option id exceeds %d bytes", maxWorkerAskOptionIDBytes)
+		}
+		if len(label) > maxWorkerAskOptionLabelBytes {
+			return nil, fmt.Sprintf("attention option label exceeds %d bytes", maxWorkerAskOptionLabelBytes)
+		}
+		if len(description) > maxWorkerAskOptionDescBytes {
+			return nil, fmt.Sprintf("attention option description exceeds %d bytes", maxWorkerAskOptionDescBytes)
+		}
+		total += len(id) + len(label) + len(description)
+		out = append(out, SuperagentOption{ID: id, Label: label, Description: description})
+	}
+	if total > maxWorkerAskOptionsBytes {
+		return nil, fmt.Sprintf("attention options exceed %d bytes in total", maxWorkerAskOptionsBytes)
 	}
 	return out, ""
 }

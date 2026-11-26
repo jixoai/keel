@@ -1534,8 +1534,11 @@ CREATE INDEX IF NOT EXISTS collab_assignments_by_status
     ON collab_assignments (tenant_id, status, created_at);
 
 -- Worker reports are the ticket timeline facts and the durable idempotency
--- ledger of the model-facing `report` tool. request_id is the idempotency key;
--- a repeated report returns the original row instead of appending a second one.
+-- ledger of the model-facing `report` tool. request_id is scoped by
+-- assignment+session, so a replaced worker's old id can never collide with its
+-- replacement; a repeated report returns the original row instead of appending
+-- a second one. audited_at is the two-phase claim marker: a claim is inserted
+-- before its auth_events row, and an unaudited claim is completed by the retry.
 -- The summary is ticket data, never an audit body (auth_events carry no text).
 CREATE TABLE IF NOT EXISTS collab_worker_reports (
     tenant_id      uuid NOT NULL,
@@ -1548,14 +1551,20 @@ CREATE TABLE IF NOT EXISTS collab_worker_reports (
     summary        text NOT NULL DEFAULT '',
     attention_id   uuid,
     result         jsonb,
+    audited_at     timestamptz,
+    applied_at     timestamptz,
     created_at     timestamptz NOT NULL DEFAULT now(),
     PRIMARY KEY (tenant_id, report_id),
     CONSTRAINT collab_worker_reports_work_item_fk FOREIGN KEY (tenant_id, work_item_id)
         REFERENCES collab_work_items (tenant_id, work_item_id) ON DELETE CASCADE
 );
-
-CREATE UNIQUE INDEX IF NOT EXISTS collab_worker_reports_request
-    ON collab_worker_reports (tenant_id, work_item_id, request_id)
+-- Alpha schema evolution for the pre-existing table (this change is unmerged):
+-- add the audit/apply markers and replace the request-id key with the scoped one.
+ALTER TABLE collab_worker_reports ADD COLUMN IF NOT EXISTS audited_at timestamptz;
+ALTER TABLE collab_worker_reports ADD COLUMN IF NOT EXISTS applied_at timestamptz;
+DROP INDEX IF EXISTS collab_worker_reports_request;
+CREATE UNIQUE INDEX IF NOT EXISTS collab_worker_reports_request_scope
+    ON collab_worker_reports (tenant_id, work_item_id, assignment_id, session_id, request_id)
     WHERE request_id <> '';
 CREATE INDEX IF NOT EXISTS collab_worker_reports_by_ticket
     ON collab_worker_reports (tenant_id, work_item_id, created_at, report_id);
