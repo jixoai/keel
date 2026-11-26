@@ -1177,6 +1177,14 @@ func (o *Orchestrator) answerAttentionLocked(ctx context.Context, tenantID uuid.
 		return collab.Attention{}, err
 	}
 	answerText := attentionAnswerText(answered)
+	if o.cfg.Outbox != nil {
+		_, _ = o.cfg.Outbox.Enqueue(ctx, OutboxMessage{
+			TenantID: tenantID, WorkItemID: ticket.ID, ChannelID: ticket.Thread.ID,
+			Thread: ticket.Thread, Text: answerText,
+			Data:           marshalData(map[string]any{"ticketId": ticket.ID.String(), "event": "attention_answered"}),
+			IdempotencyKey: "attention:" + answered.ID.String() + ":answer",
+		})
+	}
 	if assignment.ID != uuid.Nil && assignment.SessionID != uuid.Nil {
 		if err := o.cfg.Inputs.Deliver(ctx, InputRequest{
 			TenantID: tenantID, WorkItemID: ticket.ID, AssignmentID: assignment.ID,
