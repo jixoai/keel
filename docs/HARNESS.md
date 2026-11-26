@@ -230,6 +230,23 @@ policy 允许且恰好一个 open Attention 时按选项/自由文本作答；�
 因此不得把本切片描述为完整 worker-tool 闭环。CI 状态、Feishu、自动 merge、市场与完整 web
 看板不在本切片。
 
+### 3.6 协作模式内核边界（keel-collab-core）
+
+Bot 只定义角色（身份 + 模型 + Harness）；「main-agent / sub-agent / super-agent」是协作模式
+（可插拔拓扑），不是 Bot 的一种。`internal/collab` 只放模式契约与纯词汇（仅标准库 + uuid），
+不知道内核、store 或 HTTP；真正的 Host 适配在 `internal/harnessext`，由 `cmd/keel` 装配。
+
+- **单一 Host 门**：任何模式创建 Session 都经 `collab.Host`。Host 在锁内做租户/父会话/
+  `bot.invoke`/槽位检查，再调用模式注册的 launcher；模式不直接持有 SessionStore 或 kernel。
+- **深度是策略，不是模式**：sub-agent 的 `DepthPolicy` 支持 `LimitedDepth(n)`（部署默认 3）、
+  `UnlimitedDepth()`（-1）与 `ForbiddenDepth()`（0）；父链、请求、部署三者取最小，子代理不能
+  扩宽；fork 不产生委派、不消耗深度。
+- **模式可组合**：super-agent 是另一种模式（工单/调度），Worker 仍通过 subagent Host 建会话；
+  Ticket/Assignment 层级不消耗 sub-agent depth。未来模式只需实现 launcher + descriptor，
+  不改 Host 的守卫。
+- **取消/审计**：取消走 `CancelSubtree`（会话、子代理、agent cancel、预算/超时统一语义）；
+  Host 的审计 sink fail-closed，拒绝也留痕且不含正文。
+
 ## 4. 与内核的接缝
 
 - `RunControl`（`harnessext`）→ `agent.RunController` → worker：取消注册在**执行 attempt 的进程**；

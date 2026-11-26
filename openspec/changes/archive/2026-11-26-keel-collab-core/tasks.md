@@ -35,14 +35,14 @@
       `keel-collab-subagent`，现有入口未改动。）
 - [x] 4.2 toolsurface 只解析参数/投影结果，不再自行实现权限/深度判断。
       （现状已满足：权限在 `toolauth`，toolsurface 没有深度计数；本阶段未改其行为。）
-- [ ] 4.3 旧入口与新 Host 入口的一致性测试。
+- [x] 4.3 旧入口与新 Host 入口的一致性测试。（`TestCollabSubagentLauncherLaunchAndCancel` 证明 Host launcher 落到同一个 SubagentRunner、幂等与取消语义；直接入口的 depth 0/3/-1 由 `subagent_depth_test.go` 覆盖；`cmd/keel/collab_host_test.go` 校验 durable depth/index。）
 
 ## 5. 验收
 
 - [x] 5.1 `go test -race` 相关包；`openspec validate --strict keel-collab-core`。
 - [x] 5.2 独立子代理复核契约与依赖方向；P0/P1 清零。
       （复核发现 8 个 P1，已在 §6 逐项修复并补测试；P2 登记在 §6。）
-- [ ] 5.3 更新 `docs/HARNESS.md`/`docs/ARCHITECTURE.md` 的协作模式边界，归档本 change。
+- [x] 5.3 更新 `docs/HARNESS.md`/`docs/ARCHITECTURE.md` 的协作模式边界，归档本 change。（HARNESS §3.6；ARCHITECTURE 以 Bot/Account 边界为准，不再重复拓扑细节）
 
 ## 6. 独立复核修复（第二轮）
 
