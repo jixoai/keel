@@ -214,6 +214,11 @@ type Provides struct {
 	// idempotency and callers that `--help`, the settings page, creation mode
 	// and the agent tool face share as one source of truth.
 	CLI []CLICapability `yaml:"cli,omitempty" json:"cli,omitempty"`
+	// Commands are the plugin's chat commands (`provides.commands`): named
+	// user-intent entrances published as `/<plugin-id>:<name>`. Every command
+	// binds one of this manifest's provides.tools; it adds no execution
+	// primitive. Spec: openspec/changes/keel-plugin-commands.
+	Commands []CommandDecl `yaml:"commands,omitempty" json:"commands,omitempty"`
 	// UI is the webview resource declaration. It is required for a webview
 	// package that contributes iframe surfaces; a pure chunk package may omit
 	// it (see validateProvides).
@@ -969,6 +974,7 @@ func (m *Manifest) validateProvides(errs *fieldSet, env Environment, validKind b
 	m.validateProviderProvides(errs)
 	m.validateAgentProvides(errs)
 	m.validateCLI(errs)
+	m.validateCommands(errs, seenTools)
 	m.validateSlots(errs)
 	m.validateBackends(errs, env)
 	m.validateContributions(errs, env)

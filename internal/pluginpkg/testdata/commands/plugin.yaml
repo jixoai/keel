@@ -1,0 +1,29 @@
+id: vendor.search
+version: 1.1.0
+kind: in-process
+description: Search index maintenance commands.
+engines:
+  keel: ">=0.1.0 <1.0.0"
+provides:
+  tools: [vendor.search.reindex, vendor.search.purge]
+  commands:
+    - name: reindex
+      summary: Rebuild the search index.
+      description: Rebuilds the current workspace index; does not change files.
+      args_schema:
+        type: object
+        properties:
+          path:
+            type: string
+        required: [path]
+      tool: vendor.search.reindex
+      danger: write
+      idempotent: true
+      targets: [web, native, tui]
+    - name: purge
+      summary: Delete every indexed document.
+      tool: vendor.search.purge
+      danger: destructive
+      targets: [web, native]
+permissions:
+  tools: [vendor.search.reindex]
