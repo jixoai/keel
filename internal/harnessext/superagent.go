@@ -17,6 +17,10 @@ type SuperagentInput struct {
 
 var _ superagent.InputSink = SuperagentInput{}
 
+// DeliversInput implements superagent.DeliveryCapable: without a turn starter
+// Deliver returns an error, so only an assembled starter counts as delivery.
+func (s SuperagentInput) DeliversInput() bool { return s.Starter != nil }
+
 // Deliver commits one user message into the worker session with a stable
 // request id, so a replayed follow-up or a retried attention answer dedupes in
 // the kernel ledger rather than starting a second turn.

@@ -43,9 +43,12 @@ PLAYWRIGHT_CORE="${KEEL_LIVE_PLAYWRIGHT:-/Users/kzf/.npm/_npx/e41f203b7505f1fb/n
 CHROME="${KEEL_LIVE_CHROME:-/Applications/Google Chrome.app/Contents/MacOS/Google Chrome}"
 
 mkdir -p "$RUN/runtime" "$RUN/secrets" "$RUN/shots" "$RUN/data"
-# One lane, one evidence set: stale PNGs from an earlier attempt must not look
-# like this run's screenshots.
-rm -f "$RUN/shots"/*.png
+# One lane, one evidence set. A stale PASS from an earlier attempt must never be
+# mistaken for this run: the report and its public copy are removed up front and
+# are only rebuilt when this run exits 0.
+rm -f "$RUN/shots"/*.png "$RUN/report.json" "$RUN/report.html" "$RUN/report-crash.json" "$RUN/data/"*.log
+mkdir -p "$RUN/public/shots" "$RUN/public/runtime" "$RUN/public/data"
+rm -rf "$RUN/public/report.html" "$RUN/public/shots"/*.png "$RUN/public/runtime/"*.log "$RUN/public/data/"*.log
 chmod 700 "$RUN" "$RUN/secrets"
 RUNTIME="$RUN/runtime"
 SERVER_PID=""
@@ -314,6 +317,12 @@ export LIVE_ISSUE_URL="$ISSUE_URL"
 export LIVE_MARKER="$MARK"
 export LIVE_PROVIDER_LOG="$RUNTIME/provider.log"
 export LIVE_DSN_FILE="$RUNTIME/dsn"
+# Bind the report to the code it actually ran: HEAD, tracked-tree dirtiness and
+# the exact binary. The lane runs after the final commit, so a reader can check
+# the report against that commit.
+export LIVE_GIT_COMMIT="$(cd "$ROOT" && git rev-parse HEAD)"
+export LIVE_GIT_DIRTY="$(cd "$ROOT" && git status --porcelain --untracked-files=no | wc -l | tr -d ' ')"
+export LIVE_BIN_SHA256="$(shasum -a 256 "$BIN" | awk '{print $1}')"
 export LIVE_GITHUB_TOKEN="$(gh auth token)"
 export LIVE_CHROME="$CHROME"
 export LIVE_PLAYWRIGHT="$PLAYWRIGHT_CORE"
@@ -326,6 +335,18 @@ node "$ROOT/scripts/superagent-live-github/e2e.mjs"
 CODE=$?
 set -e
 
+if [[ "$CODE" == "0" ]]; then
+  # Publish only a green run. The public directory is what the pinned tunnel
+  # serves; a failed run leaves it empty rather than exposing an older PASS.
+  cp "$RUN/report.html" "$RUN/public/report.html"
+  cp "$RUN/shots/"*.png "$RUN/public/shots/"
+  cp "$RUNTIME/serve.log" "$RUNTIME/provider.log" "$RUNTIME/bootstrap.log" "$RUNTIME/worker-tools.log" "$RUN/public/runtime/"
+  cp "$RUN/data/"*.log "$RUN/public/data/" 2>/dev/null || true
+  if grep -Rl "gho_\|ghp_" "$RUN/public" >/dev/null 2>&1; then
+    fail "public report copy contains what looks like a token"
+  fi
+  say "published: $RUN/public"
+fi
 say "issue kept for review: $ISSUE_URL"
 say "repository kept for review: https://github.com/$REPO"
 say "issue created this run: $ISSUE_CREATED"

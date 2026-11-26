@@ -26,6 +26,9 @@ const ISSUE_URL = process.env.LIVE_ISSUE_URL || '';
 const MARKER = process.env.LIVE_MARKER || '';
 const PROVIDER_LOG = process.env.LIVE_PROVIDER_LOG || '';
 const DSN_FILE = process.env.LIVE_DSN_FILE || '';
+const GIT_COMMIT = process.env.LIVE_GIT_COMMIT || '';
+const GIT_DIRTY = process.env.LIVE_GIT_DIRTY || '';
+const BIN_SHA256 = process.env.LIVE_BIN_SHA256 || '';
 const CHROME = process.env.LIVE_CHROME || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const PLAYWRIGHT = process.env.LIVE_PLAYWRIGHT || '';
 const HEADLESS = process.env.LIVE_HEADLESS !== 'false';
@@ -55,6 +58,8 @@ const report = {
     `marker：${MARKER}`,
     'PG 临时库',
     'local-only 产品鉴权',
+    `commit：${GIT_COMMIT.slice(0, 12) || 'unknown'}（tracked dirty=${GIT_DIRTY || '?'}）`,
+    `bin sha256：${BIN_SHA256.slice(0, 16) || 'unknown'}…`,
   ],
   conclusion: '',
   stats: [],
@@ -65,7 +70,8 @@ const report = {
     ['允许 actor', 'Gaubee（gh api user）'],
     ['员工模型', 'loopback 脚本化 OpenAI provider（输出工具调用）'],
     ['轮询', '2s；槽位 1 + 人工保留 1'],
-    ['token', '仅进程环境，未写入文件/日志/提交'],
+    ['token', '仅进程环境；必须是 user token（PAT / gh auth token），未写入文件/日志/提交'],
+    ['代码版本', `git ${GIT_COMMIT || 'unknown'}（tracked dirty=${GIT_DIRTY || '?'}）；bin sha256 ${BIN_SHA256 || 'unknown'}`],
   ],
   steps: [],
   assertions: [],
@@ -312,6 +318,7 @@ async function main() {
     url: issue?.html_url,
   });
   note(`serve=${BASE}\nissue=${ISSUE_URL}\naccount=${auth.account?.username} tenant=${auth.tenantId}`);
+  note(`commit=${GIT_COMMIT} trackedDirty=${GIT_DIRTY} binSha256=${BIN_SHA256}`);
   finishStep();
 
   // 1. Source -> Ticket -> Assignment
@@ -416,14 +423,19 @@ async function main() {
 
   // The review-driven regressions run inside the same lane so the report
   // carries their real output: durable body/title snapshots (with real PG when
-  // the lane DSN is available), title-only edits, owner+trailing-marker
-  // filtering, human marker quotes, and the cross-endpoint cursor max over
-  // skipped self comments.
+  // the lane DSN is available), dispatch-failure replay, the no-op sink,
+  // title-only edits, owner+trailing-marker filtering, human marker quotes,
+  // the cross-endpoint cursor max over skipped self comments, and Link
+  // pagination.
   const regressionNames = [
     'TestUnchangedIssueUpdateIsNotAFollowUp',
     'TestIssueUpdateSnapshotIsDurableAcrossRestart',
+    'TestFollowUpDispatchFailureKeepsSnapshotForRetry',
+    'TestNoopInputSinkDoesNotAdvanceDeliveredSnapshot',
     'TestGitHubSourceIgnoresOwnChannelComments',
     'TestGitHubSourceFailsClosedWhenOwnerIsUnknown',
+    'TestGitHubSourceFollowsPagination',
+    'TestGitHubSourceRefusesOffHostPagination',
   ];
   let regressionOutput = '';
   let regressionExit = 1;
@@ -444,7 +456,7 @@ async function main() {
   check(
     'R2',
     'dedupe',
-    'P1 快照 / 仅标题编辑 / owner+行尾 marker / 游标取 max / PG 重启 全部 PASS',
+    'P1 快照 / 派工失败不推进 / Noop 不推进 / 仅标题编辑 / owner+行尾 marker / 游标取 max / 分页 / PG 重启 全部 PASS',
     regressed.length === 0,
     regressed.length === 0 ? `${regressionNames.length} cases PASS` : 'missing PASS: ' + regressed.join(','),
   );
@@ -603,6 +615,16 @@ async function main() {
       severity: 'P2',
       title: '本轮线程是 issue；PR 线程未实跑',
       detail: 'GitHub Source/Channel 对 issue 与 pull_request 共用同一适配器路径（thread kind 不同）；本轮只在真实 issue 上验证评论回写，PR 会话的线程 id 形态未跑。',
+    },
+    {
+      severity: 'P2',
+      title: 'live 只有单账号（Gaubee），未用第二个人类账号实测 marker 引用',
+      detail: 'owner+行尾 marker 的精确过滤由单测覆盖（人类引用 marker 仍投递、owner 行中 marker 仍投递）；本轮 live 的评论都由同一 token owner 发出，无法在真实 GitHub 上证明“别的人类账号引用 marker 不被误杀”。',
+    },
+    {
+      severity: 'P2',
+      title: '仅支持 user token；GitHub App installation token 不支持',
+      detail: 'Source 通过 GET /user 解析 token owner 以识别自身评论；App installation token 没有 user login，Poll 会失败关闭。部署必须用 classic PAT 或 gh auth token（repo scope）。后续若要支持 App，需要按 bot 身份（评论 author 为 <app>[bot]）设计过滤。',
     },
   ];
   report.evidence = [

@@ -34,13 +34,18 @@ type GitHubConfig struct {
 	// Repo is "owner/name".
 	Repo string
 	// Token is a GitHub token. Empty works for public reads but is required for
-	// writes. It is never logged or included in an error.
+	// writes. It must be a USER token (classic PAT or `gh auth token`): the
+	// Source resolves GET /user to recognise the deployment's own comments, and
+	// a GitHub App installation token has no user login, so it is refused
+	// rather than guessed. It is never logged or included in an error.
 	Token string
 	// BaseURL defaults to https://api.github.com.
 	BaseURL string
 	// HTTPClient defaults to a client with a 20s timeout.
 	HTTPClient *http.Client
-	// PerPage bounds one list request (1..100, default 50).
+	// PerPage bounds one list request (1..100, default 50). The adapter follows
+	// the API's Link rel="next" pages (bounded), so a window larger than one
+	// page is not truncated.
 	PerPage int
 	// InitialCursor seeds the read position when no durable cursor exists. Empty
 	// uses the process clock: the first poll establishes a baseline instead of
@@ -194,7 +199,14 @@ func (g *GitHubSource) listIssues(ctx context.Context, since time.Time, perPage 
 	values.Set("since", since.UTC().Format(time.RFC3339))
 	values.Set("per_page", strconv.Itoa(perPage))
 	var issues []githubIssue
-	if err := g.getJSON(ctx, endpoint+"?"+values.Encode(), &issues); err != nil {
+	if err := g.listPaged(ctx, endpoint+"?"+values.Encode(), func(batch []byte) error {
+		var page []githubIssue
+		if err := json.Unmarshal(batch, &page); err != nil {
+			return err
+		}
+		issues = append(issues, page...)
+		return nil
+	}); err != nil {
 		return nil, time.Time{}, err
 	}
 	events := make([]collab.SourceEvent, 0, len(issues))
@@ -305,7 +317,14 @@ func (g *GitHubSource) listComments(ctx context.Context, since time.Time, perPag
 		return nil, time.Time{}, err
 	}
 	var comments []githubComment
-	if err := g.getJSON(ctx, endpoint+"?"+values.Encode(), &comments); err != nil {
+	if err := g.listPaged(ctx, endpoint+"?"+values.Encode(), func(batch []byte) error {
+		var page []githubComment
+		if err := json.Unmarshal(batch, &page); err != nil {
+			return err
+		}
+		comments = append(comments, page...)
+		return nil
+	}); err != nil {
 		return nil, time.Time{}, err
 	}
 	events := make([]collab.SourceEvent, 0, len(comments))
@@ -354,9 +373,46 @@ func (g *GitHubSource) listComments(ctx context.Context, since time.Time, perPag
 }
 
 func (g *GitHubSource) getJSON(ctx context.Context, endpoint string, target any) error {
+	_, err := g.getJSONPage(ctx, endpoint, target)
+	return err
+}
+
+// maxListPages bounds one endpoint's pagination in one poll. With the default
+// or maximum per_page this covers 1000-2000 items; a window larger than that is
+// pathological and the next poll starts from the returned cursor anyway.
+const maxListPages = 20
+
+// listPaged follows the API's Link rel="next" pages and hands each raw page to
+// decode. GitHub caps a single response at per_page items, so without this a
+// busy window (>50 issues or comments) would silently skip the tail. A page URL
+// that leaves the configured API host fails closed instead of being followed.
+func (g *GitHubSource) listPaged(ctx context.Context, endpoint string, decode func([]byte) error) error {
+	next := endpoint
+	for page := 0; page < maxListPages && next != ""; page++ {
+		body, follow, err := g.getPage(ctx, next)
+		if err != nil {
+			return err
+		}
+		if err := decode(body); err != nil {
+			return fmt.Errorf("superagent: decode github response: %w", err)
+		}
+		next = ""
+		if follow == "" {
+			continue
+		}
+		parsed, err := url.Parse(follow)
+		if err != nil || parsed.Scheme != g.base.Scheme || parsed.Host != g.base.Host {
+			return fmt.Errorf("superagent: github pagination left the API host: %q", follow)
+		}
+		next = follow
+	}
+	return nil
+}
+
+func (g *GitHubSource) getPage(ctx context.Context, endpoint string) ([]byte, string, error) {
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
-		return fmt.Errorf("superagent: github request: %w", err)
+		return nil, "", fmt.Errorf("superagent: github request: %w", err)
 	}
 	request.Header.Set("Accept", "application/vnd.github+json")
 	request.Header.Set("X-GitHub-Api-Version", "2022-11-28")
@@ -365,16 +421,53 @@ func (g *GitHubSource) getJSON(ctx context.Context, endpoint string, target any)
 	}
 	response, err := g.cfg.HTTPClient.Do(request)
 	if err != nil {
-		return fmt.Errorf("superagent: github request failed: %w", err)
+		return nil, "", fmt.Errorf("superagent: github request failed: %w", err)
 	}
 	defer response.Body.Close()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return githubStatusError("read", response)
+		return nil, "", githubStatusError("read", response)
 	}
-	if err := json.NewDecoder(io.LimitReader(response.Body, 8<<20)).Decode(target); err != nil {
-		return fmt.Errorf("superagent: decode github response: %w", err)
+	body, err := io.ReadAll(io.LimitReader(response.Body, 8<<20))
+	if err != nil {
+		return nil, "", fmt.Errorf("superagent: read github response: %w", err)
 	}
-	return nil
+	return body, nextLink(response.Header.Get("Link")), nil
+}
+
+func (g *GitHubSource) getJSONPage(ctx context.Context, endpoint string, target any) (string, error) {
+	body, follow, err := g.getPage(ctx, endpoint)
+	if err != nil {
+		return "", err
+	}
+	if err := json.Unmarshal(body, target); err != nil {
+		return "", fmt.Errorf("superagent: decode github response: %w", err)
+	}
+	return follow, nil
+}
+
+// nextLink returns the rel="next" target of a GitHub Link header.
+func nextLink(header string) string {
+	for _, part := range strings.Split(header, ",") {
+		segments := strings.Split(part, ";")
+		if len(segments) < 2 {
+			continue
+		}
+		target := strings.TrimSpace(segments[0])
+		rel := ""
+		for _, attribute := range segments[1:] {
+			attribute = strings.TrimSpace(attribute)
+			if strings.HasPrefix(strings.ToLower(attribute), "rel=") {
+				rel = strings.Trim(strings.TrimPrefix(attribute, "rel="), `"`)
+			}
+		}
+		if rel != "next" {
+			continue
+		}
+		if strings.HasPrefix(target, "<") && strings.HasSuffix(target, ">") {
+			return strings.TrimSuffix(strings.TrimPrefix(target, "<"), ">")
+		}
+	}
+	return ""
 }
 
 // Send writes one comment back to the issue/PR thread. channelID is

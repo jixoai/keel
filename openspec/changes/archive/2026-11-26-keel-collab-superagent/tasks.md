@@ -84,9 +84,13 @@
       https://local-kzf-keel-live-gh.fde2e.com/report.html
       （`scripts/superagent-live-github/`）。实跑发现并修复：operator seam 未装配导致
       产品答复 403、Channel 自身评论被 Source 读回形成回声（owner + 行尾 marker 精确过滤）、
-      issue_updated 按持久化「已投递标题/正文」快照去重（重启后仍成立）。
-      未覆盖：PR 线程、真实 LLM 判断质量——见报告「缺口与风险」。）
+      issue_updated 按持久化「已投递标题/正文」快照去重（重启后仍成立）；三轮复审又收紧：
+      标题-only 编辑把新标题写入 follow-up 并更新工单标题、派工失败/未派工不得推进快照
+      （回滚 resumed 状态并让游标重试）、NoopInputSink 降级不推进、issue 正文编辑不再被
+      误当自由文本答复、issue/comments 列表跟随 Link 分页（单页 >per_page 不再截断）。
+      报告绑定 `git rev-parse HEAD` + 二进制 sha256，且只在 exit=0 时发布。
+      未覆盖：PR 线程、真实 LLM 判断质量、第二个人类账号、App token——见报告「缺口与风险」。）
 - [x] 5.3 独立 reviewer 复核；P0/P1 清零；`openspec validate --strict`；归档。
       （产品 UI 与 Worker 工具分别经独立 reviewer 复核 PASS，P0/P1=0；strict 通过。
-      5.2 的外部凭据阻塞已于 2026-11-27 实跑解除；review 复审 P1（快照去重基准）与
-      P2（marker 过滤范围）已修复并补测。）
+      5.2 的外部凭据阻塞已于 2026-11-27 实跑解除；多轮复审的 P1/P2（快照基准、
+      派工失败回滚、marker 过滤范围、标题投递、分页、报告版本绑定）已修复并补测。）

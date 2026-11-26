@@ -32,6 +32,14 @@ type InputSink interface {
 	Deliver(ctx context.Context, request InputRequest) error
 }
 
+// DeliveryCapable is implemented by an InputSink that can say whether Deliver
+// actually reaches a worker. The no-op sink of a deployment without a turn
+// starter reports false, so its accepted-but-dropped input never advances the
+// delivered snapshot.
+type DeliveryCapable interface {
+	DeliversInput() bool
+}
+
 // WorkerWatcher observes a spawned worker session and projects its terminal
 // state into the core SessionIndex. The orchestrator's slot reconciler then
 // releases the durable Assignment; the watcher is not a second slot counter.
@@ -94,6 +102,10 @@ type NoopInputSink struct{}
 
 // Deliver implements InputSink.
 func (NoopInputSink) Deliver(context.Context, InputRequest) error { return nil }
+
+// DeliversInput implements DeliveryCapable: the no-op sink records nothing, so
+// a follow-up it accepted must not be marked delivered.
+func (NoopInputSink) DeliversInput() bool { return false }
 
 // Config configures one tenant's orchestrator.
 type Config struct {
@@ -499,7 +511,10 @@ func (o *Orchestrator) attachLocked(ctx context.Context, event Event, verdict Ve
 		// A policy-allowed comment on a thread with exactly one open question is
 		// the structured answer path. An untrusted comment is never interpreted
 		// as an answer.
-		if trusted {
+		if trusted && isThreadComment(event.Kind) {
+			// Only a comment is a candidate answer. An edited issue body (which is
+			// also a follow-up kind) must never be interpreted as an answer to a
+			// free-text question — it is thread content.
 			answered, answerErr := o.answerFromCommentLocked(ctx, o.cfg.TenantID, ticket, event)
 			if answerErr != nil {
 				return nil, answerErr
@@ -516,8 +531,12 @@ func (o *Orchestrator) attachLocked(ctx context.Context, event Event, verdict Ve
 			return nil, err
 		}
 		assignment, _ := o.activeAssignment(ctx, ticket.ID)
+		text := eventInputText(event)
+		if event.Kind == EventIssueUpdated {
+			text = issueEditText(event)
+		}
+		deliveredToWorker := false
 		if assignment.ID != uuid.Nil && assignment.SessionID != uuid.Nil {
-			text := eventInputText(event)
 			if err := o.cfg.Inputs.Deliver(ctx, InputRequest{
 				TenantID: o.cfg.TenantID, WorkItemID: ticket.ID, AssignmentID: assignment.ID,
 				SessionID: assignment.SessionID, Text: text,
@@ -525,6 +544,7 @@ func (o *Orchestrator) attachLocked(ctx context.Context, event Event, verdict Ve
 			}); err != nil {
 				return nil, err
 			}
+			deliveredToWorker = inputDelivers(o.cfg.Inputs)
 		} else {
 			// No live worker: only a policy-allowed human follow-up may resume a
 			// blocked ticket. An untrusted Source comment is context, not authority,
@@ -532,21 +552,73 @@ func (o *Orchestrator) attachLocked(ctx context.Context, event Event, verdict Ve
 			if !trusted {
 				continue
 			}
+			statusChanged := false
 			if ticket.Status == collab.WorkItemBlocked {
 				if err := o.setTicketStatus(ctx, &ticket, collab.WorkItemActive, "follow-up received"); err != nil {
-					continue
+					return nil, err
 				}
+				statusChanged = true
 			}
-			if _, err := o.dispatchTicketLocked(ctx, ticket, true, "human follow-up on "+event.Thread.ID, eventInputText(event)); err != nil {
-				o.cfg.Logger.Warn("superagent: follow-up dispatch failed", "ticket", ticket.ID, "error", err)
+			dispatched, dispatchErr := o.dispatchTicketLocked(ctx, ticket, true, "human follow-up on "+event.Thread.ID, text)
+			if dispatchErr != nil {
+				// The worker never received the content. Revert the resume and
+				// return the error so the caller does not advance the Source
+				// cursor; the event is not recorded seen and the page is retried.
+				if statusChanged {
+					_ = o.setTicketStatus(ctx, &ticket, collab.WorkItemBlocked, "follow-up dispatch failed; ticket re-blocked")
+				}
+				return nil, fmt.Errorf("superagent: follow-up dispatch for ticket %s: %w", ticket.ID, dispatchErr)
 			}
+			if !dispatched {
+				// Another assignment exists but has no live session (the crash
+				// window recovery repairs), or the ticket cannot dispatch. Nothing
+				// reached a worker, so the delivered snapshot must stay at the old
+				// content: the next updated_at bump re-delivers it.
+				if statusChanged {
+					_ = o.setTicketStatus(ctx, &ticket, collab.WorkItemBlocked, "follow-up not dispatched; ticket re-blocked")
+				}
+				continue
+			}
+			deliveredToWorker = true
 		}
-		if err := o.recordDelivered(ctx, &ticket, event); err != nil {
-			return nil, err
+		if deliveredToWorker {
+			if err := o.recordDelivered(ctx, &ticket, event); err != nil {
+				return nil, err
+			}
 		}
 		delivered = append(delivered, ticket)
 	}
 	return delivered, nil
+}
+
+// inputDelivers reports whether a successful Deliver call actually reached a
+// worker. A deployment without a turn starter uses NoopInputSink, whose nil
+// answer must not be mistaken for delivery: advancing the snapshot there would
+// mark content as seen that no worker ever received.
+func inputDelivers(sink InputSink) bool {
+	if sink == nil {
+		return false
+	}
+	if capable, ok := sink.(DeliveryCapable); ok {
+		return capable.DeliversInput()
+	}
+	return true
+}
+
+// issueEditText is the follow-up body for a real issue edit. GitHub sends the
+// title and body separately, so a title-only edit has an unchanged body;
+// delivering only the body would silently drop the title change.
+func issueEditText(event Event) string {
+	title := strings.TrimSpace(event.Title)
+	body := strings.TrimSpace(event.Body)
+	switch {
+	case title == "":
+		return eventInputText(event)
+	case body == "":
+		return "Issue title: " + title
+	default:
+		return "Issue title: " + title + "\n\n" + body
+	}
 }
 
 // threadContentChanged compares an issue_updated event with the durable
@@ -565,6 +637,11 @@ func (o *Orchestrator) recordDelivered(ctx context.Context, ticket *Ticket, even
 		return nil
 	}
 	now := o.cfg.Now()
+	if title := strings.TrimSpace(event.Title); title != "" {
+		// The thread's title is part of what the worker now knows; the board
+		// shows the current issue title instead of the accept-time one.
+		ticket.Title = title
+	}
 	ticket.Delivered = &ThreadSnapshot{
 		Title: strings.TrimSpace(event.Title), Body: strings.TrimSpace(event.Body), At: now,
 	}
@@ -575,6 +652,10 @@ func (o *Orchestrator) recordDelivered(ctx context.Context, ticket *Ticket, even
 	}
 	*ticket = TicketFromWorkItem(stored)
 	return nil
+}
+
+func isThreadComment(kind EventKind) bool {
+	return kind == EventIssueComment || kind == EventPullRequestNote
 }
 
 func (o *Orchestrator) answerFromCommentLocked(ctx context.Context, tenantID uuid.UUID, ticket Ticket, event Event) (bool, error) {
@@ -1581,9 +1662,19 @@ func (o *Orchestrator) answerAttentionLocked(ctx context.Context, tenantID uuid.
 	if err != nil {
 		return collab.Attention{}, err
 	}
+	statusChanged := false
 	if ticket.Status == collab.WorkItemBlocked {
 		if err := o.setTicketStatus(ctx, &ticket, collab.WorkItemActive, "attention answered by "+actor); err != nil {
 			return collab.Attention{}, err
+		}
+		statusChanged = true
+	}
+	// A delivery/dispatch failure must not leave an active ticket without a
+	// worker. The answer row is already durable; re-blocking keeps the board
+	// honest and leaves the ticket resumable.
+	revert := func() {
+		if statusChanged {
+			_ = o.setTicketStatus(ctx, &ticket, collab.WorkItemBlocked, "answer delivery failed; ticket re-blocked")
 		}
 	}
 	assignment, err := o.activeAssignment(ctx, ticket.ID)
@@ -1605,10 +1696,12 @@ func (o *Orchestrator) answerAttentionLocked(ctx context.Context, tenantID uuid.
 			SessionID: assignment.SessionID, Text: answerText,
 			RequestID: "attention:" + answered.ID.String(), Kind: "attention_answer",
 		}); err != nil {
+			revert()
 			return collab.Attention{}, err
 		}
 	} else {
 		if _, err := o.dispatchTicketLocked(ctx, ticket, true, "attention answered by "+actor, answerText); err != nil {
+			revert()
 			return collab.Attention{}, err
 		}
 	}

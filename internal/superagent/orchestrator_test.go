@@ -220,6 +220,8 @@ type envOpts struct {
 	policy        superagent.Policy
 	inspector     superagent.WorkerInspector
 	tree          superagent.WorkerTreeCanceller
+	// inputs overrides the recording sink (a NoopInputSink test).
+	inputs superagent.InputSink
 }
 
 type testEnv struct {
@@ -310,10 +312,14 @@ func (e *testEnv) newOrchestrator(t *testing.T, opts envOpts) *superagent.Orches
 			Actors: map[string]bool{"alice": true}, WorkerBot: "worker", PolicyVersion: "test-v1",
 		}
 	}
+	inputs := superagent.InputSink(e.sink)
+	if opts.inputs != nil {
+		inputs = opts.inputs
+	}
 	orch, err := superagent.NewOrchestrator(superagent.Config{
 		TenantID: e.tenant, Store: e.store, Host: e.host, Source: e.source, Channel: e.source,
 		Policy:              policy,
-		Inputs:              e.sink,
+		Inputs:              inputs,
 		Sessions:            e.sessions,
 		Audit:               e.audit,
 		Outbox:              e.outbox,
@@ -471,7 +477,7 @@ func TestUnchangedIssueUpdateIsNotAFollowUp(t *testing.T) {
 		t.Fatalf("deliveries = %d, want 0 for an unchanged body", env.sink.count())
 	}
 
-	// A real body edit is delivered once.
+	// A real body edit is delivered once, with the thread title in the text.
 	edited := base
 	edited.EventID = "u1"
 	edited.Body = "Please fix it. Also update the tests."
@@ -480,6 +486,9 @@ func TestUnchangedIssueUpdateIsNotAFollowUp(t *testing.T) {
 	}
 	if env.sink.count() != 1 {
 		t.Fatalf("deliveries = %d, want 1 after a real edit", env.sink.count())
+	}
+	if text := env.sink.last().Text; !strings.Contains(text, "Issue title: Fix issue#1") || !strings.Contains(text, "Also update the tests") {
+		t.Fatalf("edited follow-up text = %q, want title and new body", text)
 	}
 
 	// The next comment bumps updated_at; the body is the edited one, so the
@@ -493,7 +502,8 @@ func TestUnchangedIssueUpdateIsNotAFollowUp(t *testing.T) {
 		t.Fatalf("deliveries = %d, want 1: a post-edit comment bump re-delivered the edited body", env.sink.count())
 	}
 
-	// A title-only edit is also a real edit, delivered once...
+	// A title-only edit is also a real edit, delivered once with the NEW title
+	// (the body is unchanged, so body-only delivery would drop the change)...
 	titled := bump
 	titled.EventID = "u3"
 	titled.Title = "Fix issue#1 (P1)"
@@ -502,6 +512,9 @@ func TestUnchangedIssueUpdateIsNotAFollowUp(t *testing.T) {
 	}
 	if env.sink.count() != 2 {
 		t.Fatalf("deliveries = %d, want 2 after a title-only edit", env.sink.count())
+	}
+	if text := env.sink.last().Text; !strings.Contains(text, "Issue title: Fix issue#1 (P1)") {
+		t.Fatalf("title-only follow-up text = %q, want the new title", text)
 	}
 
 	// ...and its own comment bumps do not re-deliver it either.
@@ -522,6 +535,106 @@ func TestUnchangedIssueUpdateIsNotAFollowUp(t *testing.T) {
 	delivered := board.Tickets[0].LastDelivered()
 	if delivered.Title != "Fix issue#1 (P1)" || delivered.Body != "Please fix it. Also update the tests." {
 		t.Fatalf("durable snapshot = %+v", delivered)
+	}
+	if board.Tickets[0].Title != "Fix issue#1 (P1)" {
+		t.Fatalf("ticket title = %q, want the edited thread title", board.Tickets[0].Title)
+	}
+}
+
+// TestFollowUpDispatchFailureKeepsSnapshotForRetry is the P1 replay rule: a
+// real issue edit whose follow-up could not be dispatched must not advance the
+// delivered snapshot. The event's error keeps the Source cursor in place; a
+// later bump with the same content must deliver it.
+func TestFollowUpDispatchFailureKeepsSnapshotForRetry(t *testing.T) {
+	env := newEnv(t, envOpts{})
+	acceptEvent(t, env, issueEvent("e1", "issue#1"))
+	ctx := context.Background()
+	board, _ := env.orchestrator.Board(ctx, env.tenant, superagent.BoardFilter{})
+	ticket := board.Tickets[0]
+
+	// Park the ticket on a human question, then lose the worker so the follow-up
+	// takes the dispatch branch.
+	attention, err := env.orchestrator.Ask(ctx, ticket.ID, ticket.ActiveAssignment.ID, collab.AttentionRequest{
+		Prompt: "Approve?", AllowFreeText: true,
+	})
+	if err != nil {
+		t.Fatalf("Ask: %v", err)
+	}
+	if err := env.orchestrator.Report(ctx, superagent.ReportRequest{
+		TenantID: env.tenant, WorkItemID: ticket.ID, AssignmentID: ticket.ActiveAssignment.ID,
+		State: superagent.ReportWaiting, Summary: "waiting", AttentionID: attention.ID,
+	}); err != nil {
+		t.Fatalf("Report waiting: %v", err)
+	}
+	assignment := *ticket.ActiveAssignment
+	assignment.Status = collab.AssignmentFailed
+	if _, err := env.store.UpdateAssignment(ctx, assignment); err != nil {
+		t.Fatalf("fail assignment: %v", err)
+	}
+
+	edited := superagent.Event{
+		SourceID: "fixture", EventID: "u1", Kind: superagent.EventIssueUpdated,
+		Actor: alice(), Thread: superagent.ThreadRef{Source: "fixture", Kind: "issue", ID: "issue#1"},
+		Title: "Fix issue#1", Body: "Please fix it. Also update the tests.",
+	}
+	env.launcher.launchErr = errors.New("launch down")
+	if _, err := env.orchestrator.HandleSourceEvent(ctx, fixtureEvent(t, edited)); err == nil {
+		t.Fatal("dispatch failure must return an error so the cursor does not advance")
+	}
+	board, _ = env.orchestrator.Board(ctx, env.tenant, superagent.BoardFilter{})
+	if board.Tickets[0].Status != collab.WorkItemBlocked {
+		t.Fatalf("ticket status after a failed dispatch = %s, want blocked", board.Tickets[0].Status)
+	}
+	if got := board.Tickets[0].LastDelivered().Body; got != "Please fix it." {
+		t.Fatalf("snapshot after a failed dispatch = %q, want the original body", got)
+	}
+
+	// The launcher recovers; a later event with the same content is delivered
+	// because the snapshot never advanced.
+	env.launcher.launchErr = nil
+	retry := edited
+	retry.EventID = "u2"
+	if _, err := env.orchestrator.HandleSourceEvent(ctx, fixtureEvent(t, retry)); err != nil {
+		t.Fatalf("retry: %v", err)
+	}
+	if launch := env.launcher.lastLaunch(); !strings.Contains(launch.Task, "Also update the tests") {
+		t.Fatalf("follow-up task = %q, want the edited body", launch.Task)
+	}
+	board, _ = env.orchestrator.Board(ctx, env.tenant, superagent.BoardFilter{})
+	if got := board.Tickets[0].LastDelivered().Body; got != "Please fix it. Also update the tests." {
+		t.Fatalf("snapshot after the retry = %q, want the edited body", got)
+	}
+}
+
+// TestNoopInputSinkDoesNotAdvanceDeliveredSnapshot: a deployment without a turn
+// starter accepts Deliver and drops it. The snapshot must stay at the content a
+// worker actually saw.
+func TestNoopInputSinkDoesNotAdvanceDeliveredSnapshot(t *testing.T) {
+	env := newEnv(t, envOpts{inputs: superagent.NoopInputSink{}})
+	acceptEvent(t, env, issueEvent("e1", "issue#1"))
+	ctx := context.Background()
+	edited := superagent.Event{
+		SourceID: "fixture", EventID: "u1", Kind: superagent.EventIssueUpdated,
+		Actor: alice(), Thread: superagent.ThreadRef{Source: "fixture", Kind: "issue", ID: "issue#1"},
+		Title: "Fix issue#1", Body: "Please fix it. Also update the tests.",
+	}
+	if _, err := env.orchestrator.HandleSourceEvent(ctx, fixtureEvent(t, edited)); err != nil {
+		t.Fatalf("noop delivery: %v", err)
+	}
+	board, _ := env.orchestrator.Board(ctx, env.tenant, superagent.BoardFilter{})
+	if got := board.Tickets[0].LastDelivered().Body; got != "Please fix it." {
+		t.Fatalf("snapshot with a no-op sink = %q, want the original body", got)
+	}
+	// A second bump with the same content still differs from the snapshot, so a
+	// deployment that later wires a starter can deliver it.
+	bump := edited
+	bump.EventID = "u2"
+	if _, err := env.orchestrator.HandleSourceEvent(ctx, fixtureEvent(t, bump)); err != nil {
+		t.Fatalf("second bump: %v", err)
+	}
+	board, _ = env.orchestrator.Board(ctx, env.tenant, superagent.BoardFilter{})
+	if got := board.Tickets[0].LastDelivered().Body; got != "Please fix it." {
+		t.Fatalf("snapshot after a second no-op bump = %q", got)
 	}
 }
 

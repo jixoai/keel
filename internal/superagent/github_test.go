@@ -164,6 +164,89 @@ func TestGitHubSourceIgnoresOwnChannelComments(t *testing.T) {
 	}
 }
 
+// TestGitHubSourceFollowsPagination pins the Link-header walk: GitHub caps one
+// response at per_page items, so a busy window must read the tail through the
+// rel="next" page instead of silently skipping it.
+func TestGitHubSourceFollowsPagination(t *testing.T) {
+	var serverURL string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/user":
+			_, _ = io.WriteString(w, `{"login":"deploy-bot","id":12,"type":"User"}`)
+		case "/repos/acme/repo/issues":
+			if r.URL.Query().Get("page") == "2" {
+				_, _ = io.WriteString(w, `[
+					{"number":8,"title":"Second page","body":"b2","html_url":"https://github.com/acme/repo/issues/8",
+					 "state":"open","created_at":"2026-11-25T02:00:00Z","updated_at":"2026-11-25T02:30:00Z",
+					 "user":{"login":"alice","id":11,"type":"User"}}
+				]`)
+				return
+			}
+			w.Header().Set("Link", `<`+serverURL+`/repos/acme/repo/issues?page=2>; rel="next"`)
+			_, _ = io.WriteString(w, `[
+				{"number":7,"title":"First page","body":"b1","html_url":"https://github.com/acme/repo/issues/7",
+				 "state":"open","created_at":"2026-11-25T01:00:00Z","updated_at":"2026-11-25T01:10:00Z",
+				 "user":{"login":"alice","id":11,"type":"User"}}
+			]`)
+		case "/repos/acme/repo/issues/comments":
+			_, _ = io.WriteString(w, `[]`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	serverURL = server.URL
+	defer server.Close()
+
+	tenant := uuid.New()
+	source, err := superagent.NewGitHubSource(superagent.GitHubConfig{
+		TenantID: tenant, Repo: "acme/repo", BaseURL: server.URL, Token: "secret-token",
+	})
+	if err != nil {
+		t.Fatalf("NewGitHubSource: %v", err)
+	}
+	page, err := source.Poll(context.Background(), tenant, "2026-11-25T00:00:00Z", 1)
+	if err != nil {
+		t.Fatalf("Poll: %v", err)
+	}
+	if len(page.Events) != 2 {
+		t.Fatalf("events = %d, want both pages: %+v", len(page.Events), page.Events)
+	}
+	if page.NextCursor != "2026-11-25T02:30:00Z" {
+		t.Fatalf("next cursor = %q, want the second page's newest timestamp", page.NextCursor)
+	}
+}
+
+// TestGitHubSourceRefusesOffHostPagination: a Link header that points elsewhere
+// fails the poll instead of sending the token to another host.
+func TestGitHubSourceRefusesOffHostPagination(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/user":
+			_, _ = io.WriteString(w, `{"login":"deploy-bot","id":12,"type":"User"}`)
+		case "/repos/acme/repo/issues":
+			w.Header().Set("Link", `<https://evil.invalid/repos/acme/repo/issues?page=2>; rel="next"`)
+			_, _ = io.WriteString(w, `[]`)
+		case "/repos/acme/repo/issues/comments":
+			_, _ = io.WriteString(w, `[]`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	tenant := uuid.New()
+	source, err := superagent.NewGitHubSource(superagent.GitHubConfig{
+		TenantID: tenant, Repo: "acme/repo", BaseURL: server.URL, Token: "secret-token",
+	})
+	if err != nil {
+		t.Fatalf("NewGitHubSource: %v", err)
+	}
+	if _, err := source.Poll(context.Background(), tenant, "2026-11-25T00:00:00Z", 1); err == nil {
+		t.Fatal("off-host pagination must fail the poll")
+	}
+}
+
 // TestGitHubSourceFailsClosedWhenOwnerIsUnknown: if /user cannot be read, the
 // poll must fail rather than ingest the deployment's own comments as trusted
 // follow-ups. The next tick retries; no event is consumed in the meantime.
