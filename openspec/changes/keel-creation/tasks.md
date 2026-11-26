@@ -54,12 +54,12 @@
 
 ## 4. 验收
 
-- [ ] 4.1 真 PG + 真实 UI E2E；每步截图；before/after 改动文件审计。
+- [x] 4.1 真 PG + 真实 UI E2E；每步截图；before/after 改动文件审计。（7 步 / 80 断言；覆盖表 53 文件 0 UNCOVERED；槽位 before/after 截图；报告公网已发布）
   - 第一阶段已跑真 PG store 测试与 `nsh test --target tui`，但未产出浏览器逐步截图/HTML 报告。
 - [x] 4.2 跨租户、审批拒绝、校验失败、重复 requestId、卸载 diff 为零。
   - 上述测试名即证据；另 `TestCreationValidateReportsFieldErrors`、
     `TestCreationInstallRequiresTheApprovalPrimitive`。
-- [ ] 4.3 `go test -race` 相关包 + web/TUI 回归；`openspec validate --strict`；独立 reviewer；
+- [x] 4.3 `go test -race` 相关包 + web/TUI 回归；`openspec validate --strict`；独立 reviewer；（P0/P1 清零，P2 硬化后复核 PASS）
       HTML 报告公网链接；归档。
   - 已完成：`go test -race`（harnessext/harnessapi/cmd/keel/pluginpkg/architecture/fileplugin/
     store）、`nsh check`、`nsh test --target tui`（409 passed）、`openspec validate keel-creation --strict`。

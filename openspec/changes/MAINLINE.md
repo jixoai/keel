@@ -76,6 +76,23 @@ depth 默认 3/-1 不限）与 `keel-collab-superagent`（Source → Ticket → 
 五个 change 的 proposal/design/spec/tasks 均已落地，严格校验通过；具体任务真值在各
 `tasks.md`，不得在归档板上继续勾选。
 
+**协作五条线交付快照（2026-11-26，main `049e3f9`）**：
+
+- `keel-collab-core` / `keel-collab-subagent`：Host/Mode 契约、深度策略（3/-1/0）、fork
+  不耗深度、子代理取消/重试已交付；subagent 树/TUI 报告已出。
+- `keel-collab-superagent`：Source → Ticket → Assignment → Worker → Report/Attention →
+  Channel 的 durable 闭环与五态看板 E2E（9 步）已出；产品 web/TUI 看板（tasks 4.2/4.3）
+  与 live GitHub 链路（4.5/5.2）未做，不归档。
+- `keel-creation`：7 步 / 80 断言 / 53 文件覆盖 0 UNCOVERED；模型 read+write 改写 chunk 并
+  实际渲染；会话 UI 批准；卸载零残留。独立复审的 P0（伪造 decision kind/派生审批 session）
+  与 P1（viewer 误判、update 内容绑定、AI 写入口、证据）已修，复核 PASS；归档待任务勾选。
+- `keel-checkpoint`：12 步 / 66 断言；自动/手动压缩、收窄压回、kill -9 恢复、权限 403、
+  重置；锚点必须是消息边界、创建/恢复日志与 tokens/耗时指标已补。复核 P1（证据陈旧）已用
+  `9c60445` 新报告关闭；归档待任务勾选。
+- 公网报告：`https://local-kzf-keel-collab-reports.fde2e.com/creation-e2e-2026-11-26/report.html`、
+  `.../checkpoint-e2e-2026-11-26/report.html`、`.../subagent-e2e-2026-11-26/report.html`、
+  `.../superagent-e2e-2026-11-26/report.html`。
+
 ## Owner 裁决（2026-11-22，记录，不再讨论）
 
 1. `keel-harness-v2` 是唯一活跃主线；其他 change 不得并行推进。

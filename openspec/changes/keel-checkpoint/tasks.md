@@ -39,7 +39,7 @@
 - [x] 4.2 `go test -race` 相关包（compaction/kernel/agent/harnessapi/store/
       sessionpolicy/metrics/loop/host/servicehost/accessgate/cmd-keel）+
       `openspec validate --strict`。
-- [ ] 4.3 独立 reviewer 复核；E2E 报告（压缩前后、恢复、失败态）；设置页 UI；归档。
+- [x] 4.3 独立 reviewer 复核；E2E 报告（压缩前后、恢复、失败态）；设置页 UI；归档。（12 步 / 66 断言；kill -9 恢复与 exact-prefix；复核 PASS）
 
 ## 5. 独立复核修复（No-Go 回合）
 
