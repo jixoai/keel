@@ -1161,8 +1161,9 @@ func TestMCPAppMessageAttachments(t *testing.T) {
 	server := newBridgeAPI(t, tenant, &fakeAppRuntime{}, audit, commit.commit, broker, nil)
 
 	valid := []map[string]any{
-		{"fileId": uuid.NewString(), "mime": "image/png", "name": "a.png", "size": 12},
+		{"fileId": uuid.NewString(), "mime": "image/png", "name": "a.png", "size": 12, "width": 640, "height": 480},
 		{"fileId": uuid.NewString(), "name": "b.txt", "size": 3},
+		{"name": "c.pdf", "mime": "application/pdf"},
 	}
 	session := uuid.New()
 	done := postBridgeAsync(server.Client(), server.URL+"/v1/mcp/apps/"+testAppID+"/ui/message", tenant, map[string]any{
@@ -1175,7 +1176,7 @@ func TestMCPAppMessageAttachments(t *testing.T) {
 	if result.status != http.StatusOK {
 		t.Fatalf("valid attachments = %d: %s", result.status, result.body)
 	}
-	if !strings.Contains(decision.Prompt, "含 2 个附件") {
+	if !strings.Contains(decision.Prompt, "含 3 个附件") {
 		t.Fatalf("decision prompt = %q, want an attachment count", decision.Prompt)
 	}
 	inputs := commit.snapshot()
@@ -1183,7 +1184,7 @@ func TestMCPAppMessageAttachments(t *testing.T) {
 		t.Fatalf("committed inputs = %d, want 1", len(inputs))
 	}
 	var forwarded []map[string]any
-	if err := json.Unmarshal(inputs[0].Attachments, &forwarded); err != nil || len(forwarded) != 2 {
+	if err := json.Unmarshal(inputs[0].Attachments, &forwarded); err != nil || len(forwarded) != 3 {
 		t.Fatalf("forwarded attachments = %s (%v)", inputs[0].Attachments, err)
 	}
 

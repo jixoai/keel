@@ -36,6 +36,7 @@ import (
 
 	"github.com/jixoai/keel/internal/access"
 	"github.com/jixoai/keel/internal/agentcore"
+	"github.com/jixoai/keel/internal/attachment"
 	"github.com/jixoai/keel/internal/harnessext"
 	"github.com/jixoai/keel/internal/mcp"
 	"github.com/jixoai/keel/internal/mcphost"
@@ -1102,6 +1103,13 @@ func writeMCPAppRPCErr(w http.ResponseWriter, status, code int, message string) 
 // capacity refusal is 429 with Retry-After (the View can explain the retry
 // instead of seeing a 502), and a placement conflict is 409.
 func writeMCPAppInputError(w http.ResponseWriter, err error) {
+	var attachmentErr *attachment.FieldError
+	if errors.As(err, &attachmentErr) {
+		// The shared commit path refused the reference before any event: report
+		// the field and its status (400 malformed/foreign, 413 size/quota).
+		writeErr(w, attachmentErr.HTTPStatus(), err)
+		return
+	}
 	var capacity *placement.CapacityError
 	if errors.As(err, &capacity) {
 		seconds := int(math.Ceil(capacity.RetryAfter.Seconds()))
@@ -1230,10 +1238,13 @@ func mcpAppMessageText(content []mcpAppMessageContent) (string, error) {
 }
 
 // mcpAppValidateAttachments applies the /input attachment shape strictly: an
-// array of at most 16 entries, each {fileId (UUID), mime, name, size} and
-// nothing else. An app references already-uploaded blobs; a URL or an unknown
-// field is refused rather than forwarded. The raw value is returned unchanged
-// so the shared input path sees exactly what the app sent.
+// array of at most 16 entries, each {fileId, mime, name, size, width, height}
+// and nothing else. An app references already-uploaded blobs; a URL or an
+// unknown field is refused rather than forwarded. A missing fileId keeps the
+// shared path's explicit-notice semantics (the same rule the composer gets),
+// and blob ownership/completion is re-validated by CommitClientInput. The raw
+// value is returned unchanged so the shared input path sees exactly what the
+// app sent.
 func mcpAppValidateAttachments(raw json.RawMessage) (json.RawMessage, int, error) {
 	trimmed := bytes.TrimSpace(raw)
 	if len(trimmed) == 0 || string(trimmed) == "null" {
@@ -1256,19 +1267,25 @@ func mcpAppValidateAttachments(raw json.RawMessage) (json.RawMessage, int, error
 		}
 		for key := range fields {
 			switch key {
-			case "fileId", "mime", "name", "size":
+			case "fileId", "mime", "name", "size", "width", "height":
 			default:
-				return nil, 0, &mcpAppFieldError{code: "entry", message: "attachments carry only fileId, mime, name and size"}
+				return nil, 0, &mcpAppFieldError{code: "entry", message: "attachments carry only fileId, mime, name, size, width and height"}
 			}
 		}
-		var fileID string
-		rawFileID, ok := fields["fileId"]
-		if !ok || json.Unmarshal(rawFileID, &fileID) != nil {
-			return nil, 0, &mcpAppFieldError{code: "file_id", message: "each attachment needs a fileId"}
-		}
-		id, err := uuid.Parse(fileID)
-		if err != nil || id == uuid.Nil {
-			return nil, 0, &mcpAppFieldError{code: "file_id", message: "attachment fileId must be a UUID"}
+		// fileId is optional: a reference without one is the existing explicit
+		// notice (the shared commit path preserves it). When present it must be a
+		// blob id; whether it exists in this tenant is the commit path's check.
+		if rawFileID, ok := fields["fileId"]; ok {
+			var fileID string
+			if err := json.Unmarshal(rawFileID, &fileID); err != nil {
+				return nil, 0, &mcpAppFieldError{code: "file_id", message: "attachment fileId must be a string"}
+			}
+			if fileID = strings.TrimSpace(fileID); fileID != "" {
+				id, err := uuid.Parse(fileID)
+				if err != nil || id == uuid.Nil {
+					return nil, 0, &mcpAppFieldError{code: "file_id", message: "attachment fileId must be a UUID"}
+				}
+			}
 		}
 		var name string
 		if rawName, ok := fields["name"]; ok {
@@ -1297,6 +1314,14 @@ func mcpAppValidateAttachments(raw json.RawMessage) (json.RawMessage, int, error
 		}
 		if size < 0 || size > mcpAppAttachmentSizeMax {
 			return nil, 0, &mcpAppFieldError{code: "size", message: "attachment size is out of range"}
+		}
+		for _, dimension := range []string{"width", "height"} {
+			if rawDimension, ok := fields[dimension]; ok {
+				var value int
+				if err := json.Unmarshal(rawDimension, &value); err != nil || value < 0 {
+					return nil, 0, &mcpAppFieldError{code: dimension, message: "attachment " + dimension + " must be a non-negative integer"}
+				}
+			}
 		}
 	}
 	return append(json.RawMessage(nil), trimmed...), len(items), nil

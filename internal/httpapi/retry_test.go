@@ -143,13 +143,19 @@ func TestRetryTurnAppendsANewInputAndQueuesTheRun(t *testing.T) {
 	ctx := context.Background()
 
 	// The original input is planted through the raw edge endpoint so it can
-	// carry attachments and a selection next to its text.
+	// carry attachments and a selection next to its text. The blob is a real,
+	// complete row: a retry re-validates attachments against the current
+	// tenant, so a fake id would (correctly) be refused.
 	originalText := "  what is the status?\n  (please retry this)  "
+	attachmentBytes := []byte("log line")
+	meta := completeTestBlob(t, st, tenantID, "text/plain", attachmentBytes)
 	originalPayload := map[string]any{
-		"text":        originalText,
-		"requestId":   "orig-1",
-		"attachments": []map[string]any{{"fileId": "blob-1", "name": "log.txt", "mime": "text/plain"}},
-		"selection":   map[string]any{"providerId": "s2api", "modelId": "deepseek-v4.1-flash"},
+		"text":      originalText,
+		"requestId": "orig-1",
+		"attachments": []map[string]any{{
+			"fileId": meta.BlobID.String(), "name": "log.txt", "mime": "text/plain", "size": len(attachmentBytes),
+		}},
+		"selection": map[string]any{"providerId": "s2api", "modelId": "deepseek-v4.1-flash"},
 	}
 	var appended struct {
 		Seq int64 `json:"seq"`

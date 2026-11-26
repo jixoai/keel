@@ -1052,6 +1052,10 @@ func runServe(parent context.Context, opts serveOptions) error {
 		Admitter:  stream.NewAdmitter(200, 400),
 		Limiter:   stream.NewLimiter(0),
 		Metrics:   streamMetrics,
+		// The input path re-checks the tenant's stored bytes before accepting an
+		// attachment reference. The upload middleware already enforces the same
+		// ceiling; this seam keeps the two from disagreeing (a lowered quota).
+		Quota: edge,
 		// Prometheus text at /metrics: the fixed runtime/MCP set registered at
 		// boot (P4.7).
 		MetricsExporter: metricsReg,
@@ -1612,7 +1616,7 @@ func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, 
 		// durable audit table.
 		MCPAppRuntime:     mcpAppRuntimeOrNil(rt),
 		MCPAppAudit:       st,
-		MCPAppInputCommit: mcpAppInputCommit(st, admission),
+		MCPAppInputCommit: mcpAppInputCommit(st, admission, edge),
 		// P5.5: ui/update-model-context persists into mcp_app_contexts (never the
 		// ledger); the runner reads the same table for the next attempt.
 		MCPAppContexts: st,

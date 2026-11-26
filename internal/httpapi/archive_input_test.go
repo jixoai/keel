@@ -41,7 +41,7 @@ func TestCommitClientInputRefusesArchivedSession(t *testing.T) {
 	edge := kernel.New(kernel.NewMemStore(), kernel.Options{})
 	_, err = CommitClientInput(ctx, st, edge, ClientInput{
 		TenantID: tenant, SessionID: session, RequestID: "archived-1", Text: "hello",
-	})
+	}, ClientInputOptions{})
 	if !errors.Is(err, ErrInputArchivedSession) {
 		t.Fatalf("archived input = %v, want ErrInputArchivedSession", err)
 	}
@@ -55,7 +55,7 @@ func TestCommitClientInputRefusesArchivedSession(t *testing.T) {
 
 	if _, err := CommitClientInput(ctx, st, edge, ClientInput{
 		TenantID: tenant, SessionID: uuid.New(), RequestID: "missing-1", Text: "hello",
-	}); !errors.Is(err, store.ErrNoSession) {
+	}, ClientInputOptions{}); !errors.Is(err, store.ErrNoSession) {
 		t.Fatalf("missing session input = %v, want ErrNoSession", err)
 	}
 }

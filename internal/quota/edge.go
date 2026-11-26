@@ -318,6 +318,34 @@ func (e *Edge) AdmitStorage(ctx context.Context, tenantID uuid.UUID, size int64)
 	return remaining, nil
 }
 
+// CheckStored refuses when the tenant's stored bytes already exceed its
+// ceiling. Unlike AdmitStorage it adds nothing: the bytes it measures were
+// counted when they completed, and an input referencing an existing blob must
+// not be charged twice. A lowered quota (or an object stored under an older
+// setting) is the case this catches.
+func (e *Edge) CheckStored(ctx context.Context, tenantID uuid.UUID) (used, limit int64, err error) {
+	if e == nil {
+		return 0, 0, nil
+	}
+	quota, err := e.quotaFor(ctx, tenantID)
+	if err != nil {
+		return 0, 0, err
+	}
+	if quota.StorageBytes <= 0 || e.stored == nil {
+		return 0, quota.StorageBytes, nil
+	}
+	used, err = e.stored(ctx, tenantID)
+	if err != nil {
+		return 0, quota.StorageBytes, fmt.Errorf("quota: measure stored bytes: %w", err)
+	}
+	limit = quota.StorageBytes
+	if used > limit {
+		return used, limit, fmt.Errorf("%w: tenant %s stores %d bytes, the limit is %d",
+			ErrStorageQuota, tenantID, used, limit)
+	}
+	return used, limit, nil
+}
+
 // WriteError writes the HTTP answer for a quota rejection, including the
 // Retry-After header, and reports whether it handled the error. A caller
 // passes any error it got from this package: a storage rejection is a 413 (the

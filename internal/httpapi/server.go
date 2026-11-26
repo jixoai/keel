@@ -25,6 +25,7 @@ import (
 	"github.com/jixoai/keel/internal/kernel"
 	"github.com/jixoai/keel/internal/logsafe"
 	"github.com/jixoai/keel/internal/placement"
+	"github.com/jixoai/keel/internal/quota"
 	"github.com/jixoai/keel/internal/routemux"
 	"github.com/jixoai/keel/internal/sessionbinding"
 	"github.com/jixoai/keel/internal/store"
@@ -132,6 +133,10 @@ type Config struct {
 	// MaxBody caps JSON request bodies (uploads use MaxUpload).
 	MaxBody   int64
 	MaxUpload int64
+	// Quota is the per-tenant storage enforcer the input commit path re-checks
+	// before accepting an attachment reference. Nil keeps the upload-time gate
+	// alone (the runtime package has no tenant rows).
+	Quota *quota.Edge
 }
 
 // errKernelUnwired is the explicit failure of an edge write endpoint when the
@@ -165,7 +170,7 @@ func New(cfg Config) *Server {
 		cfg.MaxBody = 1 << 20
 	}
 	if cfg.MaxUpload == 0 {
-		cfg.MaxUpload = 64 << 20
+		cfg.MaxUpload = DefaultMaxUpload
 	}
 	if cfg.Edge == nil || cfg.Events == nil {
 		cfg.Logger.Warn("httpapi: contract kernel is not wired",
@@ -441,6 +446,10 @@ func (s *Server) input(w http.ResponseWriter, r *http.Request) {
 		// shell only stores the fact (verbatim); the product vocabulary is
 		// validated through Config.ValidateSelection before the commit.
 		Selection json.RawMessage `json:"selection"`
+		// Attachments references already-uploaded blobs. The shared commit path
+		// validates the array and canonicalizes it; the handler passes it through
+		// verbatim so every path (input, retry, MCP) shares one gate.
+		Attachments json.RawMessage `json:"attachments"`
 	}
 	if err := decodeBody(w, r, s.cfg.MaxBody, &body); err != nil {
 		writeErr(w, 400, err)
@@ -490,12 +499,13 @@ func (s *Server) input(w http.ResponseWriter, r *http.Request) {
 	// external-session refusal, kernel commit and submissions bookkeeping all
 	// live in commitUserInput.
 	commit, err := s.commitUserInput(r.Context(), userInput{
-		TenantID:  tenantID,
-		SessionID: sessionID,
-		RequestID: requestID,
-		Text:      body.Text,
-		Delivery:  delivery,
-		Selection: body.Selection,
+		TenantID:    tenantID,
+		SessionID:   sessionID,
+		RequestID:   requestID,
+		Text:        body.Text,
+		Delivery:    delivery,
+		Selection:   body.Selection,
+		Attachments: body.Attachments,
 	})
 	if err != nil {
 		writeInputError(w, err)

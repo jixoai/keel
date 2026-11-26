@@ -8,7 +8,10 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/jixoai/keel/internal/attachment"
 	"github.com/jixoai/keel/internal/kernel"
+	"github.com/jixoai/keel/internal/logsafe"
+	"github.com/jixoai/keel/internal/quota"
 	"github.com/jixoai/keel/internal/sessionbinding"
 	"github.com/jixoai/keel/internal/store"
 )
@@ -29,6 +32,22 @@ var ErrInputExternalSession = errors.New("session is owned by an external backen
 // the work needs a new session. The check runs before any write, so a refused
 // input leaves no event.
 var ErrInputArchivedSession = errors.New("session is archived; it is read-only")
+
+// DefaultMaxUpload is the deployment default for one stored object. The input
+// commit path re-checks an attachment against it so a blob stored through a
+// different route (or before a lowered setting) cannot bypass the bound.
+const DefaultMaxUpload int64 = 64 << 20
+
+// ClientInputOptions are the deployment facts the shared commit path needs
+// beyond the request itself. The zero value keeps the defaults (64 MiB, no
+// quota enforcer), which is what a test harness without a product edge wants.
+type ClientInputOptions struct {
+	// MaxUpload bounds one attachment's stored size.
+	MaxUpload int64
+	// Quota measures the tenant's stored bytes before a reference is accepted.
+	// Nil skips the check; the upload middleware is still the primary gate.
+	Quota *quota.Edge
+}
 
 // ClientInput is one client input, validated by its caller and ready for the
 // shared commit path. POST /v1/sessions/{id}/input fills it from the request
@@ -72,34 +91,17 @@ type inputCommit = ClientInputCommit
 // It returns the store/kernel error verbatim; writeInputError owns the wire
 // mapping.
 func (s *Server) commitUserInput(ctx context.Context, in userInput) (inputCommit, error) {
-	return CommitClientInput(ctx, s.cfg.Store, s.cfg.Edge, in)
+	return CommitClientInput(ctx, s.cfg.Store, s.cfg.Edge, in, ClientInputOptions{
+		MaxUpload: s.cfg.MaxUpload,
+		Quota:     s.cfg.Quota,
+	})
 }
 
 // CommitClientInput is the package-level form of the shared commit path. The
 // product API's MCP app bridge uses it so a confirmed ui/message becomes a
 // normal user.message through exactly the same validation, commit and
 // bookkeeping as POST /v1/sessions/{id}/input.
-func CommitClientInput(ctx context.Context, st *store.Store, edge kernel.Committer, in ClientInput) (ClientInputCommit, error) {
-	fields := map[string]any{"text": in.Text, "requestId": in.RequestID}
-	if in.Delivery != "" {
-		fields["delivery"] = in.Delivery
-	}
-	if presentRawJSON(in.Selection) {
-		// Verbatim: a RawMessage passes the object through the payload marshal
-		// without re-encoding its fields, so the value the client sent is the
-		// value in the log.
-		fields["selection"] = json.RawMessage(in.Selection)
-	}
-	if presentRawJSON(in.Attachments) {
-		fields["attachments"] = json.RawMessage(in.Attachments)
-	}
-	if in.RetryOf != nil {
-		fields["retryOf"] = *in.RetryOf
-	}
-	payload, err := json.Marshal(fields)
-	if err != nil {
-		return ClientInputCommit{}, err
-	}
+func CommitClientInput(ctx context.Context, st *store.Store, edge kernel.Committer, in ClientInput, opts ClientInputOptions) (ClientInputCommit, error) {
 	if edge == nil {
 		return ClientInputCommit{}, errKernelUnwired
 	}
@@ -128,6 +130,33 @@ func CommitClientInput(ctx context.Context, st *store.Store, edge kernel.Committ
 	}
 	if owner == store.StateOwnerExternal {
 		return ClientInputCommit{}, ErrInputExternalSession
+	}
+	// Attachments are validated before the ledger write: ownership, completion,
+	// MIME consistency and size. The returned value is the canonical stored
+	// shape (blob size/MIME become the authority; unknown client fields drop).
+	attachments, err := validateInputAttachments(ctx, st, in.TenantID, in.Attachments, opts)
+	if err != nil {
+		return ClientInputCommit{}, err
+	}
+	fields := map[string]any{"text": in.Text, "requestId": in.RequestID}
+	if in.Delivery != "" {
+		fields["delivery"] = in.Delivery
+	}
+	if presentRawJSON(in.Selection) {
+		// Verbatim: a RawMessage passes the object through the payload marshal
+		// without re-encoding its fields, so the value the client sent is the
+		// value in the log.
+		fields["selection"] = json.RawMessage(in.Selection)
+	}
+	if len(attachments) > 0 {
+		fields["attachments"] = attachments
+	}
+	if in.RetryOf != nil {
+		fields["retryOf"] = *in.RetryOf
+	}
+	payload, err := json.Marshal(fields)
+	if err != nil {
+		return ClientInputCommit{}, err
 	}
 	// Edge-scoped commit: user.message carries the requestId as its idempotency
 	// key and never a fencing token (client input keeps landing during a drain;
@@ -189,6 +218,27 @@ func presentRawJSON(raw json.RawMessage) bool {
 // missing session is 404, an external session is 409, and everything else keeps
 // the edge/enqueue mappings (unwired kernel 503, kernel rejections, 500).
 func writeInputError(w http.ResponseWriter, err error) {
+	// Attachment refusals carry their own status and field path: 400 for a
+	// malformed/foreign/incomplete reference, 413 for size or storage quota.
+	var attachmentErr *attachment.FieldError
+	if errors.As(err, &attachmentErr) {
+		writeJSON(w, attachmentErr.HTTPStatus(), map[string]any{
+			"error": logsafe.Redact(err.Error()),
+			"field": attachmentErr.InputField(),
+		})
+		return
+	}
+	if errors.Is(err, quota.ErrStorageQuota) {
+		// The request references stored bytes the tenant may no longer hold; the
+		// message names the ceiling. It is a 413, the same class as an oversized
+		// upload.
+		writeErr(w, http.StatusRequestEntityTooLarge, err)
+		return
+	}
+	if errors.Is(err, quota.ErrConfig) {
+		writeErr(w, http.StatusServiceUnavailable, err)
+		return
+	}
 	switch {
 	case errors.Is(err, ErrInputExternalSession), errors.Is(err, ErrInputArchivedSession):
 		writeErr(w, http.StatusConflict, err)

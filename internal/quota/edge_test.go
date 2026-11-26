@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -293,5 +294,44 @@ func TestWriteErrorMapsStatusAndRetryAfter(t *testing.T) {
 	// An unrelated error is not this package's business.
 	if WriteError(httptest.NewRecorder(), errors.New("boom")) {
 		t.Fatal("an unrelated error was reported as handled")
+	}
+}
+
+// TestCheckStoredDoesNotDoubleCharge pins the input-time quota re-check: it
+// measures what is already stored (the referenced object was counted at
+// completion) and refuses only when the tenant is over the ceiling.
+func TestCheckStoredDoesNotDoubleCharge(t *testing.T) {
+	ctx := context.Background()
+	src := newStaticSource()
+	tenant, other := uuid.New(), uuid.New()
+	src.set(tenant, TenantQuota{StorageBytes: 100})
+	src.set(other, TenantQuota{StorageBytes: 100})
+	used := map[uuid.UUID]int64{tenant: 100, other: 60}
+	edge := NewEdge(src, func(_ context.Context, tenantID uuid.UUID) (int64, error) {
+		return used[tenantID], nil
+	})
+	if stored, limit, err := edge.CheckStored(ctx, tenant); err != nil || stored != 100 || limit != 100 {
+		t.Fatalf("at the ceiling: stored=%d limit=%d err=%v", stored, limit, err)
+	}
+	if _, _, err := edge.CheckStored(ctx, other); err != nil {
+		t.Fatalf("under the ceiling: %v", err)
+	}
+	used[tenant] = 101
+	_, _, err := edge.CheckStored(ctx, tenant)
+	if !errors.Is(err, ErrStorageQuota) {
+		t.Fatalf("over the ceiling: %v", err)
+	}
+	if !strings.Contains(err.Error(), "limit is 100") {
+		t.Fatalf("the refusal must name the limit: %v", err)
+	}
+	// Unlimited is a no-op; a nil edge is a no-op as well.
+	unlimited := uuid.New()
+	src.set(unlimited, TenantQuota{})
+	if _, _, err := edge.CheckStored(ctx, unlimited); err != nil {
+		t.Fatalf("unlimited: %v", err)
+	}
+	var nilEdge *Edge
+	if _, _, err := nilEdge.CheckStored(ctx, tenant); err != nil {
+		t.Fatalf("nil edge: %v", err)
 	}
 }
