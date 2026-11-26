@@ -36,6 +36,12 @@ func (f *policyStoreFake) SetSessionCheckpointPolicy(_ context.Context, _ uuid.U
 	return f.revision, nil
 }
 
+func (f *policyStoreFake) DeleteSessionCheckpointPolicy(context.Context, uuid.UUID, uuid.UUID) error {
+	f.document = nil
+	f.found = false
+	return nil
+}
+
 func policyServer(t *testing.T, seam SessionCheckpointPolicyService, accessSeam Access) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(New(Config{CheckpointPolicies: seam, Access: accessSeam, Logger: testLogger()}))
@@ -113,6 +119,16 @@ func TestCheckpointPolicyRouteWrite(t *testing.T) {
 		map[string]any{"invented": true}, nil); code != http.StatusBadRequest {
 		t.Fatalf("unknown field PUT status = %d, want 400", code)
 	}
+
+	// An empty document clears the override: the row is deleted and the view
+	// falls back to the tenant policy.
+	if code := doJSON(t, server.Client(), http.MethodPut, url, uuid.New(),
+		map[string]any{}, &view); code != http.StatusOK {
+		t.Fatalf("clear PUT status = %d, want 200", code)
+	}
+	if st.found || view.Source != "tenant" {
+		t.Fatalf("cleared = %+v, want tenant source", view)
+	}
 }
 
 // TestCheckpointPolicyRouteRefusals pins the gates: unwired 501, missing session
@@ -172,4 +188,8 @@ func (missingPolicyStore) GetSessionCheckpointPolicy(context.Context, uuid.UUID,
 
 func (missingPolicyStore) SetSessionCheckpointPolicy(context.Context, uuid.UUID, uuid.UUID, json.RawMessage) (int64, error) {
 	return 0, store.ErrNoSession
+}
+
+func (missingPolicyStore) DeleteSessionCheckpointPolicy(context.Context, uuid.UUID, uuid.UUID) error {
+	return store.ErrNoSession
 }
