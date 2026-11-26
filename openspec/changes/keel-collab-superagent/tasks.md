@@ -54,8 +54,11 @@
 - [x] 4.3 Attention 收件箱 API 与来源跳转字段；web/TUI/headless 五态未做。
       （`GET /v1/superagent/attention`）
 - [x] 4.4 不提供“新建 Super Agent Bot”入口；只提供 mode/角色配置。
-- [ ] 4.5 Worker 模型工具适配（`Report`/`Ask` builtin tool）未做；当前生产入口是 HTTP，
-      spec 已显式降级，不得声称完整 worker-tool 闭环。
+- [x] 4.5 Worker 模型工具适配（`report`/`ask` product extra tool）：
+      RunScope → `collab_session_index` → assignment 解析 Ticket，schema 无 ticketId/assignmentId；
+      非 worker fail closed，`task.write` + worker-actor 审计，report/ask 均幂等，blocked/closed 拒绝。
+      （`internal/toolsurface/superagent.go` + `internal/superagent/worker_tools.go` +
+      `cmd/keel/superagent_tools.go`；默认部署仍只有 11 个 builtin tool）
 
 ## 5. 验收
 

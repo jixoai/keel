@@ -72,7 +72,7 @@ keel version
 | GET | `/v1/subagents`、`/v1/subagents/{id}` | 子代理列表/详情 |
 | POST | `/v1/sessions/{id}/subagents` | 派生子代理（`wait:true` 同步等待；断线不再取消子代理） |
 | GET | `/v1/superagent/tickets`、`/v1/superagent/attention` | super-agent 工单看板 / Attention 收件箱（需 `task.read`；未装配 503，`superagent.board=false`） |
-| POST | `/v1/superagent/tickets/{id}/report`、`…/ask`、`…/resume`、`…/stop`、`/v1/superagent/attention/{id}/answer` | worker report/ask（需 sessionId）与 operator answer/resume/stop（需 `task.write` + `OperatorAuthorizer`）；worker 模型工具适配未接线 |
+| POST | `/v1/superagent/tickets/{id}/report`、`…/ask`、`…/resume`、`…/stop`、`/v1/superagent/attention/{id}/answer` | worker report/ask（需 sessionId；report 可带幂等 `requestId`）与 operator answer/resume/stop（需 `task.write` + `OperatorAuthorizer`）；worker 模型侧另有 `report`/`ask` 工具（§3.5） |
 
 ### 身份与 Bot API（`internal/harnessapi`，A2–A4）
 
@@ -218,6 +218,10 @@ mode：
 - `KEEL_SUPERAGENT_INTERVAL`、`KEEL_SUPERAGENT_SLOTS`、`KEEL_SUPERAGENT_HUMAN_SLOTS`
 - `KEEL_SUPERAGENT_ORCHESTRATOR_SESSION`（可选；空=按 tenant+Bot 派生稳定 session id）
 
+Worker Bot 的 Harness 是工具白名单：要使用模型侧 `report`/`ask`，需在 `harness.tools` 中授予
+这两个工具，并在 `harness.context.permissions` 中授予 `task.write`（与 HTTP worker 路由同一
+边界）；启动时缺项会打印 warning，不会静默假定已授权。
+
 工单、派工、订阅、Source 游标、Outbox 与 Host 的 session index 落在 `collab_*` 表（全部带
 `tenant_id` 并启用 RLS）；`owner_session_id` 是 WorkItem 的持久列，重启后仍可派工。启动时
 会把上一进程遗留的 active worker 标记中断，`Recover` 依据 collab index + runner/run 实际状态
@@ -226,9 +230,27 @@ mode：
 
 首版生产写入口是 HTTP：worker report/ask 与 operator answer/resume/stop。Source 评论在
 policy 允许且恰好一个 open Attention 时按选项/自由文本作答；不可信评论只能作为 thread context，
-不能 resume blocked Ticket 或启动 worker。**模型侧 `Report`/`Ask` builtin tool 尚未接线**，
-因此不得把本切片描述为完整 worker-tool 闭环。CI 状态、Feishu、自动 merge、市场与完整 web
-看板不在本切片。
+不能 resume blocked Ticket 或启动 worker。worker 同时有模型侧工具（4.5）：
+
+- **工具入口**：启用模式时 `report`/`ask` 作为 product extra tool 追加到工具面（不属于恒定
+  11 个 builtin，所以默认部署的清单哈希不变）；`report` 的状态是
+  `progress|waiting|ready|blocked|failed|dropped`，`waiting` 必须带 `attentionId`；`ask` 的问题
+  回到 Ticket 的 Source thread，答复以新 turn 投递。
+- **上下文解析**：工具只读 `RunScope` 的 tenant/session，再经 durable `collab_session_index`
+  找到 `mode_id=superagent` 与 `work_item_id`，并要求 `collab_assignments` 有一行
+  `session_id` 恰为该会话；**schema 没有 ticketId/assignmentId 入参**，模型多传的同名字段被忽略。
+  非 worker 会话（orchestrator root、普通会话、worker 的 bare sub-agent）返回
+  `superagent_not_worker`；缺 run scope 返回 `superagent_scope_required`。
+- **权限与审计**：沿用 `task.write`（ToolAccess 以 ambient session 为资源），operator
+  answer/resume/stop 仍走独立 `OperatorAuthorizer`。`auth_events` 的 worker 行记录
+  session/bot（actor）、tenant、ticket、assignment 与 action/state；不写报告 summary、
+  Attention prompt 或任何正文。
+- **幂等与失败**：`report` 的 `requestId`（缺省由工具调用 id 派生）落在
+  `collab_worker_reports` 的唯一键，重复调用返回原事实；`ask` 用 Attention 的 `request_id`
+  复用同一问题。blocked/closed Ticket 拒绝报告/新问题（`superagent_ticket_blocked` /
+  `superagent_ticket_closed`），工具结果只返回本 Ticket/Assignment 的状态，不泄露其他工单。
+
+CI 状态、Feishu、自动 merge、市场与完整 web 看板不在本切片。
 
 ### 3.6 协作模式内核边界（keel-collab-core）
 

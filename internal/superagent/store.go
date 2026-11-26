@@ -2,8 +2,10 @@ package superagent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -36,6 +38,12 @@ type Store interface {
 	ListSubscriptions(ctx context.Context, tenantID, workItemID uuid.UUID) ([]Subscription, error)
 	ListThreadSubscriptions(ctx context.Context, tenantID uuid.UUID, thread ThreadRef) ([]Subscription, error)
 
+	// Worker reports are the ticket timeline facts and the idempotency ledger
+	// of the model-facing `report` tool. A repeated request id returns the
+	// original row with created=false.
+	GetWorkerReport(ctx context.Context, tenantID, workItemID uuid.UUID, requestID string) (WorkerReport, error)
+	RecordWorkerReport(ctx context.Context, report WorkerReport) (WorkerReport, bool, error)
+
 	EnqueueOutbox(ctx context.Context, message OutboxMessage) (OutboxMessage, error)
 	ListOutbox(ctx context.Context, tenantID uuid.UUID, status OutboxStatus, limit int) ([]OutboxMessage, error)
 	UpdateOutbox(ctx context.Context, message OutboxMessage) (OutboxMessage, error)
@@ -55,6 +63,8 @@ type MemoryStore struct {
 	subs        map[uuid.UUID]Subscription
 	outbox      map[uuid.UUID]OutboxMessage
 	outboxKeys  map[string]uuid.UUID
+	reports     map[uuid.UUID]WorkerReport
+	reportKeys  map[string]uuid.UUID
 }
 
 // NewMemoryStore builds an empty store. A nil clock uses time.Now (UTC).
@@ -72,6 +82,8 @@ func NewMemoryStore(now func() time.Time) *MemoryStore {
 		subs:        make(map[uuid.UUID]Subscription),
 		outbox:      make(map[uuid.UUID]OutboxMessage),
 		outboxKeys:  make(map[string]uuid.UUID),
+		reports:     make(map[uuid.UUID]WorkerReport),
+		reportKeys:  make(map[string]uuid.UUID),
 	}
 }
 
@@ -383,6 +395,53 @@ func (m *MemoryStore) UpdateOutbox(_ context.Context, message OutboxMessage) (Ou
 	return message, nil
 }
 
+// GetWorkerReport reads one report by its idempotency key. A foreign tenant's
+// row and a missing row are the same not-found answer.
+func (m *MemoryStore) GetWorkerReport(_ context.Context, tenantID, workItemID uuid.UUID, requestID string) (WorkerReport, error) {
+	requestID = strings.TrimSpace(requestID)
+	if tenantID == uuid.Nil || workItemID == uuid.Nil || requestID == "" {
+		return WorkerReport{}, ErrReportNotFound
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	id, ok := m.reportKeys[tenantKey(tenantID)+"|"+workItemID.String()+"|"+requestID]
+	if !ok {
+		return WorkerReport{}, ErrReportNotFound
+	}
+	report, ok := m.reports[id]
+	if !ok || report.TenantID != tenantID || report.WorkItemID != workItemID {
+		return WorkerReport{}, ErrReportNotFound
+	}
+	return cloneWorkerReport(report), nil
+}
+
+// RecordWorkerReport inserts one report at most once per request id.
+func (m *MemoryStore) RecordWorkerReport(_ context.Context, report WorkerReport) (WorkerReport, bool, error) {
+	if report.TenantID == uuid.Nil || report.WorkItemID == uuid.Nil || report.AssignmentID == uuid.Nil {
+		return WorkerReport{}, false, fmt.Errorf("%w: tenant, work item and assignment ids are required", collab.ErrTenantRequired)
+	}
+	report.RequestID = strings.TrimSpace(report.RequestID)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if report.RequestID != "" {
+		key := tenantKey(report.TenantID) + "|" + report.WorkItemID.String() + "|" + report.RequestID
+		if id, ok := m.reportKeys[key]; ok {
+			return cloneWorkerReport(m.reports[id]), false, nil
+		}
+	}
+	if report.ID == uuid.Nil {
+		report.ID = uuid.New()
+	}
+	if report.CreatedAt.IsZero() {
+		report.CreatedAt = m.now()
+	}
+	m.reports[report.ID] = cloneWorkerReport(report)
+	if report.RequestID != "" {
+		m.reportKeys[tenantKey(report.TenantID)+"|"+report.WorkItemID.String()+"|"+report.RequestID] = report.ID
+	}
+	return cloneWorkerReport(report), true, nil
+}
+
 func sortSubscriptions(subs []Subscription) {
 	sort.Slice(subs, func(i, j int) bool {
 		if !subs[i].CreatedAt.Equal(subs[j].CreatedAt) {
@@ -408,5 +467,11 @@ func cloneAttention(attention collab.Attention) collab.Attention {
 		answer := *attention.Answer
 		copied.Answer = &answer
 	}
+	return copied
+}
+
+func cloneWorkerReport(report WorkerReport) WorkerReport {
+	copied := report
+	copied.Result = append(json.RawMessage(nil), report.Result...)
 	return copied
 }

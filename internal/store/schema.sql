@@ -1533,6 +1533,33 @@ CREATE UNIQUE INDEX IF NOT EXISTS collab_assignments_idempotent
 CREATE INDEX IF NOT EXISTS collab_assignments_by_status
     ON collab_assignments (tenant_id, status, created_at);
 
+-- Worker reports are the ticket timeline facts and the durable idempotency
+-- ledger of the model-facing `report` tool. request_id is the idempotency key;
+-- a repeated report returns the original row instead of appending a second one.
+-- The summary is ticket data, never an audit body (auth_events carry no text).
+CREATE TABLE IF NOT EXISTS collab_worker_reports (
+    tenant_id      uuid NOT NULL,
+    report_id      uuid NOT NULL,
+    work_item_id   uuid NOT NULL,
+    assignment_id  uuid NOT NULL,
+    session_id     uuid,
+    request_id     text NOT NULL DEFAULT '',
+    state          text NOT NULL,
+    summary        text NOT NULL DEFAULT '',
+    attention_id   uuid,
+    result         jsonb,
+    created_at     timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (tenant_id, report_id),
+    CONSTRAINT collab_worker_reports_work_item_fk FOREIGN KEY (tenant_id, work_item_id)
+        REFERENCES collab_work_items (tenant_id, work_item_id) ON DELETE CASCADE
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS collab_worker_reports_request
+    ON collab_worker_reports (tenant_id, work_item_id, request_id)
+    WHERE request_id <> '';
+CREATE INDEX IF NOT EXISTS collab_worker_reports_by_ticket
+    ON collab_worker_reports (tenant_id, work_item_id, created_at, report_id);
+
 CREATE TABLE IF NOT EXISTS collab_attentions (
     tenant_id       uuid NOT NULL,
     attention_id    uuid NOT NULL,

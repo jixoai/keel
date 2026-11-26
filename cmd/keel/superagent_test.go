@@ -1,11 +1,15 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jixoai/keel/internal/harnessext"
 	"github.com/jixoai/keel/internal/superagent"
+	"github.com/jixoai/keel/internal/toolsurface"
 )
 
 func envMap(values map[string]string) func(string) string {
@@ -63,5 +67,42 @@ func TestSuperagentConfigRequiresSourceFields(t *testing.T) {
 		if _, err := superagentConfigFromEnv(envMap(values)); err == nil {
 			t.Fatalf("config %v should fail", values)
 		}
+	}
+}
+
+func TestSuperagentWorkerToolsRegisterOnlyWhenEnabled(t *testing.T) {
+	t.Setenv("KEEL_SUPERAGENT_SOURCE", "")
+	backend := newSuperagentToolBackend()
+	if tools := superagentWorkerModelTools(backend); len(tools) != 0 {
+		t.Fatalf("disabled deployment registered %d worker tools", len(tools))
+	}
+	if tools := superagentWorkerModelTools(nil); len(tools) != 0 {
+		t.Fatalf("missing backend registered %d worker tools", len(tools))
+	}
+
+	t.Setenv("KEEL_SUPERAGENT_SOURCE", superagent.SourceFixture)
+	t.Setenv("KEEL_SUPERAGENT_ORCHESTRATOR_BOT", "orchestrator")
+	t.Setenv("KEEL_SUPERAGENT_WORKER_BOT", "worker")
+	tools := superagentWorkerModelTools(backend)
+	if len(tools) != 2 {
+		t.Fatalf("enabled deployment registered %d worker tools, want 2", len(tools))
+	}
+	names := []string{tools[0].Name(), tools[1].Name()}
+	if names[0] != "report" || names[1] != "ask" {
+		t.Fatalf("worker tool names = %v", names)
+	}
+}
+
+func TestSuperagentToolBackendFailsClosedWithoutOrchestrator(t *testing.T) {
+	backend := newSuperagentToolBackend()
+	_, err := backend.ReportFromWorker(context.Background(), harnessext.RunScope{
+		TenantID: uuid.New(), SessionID: uuid.New(),
+	}, toolsurface.SuperagentReport{State: "progress"})
+	if err == nil {
+		t.Fatal("report without an orchestrator succeeded")
+	}
+	var refusal *superagent.WorkerToolError
+	if !errors.As(err, &refusal) || refusal.ToolCode() != string(superagent.WorkerToolUnavailable) {
+		t.Fatalf("err = %v, want superagent_unavailable", err)
 	}
 }

@@ -2,9 +2,9 @@
 //
 // Every model tool call declares the permission key it needs. The mapping is
 // the single in-code registry for the runtime tool surface: the eleven builtin
-// aggregate tools, the media family and the decision tool. A tool published by
-// an approved plugin is a plugin action and is gated by plugin.invoke; it must
-// not be able to appear without any gate.
+// aggregate tools, the media family, the decision tool and the super-agent
+// worker tools. A tool published by an approved plugin is a plugin action and
+// is gated by plugin.invoke; it must not be able to appear without any gate.
 //
 // The model-visible manifest (name/description/schema) is deliberately not
 // touched: the permission map is an internal assembly artifact and adding a key
@@ -128,6 +128,14 @@ var toolPermissionCatalog = []ToolPermission{
 	{Tool: SpeechTTS, Key: access.KeyMediaInvoke},
 	{Tool: SpeechSTT, Key: access.KeyMediaInvoke},
 	{Tool: DecisionAsk, Key: access.KeyDecisionAsk},
+
+	// Super-agent worker tools (change keel-collab-superagent, task 4.5). They
+	// are product extra tools registered only when the mode is enabled, and
+	// both mutate the worker's own ticket: task.write on the ambient session,
+	// the same worker boundary as the HTTP report/ask routes. Operator actions
+	// keep their independent OperatorAuthorizer.
+	{Tool: Report, Key: access.KeyTaskWrite},
+	{Tool: Ask, Key: access.KeyTaskWrite},
 }
 
 // ToolPermissionManifest returns a copy of the runtime tool permission map.
@@ -240,6 +248,8 @@ func knownToolActions() map[string][]string {
 		SpeechTTS:     {""},
 		SpeechSTT:     {""},
 		DecisionAsk:   {""},
+		Report:        {""},
+		Ask:           {""},
 	}
 }
 

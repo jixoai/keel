@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -17,6 +18,7 @@ import (
 	"github.com/jixoai/keel/internal/harnessext"
 	"github.com/jixoai/keel/internal/store"
 	"github.com/jixoai/keel/internal/superagent"
+	"github.com/jixoai/keel/internal/toolsurface"
 )
 
 // superagentConfig is the environment-gated assembly of the first real
@@ -132,6 +134,11 @@ func newSuperagentRuntime(ctx context.Context, tenantID uuid.UUID, st *store.Sto
 	} else if archived {
 		return nil, fmt.Errorf("super-agent worker bot %q is archived", cfg.WorkerBot)
 	}
+	// The worker's model tools are a Harness whitelist: report/ask are product
+	// extras and task.write is the worker boundary. A Bot that does not grant
+	// them can still work through the HTTP routes, so this is a loud deployment
+	// warning rather than a startup refusal.
+	warnSuperagentWorkerGrants(ctx, st, tenantID, cfg.WorkerBot, log)
 	if _, err := bridge.BotHarnessPermissions(ctx, tenantID, cfg.OrchestratorBot, orchestratorOwner); err != nil {
 		return nil, fmt.Errorf("super-agent orchestrator harness: %w", err)
 	}
@@ -414,6 +421,52 @@ func (p superagentPermissions) CheckBotInvoke(ctx context.Context, tenantID uuid
 		return fmt.Errorf("%w: bot.invoke on %q: %s", collab.ErrPermissionDenied, targetBotID, decision.Reason)
 	}
 	return nil
+}
+
+// warnSuperagentWorkerGrants checks the worker Bot's Harness whitelist before
+// the mode starts. The model-facing report/ask tools and the task.write
+// permission are deployment configuration, not implicit grants; a missing
+// entry is visible here instead of only as a denied tool call in a worker run.
+func warnSuperagentWorkerGrants(ctx context.Context, st *store.Store, tenantID uuid.UUID, botID string, log *slog.Logger) {
+	if st == nil || log == nil {
+		return
+	}
+	record, err := st.GetBot(ctx, tenantID, botID)
+	if err != nil {
+		log.Warn("super-agent worker bot harness is unreadable; report/ask may be unavailable", "bot", botID, "error", err)
+		return
+	}
+	var harness struct {
+		Tools   []string `json:"tools"`
+		Context struct {
+			Permissions []string `json:"permissions"`
+		} `json:"context"`
+	}
+	if err := json.Unmarshal(record.Harness, &harness); err != nil {
+		log.Warn("super-agent worker bot harness is invalid; report/ask may be unavailable", "bot", botID, "error", err)
+		return
+	}
+	tools := make(map[string]bool, len(harness.Tools))
+	for _, tool := range harness.Tools {
+		tools[strings.TrimSpace(tool)] = true
+	}
+	permissions := make(map[string]bool, len(harness.Context.Permissions))
+	for _, key := range harness.Context.Permissions {
+		permissions[strings.TrimSpace(key)] = true
+	}
+	missing := make([]string, 0, 3)
+	for _, tool := range []string{toolsurface.Report, toolsurface.Ask} {
+		if !tools[tool] {
+			missing = append(missing, "tool:"+tool)
+		}
+	}
+	if !permissions[access.KeyTaskWrite] {
+		missing = append(missing, "permission:"+access.KeyTaskWrite)
+	}
+	if len(missing) > 0 {
+		log.Warn("super-agent worker bot is missing worker tool grants; the model-facing report/ask tools will be unavailable or denied",
+			"bot", botID, "missing", missing)
+	}
 }
 
 func splitCSV(raw string) map[string]bool {

@@ -976,93 +976,189 @@ type ReportRequest struct {
 	Summary         string          `json:"summary,omitempty"`
 	AttentionID     uuid.UUID       `json:"attentionId,omitempty"`
 	Result          json.RawMessage `json:"result,omitempty"`
+	// RequestID is the durable idempotency key of the report. A retried call
+	// with the same key returns the current state without a second audit,
+	// timeline row or terminal side effect.
+	RequestID string `json:"requestId,omitempty"`
 }
 
 // Report applies a worker report. Ready/failed are Ticket decisions; a report
 // never silently changes another tenant's row.
 func (o *Orchestrator) Report(ctx context.Context, request ReportRequest) error {
+	_, _, err := o.report(ctx, request, false)
+	return err
+}
+
+// report applies one report and returns the resulting ticket/assignment. The
+// model-facing worker path passes requireOpen=true: a blocked or closed ticket
+// refuses the report instead of applying a partial transition.
+func (o *Orchestrator) report(ctx context.Context, request ReportRequest, requireOpen bool) (Ticket, collab.Assignment, error) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	if err := o.checkTenant(request.TenantID); err != nil {
-		return err
+		return Ticket{}, collab.Assignment{}, err
 	}
 	if !request.State.Valid() {
-		return fmt.Errorf("superagent: report state %q is not in the closed vocabulary", request.State)
+		return Ticket{}, collab.Assignment{}, fmt.Errorf("superagent: report state %q is not in the closed vocabulary", request.State)
 	}
 	ticket, err := o.loadTicket(ctx, request.TenantID, request.WorkItemID)
 	if err != nil {
-		return err
+		return Ticket{}, collab.Assignment{}, err
 	}
 	assignment, err := o.cfg.Store.GetAssignment(ctx, request.TenantID, request.AssignmentID)
 	if err != nil {
-		return err
+		return Ticket{}, collab.Assignment{}, err
 	}
 	if assignment.WorkItemID != ticket.ID {
-		return fmt.Errorf("superagent: assignment does not belong to the ticket")
+		return Ticket{}, collab.Assignment{}, fmt.Errorf("superagent: assignment does not belong to the ticket")
 	}
 	if request.CallerSessionID != uuid.Nil && request.CallerSessionID != assignment.SessionID {
-		return fmt.Errorf("%w: the caller session is not the assignment worker", collab.ErrPermissionDenied)
+		return Ticket{}, collab.Assignment{}, fmt.Errorf("%w: the caller session is not the assignment worker", collab.ErrPermissionDenied)
 	}
-	if err := o.auditRequired(ctx, AuditReport, "accepted", ticket.ID, string(request.State)); err != nil {
-		return err
+	// A terminal assignment is a stale worker. Only the exact retry of the
+	// report that ended it may pass; otherwise a replaced worker could finish a
+	// ticket the queue already handed to someone else.
+	if assignment.Status.Terminal() && !reportAlreadyApplied(ticket, assignment, request.State) {
+		return Ticket{}, collab.Assignment{}, &WorkerToolError{
+			Code:         WorkerToolTicketClosed,
+			Message:      "the worker assignment has already ended; no further report is accepted",
+			TicketID:     ticket.ID,
+			TicketStatus: ticket.Status,
+		}
+	}
+	// Idempotent retry: the original report is the fact. It returns the current
+	// state even if the ticket has since moved on (for example the waiting
+	// report that blocked the ticket, retried after the human answered).
+	if exists, err := o.workerReportExists(ctx, request.TenantID, ticket.ID, request.RequestID); err != nil {
+		return Ticket{}, collab.Assignment{}, err
+	} else if exists {
+		return ticket, assignment, nil
+	}
+	if requireOpen {
+		// A retried terminal/waiting report whose state is already realized is
+		// allowed through: the report row may be missing because its write
+		// failed after the state change, and refusing it would strand the
+		// timeline fact forever.
+		if refusal := openTicketRefusal(ticket); refusal != nil && !reportAlreadyApplied(ticket, assignment, request.State) {
+			return Ticket{}, collab.Assignment{}, refusal
+		}
+	}
+	if err := o.auditRequiredWorker(ctx, AuditReport, "accepted", ticket, assignment, "state="+string(request.State)); err != nil {
+		return Ticket{}, collab.Assignment{}, err
 	}
 	switch request.State {
 	case ReportProgress:
-		return nil
+		// A progress report has no state edge; the durable report row below is
+		// its fact.
 	case ReportWaiting, ReportBlocked:
 		if request.State == ReportWaiting && request.AttentionID == uuid.Nil {
-			return fmt.Errorf("superagent: a waiting report must name a structured attention")
+			return Ticket{}, collab.Assignment{}, fmt.Errorf("superagent: a waiting report must name a structured attention")
 		}
 		if request.AttentionID != uuid.Nil {
 			attention, err := o.cfg.Store.GetAttention(ctx, request.TenantID, request.AttentionID)
 			if err != nil {
-				return err
+				return Ticket{}, collab.Assignment{}, err
 			}
 			if attention.WorkItemID != ticket.ID {
-				return fmt.Errorf("superagent: attention does not belong to the ticket")
+				return Ticket{}, collab.Assignment{}, fmt.Errorf("superagent: attention does not belong to the ticket")
 			}
 		}
 		if ticket.Status == collab.WorkItemActive || ticket.Status == collab.WorkItemOpen {
 			if err := o.setTicketStatus(ctx, &ticket, collab.WorkItemBlocked, request.Summary); err != nil {
-				return err
+				return Ticket{}, collab.Assignment{}, err
 			}
 		}
-		return nil
 	case ReportReady:
 		if err := o.finishAssignment(ctx, assignment, collab.AssignmentDone, request.Result); err != nil {
-			return err
+			return Ticket{}, collab.Assignment{}, err
 		}
 		if ticket.Status != collab.WorkItemDone {
 			if err := o.setTicketStatus(ctx, &ticket, collab.WorkItemDone, request.Summary); err != nil {
-				return err
+				return Ticket{}, collab.Assignment{}, err
 			}
 			o.enqueueTerminal(ctx, ticket, "completed", request.Summary)
 		}
-		_, err := o.dispatchQueuedLocked(ctx)
-		return err
+		if _, err := o.dispatchQueuedLocked(ctx); err != nil {
+			return Ticket{}, collab.Assignment{}, err
+		}
 	case ReportFailed:
 		if err := o.finishAssignment(ctx, assignment, collab.AssignmentFailed, request.Result); err != nil {
-			return err
+			return Ticket{}, collab.Assignment{}, err
 		}
 		if ticket.Status != collab.WorkItemFailed && ticket.Status != collab.WorkItemCancelled {
 			if err := o.setTicketStatus(ctx, &ticket, collab.WorkItemFailed, request.Summary); err != nil {
-				return err
+				return Ticket{}, collab.Assignment{}, err
 			}
 			o.enqueueTerminal(ctx, ticket, "failed", request.Summary)
 		}
-		_, err := o.dispatchQueuedLocked(ctx)
-		return err
+		if _, err := o.dispatchQueuedLocked(ctx); err != nil {
+			return Ticket{}, collab.Assignment{}, err
+		}
 	case ReportDropped:
 		if err := o.finishAssignment(ctx, assignment, collab.AssignmentCancelled, request.Result); err != nil {
-			return err
+			return Ticket{}, collab.Assignment{}, err
 		}
 		if ticket.Status == collab.WorkItemActive {
 			if err := o.setTicketStatus(ctx, &ticket, collab.WorkItemOpen, "worker dropped the assignment"); err != nil {
-				return err
+				return Ticket{}, collab.Assignment{}, err
 			}
 		}
-		_, err := o.dispatchQueuedLocked(ctx)
-		return err
+		if _, err := o.dispatchQueuedLocked(ctx); err != nil {
+			return Ticket{}, collab.Assignment{}, err
+		}
+	}
+	if err := o.recordWorkerReport(ctx, request, ticket, assignment); err != nil {
+		return Ticket{}, collab.Assignment{}, err
+	}
+	// Reload so the caller sees the applied assignment/ticket state.
+	ticket, err = o.loadTicket(ctx, request.TenantID, ticket.ID)
+	if err != nil {
+		return Ticket{}, collab.Assignment{}, err
+	}
+	assignment, err = o.cfg.Store.GetAssignment(ctx, request.TenantID, assignment.ID)
+	if err != nil {
+		return Ticket{}, collab.Assignment{}, err
+	}
+	return ticket, assignment, nil
+}
+
+// reportAlreadyApplied reports whether the requested report state is already
+// the ticket/assignment fact. It is the retry allowance after a state change
+// landed but its report row did not.
+func reportAlreadyApplied(ticket Ticket, assignment collab.Assignment, state ReportState) bool {
+	switch state {
+	case ReportReady:
+		return assignment.Status == collab.AssignmentDone
+	case ReportFailed:
+		return assignment.Status == collab.AssignmentFailed
+	case ReportDropped:
+		return assignment.Status == collab.AssignmentCancelled
+	case ReportWaiting, ReportBlocked:
+		return !assignment.Status.Terminal() && ticket.Status == collab.WorkItemBlocked
+	default:
+		return false
+	}
+}
+
+// openTicketRefusal is the model-tool boundary: work is only reportable while
+// the ticket accepts it. A blocked ticket is waiting on a human, and a closed
+// ticket (or a revoked mandate) must never be resurrected by a report.
+func openTicketRefusal(ticket Ticket) *WorkerToolError {
+	if ticket.Status == collab.WorkItemBlocked {
+		return &WorkerToolError{
+			Code:         WorkerToolTicketBlocked,
+			Message:      "the ticket is blocked on a human decision; wait for the answer before reporting",
+			TicketID:     ticket.ID,
+			TicketStatus: ticket.Status,
+		}
+	}
+	if ticket.Status.Closed() || ticket.Mandate.Revoked() {
+		return &WorkerToolError{
+			Code:         WorkerToolTicketClosed,
+			Message:      "the ticket is closed and no longer accepts worker reports",
+			TicketID:     ticket.ID,
+			TicketStatus: ticket.Status,
+		}
 	}
 	return nil
 }
@@ -1083,23 +1179,50 @@ func (o *Orchestrator) finishAssignment(ctx context.Context, assignment collab.A
 // Ask opens one structured Attention through the guarded Host. The question is
 // routed back to the Ticket thread, never to an unrelated Channel.
 func (o *Orchestrator) Ask(ctx context.Context, ticketID, assignmentID uuid.UUID, request collab.AttentionRequest) (collab.Attention, error) {
+	attention, _, err := o.ask(ctx, ticketID, assignmentID, request, false)
+	return attention, err
+}
+
+// ask is the one Ask implementation. requireOpen is set by the model-facing
+// worker tool: a blocked or closed ticket refuses a new question instead of
+// opening a second Attention the human cannot usefully answer.
+func (o *Orchestrator) ask(ctx context.Context, ticketID, assignmentID uuid.UUID, request collab.AttentionRequest, requireOpen bool) (collab.Attention, Ticket, error) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	if err := o.checkTenant(o.cfg.TenantID); err != nil {
-		return collab.Attention{}, err
+		return collab.Attention{}, Ticket{}, err
 	}
 	ticket, err := o.loadTicket(ctx, o.cfg.TenantID, ticketID)
 	if err != nil {
-		return collab.Attention{}, err
+		return collab.Attention{}, Ticket{}, err
+	}
+	if requireOpen {
+		// A retried question with the original request id is the existing
+		// Attention: return it without reopening the guard (a waiting report
+		// may have blocked the ticket after the question was created).
+		if requestID := strings.TrimSpace(request.RequestID); requestID != "" {
+			attentions, err := o.cfg.Store.ListAttentions(ctx, o.cfg.TenantID, ticket.ID)
+			if err != nil {
+				return collab.Attention{}, Ticket{}, err
+			}
+			for _, existing := range attentions {
+				if existing.RequestID == requestID {
+					return existing, ticket, nil
+				}
+			}
+		}
+		if refusal := openTicketRefusal(ticket); refusal != nil {
+			return collab.Attention{}, Ticket{}, refusal
+		}
 	}
 	if request.Route == "" {
 		request.Route = collab.AttentionRouteChannel
 	}
 	if !ticket.Thread.Valid() {
-		return collab.Attention{}, fmt.Errorf("superagent: ticket has no source thread")
+		return collab.Attention{}, Ticket{}, fmt.Errorf("superagent: ticket has no source thread")
 	}
 	if request.Channel != "" && request.Channel != ticket.Thread.ID {
-		return collab.Attention{}, fmt.Errorf("superagent: attention channel %q is not the ticket thread %q", request.Channel, ticket.Thread.ID)
+		return collab.Attention{}, Ticket{}, fmt.Errorf("superagent: attention channel %q is not the ticket thread %q", request.Channel, ticket.Thread.ID)
 	}
 	request.Channel = ticket.Thread.ID
 	if request.Timeout == 0 {
@@ -1107,20 +1230,29 @@ func (o *Orchestrator) Ask(ctx context.Context, ticketID, assignmentID uuid.UUID
 	}
 	assignment, err := o.cfg.Store.GetAssignment(ctx, o.cfg.TenantID, assignmentID)
 	if err != nil {
-		return collab.Attention{}, err
+		return collab.Attention{}, Ticket{}, err
 	}
 	if assignment.SessionID == uuid.Nil {
-		return collab.Attention{}, fmt.Errorf("superagent: assignment has no worker session")
+		return collab.Attention{}, Ticket{}, fmt.Errorf("superagent: assignment has no worker session")
+	}
+	if assignment.Status.Terminal() && requireOpen {
+		return collab.Attention{}, Ticket{}, &WorkerToolError{
+			Code:         WorkerToolTicketClosed,
+			Message:      "the worker assignment has already ended; no new question is accepted",
+			TicketID:     ticket.ID,
+			TicketStatus: ticket.Status,
+		}
 	}
 	if request.CallerSessionID != uuid.Nil && request.CallerSessionID != assignment.SessionID {
-		return collab.Attention{}, fmt.Errorf("%w: the caller session is not the assignment worker", collab.ErrPermissionDenied)
+		return collab.Attention{}, Ticket{}, fmt.Errorf("%w: the caller session is not the assignment worker", collab.ErrPermissionDenied)
 	}
-	if err := o.auditRequired(ctx, AuditAttentionOpen, "accepted", ticket.ID, "assignment "+assignment.ID.String()); err != nil {
-		return collab.Attention{}, err
+	if err := o.auditRequiredWorker(ctx, AuditAttentionOpen, "accepted", ticket, assignment, "attention requested"); err != nil {
+		return collab.Attention{}, Ticket{}, err
 	}
 	request.CallerSessionID = assignment.SessionID
 	request.AssignmentID = assignment.ID
-	return o.cfg.Host.Ask(ctx, o.cfg.TenantID, ticketID, request)
+	attention, err := o.cfg.Host.Ask(ctx, o.cfg.TenantID, ticketID, request)
+	return attention, ticket, err
 }
 
 // AnswerAttention records a human answer and wakes the same Ticket. A stopped
@@ -1508,6 +1640,30 @@ func (o *Orchestrator) auditRequired(ctx context.Context, kind, result string, t
 	return nil
 }
 
+// auditRequiredWorker is the worker-actor variant: the row names the worker
+// session and Bot (actor), the ticket and the assignment, and carries only a
+// structured action/detail. It never carries a report summary, an Attention
+// prompt or a Source body.
+func (o *Orchestrator) auditRequiredWorker(ctx context.Context, kind, result string, ticket Ticket, assignment collab.Assignment, detail string) error {
+	if o.cfg.Audit == nil {
+		return fmt.Errorf("%w: no audit sink", collab.ErrAuditUnavailable)
+	}
+	sessionID := assignment.SessionID
+	if sessionID == uuid.Nil {
+		sessionID = assignment.CallerSessionID
+	}
+	err := o.cfg.Audit.Record(ctx, collab.AuditEvent{
+		Kind: kind, Result: result, Operation: "superagent",
+		TenantID: o.cfg.TenantID, ModeID: o.cfg.ModeID, WorkItemID: ticket.ID,
+		AssignmentID: assignment.ID, SessionID: sessionID, BotID: assignment.BotID,
+		Detail: detail, At: o.cfg.Now(),
+	})
+	if err != nil {
+		return fmt.Errorf("%w: %v", collab.ErrAuditUnavailable, err)
+	}
+	return nil
+}
+
 func (o *Orchestrator) audit(ctx context.Context, kind, result string, event Event, ticketID uuid.UUID, detail string) {
 	if o.cfg.Audit == nil {
 		return
@@ -1584,7 +1740,7 @@ func workerTask(ticket Ticket) string {
 	if ticket.Source.URI != "" {
 		fmt.Fprintf(&builder, "Source: %s\n\n", ticket.Source.URI)
 	}
-	builder.WriteString("Work in your own session. Use structured attention when you need a human decision; do not infer approval from free text.")
+	builder.WriteString("Work in your own session. Report progress with the `report` tool and ask a human with the `ask` tool; both act only on the ticket bound to this session and never accept a ticket id. Use structured attention when you need a human decision; do not infer approval from free text.")
 	return builder.String()
 }
 

@@ -313,6 +313,86 @@ func scanAssignment(row workItemScanner) (collab.Assignment, error) {
 	return assignment, nil
 }
 
+// --- Worker reports -------------------------------------------------------
+
+// RecordWorkerReport inserts one worker report at most once per
+// (tenant, work item, request id). The unique index is the durable
+// idempotency key; a duplicate returns the original row with created=false.
+func (s *Store) RecordWorkerReport(ctx context.Context, report superagent.WorkerReport) (superagent.WorkerReport, bool, error) {
+	if report.TenantID == uuid.Nil || report.WorkItemID == uuid.Nil || report.AssignmentID == uuid.Nil {
+		return superagent.WorkerReport{}, false, collabError(collab.ErrTenantRequired, collab.CodeTenantRequired,
+			"record_worker_report", "tenant, work item and assignment ids are required")
+	}
+	if report.ID == uuid.Nil {
+		report.ID = uuid.New()
+	}
+	if report.CreatedAt.IsZero() {
+		report.CreatedAt = time.Now().UTC()
+	}
+	row, err := scanWorkerReport(s.pool.QueryRow(ctx, `
+		INSERT INTO collab_worker_reports
+		    (tenant_id, report_id, work_item_id, assignment_id, session_id, request_id,
+		     state, summary, attention_id, result, created_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11)
+		ON CONFLICT (tenant_id, work_item_id, request_id)
+		    WHERE request_id <> '' DO NOTHING
+		RETURNING tenant_id, report_id, work_item_id, assignment_id, session_id, request_id,
+		          state, summary, attention_id, result, created_at`,
+		report.TenantID, report.ID, report.WorkItemID, report.AssignmentID,
+		nullableUUID(report.SessionID), report.RequestID, string(report.State),
+		report.Summary, nullableUUID(report.AttentionID), rawInput(report.Result), report.CreatedAt))
+	if errors.Is(err, pgx.ErrNoRows) && report.RequestID != "" {
+		existing, lookupErr := s.GetWorkerReport(ctx, report.TenantID, report.WorkItemID, report.RequestID)
+		return existing, false, lookupErr
+	}
+	if err != nil {
+		return superagent.WorkerReport{}, false, fmt.Errorf("store: record worker report: %w", err)
+	}
+	return row, true, nil
+}
+
+// GetWorkerReport reads one report by its request id. A foreign tenant's row
+// and a missing row are the same not-found answer.
+func (s *Store) GetWorkerReport(ctx context.Context, tenantID, workItemID uuid.UUID, requestID string) (superagent.WorkerReport, error) {
+	if tenantID == uuid.Nil || workItemID == uuid.Nil || requestID == "" {
+		return superagent.WorkerReport{}, superagent.ErrReportNotFound
+	}
+	row, err := scanWorkerReport(s.pool.QueryRow(ctx, `
+		SELECT tenant_id, report_id, work_item_id, assignment_id, session_id, request_id,
+		       state, summary, attention_id, result, created_at
+		  FROM collab_worker_reports
+		 WHERE tenant_id = $1 AND work_item_id = $2 AND request_id = $3`,
+		tenantID, workItemID, requestID))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return superagent.WorkerReport{}, superagent.ErrReportNotFound
+	}
+	if err != nil {
+		return superagent.WorkerReport{}, fmt.Errorf("store: get worker report: %w", err)
+	}
+	return row, nil
+}
+
+func scanWorkerReport(row workItemScanner) (superagent.WorkerReport, error) {
+	var report superagent.WorkerReport
+	var sessionID, attentionID uuid.NullUUID
+	var state string
+	var result []byte
+	if err := row.Scan(&report.TenantID, &report.ID, &report.WorkItemID, &report.AssignmentID,
+		&sessionID, &report.RequestID, &state, &report.Summary, &attentionID, &result,
+		&report.CreatedAt); err != nil {
+		return superagent.WorkerReport{}, err
+	}
+	report.State = superagent.ReportState(state)
+	if sessionID.Valid {
+		report.SessionID = sessionID.UUID
+	}
+	if attentionID.Valid {
+		report.AttentionID = attentionID.UUID
+	}
+	report.Result = append(json.RawMessage(nil), result...)
+	return report, nil
+}
+
 // --- Attention ------------------------------------------------------------
 
 // CreateAttention inserts one attention row. A repeated request id returns the

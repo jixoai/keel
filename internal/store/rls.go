@@ -107,6 +107,7 @@ var rlsTenantTables = []string{
 	// collab-superagent. Every durable work-queue record is tenant-scoped.
 	"collab_work_items",
 	"collab_assignments",
+	"collab_worker_reports",
 	"collab_attentions",
 	"collab_links",
 	"collab_subscriptions",

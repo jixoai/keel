@@ -105,6 +105,7 @@ type superagentReportBody struct {
 	Summary      string                 `json:"summary,omitempty"`
 	AttentionID  uuid.UUID              `json:"attentionId,omitempty"`
 	Result       json.RawMessage        `json:"result,omitempty"`
+	RequestID    string                 `json:"requestId,omitempty"`
 }
 
 func (s *Server) superagentReport(w http.ResponseWriter, r *http.Request) {
@@ -128,7 +129,7 @@ func (s *Server) superagentReport(w http.ResponseWriter, r *http.Request) {
 	err := s.cfg.Superagent.Report(r.Context(), superagent.ReportRequest{
 		TenantID: tenantID, WorkItemID: ticketID, AssignmentID: body.AssignmentID,
 		CallerSessionID: body.SessionID, State: body.State, Summary: body.Summary,
-		AttentionID: body.AttentionID, Result: body.Result,
+		AttentionID: body.AttentionID, Result: body.Result, RequestID: body.RequestID,
 	})
 	if err != nil {
 		writeSuperagentError(w, err)

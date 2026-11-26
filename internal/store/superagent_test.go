@@ -16,7 +16,7 @@ func TestCollabSuperagentSchemaAndRLS(t *testing.T) {
 	st := readyTestStore(t)
 	ctx := context.Background()
 	tables := []string{
-		"collab_work_items", "collab_assignments", "collab_attentions", "collab_links",
+		"collab_work_items", "collab_assignments", "collab_worker_reports", "collab_attentions", "collab_links",
 		"collab_subscriptions", "collab_source_cursors", "collab_source_events",
 		"collab_outbox", "collab_session_index",
 	}
@@ -180,6 +180,27 @@ func TestCollabSuperagentStoreRoundTrip(t *testing.T) {
 	children, err := st.ActiveChildren(ctx, tenant, ref.ParentSessionID)
 	if err != nil || children != 0 {
 		t.Fatalf("active children = %d, err=%v", children, err)
+	}
+
+	report := superagent.WorkerReport{
+		ID: uuid.New(), TenantID: tenant, WorkItemID: created.ID, AssignmentID: assignment.ID,
+		SessionID: sessionID, RequestID: "report:1", State: superagent.ReportProgress,
+		Summary: "halfway", CreatedAt: created.CreatedAt,
+	}
+	storedReport, createdReport, err := st.RecordWorkerReport(ctx, report)
+	if err != nil || !createdReport || storedReport.ID != report.ID {
+		t.Fatalf("RecordWorkerReport = %+v created=%v err=%v", storedReport, createdReport, err)
+	}
+	duplicateReport, createdReport, err := st.RecordWorkerReport(ctx, report)
+	if err != nil || createdReport || duplicateReport.ID != report.ID {
+		t.Fatalf("idempotent RecordWorkerReport = %+v created=%v err=%v", duplicateReport, createdReport, err)
+	}
+	loadedReport, err := st.GetWorkerReport(ctx, tenant, created.ID, "report:1")
+	if err != nil || loadedReport.State != superagent.ReportProgress || loadedReport.SessionID != sessionID {
+		t.Fatalf("GetWorkerReport = %+v err=%v", loadedReport, err)
+	}
+	if _, err := st.GetWorkerReport(ctx, other, created.ID, "report:1"); !errors.Is(err, superagent.ErrReportNotFound) {
+		t.Fatalf("foreign GetWorkerReport err = %v, want report not found", err)
 	}
 }
 

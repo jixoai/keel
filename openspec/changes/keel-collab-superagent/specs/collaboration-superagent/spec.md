@@ -2,16 +2,37 @@
 
 ## ADDED Requirements
 
-> **First-slice boundary (explicit).** The production write surface in this
-> change is HTTP: `POST /v1/superagent/tickets/{id}/report`, `.../ask`,
-> `.../resume`, `.../stop`, and `POST /v1/superagent/attention/{id}/answer`.
-> Operator actions require `task.write` plus the independent
-> `OperatorAuthorizer` seam; policy-allowed Source comments may answer one
-> unambiguous open Attention. A model-facing worker `Report`/`Ask` tool
-> adapter is **deferred**; the worker API exists but no builtin tool calls it.
+> **Worker tool boundary (task 4.5).** The model-facing `report`/`ask` tools
+> are product extra tools, not part of the fixed eleven builtin tools: they are
+> registered only when the mode is enabled. Both resolve the Ticket/Assignment
+> from the ambient run session plus the durable session index; the schema has no
+> ticket or assignment argument, so a model cannot name another Ticket. A
+> non-worker session (including a bare sub-agent of a worker) fails closed with
+> a typed refusal. The HTTP routes remain the operator surface:
+> `POST /v1/superagent/tickets/{id}/report`, `.../ask`, `.../resume`,
+> `.../stop`, and `POST /v1/superagent/attention/{id}/answer`. Operator actions
+> require `task.write` plus the independent `OperatorAuthorizer` seam;
+> policy-allowed Source comments may answer one unambiguous open Attention.
 > Web/TUI boards, GitHub CI status, Feishu and auto-merge remain out of scope.
-> This change MUST NOT be reported as a complete worker-tool closed loop until
-> that adapter lands.
+
+### Requirement: Worker 模型工具不得越权 Ticket
+
+Worker 的模型工具 MUST 只作用于调用会话绑定的 Ticket/Assignment。工具 MUST 从 ambient
+run scope 的 tenant/session 经 durable session index 解析 `mode_id` 与 `work_item_id`，并
+MUST 要求 assignment 的 `session_id` 恰为该会话；MUST NOT 接受模型传入的任意 ticket/assignment
+id 作为作用域。非 superagent worker 会话（含 orchestrator root、普通会话与 worker 的 bare
+sub-agent）MUST fail closed 并返回明确错误，MUST NOT 静默成功或改投其他 Ticket。工具写操作
+MUST 走 `task.write`，审计 MUST 记录 actor/tenant/ticket/action 且 MUST NOT 包含报告正文或
+问题正文；blocked/closed Ticket MUST 拒绝新的报告/问题。`report` 与 `ask` MUST 幂等：重复
+requestId MUST 返回同一事实（报告行或 Attention），MUST NOT 产生第二条终态通知或第二个问题。
+
+#### Scenario: 非 worker 会话调用
+- **WHEN** 普通会话或 worker 的 sub-agent 调用 `report`/`ask`
+- **THEN** 返回类型化拒绝（scope/not_worker），不创建报告或 Attention
+
+#### Scenario: 模型传入其他 Ticket
+- **WHEN** 模型在参数中附带其他 ticketId/assignmentId
+- **THEN** 工具忽略该字段，只作用于调用会话绑定的 Ticket
 
 ### Requirement: super-agent 是工单/调度模式
 

@@ -13,8 +13,9 @@ func TestPermissionCatalogIsComplete(t *testing.T) {
 	if got := len(ToolPermissionManifest()); got == 0 {
 		t.Fatal("permission catalog is empty")
 	}
-	// The eleven builtin tools and the five model tools built by mediawiring.
-	for _, tool := range append(BuiltinNames(), ImageGenerate, VideoGenerate, SpeechTTS, SpeechSTT, DecisionAsk) {
+	// The eleven builtin tools, the five model tools built by mediawiring and
+	// the two super-agent worker tools (product extras).
+	for _, tool := range append(BuiltinNames(), ImageGenerate, VideoGenerate, SpeechTTS, SpeechSTT, DecisionAsk, Report, Ask) {
 		found := false
 		for _, entry := range ToolPermissionManifest() {
 			if entry.Tool == tool {
@@ -71,6 +72,8 @@ func TestRequiredKeyMapping(t *testing.T) {
 		{SpeechTTS, "", access.KeyMediaInvoke},
 		{SpeechSTT, "", access.KeyMediaInvoke},
 		{DecisionAsk, "", access.KeyDecisionAsk},
+		{Report, "", access.KeyTaskWrite},
+		{Ask, "", access.KeyTaskWrite},
 		// An unknown or omitted action on a known aggregate tool falls back to
 		// the tool's base key so the tool's own unknown_action error reaches the
 		// model.
