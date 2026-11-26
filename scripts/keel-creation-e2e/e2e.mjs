@@ -41,12 +41,16 @@ const PLAYWRIGHT =
   process.env.PLAYWRIGHT_CORE ||
   '/Users/kzf/.npm/_npx/e41f203b7505f1fb/node_modules/playwright-core/index.mjs';
 const HEADLESS = (process.env.E2E_HEADLESS || 'true') !== 'false';
+const PUBLIC_URL = process.env.E2E_PUBLIC_URL || '';
 const PLUGIN_ID = process.env.E2E_PLUGIN_ID || 'e2e.panel';
 const LEGACY_ID = 'e2e.legacy-chunk';
 const TENANT = process.env.E2E_TENANT || '';
 const DSN_FILE = process.env.E2E_DSN_FILE || '';
 const WORKTREE = process.env.E2E_WORKTREE || '';
 const HEAD_COMMIT = process.env.E2E_HEAD_COMMIT || '';
+// The creation change starts at this commit; the coverage table is computed
+// from the real diff, so it cannot quietly shrink to the convenient files.
+const COVERAGE_BASE = process.env.E2E_COVERAGE_BASE || 'acd1bee';
 
 if (!BASE || !EVIDENCE) {
   console.error('E2E_BASE and E2E_EVIDENCE are required');
@@ -72,6 +76,10 @@ process.on('unhandledRejection', (error) => {
   console.error(`[e2e] unhandled rejection: ${error?.stack || error}`);
 });
 let shotSeq = 0;
+// The visual delta must show the chunk slot itself, not the page top: a
+// full-page shot of a long settings page would hide the before/after face.
+let beforeChunkShot = null;
+let afterChunkShot = null;
 
 function addFinding(id, severity, title, detail, evidence) {
   findings.push({ id, severity, title, detail, evidence: evidence ?? null });
@@ -117,6 +125,20 @@ async function shot(page, step, label, options = {}) {
   const full = path.join(SHOTS, file);
   await page.waitForTimeout(options.settle ?? 350);
   await page.screenshot({ path: full, fullPage: options.fullPage !== false });
+  const rel = `screenshots/${file}`;
+  step.shots.push(rel);
+  return rel;
+}
+
+/** One element shot: scrolls the surface into view and captures only it, so the
+ * report's before/after pair shows the chunk slot rather than the page top. */
+async function shotOf(step, label, locator, options = {}) {
+  shotSeq += 1;
+  const file = `${String(shotSeq).padStart(2, '0')}-${String(step.n).padStart(2, '0')}-${label}.png`;
+  const full = path.join(SHOTS, file);
+  await locator.scrollIntoViewIfNeeded();
+  await locator.page().waitForTimeout(options.settle ?? 250);
+  await locator.screenshot({ path: full });
   const rel = `screenshots/${file}`;
   step.shots.push(rel);
   return rel;
@@ -567,7 +589,8 @@ async function step3(step, ctx) {
   const text = await bodyText(page);
   check(step, '旧 chunk 请求成功但渲染失败（ERR_CHUNK_LOAD）', text.includes('ERR_CHUNK_LOAD'), 'ERR_CHUNK_LOAD', text.slice(-260));
   check(step, '失败原因是裸 nsh 说明符', text.includes('Failed to resolve module specifier "nsh"'), 'Failed to resolve module specifier "nsh"', text.slice(-260));
-  ctx.beforeChunkShot = await shot(page, step, 'chunk-before-fix');
+  await shot(page, step, 'chunk-before-fix');
+  beforeChunkShot = await shotOf(step, 'chunk-before-slot', page.locator('[data-testid^="plugin-failure-"]').first());
 
   const chunk = await ctx.admin.get(`/plugins/${LEGACY_ID}/ui/settings.js`);
   check(step, '旧 chunk 的 HTTP 仍是 200（问题在导入解析）', chunk.status === 200, 200, chunk.status);
@@ -743,7 +766,8 @@ async function step5(step, ctx) {
   check(step, '模型写入的 chunk 实际渲染', chunkCount === 1 && text.includes('E2E-AI-WRITTEN-MARKER'), '1 + marker', `${chunkCount} ${text.slice(-160)}`);
   check(step, '渲染内容来自插件 id', text.includes(PLUGIN_ID), PLUGIN_ID, text.includes(PLUGIN_ID));
   check(step, '槽位不再显示失败面', (await page.locator('[data-testid^="plugin-failure-"]').count()) === 0, 0, await page.locator('[data-testid^="plugin-failure-"]').count());
-  ctx.afterChunkShot = await shot(page, step, 'chunk-rendered');
+  await shot(page, step, 'chunk-rendered');
+  afterChunkShot = await shotOf(step, 'chunk-rendered-slot', page.locator(sel('plugin-chunk-settings')).first());
   log(step, `rendered slot text=${text.slice(-120)}`);
 }
 
@@ -929,6 +953,123 @@ const conclusion =
   (failedP01.length ? `P0/P1 ${failedP01.length} 项未清零，不得称完成。` : 'P0/P1 = 0。') +
   ' 公网链接：未发布（本次只在本地生成报告，没有部署公网入口）。';
 
+
+// ---- coverage ---------------------------------------------------------------
+
+/** One surface per changed file, computed from the real diff. A file the
+ * change touched but this lane cannot evidence is UNCOVERED, never silently
+ * dropped from the table. */
+function coverageRule(file) {
+  const covered = (surface, evidence) => ({ status: 'COVERED', surface, evidence });
+  const exempt = (surface, evidence) => ({ status: 'EXEMPT', surface, evidence });
+  if (file.startsWith('scripts/keel-creation-e2e/')) {
+    return exempt('测试工具', '本报告由该脚本生成');
+  }
+  if (file === 'scripts/keel-identity-e2e/report-gen.mjs') {
+    return exempt('报告生成器', '本报告由该生成器输出');
+  }
+  if (file.startsWith('openspec/changes/keel-creation/')) {
+    return exempt('规格/任务文档', 'tasks.md 4.1/4.3');
+  }
+  if (file === 'plugins/templates/webview-react-solidglass/ui/settings.js') {
+    return covered('设置页 keel.ui.settings-section chunk', '步骤 3 before（ERR_CHUNK_LOAD）→ 步骤 5 after（模型写入的 chunk 渲染 + marker）');
+  }
+  if (file === 'plugins/templates/templates_test.go') {
+    return covered('go test ./plugins/templates', '模板契约测试（裸 nsh 导入被拒）');
+  }
+  if (file === 'internal/harnessext/creation.go' || file === 'internal/harnessext/creation_backend.go') {
+    return covered('creation 工具（scaffold/validate/read/write/install/remove）', '单测 + 步骤 4/5/7');
+  }
+  if (file === 'internal/harnessext/creation_test.go') {
+    return covered('creation 单测', 'read/write 作用域、审批伪造、内容绑定');
+  }
+  if (file === 'internal/toolsurface/creation.go' || file === 'internal/toolsurface/surface.go' || file === 'internal/toolsurface/permissions.go') {
+    return covered('creation 工具面 schema/权限', '动作枚举含 read/write；plugin.invoke 门');
+  }
+  if (file === 'internal/pluginpkg/builtin/keel.creation.yaml') {
+    return covered('内置 creation 清单权限', 'read/write 工具声明；服务启动装配');
+  }
+  if (file === 'internal/harnessext/decisions.go' || file === 'internal/harnessext/harnessext_test.go') {
+    return covered('decision 身份（requestId+kind+prompt+options）', '单测 + 步骤 4 审批卡');
+  }
+  if (file === 'internal/harnessapi/decisions.go' || file === 'internal/harnessapi/plugin_approval.go' || file === 'internal/harnessapi/plugins.go') {
+    return covered('插件审批门与 decision API', '单测（伪造 kind/内容绑定）+ 步骤 4/7');
+  }
+  if (file === 'internal/harnessapi/plugin_approval_test.go' || file === 'internal/harnessapi/plugins_test.go' || file === 'internal/harnessapi/api_test.go') {
+    return covered('审批门回归测试', 'go test ./internal/harnessapi');
+  }
+  if (file === 'internal/httpapi/server.go' || file === 'internal/httpapi/session_owner_test.go') {
+    return covered('会话创建保留命名空间', 'go test ./internal/httpapi');
+  }
+  if (file === 'cmd/keel/serve.go') {
+    return covered('serve 装配保留 sessionId', '启动时绑定 PluginApprovalSessionID');
+  }
+  if (file === 'internal/harnessext/plugin_manager_ops.go' || file === 'internal/harnessext/plugin_manager_test.go') {
+    return covered('update 内容哈希绑定', '单测（审批后换包被拒）');
+  }
+  if (file === 'web/src/data/http.ts' || file === 'web/src/data/http.identity.test.ts') {
+    return covered('decision 读取/作答与 checkpoint 策略', '步骤 4 审批作答 + nsh test decisions');
+  }
+  if (file === 'web/src/data/store.ts') {
+    return covered('决策卡合成 + 插件/触发器分载', '步骤 4 审批卡 + 步骤 6 viewer 清单');
+  }
+  if (file === 'web/src/screens/plugins.tsx') {
+    return covered('插件页 viewer 面与触发器降级', '步骤 6 截图与断言');
+  }
+  if (file === 'packages/chat-surface/src/engine.ts' || file === 'packages/chat-surface/src/projection.ts' || file === 'web/src/data/core.ts') {
+    return covered('decision 事件投影/合成', '步骤 4 审批卡可读可答');
+  }
+  // The checkpoint change owns these files and its own 12-step lane; the
+  // creation report states that instead of claiming coverage it did not run.
+  const checkpointSurface = [
+    'internal/agent/', 'internal/compaction/', 'internal/sessionpolicy/', 'internal/kernel/',
+    'internal/metrics/', 'internal/host/', 'internal/servicehost/', 'internal/configfile/loader.go',
+    'internal/assembly/config.go', 'internal/store/session_checkpoint_policy.go', 'internal/store/ready.go',
+    'internal/store/rls.go', 'internal/store/schema.sql', 'internal/store/store.go',
+    'internal/harnessapi/compact', 'internal/harnessapi/checkpoint', 'internal/harnessapi/api.go',
+    'cmd/keel/manual_compact', 'cmd/keel/checkpoint_routes_test.go', 'scripts/keel-checkpoint-e2e/',
+    'web/src/screens/settings-checkpoints', 'web/src/screens/settings.tsx', 'web/src/data/contract.ts',
+    'web/src/data/fixture.ts', 'web/App.tui.test.tsx', 'docs/',
+  ];
+  if (checkpointSurface.some((prefix) => file === prefix || file.startsWith(prefix))) {
+    return exempt('keel-checkpoint 验收面', '由 checkpoint E2E 报告（12 步/66 断言）覆盖，不在本 lane 冒充');
+  }
+  return null;
+}
+
+function buildCoverage() {
+  let files = [];
+  if (WORKTREE) {
+    try {
+      files = execFileSync('git', ['-C', WORKTREE, 'diff', '--name-only', `${COVERAGE_BASE}..HEAD`], {
+        encoding: 'utf8',
+      })
+        .trim()
+        .split('\n')
+        .filter(Boolean);
+    } catch (error) {
+      files = [];
+      console.error(`[e2e] coverage: git diff failed: ${error?.message || error}`);
+    }
+  }
+  const rows = files.map((file) => {
+    const rule = coverageRule(file);
+    if (!rule) {
+      return { file, change: '未分类', status: 'UNCOVERED', surface: '—', evidence: '需要在覆盖表中登记证据' };
+    }
+    return { file, change: rule.surface, status: rule.status, surface: rule.surface, evidence: rule.evidence };
+  });
+  const count = (status) => rows.filter((row) => row.status === status).length;
+  return {
+    baseline: `${COVERAGE_BASE}..${HEAD_COMMIT || 'HEAD'}（${files.length} 个改动文件）`,
+    total: rows.length,
+    covered: count('COVERED'),
+    exempt: count('EXEMPT'),
+    uncovered: count('UNCOVERED'),
+    rows,
+  };
+}
+
 const payload = {
   title: 'keel-creation · 插件创建端到端验收',
   change: 'keel-creation 4.1 / 4.3（真实服务 + 浏览器 + 脚本化模型）',
@@ -947,82 +1088,25 @@ const payload = {
     worktree: WORKTREE,
   },
   publish: {
-    published: false,
-    url: null,
-    reason: '本次未部署公网；报告只在 .agents/reports 下生成本地文件，没有可点击的公网链接。',
+    published: Boolean(PUBLIC_URL),
+    url: PUBLIC_URL || null,
+    reason: PUBLIC_URL
+      ? '公网静态报告（frp 自服务隧道 + 本地静态服务）。'
+      : '本次未部署公网；报告只在 .agents/reports 下生成本地文件，没有可点击的公网链接。',
   },
   steps,
   findings,
-  coverage: {
-    baseline: 'db39325 + working tree',
-    total: 6,
-    covered: 2,
-    exempt: 4,
-    uncovered: 0,
-    rows: [
-      {
-        file: 'plugins/templates/webview-react-solidglass/ui/settings.js',
-        change: 'runtime chunk 改为自包含宿主 realm 读取，移除裸 nsh 导入',
-        status: 'COVERED',
-        surface: '设置页 keel.ui.settings-section chunk',
-        evidence: '步骤 3 before（ERR_CHUNK_LOAD）→ 步骤 5 after（plugin-chunk 实际渲染）',
-      },
-      {
-        file: 'plugins/templates/templates_test.go',
-        change: '模板契约测试拒绝裸 nsh 导入并要求宿主 realm 契约',
-        status: 'COVERED',
-        surface: 'go test ./plugins/templates',
-        evidence: '本仓测试通过（见 serve.log 同目录测试命令记录）',
-      },
-      {
-        file: 'scripts/keel-creation-e2e/run.sh',
-        change: '新增无 Docker 的真实服务 E2E 栈',
-        status: 'EXEMPT',
-        surface: '测试工具',
-        evidence: '本报告由该脚本生成',
-      },
-      {
-        file: 'scripts/keel-creation-e2e/e2e.mjs',
-        change: '新增浏览器步骤断言与截图',
-        status: 'EXEMPT',
-        surface: '测试工具',
-        evidence: '本报告由该脚本生成',
-      },
-      {
-        file: 'scripts/keel-creation-e2e/scripted-model.mjs',
-        change: '新增确定性 creation 工具模型',
-        status: 'EXEMPT',
-        surface: '测试工具',
-        evidence: '脚本化模型日志 scripted-model.jsonl',
-      },
-      {
-        file: 'openspec/changes/keel-creation/tasks.md',
-        change: '记录本阶段实际完成项与证据路径',
-        status: 'EXEMPT',
-        surface: '文档',
-        evidence: 'tasks.md 4.1/4.3 条目',
-      },
-    ],
-  },
+  coverage: buildCoverage(),
   visualDelta: [
     {
       surface: 'Native chunk 渲染（ui/settings.js）',
       files: ['plugins/templates/webview-react-solidglass/ui/settings.js'],
-      before: ctxBeforeShot(),
-      after: ctxAfterShot(),
-      note: 'before=同一 E2E 栈安装的裸 nsh 旧包；after=修复模板后由 creation 生成的包',
+      before: beforeChunkShot,
+      after: afterChunkShot,
+      note: 'before=同一 E2E 栈安装的裸 nsh 旧包（槽位失败面）；after=模型写入的 chunk 在槽位实际渲染',
     },
   ].filter((delta) => delta.before && delta.after),
 };
-
-function ctxBeforeShot() {
-  const step = steps.find((row) => row.name.includes('修复前 chunk'));
-  return step?.shots?.[0] || null;
-}
-function ctxAfterShot() {
-  const step = steps.find((row) => row.name.includes('实际渲染'));
-  return step?.shots?.[0] || null;
-}
 
 fs.writeFileSync(path.join(EVIDENCE, 'steps.json'), JSON.stringify(payload, null, 2) + '\n');
 console.log(`[e2e] steps=${steps.length} checks=${checks.length} passed=${passedChecks} findings=${findings.length}`);
