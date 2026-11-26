@@ -9,6 +9,8 @@ permissions:
   tools:
     - keel.creation.catalog
     - keel.creation.scaffold
+    - keel.creation.read
+    - keel.creation.write
     - keel.creation.validate
     - keel.creation.install
     - keel.creation.list

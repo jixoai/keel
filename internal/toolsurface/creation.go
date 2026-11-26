@@ -17,16 +17,18 @@ type CreationBackend interface {
 	Invoke(ctx context.Context, action string, args json.RawMessage) (agentcore.AgentToolResult, error)
 }
 
-var creationActions = []string{ActionCatalog, ActionScaffold, ActionValidate, ActionInstall, ActionList, ActionRemove}
+var creationActions = []string{ActionCatalog, ActionScaffold, ActionRead, ActionWrite, ActionValidate, ActionInstall, ActionList, ActionRemove}
 
 const creationToolDescription = "Creation mode: build, validate, install and remove real plugin packages. Actions: " +
 	"catalog (read-only aggregate of installed plugins and their declared surface); scaffold {id, purpose, title?, tool?, version?}; " +
+	"read {id, file?} (list the package or read one file); write {id, file, content} (edit inside the staged package); " +
 	"validate {id, path?}; install {id, requestId?, decisionId?} (durable approval, call again with decisionId); " +
 	"list; remove {id, requestId?, decisionId?}. The keel.creation plugin supplies the backend."
 
 func creationSchema() json.RawMessage {
 	return schema(`, "id":{"type":"string"}, "purpose":{"type":"string"}, "title":{"type":"string"}, ` +
 		`"tool":{"type":"string"}, "version":{"type":"string"}, "kind":{"type":"string"}, "path":{"type":"string"}, ` +
+		`"file":{"type":"string"}, "content":{"type":"string"}, ` +
 		`"requestId":{"type":"string"}, "decisionId":{"type":"string"}`)
 }
 

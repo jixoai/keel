@@ -654,6 +654,8 @@ async function step4(step, ctx) {
   const allResults = toolResults(events).join('\n') || interimResults;
   check(step, 'run 完成（未触发防护中止）', run === 'done', 'done', run);
   check(step, 'creation.scaffold 生成完整包', allResults.includes('"status":"scaffolded"'), 'scaffolded', allResults.includes('"status":"scaffolded"'));
+  check(step, 'creation.read 读回模板 chunk', allResults.includes('"file":"ui/settings.js"') && allResults.includes('"content":'), 'file/content', allResults.includes('"file":"ui/settings.js"'));
+  check(step, 'creation.write 由模型改写 chunk', allResults.includes('"status":"written"'), 'written', allResults.includes('"status":"written"'));
   check(step, 'creation.validate 字段级通过', allResults.includes('"status":"valid"') && allResults.includes('"ok":true'), 'valid/ok', allResults.includes('"status":"valid"'));
   check(step, 'creation.install 打开 durable 审批', allResults.includes('"approvalRequired":true'), 'approvalRequired', allResults.includes('"approvalRequired":true'));
 
@@ -737,7 +739,8 @@ async function step5(step, ctx) {
   await waitTestId(page, 'plugin-settings-sections', 30000);
   await waitChunkRendered(page);
   const text = await bodyText(page);
-  check(step, '修复后的 chunk 实际渲染', (await page.locator(`[data-testid="plugin-chunk-${'settings'}"]`).count()) === 1 || text.includes('由 e2e.panel 的 chunk 贡献渲染'), 'plugin-chunk + 文案', text.slice(-220));
+  const chunkCount = await page.locator(sel('plugin-chunk-settings')).count();
+  check(step, '模型写入的 chunk 实际渲染', chunkCount === 1 && text.includes('E2E-AI-WRITTEN-MARKER'), '1 + marker', `${chunkCount} ${text.slice(-160)}`);
   check(step, '渲染内容来自插件 id', text.includes(PLUGIN_ID), PLUGIN_ID, text.includes(PLUGIN_ID));
   check(step, '槽位不再显示失败面', (await page.locator('[data-testid^="plugin-failure-"]').count()) === 0, 0, await page.locator('[data-testid^="plugin-failure-"]').count());
   ctx.afterChunkShot = await shot(page, step, 'chunk-rendered');
@@ -775,12 +778,17 @@ async function step6(step, ctx) {
   await loginUI(viewerPage.page, 'e2e-viewer', VIEWER_PASSWORD, 'books-shell');
   await navigate(viewerPage.page, BASE + '/plugins');
   await waitTestId(viewerPage.page, 'plugins-page', 30000);
-  await waitTestId(viewerPage.page, 'plugins-no-permission', 30000);
+  // plugin.read is held: the inventory must render. Trigger status is a
+  // separate read (trigger.read) and degrades in its own section.
+  await waitTestId(viewerPage.page, `plugin-${PLUGIN_ID}`, 30000);
   const text = await bodyText(viewerPage.page);
-  const count = await viewerPage.page.locator(sel('plugins-no-permission')).count();
-  check(step, '无权限态显示缺权提示', count >= 2, '>=2', count);
-  check(step, '无权限文案覆盖安装/创建', text.includes('没有权限安装插件') && text.includes('没有权限创建插件'), '安装+创建', text.slice(0, 220));
-  check(step, '无权限时不显示安装入口', text.includes('没有权限安装插件'), '无权限安装', text.includes('没有权限安装插件'));
+  const rows = await viewerPage.page.locator(sel(`plugin-${PLUGIN_ID}`)).count();
+  check(step, 'viewer 能看到已装插件清单', rows === 1, 1, rows);
+  check(step, '不渲染读取插件的无权限面', !text.includes('没有权限读取插件'), false, text.includes('没有权限读取插件'));
+  const installEntries = await viewerPage.page.locator(sel('plugins-available-create')).count();
+  const createEntries = await viewerPage.page.locator(sel('plugins-create-start')).count();
+  check(step, '安装/创建入口不渲染', installEntries === 0 && createEntries === 0, 0, `${installEntries}/${createEntries}`);
+  check(step, '缺权提示覆盖安装/创建', text.includes('没有权限安装插件') && text.includes('没有权限创建插件'), '安装+创建', text.slice(0, 220));
   ctx.viewerShot = await shot(viewerPage.page, step, 'viewer-no-permission');
 
   const refused = await viewerApi.post('/v1/plugins/install', { path: 'ignored-by-auth' });

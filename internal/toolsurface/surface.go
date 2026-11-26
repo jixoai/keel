@@ -66,6 +66,8 @@ const (
 	ActionAck        = "ack"
 	ActionCatalog    = "catalog"
 	ActionScaffold   = "scaffold"
+	ActionRead       = "read"
+	ActionWrite      = "write"
 	ActionValidate   = "validate"
 	ActionInstall    = "install"
 	ActionRemove     = "remove"

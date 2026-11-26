@@ -22,6 +22,26 @@ import fs from 'node:fs';
 const PORT = Number(process.env.SCRIPTED_MODEL_PORT || 13745);
 const LOG = process.env.SCRIPTED_MODEL_LOG || '';
 const PLUGIN_ID = process.env.SCRIPTED_PLUGIN_ID || 'e2e.panel';
+export const AI_WRITTEN_MARKER = 'E2E-AI-WRITTEN-MARKER';
+// Authored through creation.write, not scaffolded: the E2E must prove the model
+// can actually write the package it installs, not only pick template options.
+const AI_SETTINGS_CHUNK = `// Authored by the scripted model through creation.write.
+const realm = typeof globalThis === "object" ? globalThis.__nsh_browser_realm : undefined;
+const modules = realm && realm.modules;
+const nsh = (modules && typeof modules.get === "function" && modules.get("nsh")) || {};
+const Text = nsh.Text;
+const View = nsh.View;
+export function render(context) {
+  if (typeof Text !== "function" || typeof View !== "function") return null;
+  return View({
+    testID: "plugin-chunk-settings",
+    children: [
+      Text({ children: "由 ${PLUGIN_ID} 的 chunk 贡献渲染" }),
+      Text({ children: "${AI_WRITTEN_MARKER}" }),
+    ],
+  });
+}
+`;
 
 const log = (entry) => {
   if (!LOG) return;
@@ -156,6 +176,8 @@ const server = http.createServer((req, res) => {
     const installed = hasToolResult(messages, '"status":"enabled"');
     const removed = hasToolResult(messages, '"status":"removed"');
     const scaffolded = hasToolResult(messages, '"status":"scaffolded"');
+    const packageRead = hasToolResult(messages, '"status":"ok"') && hasToolResult(messages, '"file":"ui/settings.js"');
+    const packageWritten = hasToolResult(messages, '"status":"written"');
     const validated = hasToolResult(messages, '"status":"valid"');
     const installApprovalAsked = hasToolResult(messages, '"action":"install"');
     // `remove` is the tool action; the approval document names the lifecycle
@@ -179,6 +201,8 @@ const server = http.createServer((req, res) => {
       tools,
       creation,
       scaffolded,
+      packageRead,
+      packageWritten,
       validated,
       installApprovalAsked,
       removeApprovalAsked,
@@ -239,6 +263,21 @@ const server = http.createServer((req, res) => {
         title: 'E2E Creation Panel',
         tool: 'panel_refresh',
         version: '0.1.0',
+      });
+      return;
+    }
+    // Read the scaffolded chunk, then author it: the product claim is that the
+    // model writes the plugin, not that it picks template options.
+    if (!packageRead) {
+      toolCall(res, model, 'creation', { action: 'read', id: PLUGIN_ID, file: 'ui/settings.js' });
+      return;
+    }
+    if (!packageWritten) {
+      toolCall(res, model, 'creation', {
+        action: 'write',
+        id: PLUGIN_ID,
+        file: 'ui/settings.js',
+        content: AI_SETTINGS_CHUNK,
       });
       return;
     }

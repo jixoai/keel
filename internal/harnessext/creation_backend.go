@@ -19,6 +19,8 @@ type CreationBackend struct {
 var creationBackendActions = map[string]string{
 	"catalog":  CreationToolCatalog,
 	"scaffold": CreationToolScaffold,
+	"read":     CreationToolRead,
+	"write":    CreationToolWrite,
 	"validate": CreationToolValidate,
 	"install":  CreationToolInstall,
 	"list":     CreationToolList,

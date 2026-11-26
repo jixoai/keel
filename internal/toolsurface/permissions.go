@@ -116,6 +116,8 @@ var toolPermissionCatalog = []ToolPermission{
 
 	{Tool: Creation, Action: ActionCatalog, Key: access.KeyPluginInvoke},
 	{Tool: Creation, Action: ActionScaffold, Key: access.KeyPluginInvoke},
+	{Tool: Creation, Action: ActionRead, Key: access.KeyPluginInvoke},
+	{Tool: Creation, Action: ActionWrite, Key: access.KeyPluginInvoke},
 	{Tool: Creation, Action: ActionValidate, Key: access.KeyPluginInvoke},
 	{Tool: Creation, Action: ActionInstall, Key: access.KeyPluginLifecycleInstall},
 	{Tool: Creation, Action: ActionList, Key: access.KeyPluginInvoke},
