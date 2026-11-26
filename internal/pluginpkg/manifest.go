@@ -428,6 +428,7 @@ func AttachmentClaimProblems(slot, part string, mime []string) []FieldError {
 	}
 	if len(mime) > 0 && part != AttachmentPartKind {
 		add("part", "mime narrowing requires part: %s", AttachmentPartKind)
+		add("mime", "mime narrowing requires part: %s", AttachmentPartKind)
 	}
 	if len(mime) > MimePatternsMax {
 		add("mime", "at most %d MIME patterns are allowed per contribution", MimePatternsMax)
