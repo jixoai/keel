@@ -27,7 +27,7 @@ SSE、watchers/schedules、sync 引擎与 Slack/GitHub/Linear/Chat SDK 适配）
 | --- | --- | --- |
 | Phase 0 | 独立仓库：核心协议/日志/存储/API/SSE → watchers/schedules/attachments/reactions/blocks → sync 引擎 + Slack/GitHub/Linear 原生 + Chat SDK bridge → 测试/E2E | 独立仓库全绿，产出 commit/tag |
 | Phase 1 | keel 导入：身份/RBAC/ReBAC/PG/SSE/secret 适配；superagent 只读镜像→命令桥；启用 sync | keel 集成全绿 |
-| Phase 2 | nsh UI：队列/任务卡/线程/租约/live/五态；sync/watcher/schedule 状态与故障 UI | 全量 E2E、复核、归档 |
+| Phase 2 | nsh UI：队列/任务卡/线程/租约/live/五态；sync/watcher/schedule 状态与故障 UI；删除旧 superagent 看板（破坏性变更，无兼容开关） | 全量 E2E、复核、归档 |
 
 Sync MUST 在 phase 0 完成；phase 1 只做“接通 keel 的身份/权限/存储/凭据”，不补 sync 功能。
 
@@ -81,6 +81,9 @@ Linear 与任意 Chat SDK adapter 的线程；否则“通用任务/线程标准
 - **Sync 全量双向**：Slack/GitHub/Linear 原生 + Chat SDK 通用桥；thread 镜像、去重 marker、
   出站重试、凭据隔离、不可信输入、失败恢复。
 - superagent 作为适配器接入，不制造第二真值。
+- **单一任务面**：board 是唯一的任务/线程看板。Phase 2 删除旧 superagent 看板的
+  web/TUI 路由、页面与只读数据源；不保留双看板、兼容开关或旧数据回退路径。
+  superagent 仍是 Ticket/Assignment/Attention 的真值，但人只看 board。
 
 **Non-Goals**
 

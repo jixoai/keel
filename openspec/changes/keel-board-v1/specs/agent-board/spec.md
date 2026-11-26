@@ -462,7 +462,9 @@ MUST NOT 制造第二真值：superagent 仍是 Ticket/Assignment 的真值，bo
 成功后更新投影。映射 MUST 幂等：Ticket/Assignment/Attention/report 重复同步 MUST NOT
 产生重复任务、claim 或回复。已归档工单 MUST 保持只读，MUST NOT 被改写。GitHub 的
 PR/issue/评论 MUST 由统一 sync 处理；superagent 的 GitHub Source MUST NOT 另起第二套
-评论同步，两者 MUST 用映射行与外部 event ID 去重。
+评论同步，两者 MUST 用映射行与外部 event ID 去重。Phase 2 MUST 删除旧 superagent 看板
+（web/TUI `/superagent` 路由、页面、只读数据源与仅服务旧看板的 API），MUST NOT 保留双看板、
+兼容开关或旧数据回退路径；board MUST 成为唯一的任务/线程任务面。
 
 #### Scenario: Ticket 投影为任务
 
@@ -488,6 +490,11 @@ PR/issue/评论 MUST 由统一 sync 处理；superagent 的 GitHub Source MUST N
 
 - **WHEN** 同一 GitHub PR 同时被统一 sync 和 superagent Source 看到
 - **THEN** 只产生一条 board 线程/回复；映射行与 external event ID 去重，不起第二套评论同步
+
+#### Scenario: 旧看板退役
+
+- **WHEN** Phase 2 完成
+- **THEN** `/superagent` 旧看板的 web/TUI 路由与只读数据源被删除并返回 404，工单/答复/完成旅程由 board 队列/线程承接，不保留双看板或兼容开关
 
 ### Requirement: Watcher 与 schedule 扩展
 

@@ -95,6 +95,7 @@
 - [ ] 11.3 实现 Attention→blocked、answered/timed_out→unblock、report→reply；report_id/attention_id 幂等；测试重复事件。
 - [ ] 11.4 实现命令桥：board 动作先调 supervisor 既有 API，成功后才写 board 事件；拒绝/超时无 board 状态变化；测试全部动作。
 - [ ] 11.5 验证归档只读、不重写 `collab_*`；确认 GitHub 只有统一 sync 一个入口，superagent Source 不双同步；回归测试。
+- [ ] 11.6 冻结“单一任务面”：旧 superagent 看板（web/TUI `/superagent` 路由、页面、只读数据源）标记为待删除，不新增其功能/兼容层；board 队列/线程必须覆盖 Ticket/答复/完成旅程；测试旧看板不再是唯一入口。
 
 ## 12. Phase 1：keel 上的 sync 启用
 
@@ -124,6 +125,7 @@
 - [ ] 15.4 实现租约倒计时、`lease ran out`、live tail 状态、刷新丢失 claim 提示；假时钟测试。
 - [ ] 15.5 实现 BoardSyncStatus/BoardAutomation：entries/targets/lag/failures/dead letter/重试、watcher/schedule 启停；权限与错误态测试。
 - [ ] 15.6 实现五态（loading/empty/error/permission/success）、web/TUI 同源、键盘可达、shadcn/主题令牌/lucide 检查；`nsh check`/TUI 测试。
+- [ ] 15.7 删除旧 superagent 看板：移除 `/superagent` web/TUI 路由、页面、只读数据源与仅服务旧看板的 API；不保留兼容开关；回归测试证明工单/答复/完成旅程由 board 队列/线程承接，旧地址 404。
 
 ## 16. Phase 2：门禁与归档
 
@@ -131,4 +133,5 @@
 - [ ] 16.2 脚本化最终 E2E：队列/任务卡/线程/租约/live/sync 状态/watcher 启停；每个屏幕/状态 before/after 截图，HTML 报告，`UNCOVERED=0`。
 - [ ] 16.3 独立子代理复核（禁 Codex）：五态/同源/权限、sync 故障 UI、回归；P0/P1 清零。
 - [ ] 16.4 更新 docs/README/NOTICE：keel-board module+commit+Apache-2.0、上游归属、sync 配置与运行手册；确认未复制 vercel/board 代码、未新增运行时。
-- [ ] 16.5 `openspec validate keel-board-v1 --strict`、`openspec archive keel-board-v1 --yes`、`openspec validate --specs --strict`；提交实现与 openspec（不 push，除非 Owner 要求），汇报 commit hash 与剩余 Owner 决策。
+- [ ] 16.5 破坏性变更收口：在 CHANGELOG/README/升级说明明确“旧 superagent 看板已删除，board 为唯一任务面”，确认仓库内无旧看板路由/数据源/兼容开关残留。
+- [ ] 16.6 `openspec validate keel-board-v1 --strict`、`openspec archive keel-board-v1 --yes`、`openspec validate --specs --strict`；提交实现与 openspec（不 push，除非 Owner 要求），汇报 commit hash 与剩余 Owner 决策。
