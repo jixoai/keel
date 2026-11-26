@@ -162,8 +162,14 @@ export function superagentRequesterText(ticket: SuperagentTicketView): string {
 export interface SuperagentCounts {
   /** 待人工: blocked, or any ticket with an open Attention. */
   waiting: number;
-  /** 执行中: open/active/cancelling without an open Attention. */
+  /** 执行中: an `active` ticket without an open Attention (a worker is doing
+   * the work). `open` and `cancelling` are NOT folded in: they have their own
+   * counters so the tile's copy stays true. */
   running: number;
+  /** 待派工: `open` (accepted, no worker yet). */
+  pending: number;
+  /** 停止中: `cancelling` (a stop is propagating). */
+  stopping: number;
   done: number;
   /** 失败: failed or cancelled. */
   failed: number;
@@ -175,21 +181,37 @@ export interface SuperagentCounts {
 
 /** The bucket a ticket falls in. Precedence is product order: a question
  * waiting for a human outranks the worker's underlying status (an `active`
- * ticket with an open Attention is 待人工), then terminal states, then work. */
-export function superagentBucket(ticket: SuperagentTicketView): "waiting" | "running" | "done" | "failed" | "other" {
+ * ticket with an open Attention is 待人工), then terminal states, then work,
+ * then the two transitional states (`open`, `cancelling`). */
+export function superagentBucket(
+  ticket: SuperagentTicketView,
+): "waiting" | "running" | "pending" | "stopping" | "done" | "failed" | "other" {
   const status = ticket.status;
   if ((ticket.openAttentionCount ?? 0) > 0 || status === "blocked") return "waiting";
   if (status === "done") return "done";
   if (status === "failed" || status === "cancelled") return "failed";
-  if (status === "open" || status === "active" || status === "cancelling") return "running";
+  if (status === "active") return "running";
+  if (status === "open") return "pending";
+  if (status === "cancelling") return "stopping";
   return "other";
 }
 
-/** Four disjoint counters over the board's rows. The server's raw status map
- * is not used for these: one ticket belongs to exactly one headline bucket, so
- * the four numbers always add up to the visible list (plus `other`). */
+/** The board's counters, derived from its rows only. The server's status map
+ * is deliberately NOT a second source: it has no open-Attention dimension, so
+ * mixing it with the rows would double-count a ticket that is `active` and
+ * waiting on a human. `total` is therefore the rows' length, and every row
+ * lands in exactly one bucket. */
 export function superagentCounts(tickets: SuperagentTicketView[]): SuperagentCounts {
-  const counts: SuperagentCounts = { waiting: 0, running: 0, done: 0, failed: 0, other: 0, total: tickets.length };
+  const counts: SuperagentCounts = {
+    waiting: 0,
+    running: 0,
+    pending: 0,
+    stopping: 0,
+    done: 0,
+    failed: 0,
+    other: 0,
+    total: tickets.length,
+  };
   for (const ticket of tickets) {
     counts[superagentBucket(ticket)] += 1;
   }
@@ -263,9 +285,22 @@ export interface SuperagentActionError extends SuperagentActionState {
   failure: SuperagentFailure;
 }
 
+/** The server's super-agent refusals are English one-liners. Two of them are
+ * stable operator facts a page shows; they get the product's own Chinese
+ * sentence instead of surfacing the raw Go text. */
+function superagentErrorMessage(error: KeelApiError): string {
+  if (error.status === 503 && /super-agent board is not wired/i.test(error.message)) {
+    return "这个部署还没有启用超级助理工单看板；请让管理员启用 superagent 模式后重试。";
+  }
+  if (/operator authorization is not wired/i.test(error.message)) {
+    return "服务端还没有接通 operator 授权（OperatorAuthorizer）；恢复、停止或答复需要管理员启用该授权。";
+  }
+  return errorMessageOf(error);
+}
+
 const failureOf = (error: unknown): SuperagentFailure => {
   if (error instanceof KeelApiError) {
-    const failure: SuperagentFailure = { status: error.status, message: errorMessageOf(error) };
+    const failure: SuperagentFailure = { status: error.status, message: superagentErrorMessage(error) };
     if (error.requestId) failure.requestId = error.requestId;
     if (error.requiredKey) failure.requiredKey = error.requiredKey;
     return failure;
@@ -282,6 +317,10 @@ class SuperagentAccess {
   readonly error = signal<SuperagentFailure | null>(null);
   readonly inbox = signal<SuperagentAttentionView[]>([]);
   readonly inboxError = signal<SuperagentFailure | null>(null);
+  /** True once a read answered the inbox (even with no rows). The invalidation
+   * stream uses it, with `board !== null`, to decide whether the page already
+   * has projections to re-read; a chapter that was never opened stays quiet. */
+  readonly inboxLoaded = signal(false);
   /** When the last successful read landed (the header's 读取于 line). */
   readonly updatedAt = signal<string | null>(null);
   /** The write in flight; every action control is disabled while it runs. */
@@ -305,6 +344,18 @@ class SuperagentAccess {
     await this.load();
   }
 
+  /** Re-read the board/inbox for a `superagent` invalidation fact (the identity
+   * stream's one SSE kind). Only a page that already has a projection re-reads:
+   * a chapter the reader never opened must not fire background requests. An
+   * in-flight read already covers the fact; a burst is coalesced by the stream.
+   * The manual 刷新 control remains the explicit fallback if this was missed. */
+  async refreshForEvent(kinds: ReadonlySet<string>): Promise<void> {
+    if (!kinds.has("superagent")) return;
+    if (this.board() === null && !this.inboxLoaded()) return;
+    if (this.loading()) return;
+    await this.load();
+  }
+
   private async load(): Promise<void> {
     const api = store.superagentApi();
     const token = ++this.readToken;
@@ -316,6 +367,7 @@ class SuperagentAccess {
       if (!api) {
         this.board.set(null);
         this.inbox.set([]);
+        this.inboxLoaded.set(false);
         this.inboxError.set(null);
         this.error.set({ status: null, message: "这个部署没有接通超级助理看板。" });
         return;
@@ -330,6 +382,7 @@ class SuperagentAccess {
       if (boardResult.status === "rejected") {
         this.board.set(null);
         this.inbox.set([]);
+        this.inboxLoaded.set(false);
         this.inboxError.set(null);
         this.error.set(failureOf(boardResult.reason));
         return;
@@ -337,9 +390,11 @@ class SuperagentAccess {
       this.board.set(boardResult.value);
       if (inboxResult.status === "fulfilled") {
         this.inbox.set(inboxResult.value.items);
+        this.inboxLoaded.set(true);
         this.inboxError.set(null);
       } else {
         this.inbox.set([]);
+        this.inboxLoaded.set(false);
         this.inboxError.set(failureOf(inboxResult.reason));
       }
       this.updatedAt.set(new Date().toISOString());
@@ -424,6 +479,7 @@ class SuperagentAccess {
     this.error.set(null);
     this.inbox.set([]);
     this.inboxError.set(null);
+    this.inboxLoaded.set(false);
     this.updatedAt.set(null);
     this.action.set(null);
     this.actionError.set(null);

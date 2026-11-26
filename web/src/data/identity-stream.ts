@@ -22,8 +22,9 @@ import { store } from "./store";
 import { identityAccess } from "./identity-access";
 import { botAccess } from "./bots";
 import { shares } from "./shares";
+import { superagentAccess } from "./superagent";
 
-export type IdentityEventKind = "accounts" | "permissions" | "bots" | "teams" | "sessions" | "plugins";
+export type IdentityEventKind = "accounts" | "permissions" | "bots" | "teams" | "sessions" | "plugins" | "superagent";
 
 export type IdentityStreamState = "idle" | "connecting" | "open" | "reconnecting" | "closed";
 
@@ -34,6 +35,7 @@ const KINDS: ReadonlySet<string> = new Set<IdentityEventKind>([
   "teams",
   "sessions",
   "plugins",
+  "superagent",
 ]);
 
 const isKind = (value: unknown): value is IdentityEventKind =>
@@ -299,6 +301,7 @@ class IdentityStream {
       safe(() => identityAccess.refreshForEvent(kinds)),
       safe(() => botAccess.refreshForEvent(kinds)),
       safe(() => shares.refreshForEvent(kinds)),
+      safe(() => superagentAccess.refreshForEvent(kinds)),
     ]);
     if (kinds.has("sessions")) {
       await safe(() => store.refreshSessions());

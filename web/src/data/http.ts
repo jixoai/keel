@@ -2007,7 +2007,9 @@ export class KeelHttp implements SettingsApi {
   // `task.write`, but the server decides — a 403 keeps its `requiredKey` so a
   // page can say exactly what is missing instead of a generic failure.
 
-  /** `GET /v1/superagent/tickets` — the tenant's ticket board. */
+  /** `GET /v1/superagent/tickets` — the tenant's ticket board (newest first as
+   * the server projects it). The response's status count map is not kept: the
+   * page derives its one set of counters from the rows. */
   async superagentBoard(filter: { status?: string; limit?: number } = {}): Promise<SuperagentBoardView> {
     const query = new URLSearchParams();
     if (filter.status) query.set("status", filter.status);
@@ -2015,16 +2017,11 @@ export class KeelHttp implements SettingsApi {
     const suffix = query.toString() ? `?${query.toString()}` : "";
     const response = await this.request(`/v1/superagent/tickets${suffix}`);
     const body = asRecord(await response.json());
-    const counts: Record<string, number> = {};
-    for (const [status, value] of Object.entries(asRecord(body.counts))) {
-      if (typeof value === "number" && Number.isFinite(value)) counts[status] = value;
-    }
     const view: SuperagentBoardView = {
       tickets: listOf(body.tickets).flatMap((row): SuperagentTicketView[] => {
         const ticket = parseSuperagentTicket(row);
         return ticket ? [ticket] : [];
       }),
-      counts,
     };
     const tenantId = asText(body.tenantId);
     if (tenantId) view.tenantId = tenantId;

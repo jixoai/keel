@@ -26,7 +26,7 @@ async function openBoard(width: number) {
 const countLabel = (view: Awaited<ReturnType<typeof open>>, key: string): string =>
   view.accessibility(`id:superagent-count-${key}`)?.label ?? "";
 
-test("TUI: superagent 工单看板成功面——四类计数、工单列表、Mandate/worker/最近报告与收件箱", async () => {
+test("TUI: superagent 工单看板成功面——四类计数、最新在前、Mandate/worker/当前报告与收件箱", async () => {
   const view = await openBoard(1440);
   // Wide: the list and its detail are one board, the detail a fixed column.
   expect(view.shows("id:superagent-detail-column")).toBe(true);
@@ -37,6 +37,21 @@ test("TUI: superagent 工单看板成功面——四类计数、工单列表、M
   expect(countLabel(view, "running")).toBe("执行中 1 张");
   expect(countLabel(view, "done")).toBe("完成 1 张");
   expect(countLabel(view, "failed")).toBe("失败 1 张");
+
+  // The server contract is updated_at DESC and the client must not re-sort:
+  // the fixture's rows are -3m / -6m / -30m / -3h / -5h old in this order.
+  const order = [
+    "6a2f1c3e-4b5d-4e6f-8a90-1b2c3d4e5f02",
+    "6a2f1c3e-4b5d-4e6f-8a90-1b2c3d4e5f01",
+    "6a2f1c3e-4b5d-4e6f-8a90-1b2c3d4e5f04",
+    "6a2f1c3e-4b5d-4e6f-8a90-1b2c3d4e5f05",
+    "6a2f1c3e-4b5d-4e6f-8a90-1b2c3d4e5f03",
+  ];
+  const tops = order.map((id) => view.layout(`id:superagent-ticket-${id}`)?.y ?? -1);
+  for (let index = 0; index < tops.length; index += 1) {
+    expect(tops[index]).toBeGreaterThanOrEqual(0);
+    if (index > 0) expect(tops[index - 1]).toBeLessThan(tops[index]);
+  }
 
   const screen = view.texts().join("\n");
   expect(screen).toContain("工单看板");
@@ -49,13 +64,13 @@ test("TUI: superagent 工单看板成功面——四类计数、工单列表、M
   // The expired question says so instead of pretending it can be answered.
   expect(screen).toContain("已过期");
   // The default detail is the most recently updated ticket; its mandate,
-  // worker and the active assignment's latest report are all on screen.
+  // worker and the current Assignment's report are all on screen.
   expect(screen).toContain("Mandate");
   expect(screen).toContain("发起人");
   expect(screen).toContain("陈墨");
   expect(screen).toContain("可评论");
   expect(screen).toContain("Worker");
-  expect(screen).toContain("最近报告");
+  expect(screen).toContain("当前 Assignment 报告");
   expect(screen).toContain("已完成 4 项中的 2 项");
   // Selecting the blocked ticket moves the detail with the list; its Mandate
   // strength and its open question are the row's own facts.
@@ -99,6 +114,8 @@ test("TUI: superagent 恢复工单——blocked/failed 重开并刷新为执行�
   await view.press("label:打开工单 同步渠道对账数据");
   await view.waitFor("id:superagent-ticket-resume");
   expect(view.accessibility("id:superagent-detail-status")?.label).toBe("失败");
+  // The operator copy names the third resumable state explicitly.
+  expect(view.texts().join("\n")).toContain("失败（failed）");
 
   await view.press("id:superagent-ticket-resume");
   await view.waitFor("id:superagent-notice", { timeout: 20_000 });
@@ -142,12 +159,37 @@ test("TUI: superagent 看板五态——加载骨架 / 空（下一步）/ 错�
   expect(empty.shows("id:superagent-counts")).toBe(false);
   expect(empty.shows("id:superagent-empty-refresh")).toBe(true);
 
+  // A failed inbox is not an empty board: the inbox error must win, and the
+  // full-page empty invitation must not hide it.
+  const inboxBroken = await harness(1440, "board-empty-inbox-error");
+  await inboxBroken.waitFor("id:superagent-inbox-error");
+  expect(inboxBroken.shows("id:superagent-empty")).toBe(false);
+  expect(inboxBroken.shows("id:superagent-board-empty")).toBe(true);
+  expect(inboxBroken.texts().join("\n")).toContain("没能读到收件箱");
+
   const broken = await harness(1440, "board-error");
   await broken.waitFor("id:superagent-error");
   const brokenText = broken.texts().join("\n");
   expect(brokenText).toContain("没能读到工单看板");
   expect(brokenText).toContain("请求编号 k-super-1");
   expect(broken.shows("id:superagent-error-retry")).toBe(true);
+
+  // The one English 503 the server sends is localized before it reaches a page.
+  const unwired = await harness(1440, "board-unwired");
+  await unwired.waitFor("id:superagent-error");
+  const unwiredText = unwired.texts().join("\n");
+  expect(unwiredText).toContain("还没有启用超级助理工单看板");
+  expect(unwiredText).not.toContain("not wired");
+  expect(unwiredText).toContain("请求编号 k-super-503");
+
+  // `executing` means active only; open/cancelling get their own words instead
+  // of being folded into the tile's copy.
+  const transitional = await harness(1440, "board-transitional");
+  await transitional.waitFor("id:superagent-board");
+  expect(countLabel(transitional, "running")).toBe("执行中 0 张");
+  const transitionalText = transitional.texts().join("\n");
+  expect(transitionalText).toContain("全部 2 张工单 · 待派工 1 张 · 停止中 1 张");
+  expect(transitionalText).toContain("正在停止");
 
   const denied = await harness(1440, "board-denied");
   await denied.waitFor("id:superagent-permission");
@@ -183,6 +225,10 @@ test("TUI: superagent 写失败反馈——答复 / 恢复 / 停止各自报出�
 
   await view.press("label:打开工单 同步渠道对账数据");
   await view.waitFor("id:superagent-ticket-resume");
+  // `assignment.error` is the failure note, not a "report": it appears once.
+  const assignment = view.texts().join("\n");
+  expect((assignment.match(/对账接口返回 502/g) ?? []).length).toBe(1);
+  expect(assignment).not.toContain("当前 Assignment 报告");
   await view.press("id:superagent-ticket-resume");
   await view.waitFor("text:/恢复失败/", { timeout: 10_000 });
   expect(view.texts().join("\n")).toContain("operator");

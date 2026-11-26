@@ -16,26 +16,31 @@ const ticket = (id: string, status: string, openAttentionCount = 0): SuperagentT
   openAttentionCount,
 });
 
-test("superagent 四类计数：一票只进一个桶，待人工优先于底层状态", () => {
+test("superagent 计数：running 只含 active，open/cancelling 单独归类，待人工优先", () => {
   const counts = superagentCounts([
     ticket("t-open", "open"),
     ticket("t-active", "active"),
     ticket("t-asking", "active", 1),
     ticket("t-blocked", "blocked"),
+    ticket("t-cancelling", "cancelling"),
     ticket("t-done", "done"),
     ticket("t-failed", "failed"),
     ticket("t-cancelled", "cancelled"),
     ticket("t-odd", "paused"),
   ]);
-  // open + active are 执行中; an active ticket with an open question is 待人工.
-  expect(counts.running).toBe(2);
+  // 执行中 is only `active`; an active ticket with an open question is 待人工.
+  expect(counts.running).toBe(1);
   expect(counts.waiting).toBe(2);
+  expect(counts.pending).toBe(1);
+  expect(counts.stopping).toBe(1);
   expect(counts.done).toBe(1);
   expect(counts.failed).toBe(2);
   expect(counts.other).toBe(1);
-  expect(counts.total).toBe(8);
-  // The four headline buckets plus `other` account for every row.
-  expect(counts.waiting + counts.running + counts.done + counts.failed + counts.other).toBe(counts.total);
+  expect(counts.total).toBe(9);
+  // Every row lands in exactly one bucket, including the transitional states.
+  expect(
+    counts.waiting + counts.running + counts.pending + counts.stopping + counts.done + counts.failed + counts.other,
+  ).toBe(counts.total);
 });
 
 test("superagent 时限：今天/明天/过期/无期限各说各的，已过期不会被说成还能答", () => {

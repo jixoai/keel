@@ -54,8 +54,13 @@
       路由 + 主导航「任务」、四类计数、Ticket 详情、收件箱、answer/resume/stop；
       `web/src/screens/books/superagent.tsx`、`web/src/data/superagent.ts`）。
 - [x] 4.3 Attention 收件箱 API 与来源跳转字段；web/TUI 五态已做（loading/empty/error/denied/
-      success，另含只读与写失败反馈；`superagent.tui.test.tsx` 13/13、
-      `nsh test --target tui --filter 'superagent'`）。
+      success，另含只读、写失败与 503 中文化；identity stream 的 `superagent`
+      失效事件重读已加载的 board/inbox）。
+      `nsh test --target tui --filter 'superagent'` → `14 tests: 14 passed, 0 failed`
+      （10 个 `web/src/screens/books/superagent.tui.test.tsx` TUI 用例 + 3 个
+      `web/src/data/superagent.test.ts` 用例 + 1 个
+      `web/src/data/identity-stream.test.ts` 的 `superagent` 失效事件用例）；全量
+      `nsh test --target tui` → `431 tests: 431 passed, 0 failed`。
       （`GET /v1/superagent/attention`）
 - [x] 4.4 不提供“新建 Super Agent Bot”入口；只提供 mode/角色配置。
 - [x] 4.5 Worker 模型工具适配（`report`/`ask` product extra tool）：

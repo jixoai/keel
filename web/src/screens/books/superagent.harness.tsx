@@ -208,7 +208,6 @@ const board = (): SuperagentBoardView => ({
   tenantId: "tenant-1",
   modeId: "superagent",
   tickets: TICKETS,
-  counts: { blocked: 2, active: 1, done: 1, failed: 1 },
 });
 
 const inbox = (): SuperagentAttentionInboxView => ({ tenantId: "tenant-1", items: ATTENTIONS });
@@ -217,13 +216,37 @@ const API = (name: string): SuperagentApi => ({
   async superagentBoard() {
     if (name === "board-loading") return new Promise<SuperagentBoardView>(() => {});
     if (name === "board-error") throw failure();
-    if (name === "board-empty") return { tenantId: "tenant-1", modeId: "superagent", tickets: [], counts: {} };
+    if (name === "board-unwired") {
+      throw new KeelApiError(
+        503,
+        "the super-agent board is not wired in this deployment",
+        [],
+        undefined,
+        undefined,
+        {},
+        "k-super-503",
+      );
+    }
+    if (name === "board-empty") return { tenantId: "tenant-1", modeId: "superagent", tickets: [] };
+    if (name === "board-empty-inbox-error") return { tenantId: "tenant-1", modeId: "superagent", tickets: [] };
+    if (name === "board-transitional") {
+      return {
+        tenantId: "tenant-1",
+        modeId: "superagent",
+        tickets: [
+          { id: "t-open", modeId: "superagent", title: "等待派工", status: "open" },
+          { id: "t-cancelling", modeId: "superagent", title: "正在停止", status: "cancelling" },
+        ],
+      };
+    }
     return board();
   },
   async superagentAttention() {
     if (name === "board-loading") return new Promise<SuperagentAttentionInboxView>(() => {});
     if (name === "board-error") throw failure();
+    if (name === "board-empty-inbox-error") throw failure();
     if (name === "board-empty") return { tenantId: "tenant-1", items: [] };
+    if (name === "board-transitional") return { tenantId: "tenant-1", items: [] };
     return inbox();
   },
   async answerSuperagentAttention(_attentionId: string, _answer: SuperagentAnswerInput) {

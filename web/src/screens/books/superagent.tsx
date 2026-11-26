@@ -200,9 +200,10 @@ const answerFailure = (attentionId: string) => {
   return failure && failure.id === attentionId && failure.kind === "answer" ? failure : null;
 };
 
-/** The active worker's report, in the operator's words. The board only carries
- * the current/last Assignment, so this says "最近一次报告" rather than
- * claiming a history. */
+/** The current Assignment's report, in the operator's words. The board only
+ * carries the current/last Assignment, so the section is named after that
+ * Assignment, not a report history. `assignment.error` is NOT a report: it has
+ * its own failure note, so it is never repeated as a summary here. */
 function reportOf(ticket: SuperagentTicketView): { summary: string; raw?: string } | null {
   const assignment = ticket.activeAssignment;
   if (!assignment) return null;
@@ -231,7 +232,6 @@ function reportOf(ticket: SuperagentTicketView): { summary: string; raw?: string
     const capped = raw.length > 1200 ? `${raw.slice(0, 1200)}\n…` : raw;
     return { summary: "Worker 提交了结构化结果，下面原样显示。", raw: capped };
   }
-  if (assignment.error) return { summary: assignment.error };
   return null;
 }
 
@@ -375,7 +375,10 @@ function SuperagentHead() {
 }
 
 function SuperagentContent() {
-  const empty = () => tickets().length === 0 && superagentAccess.inbox().length === 0;
+  const empty = () =>
+    tickets().length === 0 &&
+    superagentAccess.inbox().length === 0 &&
+    superagentAccess.inboxError() === null;
   return (
     <View style={{ flexDirection: "column", gap: space.lg }}>
       <If when={empty()}>
@@ -392,9 +395,21 @@ function SuperagentContent() {
         />
       </If>
       <If when={!empty()}>
-        <CountTiles />
+        <If when={tickets().length > 0}>
+          <CountTiles />
+        </If>
         <AttentionSection />
-        <BoardSection />
+        <If when={tickets().length > 0}>
+          <BoardSection />
+        </If>
+        <If when={tickets().length === 0}>
+          <Text
+            testID="superagent-board-empty"
+            style={{ fontSize: typeScale.sm, color: color.mutedForeground }}
+          >
+            看板里还没有工单；收件箱的读取结果以上方为准。
+          </Text>
+        </If>
       </If>
       <StopDialog />
     </View>
@@ -447,6 +462,16 @@ const COUNT_TILES: Array<{
 
 function CountTiles() {
   const counts = () => superagentCounts(tickets());
+  // The two transitional states are explicit: a tile's label never claims an
+  // `open`/`cancelling` ticket is "执行中" when no worker holds it.
+  const extra = () =>
+    [
+      counts().pending > 0 ? `待派工 ${counts().pending} 张` : "",
+      counts().stopping > 0 ? `停止中 ${counts().stopping} 张` : "",
+      counts().other > 0 ? `其他状态 ${counts().other} 张` : "",
+    ]
+      .filter((part) => part !== "")
+      .join(" · ");
   return (
     <View testID="superagent-counts" style={{ flexDirection: "column", gap: space.sm }}>
       <View style={{ flexDirection: "row", flexWrap: "wrap", gap: space.sm }}>
@@ -489,7 +514,7 @@ function CountTiles() {
       </View>
       <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>
         全部 {counts().total} 张工单
-        {counts().other > 0 ? ` · 其他状态 ${counts().other} 张` : ""}
+        {extra() ? ` · ${extra()}` : ""}
       </Text>
     </View>
   );
@@ -977,7 +1002,7 @@ function TicketDetailBody() {
       </If>
       <If when={report() !== null}>
         <View testID="superagent-detail-report" style={{ flexDirection: "column", gap: space.xs }}>
-          <Text style={{ fontSize: typeScale.sm, fontWeight: weight.medium, color: color.foreground }}>最近报告</Text>
+          <Text style={{ fontSize: typeScale.sm, fontWeight: weight.medium, color: color.foreground }}>当前 Assignment 报告</Text>
           <Text style={{ fontSize: typeScale.sm, lineHeight: Math.round(typeScale.sm * lineHeight.normal), color: color.foreground }}>
             {report()?.summary}
           </Text>
@@ -1105,7 +1130,7 @@ function TicketActions() {
           </If>
         </View>
         <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>
-          恢复会重开 blocked / 完成的工单并派一次人工跟进；停止会撤销 Mandate 并取消绑定的会话。两个操作还会经过服务端的 operator 授权检查。
+          恢复会重开待人工、完成或失败（failed）的工单并派一次人工跟进；停止会撤销 Mandate 并取消绑定的会话。两个操作还会经过服务端的 operator 授权检查。
         </Text>
       </If>
       <If when={failure() !== null}>

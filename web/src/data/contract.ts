@@ -784,9 +784,9 @@ export interface SuperagentBoardView {
   tenantId?: string;
   modeId?: string;
   tickets: SuperagentTicketView[];
-  /** The server's raw status → count map (kept for diagnostics; the page's
-   * four headline counters are derived from the rows themselves). */
-  counts?: Record<string, number>;
+  /** The wire also carries a status → count map. The UI does not keep it: the
+   * board's counters are derived from the rows (the map has no open-Attention
+   * dimension), so there is exactly one source and no double count. */
 }
 
 /** `collab.AttentionOption` — one selectable answer. */

@@ -1733,20 +1733,17 @@ export class FixtureClient implements SettingsApi {
   }
 
   async superagentBoard(filter: { status?: string; limit?: number } = {}): Promise<SuperagentBoardView> {
+    // The server contract is `updated_at DESC` (newest first). The fixture
+    // applies the same order so the page never sorts on the client.
     const rows = this.superagentTickets
       .filter((ticket) => !filter.status || ticket.status === filter.status)
       .slice()
       .sort((left, right) => (right.updatedAt ?? "").localeCompare(left.updatedAt ?? ""));
     const limited = filter.limit && filter.limit > 0 ? rows.slice(0, filter.limit) : rows;
-    const counts: Record<string, number> = {};
-    for (const ticket of this.superagentTickets) {
-      counts[ticket.status] = (counts[ticket.status] ?? 0) + 1;
-    }
     return {
       tenantId: fixtureTenantId,
       modeId: "superagent",
       tickets: limited.map((ticket) => this.clone(ticket)),
-      counts,
     };
   }
 
