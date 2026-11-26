@@ -726,22 +726,25 @@ func TestTrimReasonCutsOnARuneBoundary(t *testing.T) {
 	}
 }
 
-// TestAttachmentDegradationLogCarriesOnlySafeFacts pins the log contract: the
-// degradation line names the blob id, MIME, size and reason, never the display
-// name, the prompt text or any bytes.
+// TestAttachmentDegradationLogCarriesOnlySafeFacts pins the log contract on a
+// real dispatch: the degradation line names the blob id, MIME, size and reason,
+// never the attachment's display name, the prompt text or any bytes.
 func TestAttachmentDegradationLogCarriesOnlySafeFacts(t *testing.T) {
 	var buffer bytes.Buffer
 	logger := slog.New(slog.NewJSONHandler(&buffer, nil))
-	report := attachmentResolutionReport{
-		fallbacks: []attachmentFallback{{
-			blobID: "blob-1", kind: "pdf", modality: "pdf",
-			mime: "application/pdf", size: 2048,
-			reason: "the selected model does not declare PDF input",
-		}},
-		failures: []attachmentFailure{{
-			blobID: "blob-2", mime: "image/png", size: 10, err: errors.New("blob missing"),
-		}},
-	}
+	msgs := mediaTranscript(t, map[string]any{
+		"fileId": "blob-1", "name": "secret.pdf", "mime": "application/pdf", "size": 2048,
+	})
+	runner := &Runner{Logger: logger}
+	_, report := runner.resolveAttachments(context.Background(), msgs, attachmentResolution{
+		resolver:  &fakeMediaResolver{},
+		workspace: "tenant-1",
+		model:     &ModelProperties{TextInput: true},
+		caps:      provider.MediaCapsForAPI("openai-chat-completions"),
+	})
+	report.failures = append(report.failures, attachmentFailure{
+		blobID: "blob-2", mime: "image/png", size: 10, err: errors.New("blob missing"),
+	})
 	lease := kernel.Lease{Scope: kernel.Scope{SessionID: uuid.New()}}
 	logAttachmentResolution(logger, lease, ActiveModel{ProviderID: "provider-1", Model: "model-1"}, report)
 	line := buffer.String()
@@ -750,9 +753,31 @@ func TestAttachmentDegradationLogCarriesOnlySafeFacts(t *testing.T) {
 			t.Fatalf("log line lacks %q: %s", want, line)
 		}
 	}
-	for _, forbidden := range []string{"secret.pdf", "please summarize", "base64", "JVBERi0"} {
+	for _, forbidden := range []string{"secret.pdf", "look at this", "base64", "JVBERi0"} {
 		if strings.Contains(line, forbidden) {
 			t.Fatalf("log line leaked %q: %s", forbidden, line)
 		}
+	}
+}
+
+// TestAttachmentDisplayNameCannotWidenTheModality pins the authority rule: a
+// non-empty MIME decides the durable kind and the image path, so a text/plain
+// object named `shot.png` stays a document, and an image/png object named
+// `notes.txt` stays an image.
+func TestAttachmentDisplayNameCannotWidenTheModality(t *testing.T) {
+	text := mediaTranscript(t, map[string]any{
+		"fileId": "blob-text-png", "name": "shot.png", "mime": "text/plain",
+	})
+	block := text[0].(agentcore.UserMessage).Content[1]
+	if _, ok := block.(agentcore.MediaRefContent); !ok {
+		t.Fatalf("text/plain named .png decoded as %T, want MediaRefContent", block)
+	}
+
+	image := mediaTranscript(t, map[string]any{
+		"fileId": "blob-image-txt", "name": "notes.txt", "mime": "image/png",
+	})
+	imageBlock := image[0].(agentcore.UserMessage).Content[1]
+	if _, ok := imageBlock.(agentcore.ImageRefContent); !ok {
+		t.Fatalf("image/png named .txt decoded as %T, want ImageRefContent", imageBlock)
 	}
 }

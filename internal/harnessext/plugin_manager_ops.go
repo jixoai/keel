@@ -1085,6 +1085,10 @@ func (m *Manager) Update(ctx context.Context, id string, req UpdateRequest, audi
 	entry.updatedAt = m.now()
 	entry.problem = nil
 	entry.diagnostics = nil
+	entry.extension = DecodeExtension(entry.dir, entry.manifest)
+	for _, problem := range entry.extension.Problems {
+		entry.diagnostics = appendUnique(entry.diagnostics, "extension: "+problem.String())
+	}
 	entry.disabledAt = timePointer(m.now())
 	if err := m.persistLocked(ctx, entry); err != nil {
 		return m.viewLocked(entry), err
@@ -1134,7 +1138,7 @@ func (m *Manager) Update(ctx context.Context, id string, req UpdateRequest, audi
 		return m.viewLocked(entry), err
 	}
 	m.auditLocked(ctx, audit, id, entry.manifestVersion(), store.PluginActionUpdate, store.PluginResultOK,
-		map[string]any{"from": previous.manifestVersion(), "to": entry.manifestVersion(), "hash": entry.hash, "enabled": entry.state == LifecycleEnabled})
+		withAttachmentClaimDetail(map[string]any{"from": previous.manifestVersion(), "to": entry.manifestVersion(), "hash": entry.hash, "enabled": entry.state == LifecycleEnabled}, entry.extension))
 	m.bumpRevisionLocked()
 	m.log.Info("plugin updated", "plugin", id, "from", previous.manifestVersion(), "to", entry.manifestVersion(), "actor", audit.Actor)
 	return m.viewLocked(entry), nil

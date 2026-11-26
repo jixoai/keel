@@ -197,21 +197,26 @@ func normalizeMime(mime string) string {
 	return mime
 }
 
-// MediaKindFromMime classifies an attachment by MIME type, falling back to the
-// filename extension. It returns one of the agentcore.MediaKind* constants.
+// MediaKindFromMime classifies an attachment by MIME type. A non-empty MIME is
+// authoritative; the filename extension is consulted only when the producer
+// supplied no MIME at all. It returns one of the agentcore.MediaKind* constants.
 func MediaKindFromMime(mime, name string) string {
 	mime = normalizeMime(mime)
-	switch {
-	case mime == "application/pdf":
-		return agentcore.MediaKindPDF
-	case strings.HasPrefix(mime, "audio/"):
-		return agentcore.MediaKindAudio
-	case strings.HasPrefix(mime, "video/"):
-		return agentcore.MediaKindVideo
-	case strings.HasPrefix(mime, "image/"):
-		// Images have their own durable reference; callers that reach here with
-		// an image MIME should treat it as a generic file rather than guess.
-		return agentcore.MediaKindFile
+	if mime != "" {
+		switch {
+		case mime == "application/pdf":
+			return agentcore.MediaKindPDF
+		case strings.HasPrefix(mime, "audio/"):
+			return agentcore.MediaKindAudio
+		case strings.HasPrefix(mime, "video/"):
+			return agentcore.MediaKindVideo
+		case strings.HasPrefix(mime, "image/"):
+			// Images have their own durable reference; callers that reach here with
+			// an image MIME should treat it as a generic file rather than guess.
+			return agentcore.MediaKindFile
+		default:
+			return agentcore.MediaKindFile
+		}
 	}
 	switch lowerExt(name) {
 	case ".pdf":

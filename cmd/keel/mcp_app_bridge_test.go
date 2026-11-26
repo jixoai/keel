@@ -86,7 +86,7 @@ func TestMCPAppInputCommitWritesUserMessage(t *testing.T) {
 	mem := kernel.NewMemStore()
 	mem.CreateSession(tenant, session)
 	k := kernel.New(mem, kernel.Options{})
-	commit := mcpAppInputCommit(st, k, nil)
+	commit := mcpAppInputCommit(st, k, nil, 0)
 
 	requestID := "mcp-app:mcpapp_0123456789abcdef:frame-1"
 	input, err := commit(ctx, tenant, session, requestID, "hello from the app", nil)

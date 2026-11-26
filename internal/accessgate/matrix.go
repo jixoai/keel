@@ -391,6 +391,10 @@ var rules = []Rule{
 	route(http.MethodGet, "/v1/files/{id}/meta", ModeKey, access.KeyFileRead),
 	route(http.MethodGet, "/v1/files/{id}/thumbnail", ModeKey, access.KeyFileRead),
 	route(http.MethodGet, "/v1/files/{id}", ModeKey, access.KeyFileRead),
+	// The attachment projection is metadata for an already-uploaded blob: the
+	// same tenant-level read capability as the file routes, never a second
+	// session-scoped grant.
+	route(http.MethodGet, "/v1/attachments/{id}/part", ModeKey, access.KeyFileRead),
 
 	// --- media gateway -------------------------------------------------------
 	route(http.MethodGet, "/v1/media/capabilities", ModeKey, access.KeyMediaRead),

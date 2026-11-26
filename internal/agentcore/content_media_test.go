@@ -81,6 +81,8 @@ func TestInputKindForMime(t *testing.T) {
 		{"video/mp4", "clip.mp4", MediaKindVideo},
 		{"image/png", "shot.png", MediaKindFile},
 		{"text/plain", "notes.log", MediaKindFile},
+		{"text/plain", "fake.pdf", MediaKindFile},
+		{"application/zip", "fake.mp4", MediaKindFile},
 		{"", "", MediaKindFile},
 	}
 	for _, tc := range cases {

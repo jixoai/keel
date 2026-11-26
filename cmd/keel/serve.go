@@ -998,9 +998,12 @@ func runServe(parent context.Context, opts serveOptions) error {
 	// quota projection reports the same counters the stream and upload paths
 	// enforce, so "my usage" and "why was I refused" cannot disagree.
 	edge := newEdgeQuota(st)
+	// One upload bound for every input path: the HTTP upload handler, the
+	// attachment re-check and the MCP ui/message bridge read the same number.
+	uploadLimit := httpapi.DefaultMaxUpload
 	hostTheme := loadHostTheme(static.root, log)
 	product, err := newProductLayer(ctx, st, kern, placementRT.Edge, placementRT.Gate, rt, hooks, runControl, partials, taskLog, opts, secretBox, secretReason,
-		accessBridge, mcpApps, mcpAppsSandboxOrigin, hostTheme, edge, mcpMetrics, mrtr,
+		accessBridge, mcpApps, mcpAppsSandboxOrigin, hostTheme, edge, uploadLimit, mcpMetrics, mrtr,
 		newManualCompactor(rt.Binding(), st, kern, log), sessionPolicies, log)
 	if err != nil {
 		return err
@@ -1055,7 +1058,8 @@ func runServe(parent context.Context, opts serveOptions) error {
 		// The input path re-checks the tenant's stored bytes before accepting an
 		// attachment reference. The upload middleware already enforces the same
 		// ceiling; this seam keeps the two from disagreeing (a lowered quota).
-		Quota: edge,
+		Quota:     edge,
+		MaxUpload: uploadLimit,
 		// Prometheus text at /metrics: the fixed runtime/MCP set registered at
 		// boot (P4.7).
 		MetricsExporter: metricsReg,
@@ -1349,7 +1353,7 @@ func (r runRequeuer) RequeueRun(ctx context.Context, tenantID, sessionID uuid.UU
 // settings secret store; secretReason explains its absence to an operator;
 // theme is the host theme token document handed to plugin UIs through the
 // bridge (nil when the web build has none).
-func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, admission kernel.Committer, admissionGate *placement.Gate, rt *servicehost.Runtime, hooks *harnessext.HookBus, runControl *harnessext.RunControl, partials *harnessext.PartialHub, taskLog *tasklog.Service, opts serveOptions, secretBox *store.SecretBox, secretReason string, accessBridge *accesswire.Bridge, mcpApps *mcphost.Registry, mcpAppsSandboxOrigin string, theme json.RawMessage, edge *quota.Edge, mcpMetrics *mcphost.Metrics, mrtr *mcphost.MRTR, compactSession harnessapi.CompactSessionFunc, checkpointPolicies harnessapi.SessionCheckpointPolicyService, log *slog.Logger) (*productLayer, error) {
+func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, admission kernel.Committer, admissionGate *placement.Gate, rt *servicehost.Runtime, hooks *harnessext.HookBus, runControl *harnessext.RunControl, partials *harnessext.PartialHub, taskLog *tasklog.Service, opts serveOptions, secretBox *store.SecretBox, secretReason string, accessBridge *accesswire.Bridge, mcpApps *mcphost.Registry, mcpAppsSandboxOrigin string, theme json.RawMessage, edge *quota.Edge, maxUpload int64, mcpMetrics *mcphost.Metrics, mrtr *mcphost.MRTR, compactSession harnessapi.CompactSessionFunc, checkpointPolicies harnessapi.SessionCheckpointPolicyService, log *slog.Logger) (*productLayer, error) {
 	sessions := storeSessions{Store: st}
 	decisions := harnessext.NewDecisionBroker(harnessext.DecisionBrokerOptions{
 		Store:  harnessext.NewTasksDecisionStore(st),
@@ -1616,7 +1620,7 @@ func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, 
 		// durable audit table.
 		MCPAppRuntime:     mcpAppRuntimeOrNil(rt),
 		MCPAppAudit:       st,
-		MCPAppInputCommit: mcpAppInputCommit(st, admission, edge),
+		MCPAppInputCommit: mcpAppInputCommit(st, admission, edge, maxUpload),
 		// P5.5: ui/update-model-context persists into mcp_app_contexts (never the
 		// ledger); the runner reads the same table for the next attempt.
 		MCPAppContexts: st,

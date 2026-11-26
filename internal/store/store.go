@@ -748,6 +748,28 @@ type Submission struct {
 	Status string
 }
 
+// SubmissionOf reads the submission row for one (tenant, session, requestId)
+// key without creating one. The shared input path uses it to recognize an
+// idempotent replay before re-validating attachments: the bytes and quota were
+// accepted when the input was first committed, and a later quota change must
+// not turn the same requestId into a new refusal.
+func (s *Store) SubmissionOf(ctx context.Context, tenantID, sessionID uuid.UUID, requestID string) (Submission, bool, error) {
+	var out Submission
+	var seq *int64
+	err := s.pool.QueryRow(ctx,
+		`SELECT submission_id, seq, status FROM submissions
+		 WHERE tenant_id = $1 AND session_id = $2 AND request_id = $3`,
+		tenantID, sessionID, requestID).Scan(&out.ID, &seq, &out.Status)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Submission{}, false, nil
+	}
+	if err != nil {
+		return Submission{}, false, fmt.Errorf("store: read submission: %w", err)
+	}
+	out.Seq = seq
+	return out, true, nil
+}
+
 // Submit records a request idempotently. The key is (tenant, session,
 // requestId), mirroring the event log's dedupe scope: a replay in the same
 // session returns the existing row (and never creates a second user message),

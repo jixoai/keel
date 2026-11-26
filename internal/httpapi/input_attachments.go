@@ -22,6 +22,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/jixoai/keel/internal/attachment"
+	"github.com/jixoai/keel/internal/quota"
 	"github.com/jixoai/keel/internal/store"
 )
 
@@ -85,8 +86,14 @@ func validateInputAttachments(ctx context.Context, st *store.Store, tenantID uui
 	if referenced && opts.Quota != nil {
 		// The bytes were counted when the blob completed. Re-checking the tenant
 		// against the ceiling (rather than charging the size again) catches a
-		// lowered quota without double-counting the same object.
+		// lowered quota without double-counting the same object. The refusal is
+		// field-level at the array, where the client can point at its input.
 		if _, _, err := opts.Quota.CheckStored(ctx, tenantID); err != nil {
+			if errors.Is(err, quota.ErrStorageQuota) {
+				return nil, &attachment.FieldError{
+					Field: "attachments", Status: 413, Message: err.Error(),
+				}
+			}
 			return nil, err
 		}
 	}

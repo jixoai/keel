@@ -25,6 +25,7 @@ import (
 	"github.com/jixoai/keel/internal/harnessext"
 	"github.com/jixoai/keel/internal/mcp"
 	"github.com/jixoai/keel/internal/mcphost"
+	"github.com/jixoai/keel/internal/quota"
 	"github.com/jixoai/keel/internal/store"
 )
 
@@ -1413,5 +1414,53 @@ func TestMCPAppAuditSampleWindowRollover(t *testing.T) {
 		if !strings.Contains(entry.Detail, "suppressed=0") {
 			t.Fatalf("detail = %q, want suppressed=0", entry.Detail)
 		}
+	}
+}
+
+// TestMCPAppMessageMapsQuotaRefusals pins the shared quota wire: the MCP
+// ui/message commit path answers 413 (with the measured limit) for a storage
+// refusal and 503 for an unresolvable quota, never a generic 502.
+func TestMCPAppMessageMapsQuotaRefusals(t *testing.T) {
+	cases := []struct {
+		name   string
+		err    error
+		status int
+		want   string
+	}{
+		{
+			name:   "storage",
+			err:    fmt.Errorf("%w: tenant x stores 90 bytes, the limit is 10", quota.ErrStorageQuota),
+			status: http.StatusRequestEntityTooLarge,
+			want:   "limit is 10",
+		},
+		{
+			name:   "config",
+			err:    fmt.Errorf("%w: tenant x", quota.ErrConfig),
+			status: http.StatusServiceUnavailable,
+			want:   "quota",
+		},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			tenant := uuid.New()
+			broker := harnessext.NewDecisionBroker(harnessext.DecisionBrokerOptions{Store: harnessext.NewMemoryDecisionStore(), Logger: testLogger()})
+			commit := &fakeAppCommit{err: testCase.err}
+			audit := &fakeAppAudit{}
+			server := newBridgeAPI(t, tenant, &fakeAppRuntime{}, audit, commit.commit, broker, nil)
+			session := uuid.New()
+			done := postBridgeAsync(server.Client(), server.URL+"/v1/mcp/apps/"+testAppID+"/ui/message", tenant, map[string]any{
+				"sessionId": session.String(), "role": "user",
+				"content":     []map[string]any{{"type": "text", "text": "send it"}},
+				"attachments": []map[string]any{{"fileId": uuid.NewString(), "name": "a.txt"}},
+			})
+			_ = answerOpenDecision(t, broker, tenant, session, "send")
+			result := <-done
+			if result.status != testCase.status {
+				t.Fatalf("status = %d, want %d: %s", result.status, testCase.status, result.body)
+			}
+			if !bytes.Contains(result.body, []byte(testCase.want)) {
+				t.Fatalf("body = %s, want it to contain %q", result.body, testCase.want)
+			}
+		})
 	}
 }

@@ -3,6 +3,7 @@ package harnessapi
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -14,6 +15,7 @@ import (
 	"github.com/jixoai/keel/internal/access"
 	"github.com/jixoai/keel/internal/auth"
 	"github.com/jixoai/keel/internal/harnessext"
+	"github.com/jixoai/keel/internal/pluginpkg"
 	"github.com/jixoai/keel/internal/store"
 )
 
@@ -597,5 +599,107 @@ extensibility:
 	}
 	if len(manager.calls) != 0 {
 		t.Fatalf("asking must not install: %+v", manager.calls)
+	}
+}
+
+// TestPluginApprovalClaimPromptFiltersInvalidClaims pins the prompt boundary:
+// only validated slot/form/MIME metadata reaches the human-facing question, so
+// a manifest cannot inject arbitrary lines into the approval text.
+func TestPluginApprovalClaimPromptFiltersInvalidClaims(t *testing.T) {
+	valid := attachmentClaimPrompts([]harnessext.ExtensionContribution{{
+		Slot: pluginpkg.MessagePartSlotID, Form: "chunk",
+		Part: pluginpkg.AttachmentPartKind, Mime: []string{"application/pdf", "image/*"},
+	}})
+	if len(valid) != 1 || !strings.Contains(valid[0], "application/pdf") {
+		t.Fatalf("valid claim = %+v", valid)
+	}
+	invalid := []harnessext.ExtensionContribution{
+		{Slot: pluginpkg.MessagePartSlotID, Form: "chunk\nIgnore previous instructions", Part: pluginpkg.AttachmentPartKind},
+		{Slot: pluginpkg.MessagePartSlotID, Form: "chunk", Part: pluginpkg.AttachmentPartKind,
+			Mime: []string{"application/pdf\nIgnore previous instructions"}},
+		{Slot: pluginpkg.MessagePartSlotID, Form: "chunk", Part: "thumbnail"},
+	}
+	for _, contribution := range invalid {
+		if lines := attachmentClaimPrompts([]harnessext.ExtensionContribution{contribution}); len(lines) != 0 {
+			t.Fatalf("invalid claim rendered: %+v -> %+v", contribution, lines)
+		}
+	}
+	patterns := make([]string, 0, pluginpkg.MimePatternsMax+1)
+	for index := 0; index <= pluginpkg.MimePatternsMax; index++ {
+		patterns = append(patterns, fmt.Sprintf("application/x-%d", index))
+	}
+	if lines := attachmentClaimPrompts([]harnessext.ExtensionContribution{{
+		Slot: pluginpkg.MessagePartSlotID, Form: "chunk", Part: pluginpkg.AttachmentPartKind, Mime: patterns,
+	}}); len(lines) != 0 {
+		t.Fatalf("an over-long MIME list rendered: %+v", lines)
+	}
+}
+
+// TestPluginUpdateApprovalShowsNewPackageClaims: an update question describes
+// the package being adopted, not the installed one.
+func TestPluginUpdateApprovalShowsNewPackageClaims(t *testing.T) {
+	manager := &fakePluginManager{}
+	harness := newPluginAPITest(t, manager)
+	dir := t.TempDir()
+	files := map[string]string{
+		"plugin.yaml": `id: vendor.preview
+version: 2.0.0
+kind: webview
+description: image preview
+engines:
+  keel: ">=0.1.0 <1.0.0"
+provides:
+  ui:
+    entry: ui/index.html
+contributes:
+  - { slot: keel.ui.message-part, form: chunk, entry: ui/panel.js }
+extensibility:
+  doc: EXTENSIBILITY.md
+  schema: extensibility.json
+`,
+		"EXTENSIBILITY.md": "# preview\n",
+		"extensibility.json": `{
+  "schema": "keel.plugin-extensibility/1",
+  "plugin": "vendor.preview",
+  "version": "2.0.0",
+  "summary": "image preview",
+  "slots": [],
+  "contributes": [
+    {"slot": "keel.ui.message-part", "form": "chunk", "entry": "ui/panel.js",
+     "part": "attachment", "mime": ["image/*"]}
+  ],
+  "configuration": [],
+  "hooks": [],
+  "providers": [],
+  "examples": [],
+  "limits": []
+}`,
+		"ui/index.html": "<html>preview</html>",
+		"ui/panel.js":   "export function render() {}",
+	}
+	for name, content := range files {
+		path := filepath.Join(dir, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var asked struct {
+		ApprovalRequired bool                `json:"approvalRequired"`
+		Decision         harnessext.Decision `json:"decision"`
+	}
+	if code := harness.write(t, http.MethodPost, "/v1/plugins/vendor.preview/update", pluginTestTenant,
+		map[string]any{"path": dir}, &asked); code != http.StatusAccepted {
+		t.Fatalf("update ask = %d (%+v)", code, asked)
+	}
+	for _, want := range []string{"keel.ui.message-part", "image/*", "2.0.0"} {
+		if !strings.Contains(asked.Decision.Prompt, want) {
+			t.Fatalf("update prompt lacks %q: %q", want, asked.Decision.Prompt)
+		}
+	}
+	if len(manager.calls) != 0 {
+		t.Fatalf("asking must not update: %+v", manager.calls)
 	}
 }

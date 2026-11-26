@@ -531,6 +531,9 @@ func TestExtensibilityDocValidatesAttachmentClaims(t *testing.T) {
 		{"wildcard type", func(d *ExtensibilityDoc) {
 			d.Contributes[0].Mime = []string{"*/pdf"}
 		}, "contributes[0].mime[0]"},
+		{"both wildcards", func(d *ExtensibilityDoc) {
+			d.Contributes[0].Mime = []string{"*/*"}
+		}, "contributes[0].mime[0]"},
 		{"empty item", func(d *ExtensibilityDoc) {
 			d.Contributes[0].Mime = []string{""}
 		}, "contributes[0].mime[0]"},

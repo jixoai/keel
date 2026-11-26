@@ -110,8 +110,13 @@ func TestDecodeExtensionMissingDocumentIsNotAnInstallError(t *testing.T) {
 // message-part contribution and whose extensibility.json carries the claim.
 func attachmentPackage(t *testing.T, id, claim string) string {
 	t.Helper()
+	return attachmentPackageVersion(t, id, "1.0.0", claim)
+}
+
+func attachmentPackageVersion(t *testing.T, id, version, claim string) string {
+	t.Helper()
 	manifest := `id: ` + id + `
-version: 1.0.0
+version: ` + version + `
 kind: webview
 description: attachment preview fixture
 engines:
@@ -128,7 +133,7 @@ extensibility:
 	doc := fmt.Sprintf(`{
   "schema": "keel.plugin-extensibility/1",
   "plugin": %q,
-  "version": "1.0.0",
+  "version": %q,
   "summary": "attachment preview fixture",
   "slots": [],
   "contributes": [%s],
@@ -137,7 +142,7 @@ extensibility:
   "providers": [],
   "examples": [],
   "limits": []
-}`, id, claim)
+}`, id, version, claim)
 	return writePluginPackage(t, filepath.Join(t.TempDir(), strings.ReplaceAll(id, ".", "-")), map[string]string{
 		"plugin.yaml":        manifest,
 		"ui/index.html":      "<html>panel</html>",
@@ -488,5 +493,154 @@ func TestAttachmentPreviewLifecycleWithdrawsAndAudits(t *testing.T) {
 		if !seen[action] {
 			t.Fatalf("no %s audit row: %+v", action, rows)
 		}
+	}
+}
+
+// TestDecodeExtensionIgnoresFixedDocumentWithoutPointer pins the claim source:
+// a file merely named extensibility.json is not an approval surface unless
+// plugin.yaml points at it. Its contributions still exist, but part/mime are
+// empty (no renderer claim).
+func TestDecodeExtensionIgnoresFixedDocumentWithoutPointer(t *testing.T) {
+	dir := writePluginPackage(t, filepath.Join(t.TempDir(), "fixed"), map[string]string{
+		"plugin.yaml":        webviewManifest("vendor.fixed", "1.0.0", nil, false),
+		"ui/index.html":      "<html></html>",
+		"ui/panel.js":        "export function render() {}",
+		"extensibility.json": `{"contributes":[{"slot":"keel.ui.message-part","form":"chunk","entry":"ui/panel.js","part":"attachment","mime":["application/pdf"]}]}`,
+	})
+	decl := DecodeExtension(dir, nil)
+	if len(decl.Contributes) != 1 {
+		t.Fatalf("contributions = %+v", decl.Contributes)
+	}
+	if decl.Contributes[0].Part != "" || len(decl.Contributes[0].Mime) != 0 {
+		t.Fatalf("a fixed-name document without a manifest pointer became a claim: %+v", decl.Contributes[0])
+	}
+}
+
+// TestDecodeExtensionReadsTheDeclaredDocumentPath pins the other half: the
+// manifest's pointer may name a path that is not extensibility.json.
+func TestDecodeExtensionReadsTheDeclaredDocumentPath(t *testing.T) {
+	manifest := `id: vendor.customdoc
+version: 1.0.0
+kind: webview
+description: custom document path
+engines:
+  keel: ">=0.1.0 <1.0.0"
+provides:
+  ui:
+    entry: ui/index.html
+contributes:
+  - { slot: keel.ui.message-part, form: chunk, entry: ui/panel.js }
+extensibility:
+  doc: EXTENSIBILITY.md
+  schema: ext/claims.json
+`
+	doc := `{
+  "schema": "keel.plugin-extensibility/1",
+  "plugin": "vendor.customdoc",
+  "version": "1.0.0",
+  "summary": "custom path",
+  "slots": [],
+  "contributes": [
+    {"slot": "keel.ui.message-part", "form": "chunk", "entry": "ui/panel.js",
+     "part": "attachment", "mime": ["application/pdf"]}
+  ],
+  "configuration": [],
+  "hooks": [],
+  "providers": [],
+  "examples": [],
+  "limits": []
+}`
+	dir := writePluginPackage(t, filepath.Join(t.TempDir(), "custom"), map[string]string{
+		"plugin.yaml":      manifest,
+		"EXTENSIBILITY.md": "# custom\n",
+		"ext/claims.json":  doc,
+		"ui/index.html":    "<html></html>",
+		"ui/panel.js":      "export function render() {}",
+	})
+	pkg := pluginpkg.LoadDir(dir, pluginpkg.Environment{KeelVersion: testKeelVersion()})
+	if !pkg.Usable() {
+		t.Fatalf("package is not usable: %+v", pkg.Problem)
+	}
+	decl := DecodeExtension(pkg.Dir, pkg.Manifest)
+	if len(decl.Problems) > 0 {
+		t.Fatalf("problems = %+v", decl.Problems)
+	}
+	if len(decl.Contributes) != 1 || decl.Contributes[0].Part != pluginpkg.AttachmentPartKind ||
+		len(decl.Contributes[0].Mime) != 1 {
+		t.Fatalf("declared document claims = %+v", decl.Contributes)
+	}
+	if decl.Doc == nil || !decl.Doc.Usable || decl.Doc.Schema != "ext/claims.json" {
+		t.Fatalf("doc pointer = %+v", decl.Doc)
+	}
+}
+
+// TestAttachmentPreviewUpdateAuditsNewClaims: an update replaces the installed
+// declaration, so the update audit row names the NEW package's claims (not the
+// old surface it just removed).
+func TestAttachmentPreviewUpdateAuditsNewClaims(t *testing.T) {
+	root := t.TempDir()
+	harness := newManagerHarness(t, root, nil)
+	ctx := context.Background()
+	if err := harness.manager.Boot(ctx); err != nil {
+		t.Fatal(err)
+	}
+	v1 := attachmentPackageVersion(t, "vendor.preview", "1.0.0",
+		`{"slot": "keel.ui.message-part", "form": "chunk", "entry": "ui/panel.js", "part": "attachment", "mime": ["application/pdf"]}`)
+	if _, err := harness.manager.Install(ctx, InstallRequest{Path: v1}, AuditContext{Actor: "tester"}); err != nil {
+		t.Fatal(err)
+	}
+	v2 := attachmentPackageVersion(t, "vendor.preview", "2.0.0",
+		`{"slot": "keel.ui.message-part", "form": "chunk", "entry": "ui/panel.js", "part": "attachment", "mime": ["image/*"]}`)
+	if _, err := harness.manager.Update(ctx, "vendor.preview", UpdateRequest{Path: v2}, AuditContext{Actor: "tester"}); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := harness.manager.Audit(ctx, nil, "vendor.preview", 0, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var updateDetail struct {
+		Claims []AttachmentClaim `json:"attachmentClaims"`
+		From   string            `json:"from"`
+		To     string            `json:"to"`
+	}
+	found := false
+	for _, row := range rows {
+		if row.Action != store.PluginActionUpdate || row.Result != store.PluginResultOK {
+			continue
+		}
+		found = true
+		if err := json.Unmarshal(row.Detail, &updateDetail); err != nil {
+			t.Fatalf("update detail = %s: %v", row.Detail, err)
+		}
+	}
+	if !found {
+		t.Fatalf("no update audit row: %+v", rows)
+	}
+	if updateDetail.From != "1.0.0" || updateDetail.To != "2.0.0" {
+		t.Fatalf("update detail versions = %+v", updateDetail)
+	}
+	if len(updateDetail.Claims) != 1 || len(updateDetail.Claims[0].Mime) != 1 ||
+		updateDetail.Claims[0].Mime[0] != "image/*" {
+		t.Fatalf("update claims = %+v, want the new package's image/* claim", updateDetail.Claims)
+	}
+}
+
+// TestValidateExtensionRejectsClaimsWithoutDocument: a claim requires the
+// machine-readable document; without it the declaration is not a renderer.
+func TestValidateExtensionRejectsClaimsWithoutDocument(t *testing.T) {
+	problems := ValidateExtension("vendor.claim", "webview", ExtensionDeclaration{
+		Contributes: []ExtensionContribution{{
+			Slot: pluginpkg.MessagePartSlotID, Form: "chunk", Entry: "ui/panel.js",
+			Part: pluginpkg.AttachmentPartKind, Mime: []string{"application/pdf"},
+		}},
+	})
+	found := false
+	for _, problem := range problems {
+		if problem.Field == "contributes[0].part" && strings.Contains(problem.Message, ExtensionFileName) {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("problems = %+v, want the missing-document refusal", problems)
 	}
 }

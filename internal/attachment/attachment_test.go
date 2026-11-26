@@ -118,3 +118,37 @@ func TestNormalizeMime(t *testing.T) {
 		}
 	}
 }
+
+func TestKindForMimeTrustsStoredMimeOverTheName(t *testing.T) {
+	cases := []struct {
+		mime, name, want string
+	}{
+		{"text/plain", "fake.png", "file"},
+		{"image/png", "fake.txt", "image"},
+		{"application/pdf", "fake.mp4", "pdf"},
+		{"", "shot.PNG", "image"},
+		{"application/zip", "fake.pdf", "file"},
+	}
+	for _, testCase := range cases {
+		if got := KindForMime(testCase.mime, testCase.name); got != testCase.want {
+			t.Fatalf("KindForMime(%q, %q) = %q, want %q", testCase.mime, testCase.name, got, testCase.want)
+		}
+	}
+}
+
+func TestBuildPartUsesBlobFactsAndSameOriginURLs(t *testing.T) {
+	part := BuildPart(Ref{FileID: "blob-1", Name: "shot.png", Width: 10, Height: 20},
+		BlobFacts{Mime: "image/png", Size: 1234, ThumbStatus: "ready"},
+		Delivery{Native: true, Reason: "the wire carries it"})
+	if part.Mime != "image/png" || part.Size != 1234 || part.Kind != "image" ||
+		part.ThumbStatus != "ready" ||
+		part.DownloadURL != "/v1/files/blob-1" ||
+		part.ThumbnailURL != "/v1/files/blob-1/thumbnail" ||
+		!part.Delivery.Native || part.Delivery.Reason != "the wire carries it" {
+		t.Fatalf("part = %+v", part)
+	}
+	failed := BuildPart(Ref{FileID: "blob-2"}, BlobFacts{Mime: "application/pdf", ThumbStatus: "failed"}, Delivery{})
+	if failed.ThumbnailURL != "" || failed.ThumbStatus != "failed" || failed.Kind != "pdf" {
+		t.Fatalf("failed part = %+v", failed)
+	}
+}

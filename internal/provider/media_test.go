@@ -415,6 +415,8 @@ func TestMediaKindAndAudioFormatClassification(t *testing.T) {
 		{"", "memo.mp3", agentcore.MediaKindAudio},
 		{"video/mp4", "clip.mp4", agentcore.MediaKindVideo},
 		{"text/plain", "notes.log", agentcore.MediaKindFile},
+		{"text/plain", "fake.pdf", agentcore.MediaKindFile},
+		{"application/zip", "fake.mp3", agentcore.MediaKindFile},
 		{"application/zip", "", agentcore.MediaKindFile},
 	}
 	for _, tc := range cases {

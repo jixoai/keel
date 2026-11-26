@@ -38,9 +38,11 @@ import (
 	"github.com/jixoai/keel/internal/agentcore"
 	"github.com/jixoai/keel/internal/attachment"
 	"github.com/jixoai/keel/internal/harnessext"
+	"github.com/jixoai/keel/internal/logsafe"
 	"github.com/jixoai/keel/internal/mcp"
 	"github.com/jixoai/keel/internal/mcphost"
 	"github.com/jixoai/keel/internal/placement"
+	"github.com/jixoai/keel/internal/quota"
 	"github.com/jixoai/keel/internal/store"
 )
 
@@ -1107,7 +1109,15 @@ func writeMCPAppInputError(w http.ResponseWriter, err error) {
 	if errors.As(err, &attachmentErr) {
 		// The shared commit path refused the reference before any event: report
 		// the field and its status (400 malformed/foreign, 413 size/quota).
-		writeErr(w, attachmentErr.HTTPStatus(), err)
+		writeJSON(w, attachmentErr.HTTPStatus(), map[string]any{
+			"error": logsafe.Redact(err.Error()),
+			"field": attachmentErr.InputField(),
+		})
+		return
+	}
+	// Quota refusals are the same wire answer on every input path: 413 with the
+	// measured used/limit for storage, 503 when the quota cannot be resolved.
+	if quota.WriteError(w, err) {
 		return
 	}
 	var capacity *placement.CapacityError

@@ -79,17 +79,23 @@ const (
 // classify with it, and they must agree.
 func InputKindForMime(mime, name string) string {
 	normalized := lowerMime(mime)
-	switch {
-	case normalized == "application/pdf":
-		return MediaKindPDF
-	case len(normalized) > 6 && normalized[:6] == "audio/":
-		return MediaKindAudio
-	case len(normalized) > 6 && normalized[:6] == "video/":
-		return MediaKindVideo
-	case len(normalized) > 6 && normalized[:6] == "image/":
-		// Images have their own durable reference; a caller that reaches here
-		// with an image MIME treats it as a generic file rather than guesses.
-		return MediaKindFile
+	if normalized != "" {
+		switch {
+		case normalized == "application/pdf":
+			return MediaKindPDF
+		case len(normalized) > 6 && normalized[:6] == "audio/":
+			return MediaKindAudio
+		case len(normalized) > 6 && normalized[:6] == "video/":
+			return MediaKindVideo
+		case len(normalized) > 6 && normalized[:6] == "image/":
+			// Images have their own durable reference; a caller that reaches here
+			// with an image MIME treats it as a generic file rather than guesses.
+			return MediaKindFile
+		default:
+			// A non-empty MIME is authoritative. A display name may lie (`a.pdf`
+			// uploaded as text/plain) and must not widen the kind.
+			return MediaKindFile
+		}
 	}
 	switch lowerExtension(name) {
 	case ".pdf":

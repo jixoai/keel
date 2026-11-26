@@ -112,7 +112,7 @@ func (a mcpAppAuditor) RecordMCPApp(ctx context.Context, event mcphost.AuditEven
 // through httpapi.CommitClientInput — the same validation, kernel commit and
 // submissions bookkeeping as POST /v1/sessions/{id}/input — with delivery fixed
 // to queue (a View never steers a running turn).
-func mcpAppInputCommit(st *store.Store, edge kernel.Committer, edgeQuota *quota.Edge) func(ctx context.Context, tenantID, sessionID uuid.UUID, requestID, text string, attachments json.RawMessage) (harnessapi.MCPAppInput, error) {
+func mcpAppInputCommit(st *store.Store, edge kernel.Committer, edgeQuota *quota.Edge, maxUpload int64) func(ctx context.Context, tenantID, sessionID uuid.UUID, requestID, text string, attachments json.RawMessage) (harnessapi.MCPAppInput, error) {
 	return func(ctx context.Context, tenantID, sessionID uuid.UUID, requestID, text string, attachments json.RawMessage) (harnessapi.MCPAppInput, error) {
 		commit, err := httpapi.CommitClientInput(ctx, st, edge, httpapi.ClientInput{
 			TenantID:    tenantID,
@@ -121,7 +121,7 @@ func mcpAppInputCommit(st *store.Store, edge kernel.Committer, edgeQuota *quota.
 			Text:        text,
 			Delivery:    kernel.DeliveryQueue,
 			Attachments: attachments,
-		}, httpapi.ClientInputOptions{Quota: edgeQuota})
+		}, httpapi.ClientInputOptions{MaxUpload: maxUpload, Quota: edgeQuota})
 		if err != nil {
 			if errors.Is(err, httpapi.ErrInputExternalSession) {
 				return harnessapi.MCPAppInput{}, harnessapi.ErrExternalSession

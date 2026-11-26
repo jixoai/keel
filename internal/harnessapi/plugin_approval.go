@@ -417,20 +417,89 @@ func pluginApprovalPrompt(ask pluginApprovalAsk) string {
 	return prompt
 }
 
+// Attachment claim rendering bounds. The claims are metadata, not a plugin
+// free-text field: every token is validated before it enters the approval
+// prompt, and the rendered text is capped so a pathological declaration cannot
+// flood the decision UI.
+const (
+	pluginApprovalClaimLineMax  = 512
+	pluginApprovalClaimsTextMax = 2048
+)
+
 // attachmentClaimPrompts renders the attachment claims of a declaration for the
-// approval question.
+// approval question. Invalid forms/MIME patterns are dropped (never rendered):
+// this text is shown to a human as the surface being approved.
 func attachmentClaimPrompts(contributions []harnessext.ExtensionContribution) []string {
 	claims := harnessext.AttachmentClaims(contributions)
 	out := make([]string, 0, len(claims))
+	total := 0
 	for _, claim := range claims {
-		mime := "all attachment MIME types"
-		if len(claim.Mime) > 0 {
-			mime = strings.Join(claim.Mime, ", ")
+		if claim.Slot != pluginpkg.MessagePartSlotID {
+			continue
 		}
-		out = append(out, fmt.Sprintf("%s attachment preview contribution (form %s) for MIME: %s",
-			claim.Slot, claim.Form, mime))
+		form := strings.TrimSpace(claim.Form)
+		switch form {
+		case "chunk", "package", "iframe", "data":
+		default:
+			continue
+		}
+		mime := make([]string, 0, len(claim.Mime))
+		valid := true
+		for _, pattern := range claim.Mime {
+			if pluginpkg.MimePatternProblem(pattern) != "" {
+				valid = false
+				break
+			}
+			mime = append(mime, pattern)
+		}
+		if !valid || len(mime) > pluginpkg.MimePatternsMax {
+			continue
+		}
+		mimeText := "all attachment MIME types"
+		if len(mime) > 0 {
+			mimeText = strings.Join(mime, ", ")
+		}
+		line := fmt.Sprintf("%s attachment preview contribution (form %s) for MIME: %s",
+			claim.Slot, form, mimeText)
+		if len(line) > pluginApprovalClaimLineMax {
+			line = line[:pluginApprovalClaimLineMax]
+		}
+		if total+len(line)+2 > pluginApprovalClaimsTextMax {
+			break
+		}
+		total += len(line) + 2
+		out = append(out, line)
 	}
 	return out
+}
+
+// attachmentClaimsFromPackage reads claims only from a usable package whose
+// extensibility declaration validates. A broken package is refused later by the
+// manager; the question then carries no partial claim.
+func attachmentClaimsFromPackage(dir string) []string {
+	pkg := pluginpkg.LoadDir(dir, pluginpkg.Environment{})
+	if !pkg.Usable() {
+		return nil
+	}
+	decl := harnessext.DecodeExtension(pkg.Dir, pkg.Manifest)
+	if len(decl.Problems) > 0 {
+		return nil
+	}
+	return attachmentClaimPrompts(decl.Contributes)
+}
+
+// attachmentClaimsFromView is the installed-plugin form: an invalid row or an
+// extension with diagnostic problems contributes no approval text.
+func attachmentClaimsFromView(view harnessext.PluginView) []string {
+	if view.Problem != nil || view.Extensibility == nil || !view.Extensibility.Usable {
+		return nil
+	}
+	for _, diagnostic := range view.Diagnostics {
+		if strings.HasPrefix(diagnostic, "extension: ") {
+			return nil
+		}
+	}
+	return attachmentClaimPrompts(view.Contributes)
 }
 
 // installApprovalAsk builds the ask of an install: the package path is the
@@ -467,12 +536,10 @@ func installApprovalAsk(path, contentHash string) pluginApprovalAsk {
 		PluginID:    id,
 		ContentHash: contentHash,
 	}
-	// The question names the attachment surface the package will register. The
-	// read is best-effort: an unreadable/invalid package is refused by the
-	// manager after approval, and a question without claims is still honest.
-	if pkg := pluginpkg.LoadDir(target, pluginpkg.Environment{}); pkg.Manifest != nil {
-		ask.Claims = attachmentClaimPrompts(harnessext.DecodeExtension(pkg.Dir, pkg.Manifest).Contributes)
-	}
+	// The question names the attachment surface the package will register. Only a
+	// usable package with a valid declaration contributes claims; a broken one is
+	// refused by the manager and is not described as if it would load.
+	ask.Claims = attachmentClaimsFromPackage(target)
 	return ask
 }
 
@@ -485,7 +552,7 @@ func (s *Server) pluginIDApprovalAsk(action, id string) pluginApprovalAsk {
 			if view.ID == id {
 				version = view.Version
 				contentHash = view.ContentHash
-				claims = attachmentClaimPrompts(view.Contributes)
+				claims = attachmentClaimsFromView(view)
 				break
 			}
 		}

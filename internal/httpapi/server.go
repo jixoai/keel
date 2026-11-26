@@ -172,6 +172,12 @@ func New(cfg Config) *Server {
 	if cfg.MaxUpload == 0 {
 		cfg.MaxUpload = DefaultMaxUpload
 	}
+	// One bound for the whole path: the uploader's own limit (which blob.Put
+	// also enforces) and the HTTP body reader both use Config.MaxUpload, so a
+	// deployment cannot store a blob larger than the input path accepts.
+	if cfg.Uploader != nil {
+		cfg.Uploader.MaxBytes = cfg.MaxUpload
+	}
 	if cfg.Edge == nil || cfg.Events == nil {
 		cfg.Logger.Warn("httpapi: contract kernel is not wired",
 			"detail", "POST /v1/sessions/{id}/events and /input answer 503; GET /v1/sessions/{id}/events answers 503")
@@ -246,6 +252,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/files/{id}/meta", s.fileMeta)
 	s.mux.HandleFunc("GET /v1/files/{id}/thumbnail", s.fileThumbnail)
 	s.mux.HandleFunc("GET /v1/files/{id}", s.file)
+	s.mux.HandleFunc("GET /v1/attachments/{id}/part", s.attachmentPart)
 	s.mux.HandleFunc("POST /v1/mcp/servers/{name}/signin", s.mcpSignIn)
 	s.mux.HandleFunc("/v1/mcp/callback", s.mcpCallback)
 	// Product-layer HarnessAPI (keel-agent): its own mux owns the remaining /v1
@@ -1227,22 +1234,34 @@ func (s *Server) upload(w http.ResponseWriter, r *http.Request) {
 
 	mime := r.Header.Get("Content-Type")
 	if strings.HasPrefix(mime, "multipart/form-data") {
+		// A multipart body has no single file size the quota middleware can
+		// pre-check (and a chunked one has no Content-Length at all). Bound the
+		// whole body first, then admit the file's declared size before storing.
+		r.Body = http.MaxBytesReader(w, r.Body, s.cfg.MaxUpload)
 		if err := r.ParseMultipartForm(8 << 20); err != nil {
-			writeErr(w, 400, err)
+			writeMultipartReadError(w, err)
 			return
 		}
 		file, header, err := r.FormFile("file")
 		if err != nil {
-			writeErr(w, 400, err)
+			writeMultipartReadError(w, err)
 			return
 		}
 		defer file.Close()
+		if s.cfg.Quota != nil {
+			if _, err := s.cfg.Quota.AdmitStorage(r.Context(), tenantID, header.Size); err != nil {
+				if !quota.WriteError(w, err) {
+					writeErr(w, 500, err)
+				}
+				return
+			}
+		}
 		if mime == "" || strings.HasPrefix(mime, "multipart/") {
 			mime = header.Header.Get("Content-Type")
 		}
 		meta, err := s.cfg.Uploader.Put(r.Context(), tenantID, mime, file)
 		if err != nil {
-			writeErr(w, 500, err)
+			writeUploadError(w, err)
 			return
 		}
 		s.writeFileMeta(w, meta)
@@ -1253,10 +1272,37 @@ func (s *Server) upload(w http.ResponseWriter, r *http.Request) {
 	}
 	meta, err := s.cfg.Uploader.Put(r.Context(), tenantID, mime, http.MaxBytesReader(w, r.Body, s.cfg.MaxUpload))
 	if err != nil {
-		writeErr(w, 500, err)
+		writeUploadError(w, err)
 		return
 	}
 	s.writeFileMeta(w, meta)
+}
+
+// writeUploadError maps an oversized upload onto 413 instead of the generic
+// 500. Both bounds produce the same answer: the HTTP reader's MaxBytesError
+// (multipart or raw body) and blob.Uploader's own ErrTooLarge (a direct store
+// caller with a smaller MaxBytes).
+func writeUploadError(w http.ResponseWriter, err error) {
+	if uploadTooLarge(err) {
+		writeErr(w, http.StatusRequestEntityTooLarge, err)
+		return
+	}
+	writeErr(w, 500, err)
+}
+
+// writeMultipartReadError keeps a malformed multipart body a 400 (the client
+// sent a bad request) while the size bound stays a 413.
+func writeMultipartReadError(w http.ResponseWriter, err error) {
+	if uploadTooLarge(err) {
+		writeErr(w, http.StatusRequestEntityTooLarge, err)
+		return
+	}
+	writeErr(w, http.StatusBadRequest, err)
+}
+
+func uploadTooLarge(err error) bool {
+	var maxBytes *http.MaxBytesError
+	return errors.Is(err, blob.ErrTooLarge) || errors.As(err, &maxBytes)
 }
 
 func (s *Server) writeFileMeta(w http.ResponseWriter, meta store.BlobMeta) {

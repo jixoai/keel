@@ -178,17 +178,17 @@ func attachmentBlocks(refs []attachmentReference) agentcore.ContentList {
 	return out
 }
 
-// isImageAttachment reports whether an attachment is image input. A missing MIME
-// with an image-looking extension is still an image: the upload endpoint records
-// the real MIME (the blob store is the authority the image resolver reads), but a
-// client that omitted it must not turn an image into a generic document.
+// isImageAttachment reports whether an attachment is image input. A non-empty
+// MIME is authoritative: a text/plain object named `shot.png` stays a document
+// (a display name cannot widen the modality). Only a reference with no MIME at
+// all falls back to the extension.
 func isImageAttachment(mime, name string) bool {
 	normalized := strings.ToLower(strings.TrimSpace(mime))
 	if i := strings.IndexByte(normalized, ';'); i >= 0 {
 		normalized = strings.TrimSpace(normalized[:i])
 	}
-	if strings.HasPrefix(normalized, "image/") {
-		return true
+	if normalized != "" {
+		return strings.HasPrefix(normalized, "image/")
 	}
 	switch strings.ToLower(path.Ext(strings.TrimSpace(name))) {
 	case ".png", ".jpg", ".jpeg", ".gif", ".webp", ".heic", ".heif", ".bmp", ".tif", ".tiff":

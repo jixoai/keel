@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -37,6 +38,11 @@ var ErrInputArchivedSession = errors.New("session is archived; it is read-only")
 // commit path re-checks an attachment against it so a blob stored through a
 // different route (or before a lowered setting) cannot bypass the bound.
 const DefaultMaxUpload int64 = 64 << 20
+
+// replayMaxUpload keeps the canonicalization of a replay independent of a later
+// lowered upload bound: the first commit accepted the object under the bound in
+// force then, and the replay must reproduce that payload for the kernel dedupe.
+const replayMaxUpload int64 = 1 << 62
 
 // ClientInputOptions are the deployment facts the shared commit path needs
 // beyond the request itself. The zero value keeps the defaults (64 MiB, no
@@ -133,30 +139,20 @@ func CommitClientInput(ctx context.Context, st *store.Store, edge kernel.Committ
 	if owner == store.StateOwnerExternal {
 		return ClientInputCommit{}, ErrInputExternalSession
 	}
-	// Attachments are validated before the ledger write: ownership, completion,
-	// MIME consistency and size. The returned value is the canonical stored
-	// shape (blob size/MIME become the authority; unknown client fields drop).
-	attachments, err := validateInputAttachments(ctx, st, in.TenantID, in.Attachments, opts)
-	if err != nil {
+	// An idempotent replay is answered from the submission row before any
+	// attachment/quota re-validation: the original commit already accepted the
+	// bytes and measured the tenant, and a quota lowered afterwards must not
+	// turn the same requestId into a new refusal. The kernel dedupe compares the
+	// payload, so a replay must resend the committed one; when the ledger is not
+	// readable here (an in-memory conformance edge), the canonicalized request is
+	// the fallback and the quota check stays skipped.
+	var replay store.Submission
+	if existing, found, err := st.SubmissionOf(ctx, in.TenantID, in.SessionID, in.RequestID); err != nil {
 		return ClientInputCommit{}, err
+	} else if found {
+		replay = existing
 	}
-	fields := map[string]any{"text": in.Text, "requestId": in.RequestID}
-	if in.Delivery != "" {
-		fields["delivery"] = in.Delivery
-	}
-	if presentRawJSON(in.Selection) {
-		// Verbatim: a RawMessage passes the object through the payload marshal
-		// without re-encoding its fields, so the value the client sent is the
-		// value in the log.
-		fields["selection"] = json.RawMessage(in.Selection)
-	}
-	if len(attachments) > 0 {
-		fields["attachments"] = attachments
-	}
-	if in.RetryOf != nil {
-		fields["retryOf"] = *in.RetryOf
-	}
-	payload, err := json.Marshal(fields)
+	payload, err := buildClientInputPayload(ctx, st, in, replay, opts)
 	if err != nil {
 		return ClientInputCommit{}, err
 	}
@@ -216,6 +212,67 @@ func presentRawJSON(raw json.RawMessage) bool {
 	return trimmed != "" && trimmed != "null"
 }
 
+// buildClientInputPayload produces the exact payload the kernel dedupe sees. A
+// replay reuses the committed event when readable; otherwise it canonicalizes
+// the request without the quota check (the quota was measured at the first
+// commit). A fresh input runs the full attachment validation.
+func buildClientInputPayload(ctx context.Context, st *store.Store, in ClientInput, replay store.Submission, opts ClientInputOptions) (json.RawMessage, error) {
+	if replay.ID == uuid.Nil {
+		attachments, err := validateInputAttachments(ctx, st, in.TenantID, in.Attachments, opts)
+		if err != nil {
+			return nil, err
+		}
+		return marshalClientInputPayload(in, attachments)
+	}
+	// Replay: canonicalize the request without the quota check (the quota was
+	// measured at the first commit) and compare it with the committed payload.
+	// Equal means the kernel will dedupe; different means the kernel will (and
+	// must) answer key-conflict, which keeps a changed body from being treated as
+	// an idempotent retry.
+	attachments, err := validateInputAttachments(ctx, st, in.TenantID, in.Attachments, ClientInputOptions{MaxUpload: replayMaxUpload})
+	if err != nil {
+		return nil, err
+	}
+	requestPayload, err := marshalClientInputPayload(in, attachments)
+	if err != nil {
+		return nil, err
+	}
+	if replay.Seq == nil {
+		return requestPayload, nil
+	}
+	events, err := st.LoadEvents(ctx, in.TenantID, in.SessionID, *replay.Seq-1, 1)
+	if err != nil {
+		return nil, err
+	}
+	if len(events) == 1 && events[0].Seq == *replay.Seq {
+		if bytes.Equal(events[0].Payload, requestPayload) {
+			return events[0].Payload, nil
+		}
+		return requestPayload, nil
+	}
+	return requestPayload, nil
+}
+
+func marshalClientInputPayload(in ClientInput, attachments json.RawMessage) (json.RawMessage, error) {
+	fields := map[string]any{"text": in.Text, "requestId": in.RequestID}
+	if in.Delivery != "" {
+		fields["delivery"] = in.Delivery
+	}
+	if presentRawJSON(in.Selection) {
+		// Verbatim: a RawMessage passes the object through the payload marshal
+		// without re-encoding its fields, so the value the client sent is the
+		// value in the log.
+		fields["selection"] = json.RawMessage(in.Selection)
+	}
+	if len(attachments) > 0 {
+		fields["attachments"] = attachments
+	}
+	if in.RetryOf != nil {
+		fields["retryOf"] = *in.RetryOf
+	}
+	return json.Marshal(fields)
+}
+
 // writeInputError maps the shared input commit path's refusals onto the wire: a
 // missing session is 404, an external session is 409, and everything else keeps
 // the edge/enqueue mappings (unwired kernel 503, kernel rejections, 500).
@@ -230,15 +287,9 @@ func writeInputError(w http.ResponseWriter, err error) {
 		})
 		return
 	}
-	if errors.Is(err, quota.ErrStorageQuota) {
-		// The request references stored bytes the tenant may no longer hold; the
-		// message names the ceiling. It is a 413, the same class as an oversized
-		// upload.
-		writeErr(w, http.StatusRequestEntityTooLarge, err)
-		return
-	}
-	if errors.Is(err, quota.ErrConfig) {
-		writeErr(w, http.StatusServiceUnavailable, err)
+	if quota.WriteError(w, err) {
+		// Storage is a 413 that names used/limit; an unresolvable quota is 503.
+		// The same helper answers the MCP ui/message path.
 		return
 	}
 	switch {

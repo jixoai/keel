@@ -4,6 +4,7 @@ import (
 	"sort"
 	"testing"
 
+	"github.com/jixoai/keel/internal/access"
 	"github.com/jixoai/keel/internal/accessgate"
 	"github.com/jixoai/keel/internal/harnessapi"
 	"github.com/jixoai/keel/internal/httpapi"
@@ -109,4 +110,16 @@ func sampleRoutePath(path string) string {
 		out = append(out, path[i])
 	}
 	return string(out)
+}
+
+// TestAttachmentPartUsesTheFileReadCapability pins the projection's permission
+// model: it is a tenant blob read, not a session-scoped grant.
+func TestAttachmentPartUsesTheFileReadCapability(t *testing.T) {
+	match, ok := accessgate.Match("GET", "/v1/attachments/00000000-0000-0000-0000-000000000000/part")
+	if !ok {
+		t.Fatal("no matrix rule for the attachment projection")
+	}
+	if match.Rule.Key != access.KeyFileRead {
+		t.Fatalf("attachment part key = %q, want %q", match.Rule.Key, access.KeyFileRead)
+	}
 }

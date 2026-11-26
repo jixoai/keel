@@ -273,6 +273,9 @@ func (s *Server) updatePlugin(w http.ResponseWriter, r *http.Request) {
 	ask := s.pluginIDApprovalAsk(store.PluginActionUpdate, id)
 	ask.ContentHash = hash
 	ask.Version = version
+	// The question describes the package being updated TO, not the installed
+	// surface: a new attachment claim must be visible before approval.
+	ask.Claims = attachmentClaimsFromPackage(dir)
 	if version != "" {
 		ask.Label = id + " " + version
 	}

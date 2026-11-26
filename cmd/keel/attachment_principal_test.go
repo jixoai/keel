@@ -126,4 +126,15 @@ func TestFileRoutesUseThePrincipalTenant(t *testing.T) {
 	if res, _ := get(env.client, "/v1/files/"+metaB.BlobID.String()+"/thumbnail", nil); res.StatusCode != http.StatusNotFound {
 		t.Fatalf("cross-tenant thumbnail = %d, want 404", res.StatusCode)
 	}
+	// The AttachmentPart projection is a principal-tenant route too.
+	partPath := "/v1/attachments/" + metaA.BlobID.String() + "/part?name=a.txt"
+	if res, _ := get(anonymous, partPath, map[string]string{"X-Tenant-ID": tenantA.String()}); res.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("anonymous attachment part = %d, want 401", res.StatusCode)
+	}
+	if res, body := get(env.client, partPath, nil); res.StatusCode != http.StatusOK || !bytes.Contains(body, []byte(`"fileId"`)) {
+		t.Fatalf("principal attachment part = %d %s", res.StatusCode, body)
+	}
+	if res, _ := get(env.client, "/v1/attachments/"+metaB.BlobID.String()+"/part", nil); res.StatusCode != http.StatusNotFound {
+		t.Fatalf("cross-tenant attachment part = %d, want 404", res.StatusCode)
+	}
 }

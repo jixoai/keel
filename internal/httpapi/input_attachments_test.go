@@ -269,3 +269,54 @@ func TestInputAttachmentWithoutFileIDStaysANotice(t *testing.T) {
 		t.Fatalf("model transcript = %q, want the explicit no-fileId notice", notice)
 	}
 }
+
+// TestInputReplaySkipsAttachmentQuotaRecheck pins idempotency over a changed
+// quota: the first commit accepted the reference; replaying the same requestId
+// after the tenant goes over its ceiling returns the original receipt instead of
+// a new 413. A new requestId is still refused.
+func TestInputReplaySkipsAttachmentQuotaRecheck(t *testing.T) {
+	var stored int64 = 1
+	src := quota.QuotaSourceFunc(func(context.Context, uuid.UUID) (quota.TenantQuota, error) {
+		return quota.TenantQuota{StorageBytes: 10}, nil
+	})
+	edge := quota.NewEdge(src, func(context.Context, uuid.UUID) (int64, error) { return stored, nil })
+	hs, st := newTestServer(t, func(c *Config) { c.Quota = edge })
+	tenant := uuid.NewString()
+	session := inputSetup(t, hs, tenant)
+	meta := completeTestBlob(t, st, uuid.MustParse(tenant), "text/plain", []byte("hello"))
+	attachment := []map[string]any{{"fileId": meta.BlobID.String(), "name": "a.txt", "mime": "text/plain"}}
+
+	var first struct {
+		Seq     *int64 `json:"seq"`
+		Created bool   `json:"created"`
+		Status  string `json:"status"`
+		Error   string `json:"error"`
+	}
+	code := doJSON(t, hs.Client(), http.MethodPost, hs.URL+"/v1/sessions/"+session.String()+"/input", tenant,
+		map[string]any{"text": "first", "requestId": "replay-quota", "attachments": attachment}, &first)
+	if code != http.StatusCreated || first.Seq == nil {
+		t.Fatalf("first input = %d (%+v)", code, first)
+	}
+	stored = 99 // the tenant is now over its ceiling
+
+	var replay struct {
+		Seq     *int64 `json:"seq"`
+		Created bool   `json:"created"`
+		Error   string `json:"error"`
+	}
+	code = doJSON(t, hs.Client(), http.MethodPost, hs.URL+"/v1/sessions/"+session.String()+"/input", tenant,
+		map[string]any{"text": "first", "requestId": "replay-quota", "attachments": attachment}, &replay)
+	if code != http.StatusOK || replay.Seq == nil || *replay.Seq != *first.Seq || replay.Created {
+		t.Fatalf("replay = %d (%+v), want the original receipt", code, replay)
+	}
+
+	var fresh inputErrorBody
+	code = doJSON(t, hs.Client(), http.MethodPost, hs.URL+"/v1/sessions/"+session.String()+"/input", tenant,
+		map[string]any{"text": "new", "requestId": "replay-quota-new", "attachments": attachment}, &fresh)
+	if code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("new input over quota = %d (%+v), want 413", code, fresh)
+	}
+	if fresh.Field != "attachments" {
+		t.Fatalf("quota refusal field = %q, want attachments", fresh.Field)
+	}
+}

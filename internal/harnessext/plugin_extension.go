@@ -151,7 +151,7 @@ type extensionManifest struct {
 	Layer         string                  `yaml:"layer"`
 	Provides      extensionProvides       `yaml:"provides"`
 	Contributes   []extensionContribution `yaml:"contributes"`
-	Extensibility any                     `yaml:"extensibility"`
+	Extensibility *extensibilityPointer   `yaml:"extensibility"`
 }
 
 type extensionProvides struct {
@@ -216,18 +216,26 @@ var (
 func DecodeExtension(dir string, manifest *pluginpkg.Manifest) ExtensionDeclaration {
 	decl := ExtensionDeclaration{}
 	pluginID := ""
+	docPath := ExtensionFileName
+	docDeclared := false
 	if manifest != nil {
 		pluginID = manifest.ID
+		if manifest.Extensibility != nil {
+			if schema := strings.TrimSpace(manifest.Extensibility.Schema); schema != "" {
+				docPath = filepath.FromSlash(schema)
+				docDeclared = true
+			}
+		}
 	}
 
 	// 1. The parsed manifest, when pluginpkg has the fields (a JSON round-trip
 	// reads them without this package linking to a struct that may not exist
-	// yet).
+	// yet). The manifest declares contributions, never claims.
 	if manifest != nil {
 		if raw, err := json.Marshal(manifest); err == nil {
 			var doc extensionFile
 			if err := json.Unmarshal(raw, &doc); err == nil {
-				mergeExtensionFile(&decl, doc)
+				mergeExtensionFile(&decl, doc, false)
 			}
 		}
 	}
@@ -238,30 +246,40 @@ func DecodeExtension(dir string, manifest *pluginpkg.Manifest) ExtensionDeclarat
 		if raw, err := os.ReadFile(filepath.Join(dir, pluginpkg.PluginFileName)); err == nil {
 			var doc extensionManifest
 			if err := yaml.Unmarshal(raw, &doc); err == nil {
-				mergeExtensionManifest(&decl, doc)
+				mergeExtensionManifest(&decl, doc, false)
 				if pluginID == "" {
 					pluginID = doc.ID
+				}
+				// A caller that passed no parsed manifest still gets the claim
+				// pointer from the raw file; without one, fixed-name documents
+				// carry no claims.
+				if !docDeclared && doc.Extensibility != nil {
+					if schema := strings.TrimSpace(doc.Extensibility.Schema); schema != "" {
+						docPath = filepath.FromSlash(schema)
+						docDeclared = true
+					}
 				}
 			}
 		}
 	}
 
-	// 3. `extensibility.json`: the machine-readable document the creation mode
-	// aggregates. It may repeat the declaration; the file wins for what it
-	// carries.
-	decl.Doc = &ExtensionDoc{Usable: false, Reason: "no extensibility.json in the package"}
+	// 3. The machine-readable document the manifest points at (or the conventional
+	// `extensibility.json` when it declares none). It may repeat the declaration;
+	// the file wins for what it carries. Claims are read only from a declared
+	// document.
+	decl.Doc = &ExtensionDoc{Usable: false, Reason: "no extensibility document declared in plugin.yaml"}
 	if dir != "" {
-		path := filepath.Join(dir, ExtensionFileName)
+		path := filepath.Join(dir, docPath)
 		raw, err := readAtMost(path, extensionFileMaxBytes)
 		if err == nil {
 			var doc extensionFile
 			if jsonErr := json.Unmarshal(raw, &doc); jsonErr != nil {
-				decl.Doc = &ExtensionDoc{Usable: false, Schema: ExtensionFileName, Reason: "extensibility.json is not valid JSON: " + jsonErr.Error()}
-				decl.Problems = append(decl.Problems, pluginpkg.FieldError{Field: "extensibility.json", Message: "the machine-readable extension document is not valid JSON"})
+				decl.Doc = &ExtensionDoc{Usable: false, Schema: filepath.ToSlash(docPath), Reason: "the extension document is not valid JSON: " + jsonErr.Error()}
+				decl.Problems = append(decl.Problems, pluginpkg.FieldError{Field: filepath.ToSlash(docPath), Message: "the machine-readable extension document is not valid JSON"})
 			} else {
-				mergeExtensionFile(&decl, doc)
+				mergeExtensionFile(&decl, doc, docDeclared)
 				decl.Doc.Usable = true
-				decl.Doc.Schema = ExtensionFileName
+				decl.Doc.Schema = filepath.ToSlash(docPath)
 				decl.Doc.Reason = ""
 				if doc.Extensibility != nil && doc.Extensibility.Doc != "" {
 					decl.Doc.Doc = doc.Extensibility.Doc
@@ -313,7 +331,7 @@ func readAtMost(path string, limit int64) ([]byte, error) {
 	return os.ReadFile(path)
 }
 
-func mergeExtensionManifest(dst *ExtensionDeclaration, doc extensionManifest) {
+func mergeExtensionManifest(dst *ExtensionDeclaration, doc extensionManifest, allowClaims bool) {
 	if dst.Layer == "" {
 		dst.Layer = strings.TrimSpace(doc.Layer)
 	}
@@ -321,11 +339,11 @@ func mergeExtensionManifest(dst *ExtensionDeclaration, doc extensionManifest) {
 		mergeSlot(dst, slot)
 	}
 	for _, contribution := range doc.Contributes {
-		mergeContribution(dst, contribution)
+		mergeContribution(dst, contribution, allowClaims)
 	}
 }
 
-func mergeExtensionFile(dst *ExtensionDeclaration, doc extensionFile) {
+func mergeExtensionFile(dst *ExtensionDeclaration, doc extensionFile, allowClaims bool) {
 	if dst.Layer == "" {
 		dst.Layer = strings.TrimSpace(doc.Layer)
 	}
@@ -336,7 +354,7 @@ func mergeExtensionFile(dst *ExtensionDeclaration, doc extensionFile) {
 		mergeSlot(dst, slot)
 	}
 	for _, contribution := range doc.Contributes {
-		mergeContribution(dst, contribution)
+		mergeContribution(dst, contribution, allowClaims)
 	}
 }
 
@@ -365,7 +383,7 @@ func mergeSlot(dst *ExtensionDeclaration, raw extensionSlot) {
 	dst.Slots = append(dst.Slots, slot)
 }
 
-func mergeContribution(dst *ExtensionDeclaration, raw extensionContribution) {
+func mergeContribution(dst *ExtensionDeclaration, raw extensionContribution, allowClaims bool) {
 	slot := strings.TrimSpace(raw.Slot)
 	if slot == "" {
 		return
@@ -375,6 +393,11 @@ func mergeContribution(dst *ExtensionDeclaration, raw extensionContribution) {
 	entry := strings.TrimSpace(raw.Entry)
 	part := strings.TrimSpace(raw.Part)
 	mime := normalizedMimePatterns(raw.Mime)
+	if !allowClaims {
+		// A claim exists only in the machine-readable document the manifest
+		// points at; a fixed file name or a plugin.yaml field cannot shortcut it.
+		part, mime = "", nil
+	}
 	for index := range dst.Contributes {
 		existing := &dst.Contributes[index]
 		// The claim document and plugin.yaml name the same contribution by
