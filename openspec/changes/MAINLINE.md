@@ -79,7 +79,7 @@ depth 默认 3/-1 不限）与 `keel-collab-superagent`（Source → Ticket → 
 **协作五条线交付快照（2026-11-26，main `5368acd`）**：
 
 - `keel-collab-core` / `keel-collab-subagent`：Host/Mode 契约、深度策略（3/-1/0）、fork
-  不耗深度、子代理取消/重试已交付；subagent 树/TUI 报告已出。
+  不耗深度、子代理取消/重试已交付；subagent 树/TUI 报告已出，**subagent 已归档 2026-11-26**。
 - `keel-collab-superagent`：Source → Ticket → Assignment → Worker → Report/Attention →
   Channel 的 durable 闭环与五态看板 E2E（9 步）已出；产品 web/TUI 看板（tasks 4.2/4.3）
   与 live GitHub 链路（4.5/5.2）未做，不归档。

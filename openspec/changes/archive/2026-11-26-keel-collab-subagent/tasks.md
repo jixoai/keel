@@ -64,7 +64,7 @@
 - [x] 5.2 `go test -race` 相关包 + web/TUI 回归；`openspec validate --strict`。
       → Go `-race` 通过（harnessext/harnessapi/collab/cmd/keel）；web/TUI 回归与截图见
       `.agents/reports/keel/subagent-e2e-2026-11-26/report.html`；`openspec validate --strict` 通过。
-- [ ] 5.3 独立 reviewer 复核；E2E 报告（树/取消/深度拒绝截图）；归档。
+- [x] 5.3 独立 reviewer 复核；E2E 报告（树/取消/深度拒绝截图）；归档。（复核 PASS，P0/P1=0；报告公网已发布）
       → E2E 报告已生成（web 20 张 + TUI 20 张，含 depth 0/3/-1、取消/重试、动作五态）；
       待父级编排的独立复核；未 archive。
 
