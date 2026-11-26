@@ -282,6 +282,18 @@ async function putPolicy(sessionId, update) {
   return response.body;
 }
 
+/** A compact request can land while the previous turn's lease is still
+ * settling; `busy` is the documented transient (the policy refusal is decided
+ * after the lease). Retry it so the assertion sees the durable answer. */
+async function compactSettled(sessionId, requestId, timeoutMs = 20000) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const response = await api('POST', `/v1/sessions/${sessionId}/compact`, { requestId });
+    if (response.body?.status !== 'busy' || Date.now() > deadline) return response;
+    await sleep(250);
+  }
+}
+
 async function sendInput(sessionId, text, requestId) {
   const response = await api('POST', `/v1/sessions/${sessionId}/input`, { text, requestId });
   if (response.status !== 201) throw new Error(`input: HTTP ${response.status} ${brief(response.body)}`);
@@ -602,7 +614,7 @@ async function runAll() {
   });
   const beforeDisabled = await events(created.sessionId);
   const compactionsBefore = beforeDisabled.filter((event) => event.kind === 'compaction').length;
-  const disabled = await api('POST', `/v1/sessions/${created.sessionId}/compact`, { requestId: 'e2e-manual-disabled' });
+  const disabled = await compactSettled(created.sessionId, 'e2e-manual-disabled');
   saveData('manual-disabled.json', disabled.body);
   check('manual compaction refused with 409', disabled.status === 409, disabled.status, 409);
   check('refusal reason names the policy', disabled.body?.status === 'disabled', disabled.body?.status, 'disabled');
@@ -676,8 +688,15 @@ async function runAll() {
   check('ttl reason uses the server field name', fields.includes('ttl'), fields, 'ttl');
   const narrowedText = await bodyText();
   check('UI lists every clamp', narrowedText.includes('被租户上限收窄') && narrowedText.includes('最大检查点数'), narrowedText.includes('被租户上限收窄'), true);
-  const overrideShown = narrowedText.includes('会话覆盖：阈值 100 tokens') && narrowedText.includes('最多 不限');
-  check('UI shows the requested override, not the clamped values', overrideShown, overrideShown, true);
+  const overrideLine = await page.locator(sel('settings-checkpoint-override')).innerText();
+  // The override line also carries enabled/manual when they were part of the
+  // stored document, so assert the fields themselves, not a fixed prefix.
+  const overrideShown =
+    overrideLine.includes('阈值 100 tokens') &&
+    overrideLine.includes('保留 999999 tokens') &&
+    overrideLine.includes('最多 不限') &&
+    overrideLine.includes('TTL 9999 小时');
+  check('UI shows the requested override, not the clamped values', overrideShown, overrideLine, '阈值 100 / 999999 / 不限 / 9999');
   await shot('narrowed-1440');
   await resize(390);
   await shot('narrowed-390');
@@ -845,6 +864,7 @@ async function main() {
     report.finishedAt = new Date().toISOString();
     report.pass = report.failures === 0 && !report.error;
     fs.writeFileSync(path.join(EVIDENCE, 'steps.json'), JSON.stringify(report, null, 2) + '\n');
+    if (!report.pass) exitCode = 1;
     console.log(`\nsteps: ${report.pass ? 'PASS' : 'FAIL'} (${report.failures} failed check(s))`);
   }
   process.exit(exitCode);
