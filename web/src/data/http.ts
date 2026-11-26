@@ -112,10 +112,12 @@ import {
   parseSessionCancel,
   parseSessionEvent,
   parseSubagent,
+  parseSubagentResume,
   type ProfileView,
   type RoleView,
   type SessionCancelView,
   type SessionEventView,
+  type SubagentResumeView,
   type SubagentView,
 } from "./bots-wire";
 
@@ -2118,6 +2120,38 @@ export class KeelHttp implements SettingsApi {
       body: "{}",
     });
     return parseSessionCancel(await response.json());
+  }
+
+  /** `POST /v1/subagents/{id}/cancel` — one child's subtree. The parent session
+   * is the authorizing query parameter; the child id alone cannot authorize the
+   * write. The body carries only the operator's reason. */
+  async cancelSubagent(sessionId: string, parentSessionId: string, reason = ""): Promise<SessionCancelView> {
+    const query = new URLSearchParams({ parentSessionId });
+    const response = await this.request(
+      `/v1/subagents/${encodeURIComponent(sessionId)}/cancel?${query.toString()}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason }),
+      },
+    );
+    return parseSessionCancel(asRecord(await response.json()).cancel);
+  }
+
+  /** `POST /v1/sessions/{id}/resume` — requeue the same child session. A
+   * terminal/already-running answer is returned as the server's own outcome. */
+  async resumeSubagent(
+    parentSessionId: string,
+    sessionId: string,
+    requestId = "",
+    reason = "",
+  ): Promise<SubagentResumeView> {
+    const response = await this.request(`/v1/sessions/${encodeURIComponent(parentSessionId)}/resume`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sessionId, requestId, reason }),
+    });
+    return parseSubagentResume(asRecord(await response.json()).resume);
   }
 
   /** `GET /v1/audit/events` — the audit ledger's read projection. The route is

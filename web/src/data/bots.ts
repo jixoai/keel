@@ -149,6 +149,17 @@ export interface RunNode {
   agent?: string;
   /** The Bot's owner account, when the Bot index could resolve it. */
   ownerAccountId?: string;
+  /** The wire parent session (the authorizing resource for a child cancel or
+   * resume). A captain has none; a task/fork without a spawn link leaves it
+   * unset. */
+  parentSessionId?: string;
+  /** The collaboration depth from the wire (main is 0). Tasks and forks leave
+   * it unset: a fork is a ledger branch, not a delegation. */
+  collabDepth?: number;
+  /** The subtree cap in force at spawn: positive, -1 unlimited, 0 forbidden. */
+  collabMaxDepth?: number;
+  /** "spawn" or "fork" from the wire; absent when the record did not say. */
+  collabOrigin?: string;
   source: "session" | "task" | "subagent";
 }
 
@@ -206,6 +217,25 @@ const STATUS_LABEL: Record<RunNodeStatus, string> = {
 };
 
 export const runStatusLabel = (status: RunNodeStatus): string => STATUS_LABEL[status];
+
+/** The depth line every run node carries. Main is depth 0; a spawned child is
+ * parent+1 with the cap in force. A fork is a ledger branch and is explicitly
+ * outside the delegation depth; a task card has no collaboration depth. The
+ * labels spell out the two special caps: -1 不限, 0 禁止派生. */
+export function runNodeDepthLabel(node: RunNode): string {
+  if (node.kind === "captain") return "depth 0 · 主";
+  if (node.collabOrigin === "fork" || node.edge === "fork") return "depth — · 分叉不计";
+  if (typeof node.collabDepth === "number") {
+    const max = node.collabMaxDepth;
+    if (max === undefined) return `depth ${node.collabDepth}`;
+    if (max < 0) return `depth ${node.collabDepth}/-1 · 不限`;
+    if (max === 0) return `depth ${node.collabDepth}/0 · 禁止派生`;
+    return `depth ${node.collabDepth}/${max}`;
+  }
+  if (node.source === "subagent") return "depth — · 未返回";
+  if (node.source === "task") return "depth — · 任务卡";
+  return "depth —";
+}
 
 const taskStatus = (status: string): RunNodeStatus => {
   switch (status) {
@@ -487,6 +517,13 @@ class BotAccessStore {
   readonly nodeEvents = signal<Record<string, SessionEventView[]>>({});
   readonly nodeEventsLoading = signal<string | null>(null);
   readonly nodeEventsError = signal<{ sessionId: string; message: string } | null>(null);
+  /** One sub-agent node action at a time: cancel a child subtree or resume the
+   * same child (retry). The busy id is the child session; notices/errors are
+   * bound to that session so a selection change never shows another node's
+   * result. */
+  readonly nodeActionBusy = signal<string | null>(null);
+  readonly nodeActionNotice = signal<{ sessionId: string; message: string } | null>(null);
+  readonly nodeActionError = signal<{ sessionId: string; message: string; requiredKey?: string } | null>(null);
   private runToken = 0;
   private nodeToken = 0;
   /** A run page reads once per (team, run); an error stays an error until the
@@ -1504,6 +1541,9 @@ class BotAccessStore {
     if (this.run() !== null && this.run()?.runId !== runId) {
       this.runStopError.set(null);
       this.runStopNotice.set(null);
+      this.nodeActionBusy.set(null);
+      this.nodeActionNotice.set(null);
+      this.nodeActionError.set(null);
     }
     this.runSelected.set(null);
     this.nodeEvents.set({});
@@ -1726,6 +1766,118 @@ class BotAccessStore {
     }
   }
 
+  /** Cancel one child and its non-terminal descendants. The parent session is
+   * the authorizing resource; a captain is not a sub-agent node and is not
+   * actionable here (the run-level stop owns it). */
+  async cancelSubagentNode(node: RunNode): Promise<void> {
+    const sessionId = node.sessionId;
+    const parentSessionId = node.parentSessionId;
+    if (!sessionId || !parentSessionId) {
+      this.nodeActionError.set({ sessionId: sessionId ?? node.id, message: "这个节点没有父会话，不能取消。" });
+      return;
+    }
+    const api = this.api();
+    if (!api?.cancelSubagent) {
+      this.nodeActionError.set({ sessionId, message: "这个传输不提供子代理取消接口。" });
+      return;
+    }
+    this.nodeActionBusy.set(sessionId);
+    this.nodeActionNotice.set(null);
+    this.nodeActionError.set(null);
+    try {
+      const result = await api.cancelSubagent(sessionId, parentSessionId, "run page: cancel subagent subtree");
+      const stopped = result.cancelledIds?.length ?? 0;
+      const message = result.cancelled
+        ? stopped > 0
+          ? `已取消 ${stopped} 个子会话（含未终态后代）。`
+          : "已取消子代理及其未终态子树。"
+        : result.detail || "服务端接受了取消请求，但没有报告已取消。";
+      this.nodeActionNotice.set({ sessionId, message });
+      await this.reloadRunKeepNode(node);
+    } catch (error) {
+      const failure = failureOf(error);
+      this.nodeActionError.set({
+        sessionId,
+        message: humanWriteError(error, "取消子代理"),
+        ...(failure.requiredKey ? { requiredKey: failure.requiredKey } : {}),
+      });
+    } finally {
+      this.nodeActionBusy.set(null);
+    }
+  }
+
+  /** Retry a failed/stopped child by re-queueing the same session. This is the
+   * server's resume contract, not a fresh spawn: ledger, card and bindings are
+   * unchanged, and a terminal/already-running child answers with its own
+   * outcome instead of pretending to restart. */
+  async resumeSubagentNode(node: RunNode): Promise<void> {
+    const sessionId = node.sessionId;
+    const parentSessionId = node.parentSessionId;
+    if (!sessionId || !parentSessionId) {
+      this.nodeActionError.set({ sessionId: sessionId ?? node.id, message: "这个节点没有父会话，不能重试。" });
+      return;
+    }
+    const api = this.api();
+    if (!api?.resumeSubagent) {
+      this.nodeActionError.set({ sessionId, message: "这个传输不提供子代理重试接口。" });
+      return;
+    }
+    this.nodeActionBusy.set(sessionId);
+    this.nodeActionNotice.set(null);
+    this.nodeActionError.set(null);
+    try {
+      const result = await api.resumeSubagent(
+        parentSessionId,
+        sessionId,
+        newRequestId(),
+        "run page: retry subagent",
+      );
+      const attempts = result.attempts ? `（第 ${result.attempts} 次尝试）` : "";
+      let message = result.detail || `重试结果：${result.status}`;
+      switch (result.status) {
+        case "resumed":
+          message = `已重新排队${attempts}：同一子会话，账本/卡/绑定不变。`;
+          break;
+        case "running":
+          message = result.detail || "子会话已在运行；没有启动第二个 attempt。";
+          break;
+        case "pending":
+          message = result.detail || "子会话已在队列；没有重复排队。";
+          break;
+        case "terminal":
+        case "done":
+          message = result.detail || "子会话已结束，重试不会重开已完成的任务。";
+          break;
+        case "no_run":
+          message = result.detail || "子会话没有 run 记录，无法重试。";
+          break;
+      }
+      this.nodeActionNotice.set({ sessionId, message });
+      await this.reloadRunKeepNode(node);
+    } catch (error) {
+      const failure = failureOf(error);
+      this.nodeActionError.set({
+        sessionId,
+        message: humanWriteError(error, "重试子代理"),
+        ...(failure.requiredKey ? { requiredKey: failure.requiredKey } : {}),
+      });
+    } finally {
+      this.nodeActionBusy.set(null);
+    }
+  }
+
+  /** Re-read the run after an action and keep the acted node selected, so the
+   * notice/error is still attached to the node the reader pressed. */
+  private async reloadRunKeepNode(node: RunNode): Promise<void> {
+    const run = this.run();
+    if (!run) return;
+    await this.loadRun(run.teamId, run.runId);
+    const next = this.run()?.nodes.find(
+      (candidate) => candidate.sessionId === node.sessionId || candidate.id === node.id,
+    );
+    if (next) this.runSelected.set(next.id);
+  }
+
   // ---- invalidation stream ------------------------------------------------
 
   /** Re-read the Bot/TeamBot projections an invalidation fact names (change
@@ -1896,11 +2048,15 @@ const humanWriteError = (error: unknown, action: string): string => {
 };
 
 /** The sub-agent node's one-line subtitle. `depth` is the collaboration depth
- * (main is 0); a fork shows its edge instead because it does not consume depth. */
+ * (main is 0); a fork shows its edge instead because it does not consume depth.
+ * The cap wording is shared with `runNodeDepthLabel`: -1 不限, 0 禁止派生. */
 function subagentSubtitle(record: SubagentView): string {
   if (record.origin === "fork") return "分叉 · 子会话";
-  if (typeof record.depth === "number" && record.depth > 0) {
-    return record.maxDepth ? `调用 · depth ${record.depth}/${record.maxDepth}` : `调用 · depth ${record.depth}`;
+  if (typeof record.depth === "number") {
+    if (record.maxDepth === undefined) return `调用 · depth ${record.depth}`;
+    if (record.maxDepth < 0) return `调用 · depth ${record.depth}/-1 · 不限`;
+    if (record.maxDepth === 0) return `调用 · depth ${record.depth}/0 · 禁止派生`;
+    return `调用 · depth ${record.depth}/${record.maxDepth}`;
   }
   return "调用 · 子会话";
 }
@@ -1990,6 +2146,7 @@ function buildRun(input: {
     model: captainUsage.model,
     error: captainUsage.error,
     ownerAccountId: captainBot?.accountId,
+    collabDepth: 0,
     source: "session",
   });
 
@@ -2050,6 +2207,10 @@ function buildRun(input: {
         error: record.error ?? existing.error,
         summary: record.summary ?? existing.summary,
         agent: record.agent,
+        parentSessionId: record.parentSessionId || existing.parentSessionId,
+        collabDepth: record.depth ?? existing.collabDepth,
+        collabMaxDepth: record.maxDepth ?? existing.collabMaxDepth,
+        collabOrigin: record.origin ?? existing.collabOrigin,
         source: existing.source,
       });
       continue;
@@ -2072,6 +2233,10 @@ function buildRun(input: {
       error: record.error,
       summary: record.summary,
       agent: record.agent,
+      parentSessionId: record.parentSessionId,
+      collabDepth: record.depth,
+      collabMaxDepth: record.maxDepth,
+      collabOrigin: record.origin,
       source: "subagent",
     });
   }

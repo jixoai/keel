@@ -9,17 +9,18 @@
 //   run-empty       no summary, no session ledger, no tasks, no sub-agents
 //   run-error       the session ledger answers 500 (request id carried)
 //   run-permission  the session ledger relation is refused (403 + key)
-//   run-success     captain + four spawned records: a 1 -> 2 -> 3 depth chain
-//                   (maxDepth 3) and a sibling with maxDepth=-1 (unlimited)
+//   run-success     captain + five spawned records: a 1 -> 2 -> 3 depth chain
+//                   (maxDepth 3), a maxDepth=-1 branch and a maxDepth=0 child
 //   run-cancel      run-success, plus a cancelSession that reports cancelled
 //   run-retry       run-success, with the depth-2 child's ledger failing once
+//   run-action-loading     child cancel/resume never settles
+//   run-action-error       child cancel/resume answers 500
+//   run-action-permission  child cancel/resume is refused (403 + session.write)
 //
 // The success faces of the *product entry* are still the app's own fixture
 // transport (`?fixture=1` / `host.params.fixture`); this harness exists because
 // a test's module graph is not the app's. The wire facts (record depth and
-// maxDepth, main = 0) are exactly what the server sends; the run surface does
-// not render a numeric depth label, which is a recorded UI gap, not something
-// this harness hides.
+// maxDepth, main = 0) are exactly what the server sends.
 import { host, mount, View } from "nsh";
 import { setEffectivePermissions } from "../../data/permissions";
 import { KeelApiError } from "../../data/http";
@@ -44,6 +45,7 @@ const CHILD_DEPTH_1 = "8a10c1de-0000-4000-8000-000000000011";
 const CHILD_DEPTH_2 = "8a10c1de-0000-4000-8000-000000000012";
 const CHILD_DEPTH_3 = "8a10c1de-0000-4000-8000-000000000013";
 const CHILD_UNLIMITED = "8a10c1de-0000-4000-8000-000000000014";
+const CHILD_FORBIDDEN = "8a10c1de-0000-4000-8000-000000000015";
 
 const ACCOUNT: AccountView = {
   accountId: "acc-1",
@@ -80,8 +82,19 @@ const forbidden = (): KeelApiError =>
     requiredKey: "session.read",
   });
 
-/** The three wire records the run projection must draw: the server's own depth
- * projection, not a number this harness invented for the tree. */
+const writeForbidden = (): KeelApiError =>
+  new KeelApiError(403, "permission denied", [], undefined, "missing_relation", {
+    reason: "missing_relation",
+    requiredKey: "session.write",
+  });
+
+const actionFailure = (): KeelApiError =>
+  new KeelApiError(500, "子代理动作暂时不可用", [], undefined, undefined, {}, "k-action-1");
+
+/** The five wire records the run projection must draw: the server's own depth
+ * projection, not a number this harness invented for the tree. The maxDepth=0
+ * row is a wire fact the display must spell out even though the guarded Host
+ * would refuse such a spawn in practice. */
 const SUBAGENTS: SubagentView[] = [
   {
     id: `sub-${CHILD_DEPTH_1}`,
@@ -131,13 +144,26 @@ const SUBAGENTS: SubagentView[] = [
     sessionId: CHILD_UNLIMITED,
     task: "不限深度分支",
     agent: "深度不限",
-    status: "completed",
+    status: "running",
     origin: "spawn",
     depth: 1,
     maxDepth: -1,
     startedAt: new Date(Date.now() - 30_000).toISOString(),
-    endedAt: new Date(Date.now() - 20_000).toISOString(),
-    usage: { turns: 1, inputTokens: 900, outputTokens: 90, durationMs: 10_000 },
+    usage: { turns: 1, inputTokens: 900, outputTokens: 90 },
+  },
+  {
+    id: `sub-${CHILD_FORBIDDEN}`,
+    parentSessionId: RUN_ID,
+    sessionId: CHILD_FORBIDDEN,
+    task: "上限为零的子代理",
+    agent: "禁止派生",
+    status: "completed",
+    origin: "spawn",
+    depth: 1,
+    maxDepth: 0,
+    startedAt: new Date(Date.now() - 25_000).toISOString(),
+    endedAt: new Date(Date.now() - 15_000).toISOString(),
+    usage: { turns: 1, inputTokens: 300, outputTokens: 30, durationMs: 10_000 },
   },
 ];
 
@@ -186,6 +212,42 @@ const apiFor = (name: string): IdentityApi => {
   api.listSubagents = async () => {
     if (name === "run-permission") throw forbidden();
     return SUBAGENTS;
+  };
+  api.cancelSubagent = async (sessionId: string, parentSessionId: string) => {
+    if (name === "run-action-loading") return new Promise(() => {});
+    if (name === "run-action-error") throw actionFailure();
+    if (name === "run-action-permission") throw writeForbidden();
+    const record = SUBAGENTS.find(
+      (entry) => entry.sessionId === sessionId && entry.parentSessionId === parentSessionId,
+    );
+    if (!record) throw new KeelApiError(404, "没有找到这个子代理。");
+    record.status = "cancelled";
+    record.endedAt = new Date().toISOString();
+    return {
+      status: "cancelled",
+      runStatus: "cancelled",
+      cancelled: true,
+      cancelledIds: [sessionId],
+      detail: "harness: 已取消该子代理及其未终态后代",
+    };
+  };
+  api.resumeSubagent = async (
+    parentSessionId: string,
+    sessionId: string,
+    _requestId?: string,
+    _reason?: string,
+  ) => {
+    if (name === "run-action-loading") return new Promise(() => {});
+    if (name === "run-action-error") throw actionFailure();
+    if (name === "run-action-permission") throw writeForbidden();
+    const record = SUBAGENTS.find(
+      (entry) => entry.sessionId === sessionId && entry.parentSessionId === parentSessionId,
+    );
+    if (!record) throw new KeelApiError(404, "没有找到这个子代理。");
+    record.status = "running";
+    record.error = undefined;
+    record.endedAt = undefined;
+    return { status: "resumed", sessionId, attempts: 2, detail: "harness: 同一子会话已重新排队" };
   };
   return api;
 };

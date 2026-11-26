@@ -26,6 +26,7 @@ import type {
   RunStartView,
   SessionCancelView,
   SessionEventView,
+  SubagentResumeView,
   SubagentView,
 } from "./bots-wire";
 import type {
@@ -773,6 +774,8 @@ export class FixtureIdentity implements IdentityApi {
       agent: "订单查询",
       status: "completed",
       origin: "spawn",
+      depth: 1,
+      maxDepth: 3,
       startedAt: agoIso(4, 0),
       endedAt: agoIso(3, 0),
       summary: "找到 3 个退款订单，2 个来自同一渠道。",
@@ -786,6 +789,8 @@ export class FixtureIdentity implements IdentityApi {
       agent: "退款专员",
       status: "completed",
       origin: "spawn",
+      depth: 2,
+      maxDepth: 3,
       startedAt: agoIso(3, 0),
       endedAt: agoIso(2, 30),
       summary: "退款材料已备齐，等待人工确认。",
@@ -799,6 +804,8 @@ export class FixtureIdentity implements IdentityApi {
       agent: "知识库",
       status: "completed",
       origin: "spawn",
+      depth: 1,
+      maxDepth: 3,
       startedAt: agoIso(3, 50),
       endedAt: agoIso(1, 50),
       summary: "引用退款政策第 3 节。",
@@ -812,6 +819,8 @@ export class FixtureIdentity implements IdentityApi {
       agent: "售后升级",
       status: "failed",
       origin: "spawn",
+      depth: 1,
+      maxDepth: 3,
       startedAt: agoIso(0, 54),
       endedAt: agoIso(0, 54),
       error: "调用被拒：缺「调用 Bot」能力（bot.invoke）。",
@@ -1499,6 +1508,44 @@ export class FixtureIdentity implements IdentityApi {
     this.cancelledRuns.add(sessionId);
     this.runLive = false;
     return { status: "cancelled", runStatus: "cancelled", cancelled: true };
+  }
+
+  /** The child subtree cancel, in memory: the fixture's registry is the same
+   * records the run page draws, so a cancelled child is visible after reload. */
+  async cancelSubagent(sessionId: string, parentSessionId: string): Promise<SessionCancelView> {
+    const record = this.subagents.find(
+      (entry) => entry.sessionId === sessionId && entry.parentSessionId === parentSessionId,
+    );
+    if (!record) throw new KeelApiError(404, "没有找到这个子代理，或者它不属于这个父会话。");
+    record.status = "cancelled";
+    record.endedAt = nowIso();
+    return {
+      status: "cancelled",
+      runStatus: "cancelled",
+      cancelled: true,
+      cancelledIds: [sessionId],
+      detail: "fixture: 已取消该子代理及其未终态后代",
+    };
+  }
+
+  /** The child retry, in memory: resume the same record, never a new spawn. */
+  async resumeSubagent(
+    parentSessionId: string,
+    sessionId: string,
+    _requestId?: string,
+    _reason?: string,
+  ): Promise<SubagentResumeView> {
+    const record = this.subagents.find(
+      (entry) => entry.sessionId === sessionId && entry.parentSessionId === parentSessionId,
+    );
+    if (!record) throw new KeelApiError(404, "没有找到这个子代理，或者它不属于这个父会话。");
+    if (record.status === "completed") {
+      return { status: "terminal", sessionId, attempts: 1, detail: "fixture: 已完成的子会话不会重开" };
+    }
+    record.status = "running";
+    record.error = undefined;
+    record.endedAt = undefined;
+    return { status: "resumed", sessionId, attempts: 2, detail: "fixture: 同一子会话已重新排队" };
   }
 
   // ---- records -------------------------------------------------------------

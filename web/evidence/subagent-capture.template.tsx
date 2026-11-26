@@ -107,4 +107,63 @@ test("subagent tree evidence", async () => {
   await phoneRetry.press("label:重试读取节点事件");
   await phoneRetry.waitUntil(() => !phoneRetry.texts().join("\n").includes("没能读到这个节点的会话事件"));
   await shot(phoneRetry, "20-retry-done-390");
+
+  // ---- per-child actions: cancel a subtree and resume the same child ----
+  // The failed child is selected by default on the wide run; its inspector
+  // shows the retry action. The unlimited child is running, so it shows the
+  // cancel action after selection.
+  await success.waitFor("id:run-node-actions");
+  await shot(success, "21-node-actions-1440");
+  await success.press("id:run-node-retry");
+  await success.waitFor("id:run-node-action-notice");
+  await shot(success, "22-node-retry-done-1440");
+  await success.press("label:查看节点 深度不限，运行中");
+  await success.waitFor("id:run-node-cancel");
+  await shot(success, "23-node-cancel-ready-1440");
+  await success.press("id:run-node-cancel");
+  await success.waitFor("id:run-node-cancel-dialog");
+  await shot(success, "24-node-cancel-dialog-1440");
+  await success.press("id:run-node-cancel-dialog-confirm");
+  await success.waitFor("id:run-node-action-notice");
+  await shot(success, "25-node-cancel-done-1440");
+
+  const phoneNode = await harness(390, "run-success");
+  await phoneNode.waitFor("id:run-timeline");
+  await phoneNode.press("label:查看节点 条款核对，失败");
+  await phoneNode.waitFor("id:run-node-actions");
+  await shot(phoneNode, "26-node-actions-390");
+  await phoneNode.press("id:run-node-retry");
+  await phoneNode.waitFor("id:run-node-action-notice");
+  await shot(phoneNode, "27-node-retry-done-390");
+
+  const phoneCancelNode = await harness(390, "run-success");
+  await phoneCancelNode.waitFor("id:run-timeline");
+  await phoneCancelNode.press("label:查看节点 深度不限，运行中");
+  await phoneCancelNode.waitFor("id:run-node-cancel");
+  await phoneCancelNode.press("id:run-node-cancel");
+  await phoneCancelNode.waitFor("id:run-node-cancel-dialog");
+  await shot(phoneCancelNode, "28-node-cancel-dialog-390");
+  await phoneCancelNode.press("id:run-node-cancel-dialog-confirm");
+  await phoneCancelNode.waitFor("id:run-node-action-notice");
+  await shot(phoneCancelNode, "29-node-cancel-done-390");
+
+  // ---- action-state faces: loading / error / no permission ----
+  const actionLoading = await harness(1440, "run-action-loading");
+  await actionLoading.waitFor("id:run-lanes");
+  await actionLoading.waitFor("id:run-node-actions");
+  await actionLoading.press("id:run-node-retry");
+  await actionLoading.waitFor("text:/重试中…/");
+  await shot(actionLoading, "30-action-loading-1440");
+
+  const actionError = await harness(1440, "run-action-error");
+  await actionError.waitFor("id:run-lanes");
+  await actionError.press("id:run-node-retry");
+  await actionError.waitFor("id:run-node-action-error");
+  await shot(actionError, "31-action-error-1440");
+
+  const actionDenied = await harness(1440, "run-action-permission");
+  await actionDenied.waitFor("id:run-lanes");
+  await actionDenied.press("id:run-node-retry");
+  await actionDenied.waitFor("id:run-node-action-error");
+  await shot(actionDenied, "32-action-permission-1440");
 }, 1_200_000);

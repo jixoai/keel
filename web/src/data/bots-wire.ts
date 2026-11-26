@@ -94,6 +94,24 @@ export interface SessionCancelView {
   runStatus?: string;
   cancelled: boolean;
   detail?: string;
+  /** The subtree ids a CancelSubtree call actually stopped, found terminal, or
+   * failed to stop. A single-session cancel leaves them empty. */
+  cancelledIds?: string[];
+  settledIds?: string[];
+  failedIds?: string[];
+  failures?: Record<string, string>;
+}
+
+/** The explicit answer of a resume (retry) call for one child session. A
+ * terminal or already-running answer is an outcome, not a success claim. */
+export interface SubagentResumeView {
+  status: string;
+  sessionId: string;
+  eventSeq?: number;
+  configHash?: string;
+  configRevision?: number;
+  attempts?: number;
+  detail?: string;
 }
 
 const asRecord = (value: unknown): Record<string, unknown> =>
@@ -192,12 +210,46 @@ export function parseRunStart(value: unknown): RunStartView {
   };
 }
 
+const stringList = (value: unknown): string[] | undefined => {
+  const rows = list(value).flatMap((item) => {
+    const entry = text(item);
+    return entry ? [entry] : [];
+  });
+  return rows.length > 0 ? rows : undefined;
+};
+
+const stringMap = (value: unknown): Record<string, string> | undefined => {
+  const row = asRecord(value);
+  const entries = Object.entries(row).flatMap(([key, item]) => {
+    const entry = text(item);
+    return key && entry ? [[key, entry] as [string, string]] : [];
+  });
+  return entries.length > 0 ? Object.fromEntries(entries) : undefined;
+};
+
 export function parseSessionCancel(value: unknown): SessionCancelView {
   const row = asRecord(value);
   return {
     status: text(row.status) || "unknown",
     runStatus: textOrUndefined(row.runStatus),
     cancelled: row.cancelled === true,
+    detail: textOrUndefined(row.detail),
+    cancelledIds: stringList(row.cancelledIds),
+    settledIds: stringList(row.settledIds),
+    failedIds: stringList(row.failedIds),
+    failures: stringMap(row.failures),
+  };
+}
+
+export function parseSubagentResume(value: unknown): SubagentResumeView {
+  const row = asRecord(value);
+  return {
+    status: text(row.status) || "unknown",
+    sessionId: text(row.sessionId),
+    eventSeq: numberOrUndefined(row.eventSeq),
+    configHash: textOrUndefined(row.configHash),
+    configRevision: numberOrUndefined(row.configRevision),
+    attempts: numberOrUndefined(row.attempts),
     detail: textOrUndefined(row.detail),
   };
 }

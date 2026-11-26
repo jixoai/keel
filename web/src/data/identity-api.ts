@@ -50,6 +50,7 @@ import type {
   RunStartView,
   SessionCancelView,
   SessionEventView,
+  SubagentResumeView,
   SubagentView,
   TeamTasksView,
 } from "./bots-wire";
@@ -155,6 +156,18 @@ export interface IdentityApi {
    * a deployment without the projection keeps the registry-only read. */
   listSubagentTree?(rootSessionId: string, limit?: number): Promise<SubagentView[]>;
   cancelSession?(sessionId: string): Promise<SessionCancelView>;
+  /** `POST /v1/subagents/{id}/cancel` — stop one child and its non-terminal
+   * descendants. The parent session authorizes the write; the child alone does
+   * not. Optional: a deployment without the guarded Host has no such route. */
+  cancelSubagent?(sessionId: string, parentSessionId: string, reason?: string): Promise<SessionCancelView>;
+  /** `POST /v1/sessions/{id}/resume` — requeue the same child session (a retry
+   * of a failed/stopped run, never a new spawn). The path id is the parent. */
+  resumeSubagent?(
+    parentSessionId: string,
+    sessionId: string,
+    requestId?: string,
+    reason?: string,
+  ): Promise<SubagentResumeView>;
 
   /** The audit projection. Absent until the server exposes the route. */
   listAuditEvents?(query?: AuditQuery): Promise<IdentityPage<AuditEventView>>;

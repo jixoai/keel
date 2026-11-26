@@ -42,12 +42,18 @@
 ## 4. UI 与产品面
 
 - [x] 4.1 会话页/TUI 子代理树：角色、depth、状态、tokens/turns、取消/重试。
-      → web 运行图显示 `depth N[/maxDepth]`；注册表冷启动/不完整时 durable tree 合并
-      （`GET /v1/subagents?rootSessionId=` 与 `parentSessionId` 合并），记录带 status/caps/budget。
-      TUI 为仓库外 NSH artifact，本 worktree 未改。
+      → web 运行页的泳道/图/390 时间线/检查器统一显示 `depth`：主 `depth 0 · 主`、子
+      `depth N/M`、`-1` 显示 `不限`、`0` 显示 `禁止派生`、分叉/任务卡显示 `—`；TUI 与 web
+      共用 `web/src/screens/books/run.tsx`，由 `nsh test --target tui` 验收，不是仓库外 artifact。
+      注册表冷启动/不完整时 durable tree 合并（`GET /v1/subagents?rootSessionId=` 与
+      `parentSessionId` 合并），记录带 status/caps/budget。
+      子代理节点内置「取消子树」（`POST /v1/subagents/{id}/cancel`，父会话授权）与「重试子代理」
+      （`POST /v1/sessions/{parent}/resume`，同一子会话重新排队，不是新 spawn）。
 - [x] 4.2 不新增 BotKind=sub；不提供“新建 Sub Agent”实体入口。
-- [ ] 4.3 五态：加载/空/错误/无权限/成功；TUI 与 headless 分别验收。
-      → 后端/API 五态错误已类型化；web 视觉验收需 NSH 工具链（本 worktree 无 node_modules），未跑。
+- [x] 4.3 五态：加载/空/错误/无权限/成功；TUI 与 headless 分别验收。
+      → `web/src/screens/books/run-subagent.tui.test.tsx` 覆盖运行页五态、depth 文案、
+      子代理动作五态（空/加载/错误/无权限/成功）、取消与重试；`--target tui` 与
+      `--target web` 均 6/6 通过。
 
 ## 5. 验收
 
@@ -55,11 +61,12 @@
       → `internal/harnessext/subagent_depth_test.go`、`subagent_p1_test.go`、
       `internal/harnessapi/subagent_depth_http_test.go`、`internal/store/subagent_links_test.go`、
       `cmd/keel/collab_host_test.go`、`internal/toolsurface/agent_depth_test.go`。
-- [ ] 5.2 `go test -race` 相关包 + web/TUI 回归；`openspec validate --strict`。
-      → Go `-race` 已过（collab/harnessext/harnessapi/toolsurface）并跑本地临时 PG（已删库）；
-      `openspec validate --strict` 已过；web/TUI 回归未跑（无 NSH 构建链）。
+- [x] 5.2 `go test -race` 相关包 + web/TUI 回归；`openspec validate --strict`。
+      → Go `-race` 通过（harnessext/harnessapi/collab/cmd/keel）；web/TUI 回归与截图见
+      `.agents/reports/keel/subagent-e2e-2026-11-26/report.html`；`openspec validate --strict` 通过。
 - [ ] 5.3 独立 reviewer 复核；E2E 报告（树/取消/深度拒绝截图）；归档。
-      → 待父级编排的独立复核与交付验收。
+      → E2E 报告已生成（web 20 张 + TUI 20 张，含 depth 0/3/-1、取消/重试、动作五态）；
+      待父级编排的独立复核；未 archive。
 
 ## 第二轮 P1 复核修复
 

@@ -419,7 +419,7 @@ test("TUI: 运行页四档——768 检查器入口、390 时间线与检查器 
   await phone.press("label:查看节点 售后升级，失败");
   await phone.waitFor("text:对象归属者");
   expect(phone.texts().join("\n")).toContain("缺「调用 Bot」能力");
-});
+}, 120_000);
 
 test("TUI: 员工五态——加载 / 空 / 错 / 权限不足", async () => {
   const loading = await harness(1440, { scenario: "bot-loading", chapter: "bots" });

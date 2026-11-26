@@ -113,6 +113,14 @@ def caption(name: str) -> str:
         "cancel-stopped": "取消（停止信号与已停止状态）",
         "retry-error": "重试（节点账本读取失败）",
         "retry-done": "重试（重读后错误消失）",
+        "node-actions": "子代理动作（失败节点可重试）",
+        "node-retry-done": "子代理重试完成（同一会话重新排队）",
+        "node-cancel-ready": "子代理取消入口（运行中节点）",
+        "node-cancel-dialog": "子代理取消二次确认",
+        "node-cancel-done": "子代理取消完成",
+        "action-loading": "动作加载（请求未返回）",
+        "action-error": "动作错误（服务端 500）",
+        "action-permission": "动作无权限（缺 session.write）",
     }
     step = rest
     width = ""

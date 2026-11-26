@@ -31,7 +31,7 @@ import {
 import { Icon } from "../../ui/icons";
 import { store } from "../../data/store";
 import { identityAccess } from "../../data/identity-access";
-import { botAccess, formatRunDuration, runStatusLabel, type RunNode, type RunNodeStatus, type RunProjection } from "../../data/bots";
+import { botAccess, formatRunDuration, runNodeDepthLabel, runStatusLabel, type RunNode, type RunNodeStatus, type RunProjection } from "../../data/bots";
 import { capabilityOf } from "../../data/permission-catalog";
 import { can, capabilityIsKnown } from "../../data/capabilities";
 import { isTaskPanelReadable, taskPanelAccess } from "../../data/tasks";
@@ -60,6 +60,8 @@ const stopOpen = signal(false);
 const rerunOpen = signal(false);
 const inspectorOpen = signal(false);
 const graphSheetOpen = signal(false);
+/** The child node whose cancel confirmation is open. Null when no dialog. */
+const nodeCancelTarget = signal<RunNode | null>(null);
 const inspectorTab = signal<"summary" | "tools" | "permissions">("summary");
 /** The task panel's own open state on the run paper (desktop: a band under the
  * run facts; phone: the bottom Sheet). It starts closed: the panel is an
@@ -159,6 +161,7 @@ export function resetRunUi(): void {
   rerunOpen.set(false);
   inspectorOpen.set(false);
   graphSheetOpen.set(false);
+  nodeCancelTarget.set(null);
   inspectorTab.set("summary");
   taskPanelOpen.set(false);
   taskPanelSheetOpen.set(false);
@@ -314,6 +317,7 @@ export function TeamRunPage(props: { teamId: string; runId: string }) {
         <RunMobileBar isRunning={isRunning()} onInspector={() => inspectorOpen.set(true)} onStop={() => stopOpen.set(true)} runId={props.runId} />
       </If>
       <StopDialog runId={props.runId} teamId={props.teamId} />
+      <NodeCancelDialog />
       <RerunDialog teamId={props.teamId} />
       <RunInspectorSheet onStop={() => stopOpen.set(true)} />
       <GraphSheet />
@@ -592,6 +596,9 @@ function RunLegend() {
       <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>实线 调用</Text>
       <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>虚线 创建 / 分叉</Text>
       <Text style={{ fontSize: typeScale.sm, color: color.danger }}>红虚线 拒绝</Text>
+      <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>
+        depth 0 主 · N/M 委派/上限 · -1 不限 · 0 禁止派生 · — 不分层
+      </Text>
       <Text style={{ marginLeft: "auto", fontSize: typeScale.sm, color: color.mutedForeground }}>「图」为拓扑视角</Text>
     </View>
   );
@@ -807,10 +814,18 @@ function LaneRow(props: { cell: LaneCell; parentName: string }) {
   return (
     <View
       testID={`run-lane-${node().id}`}
+      role="button"
+      focusable
+      onPress={() => {
+        botAccess.runSelected.set(node().id);
+        if (isMobile()) inspectorOpen.set(true);
+      }}
+      accessibilityLabel={`查看节点 ${node().name}，${runStatusLabel(node().status)}`}
+      accessibilityState={{ selected: selected() }}
       style={{
         flexDirection: "row",
         alignItems: "stretch",
-        height: 56,
+        height: 64,
         borderTopWidth: 1,
         borderTopColor: color.border,
         backgroundColor: node().status === "failed" ? color.dangerTint : undefined,
@@ -825,19 +840,17 @@ function LaneRow(props: { cell: LaneCell; parentName: string }) {
           <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground, numberOfLines: 1, textOverflow: "ellipsis" }}>
             {props.parentName ? `← ${props.parentName}` : node().kind === "captain" ? "队长" : "运行节点"}
           </Text>
+          <Text
+            testID={`run-depth-${node().id}`}
+            style={{ fontFamily: font.mono, fontSize: typeScale.key, color: color.mutedForeground, numberOfLines: 1, textOverflow: "ellipsis" }}
+          >
+            {runNodeDepthLabel(node())}
+          </Text>
         </View>
       </View>
       <View style={{ flex: 1, minWidth: 0, position: "relative" }}>
         <View
           testID={`run-bar-${node().id}`}
-          role="button"
-          focusable
-          onPress={() => {
-            botAccess.runSelected.set(node().id);
-            if (isMobile()) inspectorOpen.set(true);
-          }}
-          accessibilityLabel={`查看节点 ${node().name}，${runStatusLabel(node().status)}`}
-          accessibilityState={{ selected: selected() }}
           style={{
             position: "absolute",
             left: props.cell.left,
@@ -926,6 +939,12 @@ function RunTimeline(props: { run: RunProjection }) {
                 </Text>
                 {statusBadge(node().status)}
               </View>
+              <Text
+                testID={`run-depth-${node().id}`}
+                style={{ fontFamily: font.mono, fontSize: typeScale.key, color: color.mutedForeground }}
+              >
+                {runNodeDepthLabel(node())}
+              </Text>
               <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>
                 {node().status === "failed"
                   ? `${clockOf(node().startedAt)} · ${node().error ?? "服务端没有返回失败原因"}`
@@ -1051,6 +1070,12 @@ function GraphNode(props: { node: RunNode }) {
       <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground, numberOfLines: 1, textOverflow: "ellipsis" }}>
         {parent() ? `← ${parent()!.name} · ${edgeLabel(node())}` : node().subtitle ?? node().agent ?? "运行节点"}
       </Text>
+      <Text
+        testID={`run-depth-${node().id}`}
+        style={{ fontFamily: font.mono, fontSize: typeScale.key, color: color.mutedForeground, numberOfLines: 1, textOverflow: "ellipsis" }}
+      >
+        {runNodeDepthLabel(node())}
+      </Text>
       <Text style={{ fontFamily: font.mono, fontSize: typeScale.key, color: color.mutedForeground, numberOfLines: 1, textOverflow: "ellipsis" }}>
         {node().status === "failed" ? node().error ?? "失败" : `${formatRunDuration(node().durationMs)} · ${tokensText(node().tokens)}`}
       </Text>
@@ -1115,6 +1140,91 @@ function InspectorTabs() {
   );
 }
 
+/** The per-child actions: cancel one subtree or retry the same child. Only a
+ * spawned sub-agent has a parent session to authorize either call; the captain
+ * is the run-level stop's job, and a fork is a ledger branch. The buttons are
+ * bound to the selected node, and their busy/notice/error state is bound to the
+ * child session so switching nodes cannot show another node's result. */
+function NodeActions(props: { node: RunNode | undefined }) {
+  const node = () => props.node;
+  const eligible = () =>
+    node()?.source === "subagent" &&
+    node()?.collabOrigin === "spawn" &&
+    node()?.sessionId !== undefined &&
+    node()?.parentSessionId !== undefined;
+  const busy = () => node()?.sessionId !== undefined && botAccess.nodeActionBusy() === node()!.sessionId;
+  const notice = () => {
+    const entry = botAccess.nodeActionNotice();
+    return entry && entry.sessionId === node()?.sessionId ? entry.message : null;
+  };
+  const error = () => {
+    const entry = botAccess.nodeActionError();
+    return entry && entry.sessionId === node()?.sessionId ? entry : null;
+  };
+  const canCancel = () =>
+    eligible() && (node()!.status === "running" || node()!.status === "pending" || node()!.status === "unknown");
+  const canRetry = () => eligible() && (node()!.status === "failed" || node()!.status === "stopped");
+  const busyLabel = (verb: "取消" | "重试") => (busy() ? `${verb}中…` : "");
+  return (
+    <If when={eligible()}>
+      <View
+        testID="run-node-actions"
+        style={{
+          flexDirection: "column",
+          gap: space.sm,
+          padding: space.sm,
+          borderRadius: radius.md,
+          borderWidth: 1,
+          borderColor: color.border,
+          backgroundColor: color.hoverFaint,
+        }}
+      >
+        <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>子代理动作</Text>
+        <View style={{ flexDirection: "row", gap: space.sm }}>
+          <If when={canCancel()}>
+            <Button
+              testID="run-node-cancel"
+              variant="outline"
+              size={isMobile() ? "lg" : "sm"}
+              label={busyLabel("取消") || "取消子树"}
+              accessibilityLabel="取消这个子代理及其未终态后代"
+              disabled={busy()}
+              onPress={() => nodeCancelTarget.set(node()!)}
+              style={{ flex: 1, ...touchStyle() }}
+            />
+          </If>
+          <If when={canRetry()}>
+            <Button
+              testID="run-node-retry"
+              variant="outline"
+              size={isMobile() ? "lg" : "sm"}
+              label={busyLabel("重试") || "重试子代理"}
+              accessibilityLabel="重试这个子代理（同一会话重新排队）"
+              disabled={busy()}
+              onPress={() => {
+                const current = node();
+                if (current) void botAccess.resumeSubagentNode(current);
+              }}
+              style={{ flex: 1, ...touchStyle() }}
+            />
+          </If>
+        </View>
+        <If when={notice() !== null}>
+          <StateNote tone="success" icon="check" text={notice() ?? ""} testID="run-node-action-notice" />
+        </If>
+        <If when={error() !== null}>
+          <StateNote
+            tone="danger"
+            icon="alert"
+            text={error()?.message ?? ""}
+            testID="run-node-action-error"
+          />
+        </If>
+      </View>
+    </If>
+  );
+}
+
 function InspectorBody(props: { node: RunNode | undefined }) {
   const node = () => props.node;
   const refusal = () => refusalOf(node());
@@ -1125,6 +1235,7 @@ function InspectorBody(props: { node: RunNode | undefined }) {
   const parent = () => (node()?.parentId ? botAccess.run()?.nodes.find((entry) => entry.id === node()!.parentId) : undefined);
   return (
     <View style={{ flexDirection: "column", gap: space.md }}>
+      <NodeActions node={node()} />
       <If when={node()?.status === "failed" || (refusal()?.capability !== undefined)}>
         <StateNote
           tone="danger"
@@ -1144,6 +1255,12 @@ function InspectorBody(props: { node: RunNode | undefined }) {
         <View style={{ flexDirection: "column", gap: space.xs }}>
           <FactRow label="对象归属者" value={accountName(node()?.ownerAccountId) || "未返回（需要 Bot 归属读）"} />
           <FactRow label="父级" value={parent()?.name ?? (node()?.kind === "captain" ? "使命" : "未返回")} />
+          <FactRow
+            label="深度"
+            value={node() ? runNodeDepthLabel(node()!) : "—"}
+            mono
+            testID="run-node-depth-fact"
+          />
           <FactRow label="实际模型" value={node()?.model ?? run()?.model ?? "未返回"} mono />
           <FactRow label="状态" value={runStatusLabel(node()?.status ?? "unknown")} />
           <FactRow label="开始" value={clockOf(node()?.startedAt)} />
@@ -1250,9 +1367,9 @@ function InspectorBody(props: { node: RunNode | undefined }) {
   );
 }
 
-function FactRow(props: { label: string; value: string; mono?: boolean }) {
+function FactRow(props: { label: string; value: string; mono?: boolean; testID?: string }) {
   return (
-    <View style={{ flexDirection: "row", alignItems: "baseline", gap: space.sm }}>
+    <View testID={props.testID} style={{ flexDirection: "row", alignItems: "baseline", gap: space.sm }}>
       <Text style={{ width: 72, flexShrink: 0, fontSize: typeScale.sm, color: color.mutedForeground }}>{props.label}</Text>
       <Text
         style={{
@@ -1575,6 +1692,27 @@ function StopDialog(props: { runId: string; teamId: string }) {
         });
       }}
       onCancel={() => stopOpen.set(false)}
+    />
+  );
+}
+
+function NodeCancelDialog() {
+  const target = () => nodeCancelTarget();
+  return (
+    <AlertDialog
+      testID="run-node-cancel-dialog"
+      open={target() !== null}
+      title="取消这个子代理子树？"
+      description={`${target()?.name ?? "这个子代理"} 及其未终态后代会被取消；已完成的会话保留。`}
+      confirmLabel="取消子树"
+      cancelLabel="继续运行"
+      destructive
+      onConfirm={() => {
+        const current = target();
+        nodeCancelTarget.set(null);
+        if (current) void botAccess.cancelSubagentNode(current);
+      }}
+      onCancel={() => nodeCancelTarget.set(null)}
     />
   );
 }
