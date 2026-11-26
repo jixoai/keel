@@ -968,8 +968,33 @@ function coverageRule(file) {
   if (file === 'scripts/keel-identity-e2e/report-gen.mjs') {
     return exempt('报告生成器', '本报告由该生成器输出');
   }
-  if (file.startsWith('openspec/changes/keel-creation/')) {
-    return exempt('规格/任务文档', 'tasks.md 4.1/4.3');
+  if (file.startsWith('openspec/')) {
+    return exempt('OpenSpec 规格/归档', '规格与归档文档，不是运行时代码');
+  }
+  if (file === '.github/workflows/release.yml') {
+    return exempt('发布流水线', 'nsh 0.7 打包前置由 package-web.sh 实测验证');
+  }
+  if (file === 'scripts/package-web.sh') {
+    return exempt('构建脚本', '本报告使用其产物（16.5 MB Keel 站点）跑完 7 步');
+  }
+  if (file === 'web/nsh.json' || file === 'web/nsh.lock') {
+    return covered('nsh 0.7.1 + nsh-extra 锁', '本报告即由该构建产物（含 speech wasm runtime）跑出');
+  }
+  if (file === 'web/README.md' || file === 'docs/WEBUI.md') {
+    return exempt('版本文档', 'nsh 0.7.1 升级与迁移说明');
+  }
+  if (file === 'web/speech.test.tsx' || file.startsWith('web/src/surfaces/speech/')) {
+    return exempt('nsh 0.7 Speech 迁移', 'nsh test speech 9/9 覆盖，不在本 lane 冒充');
+  }
+  // The superagent lane owns these files and its own board acceptance; this
+  // report only names them so the diff stays fully accounted for.
+  const superagentSurface = [
+    'internal/superagent/', 'internal/harnessapi/superagent', 'cmd/keel/superagent',
+    'internal/store/superagent.go', 'internal/toolsurface/superagent',
+    'web/src/data/superagent', 'web/src/screens/books/superagent', 'scripts/superagent-acceptance/',
+  ];
+  if (superagentSurface.some((prefix) => file === prefix || file.startsWith(prefix))) {
+    return exempt('keel-collab-superagent 验收面', '由 superagent 工单看板/工具 lane 与其 E2E 覆盖，不在本 lane 冒充');
   }
   if (file === 'plugins/templates/webview-react-solidglass/ui/settings.js') {
     return covered('设置页 keel.ui.settings-section chunk', '步骤 3 before（ERR_CHUNK_LOAD）→ 步骤 5 after（模型写入的 chunk 渲染 + marker）');
