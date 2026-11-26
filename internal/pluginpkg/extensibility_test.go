@@ -1,6 +1,7 @@
 package pluginpkg
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -483,4 +484,129 @@ func TestExtensibilityDocMatchesManifest(t *testing.T) {
 	doc.Version = manifest.Version
 	doc.Plugin = "vendor.other"
 	requireField(t, doc.ValidateAgainstManifest(manifest), "plugin")
+}
+
+// attachmentDoc returns a document whose sole contribution claims attachment
+// rendering for the given MIME patterns.
+func attachmentDoc(t *testing.T, mime []string) *ExtensibilityDoc {
+	t.Helper()
+	doc, err := ParseExtensibility([]byte(validDocJSON(t, "keel.attachment.test")))
+	if err != nil {
+		panic(err)
+	}
+	doc.Contributes = []Contribution{{
+		Slot: MessagePartSlotID, Form: SlotFormChunk, Entry: "ui/pdf-preview.js",
+		Part: AttachmentPartKind, Mime: mime,
+	}}
+	return doc
+}
+
+// TestExtensibilityDocValidatesAttachmentClaims pins the claim contract: only
+// the message-part slot may carry `part`/`mime`, only `part: attachment` is
+// defined, and MIME patterns are lowercase `type/subtype` or `type/*`.
+func TestExtensibilityDocValidatesAttachmentClaims(t *testing.T) {
+	if err := attachmentDoc(t, []string{"application/pdf", "image/*"}).Validate(); err != nil {
+		t.Fatalf("a valid attachment claim must validate: %v", err)
+	}
+	cases := []struct {
+		name   string
+		mutate func(*ExtensibilityDoc)
+		field  string
+	}{
+		{"part on a foreign slot", func(d *ExtensibilityDoc) {
+			d.Contributes[0].Slot = "keel.ui.settings-section"
+		}, "contributes[0].part"},
+		{"mime on a foreign slot", func(d *ExtensibilityDoc) {
+			d.Contributes[0].Slot = "keel.ui.settings-section"
+		}, "contributes[0].mime"},
+		{"unknown part kind", func(d *ExtensibilityDoc) {
+			d.Contributes[0].Part = "thumbnail"
+		}, "contributes[0].part"},
+		{"mime without the attachment claim", func(d *ExtensibilityDoc) {
+			d.Contributes[0].Part = ""
+		}, "contributes[0].part"},
+		{"uppercase pattern", func(d *ExtensibilityDoc) {
+			d.Contributes[0].Mime = []string{"Application/PDF"}
+		}, "contributes[0].mime[0]"},
+		{"wildcard type", func(d *ExtensibilityDoc) {
+			d.Contributes[0].Mime = []string{"*/pdf"}
+		}, "contributes[0].mime[0]"},
+		{"empty item", func(d *ExtensibilityDoc) {
+			d.Contributes[0].Mime = []string{""}
+		}, "contributes[0].mime[0]"},
+		{"missing subtype", func(d *ExtensibilityDoc) {
+			d.Contributes[0].Mime = []string{"application/"}
+		}, "contributes[0].mime[0]"},
+		{"parameters are not a pattern", func(d *ExtensibilityDoc) {
+			d.Contributes[0].Mime = []string{"application/pdf; charset=utf-8"}
+		}, "contributes[0].mime[0]"},
+		{"too many patterns", func(d *ExtensibilityDoc) {
+			patterns := make([]string, MimePatternsMax+1)
+			for index := range patterns {
+				patterns[index] = fmt.Sprintf("application/x-%d", index)
+			}
+			d.Contributes[0].Mime = patterns
+		}, "contributes[0].mime"},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			doc := attachmentDoc(t, []string{"application/pdf"})
+			testCase.mutate(doc)
+			requireField(t, doc.Validate(), testCase.field)
+		})
+	}
+}
+
+func TestExtensibilityDocRejectsDuplicateMimeClaims(t *testing.T) {
+	doc := attachmentDoc(t, []string{"application/pdf"})
+	doc.Contributes = append(doc.Contributes, Contribution{
+		Slot: MessagePartSlotID, Form: SlotFormChunk, Entry: "ui/other.js",
+		Part: AttachmentPartKind, Mime: []string{"image/png", "application/pdf"},
+	})
+	requireField(t, doc.Validate(), "contributes[1].mime[1]")
+}
+
+// TestManifestRejectsAttachmentClaimsInPluginYAML pins the single source: the
+// claim fields belong to extensibility.json; plugin.yaml carrying them is a
+// field-level refusal (not a merge with two competing spellings).
+func TestManifestRejectsAttachmentClaimsInPluginYAML(t *testing.T) {
+	manifest := &Manifest{
+		ID: "vendor.claims", Version: "1.0.0", Kind: KindWebview, Description: "d",
+		Contributes: []Contribution{{
+			Slot: MessagePartSlotID, Form: SlotFormChunk, Entry: "ui/preview.js",
+			Part: AttachmentPartKind, Mime: []string{"application/pdf"},
+		}},
+	}
+	requireField(t, manifest.Validate(Environment{}), "contributes[0].part")
+	manifest.Contributes[0].Part = ""
+	manifest.Contributes[0].Mime = []string{"application/pdf"}
+	requireField(t, manifest.Validate(Environment{}), "contributes[0].mime")
+}
+
+// TestExtensibilityDocMatchesManifestIgnoresClaims: the document narrows the
+// manifest's contribution with claims, so the base surface is what must match.
+func TestExtensibilityDocMatchesManifestIgnoresClaims(t *testing.T) {
+	manifest := validUIManifest()
+	doc := &ExtensibilityDoc{
+		Schema: ExtensibilitySchema, Plugin: manifest.ID, Version: manifest.Version,
+		Summary: "A panel.", Slots: manifest.Provides.Slots,
+		Contributes: []Contribution{{
+			Slot: manifest.Contributes[2].Slot, Form: manifest.Contributes[2].Form,
+			Entry: manifest.Contributes[2].Entry, Part: AttachmentPartKind,
+			Mime: []string{"image/*"},
+		}},
+		Configuration: []ExtConfig{}, Hooks: []ExtHook{}, Providers: []ExtProvider{},
+		Examples: []ExtExample{}, Limits: []ExtLimit{},
+	}
+	// The document carries one contribution while the manifest carries three:
+	// that mismatch is still refused.
+	requireField(t, doc.ValidateAgainstManifest(manifest), "contributes")
+	doc.Contributes = contributionSurface(manifest.Contributes)
+	doc.Contributes[2].Part = AttachmentPartKind
+	doc.Contributes[2].Mime = []string{"image/*"}
+	if err := doc.ValidateAgainstManifest(manifest); err != nil {
+		t.Fatalf("claims must not break the surface comparison: %v", err)
+	}
+	doc.Contributes[2].Entry = "ui/other.js"
+	requireField(t, doc.ValidateAgainstManifest(manifest), "contributes")
 }

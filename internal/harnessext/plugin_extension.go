@@ -13,6 +13,7 @@ package harnessext
 // `pluginpkg`, the first source starts carrying them and nothing here moves.
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -86,13 +87,39 @@ type ExtensionContribution struct {
 	Targets      []string        `json:"targets,omitempty" yaml:"targets,omitempty"`
 	Tool         string          `json:"tool,omitempty" yaml:"tool,omitempty"`
 	Part         string          `json:"part,omitempty" yaml:"part,omitempty"`
+	Mime         []string        `json:"mime,omitempty" yaml:"mime,omitempty"`
 	// Plugin is the contributing plugin id, filled by the reader.
 	Plugin string `json:"plugin,omitempty" yaml:"-"`
 }
 
+// AttachmentClaim is the read-only summary of one attachment preview claim:
+// what an install/enable will register and what an audit row may carry.
+type AttachmentClaim struct {
+	Slot string   `json:"slot"`
+	Form string   `json:"form"`
+	Mime []string `json:"mime,omitempty"`
+}
+
+// AttachmentClaims lists the attachment preview claims in declaration order.
+// Only `keel.ui.message-part` contributions with `part=attachment` qualify;
+// everything else is not an attachment renderer.
+func AttachmentClaims(contributions []ExtensionContribution) []AttachmentClaim {
+	var claims []AttachmentClaim
+	for _, contribution := range contributions {
+		if contribution.Slot != pluginpkg.MessagePartSlotID || contribution.Part != pluginpkg.AttachmentPartKind {
+			continue
+		}
+		claims = append(claims, AttachmentClaim{
+			Slot: contribution.Slot,
+			Form: contribution.Form,
+			Mime: append([]string(nil), contribution.Mime...),
+		})
+	}
+	return claims
+}
+
 // ExtensionDoc is the machine-readable extensibility document's presence.
-type ExtensionDoc struct {
-	Usable bool   `json:"usable"`
+type ExtensionDoc struct {	Usable bool   `json:"usable"`
 	Doc    string `json:"doc,omitempty"`
 	Schema string `json:"schema,omitempty"`
 	Reason string `json:"reason,omitempty"`
@@ -151,6 +178,7 @@ type extensionContribution struct {
 	Targets      []string `yaml:"targets"`
 	Tool         string   `yaml:"tool"`
 	Part         string   `yaml:"part"`
+	Mime         []string `yaml:"mime"`
 }
 
 type extensionFile struct {
@@ -343,11 +371,20 @@ func mergeContribution(dst *ExtensionDeclaration, raw extensionContribution) {
 	}
 	id := strings.TrimSpace(raw.ID)
 	form := strings.TrimSpace(raw.Form)
-	for _, existing := range dst.Contributes {
+	entry := strings.TrimSpace(raw.Entry)
+	part := strings.TrimSpace(raw.Part)
+	mime := normalizedMimePatterns(raw.Mime)
+	for index := range dst.Contributes {
+		existing := &dst.Contributes[index]
+		// The claim document and plugin.yaml name the same contribution by id,
+		// or (when neither carries an id) by the (slot, form, entry) triple. The
+		// claim fields merge into that entry; they never create a second one.
 		if id != "" && existing.ID == id {
+			mergeContributionClaims(existing, part, mime)
 			return
 		}
-		if id == "" && existing.ID == "" && existing.Slot == slot && existing.Form == form && existing.Entry == strings.TrimSpace(raw.Entry) {
+		if id == "" && existing.ID == "" && existing.Slot == slot && existing.Form == form && existing.Entry == entry {
+			mergeContributionClaims(existing, part, mime)
 			return
 		}
 	}
@@ -355,13 +392,14 @@ func mergeContribution(dst *ExtensionDeclaration, raw extensionContribution) {
 		ID:           id,
 		Slot:         slot,
 		Form:         form,
-		Entry:        strings.TrimSpace(raw.Entry),
+		Entry:        entry,
 		Title:        strings.TrimSpace(raw.Title),
 		Description:  strings.TrimSpace(raw.Description),
 		Capabilities: append([]string(nil), raw.Capabilities...),
 		Targets:      append([]string(nil), raw.Targets...),
 		Tool:         strings.TrimSpace(raw.Tool),
-		Part:         strings.TrimSpace(raw.Part),
+		Part:         part,
+		Mime:         mime,
 	}
 	if raw.Payload != nil {
 		if encoded, err := json.Marshal(raw.Payload); err == nil {
@@ -369,6 +407,35 @@ func mergeContribution(dst *ExtensionDeclaration, raw extensionContribution) {
 		}
 	}
 	dst.Contributes = append(dst.Contributes, contribution)
+}
+
+// mergeContributionClaims folds a later declaration's part/mime into the
+// contribution it names. An empty part never erases a declared one; MIME
+// patterns append in declaration order without duplicating a spelling.
+func mergeContributionClaims(existing *ExtensionContribution, part string, mime []string) {
+	if existing.Part == "" {
+		existing.Part = part
+	}
+	for _, pattern := range mime {
+		duplicate := false
+		for _, present := range existing.Mime {
+			if present == pattern {
+				duplicate = true
+				break
+			}
+		}
+		if !duplicate {
+			existing.Mime = append(existing.Mime, pattern)
+		}
+	}
+}
+
+func normalizedMimePatterns(values []string) []string {
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		out = append(out, strings.TrimSpace(value))
+	}
+	return out
 }
 
 // ValidateExtension checks the shape the client relies on. Slot existence in
@@ -429,6 +496,7 @@ func ValidateExtension(pluginID, kind string, decl ExtensionDeclaration) []plugi
 			add(field("schema"), "schema must be valid JSON")
 		}
 	}
+	claimedMime := map[string]string{}
 	for index, contribution := range decl.Contributes {
 		field := func(name string) string { return "contributes[" + itoa(index) + "]." + name }
 		if strings.TrimSpace(contribution.Slot) == "" {
@@ -468,6 +536,19 @@ func ValidateExtension(pluginID, kind string, decl ExtensionDeclaration) []plugi
 			if !safeExtensionID(contribution.ID) {
 				add(field("id"), "the contribution id has an unsupported character")
 			}
+		}
+		// Attachment preview claims (change keel-plugin-attachment): part/mime
+		// narrow a keel.ui.message-part contribution, and the claim is validated
+		// with the same rules pluginpkg applies to extensibility.json.
+		for _, problem := range pluginpkg.AttachmentClaimProblems(contribution.Slot, contribution.Part, contribution.Mime) {
+			add(field(problem.Field), problem.Message)
+		}
+		for mimeIndex, pattern := range contribution.Mime {
+			if first, exists := claimedMime[pattern]; exists {
+				add(field("mime["+itoa(mimeIndex)+"]"), fmt.Sprintf("MIME pattern %q is already claimed by %s", pattern, first))
+				continue
+			}
+			claimedMime[pattern] = field("mime[" + itoa(mimeIndex) + "]")
 		}
 	}
 	return problems

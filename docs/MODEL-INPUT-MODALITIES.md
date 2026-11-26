@@ -99,6 +99,9 @@ durable ref
 | 情形 | 结果 |
 |---|---|
 | 附件无 `fileId`（客户端只发了 name/mime） | 重建时立即成 `[attachment … omitted: the client sent no fileId …]` 文本块 |
+| `fileId` 不属于当前租户 / 未完成 / 不存在 | 输入期字段级 400，不落事件（读取期 404，不泄露存在性） |
+| 声明 MIME 与 blob 记录不一致（归一后） | 输入期字段级 400，不落事件 |
+| 超过 16 个附件 / 单文件超过 `MaxUpload` | 输入期 400 / 413，不落事件 |
 | blob 不存在 / 无 workspace | 文本兜底，原因含 blobId 与错误 |
 | 模型声明不支持该模态 | 文本兜底，原因 `the selected model does not declare …` |
 | 协议无原生形状 | 文本兜底，原因 `… wire protocol cannot carry …` |
@@ -106,12 +109,51 @@ durable ref
 | 无 resolver 的部署 | 全部附件→文本兜底（引用自带事实），日志 warn 一次 |
 | header 探测失败 | 兜底文本仍含引用事实（name/mime/size） |
 
-日志：`logAttachmentResolution`（失败/降级 warn；文本兜底逐条 info 并带原因；原生形态
-info 汇总）；`logImageResolution` 保留（图片文本兜底也记录）。
+日志：`logAttachmentResolution`（失败/降级 warn；文本兜底逐条 info 并带
+`blobId/size/mime/reason`，不记 name/正文/字节）；`logImageResolution` 保留（图片文本
+兜底也记录同一组字段）。
 
-## 8. 非目标（本切片）
+## 8. 插件附件面（change `keel-plugin-attachment`）
+
+插件只读附件元数据，不拥有附件生命周期；字节与引用计数仍归宿主。
+
+**唯一生命周期**（MUST NOT 另建第二套）：
+
+```text
+POST /v1/files → blob（tenant, complete, mime, size, thumb_status）
+  → 输入期校验（数量/大小/MIME/归属/完成态）
+  → user.message.attachments[]（blobId + 展示元数据）
+  → blob_refs（引用计数/TTL，事件事务内）
+  → attempt：原生 wire 部件 或 文本兜底
+```
+
+**输入期校验**（`POST /v1/sessions/{id}/input`、MCP Apps `ui/message`、retry 共用
+`CommitClientInput`）：≤16 个附件；每个只允许 `fileId/name/mime/size/width/height`
+（未知字段忽略）；`fileId` 属于当前 tenant 且 `complete=true`；声明 MIME 以 blob 记录为
+权威（小写去参数后比较）；name 1..256 字节且只作展示；失败返回字段级错误且不落事件。
+缺 `fileId` 是唯一不拒绝的降级：生成显式文本 notice，模型仍知道附件存在。
+
+**只读投影**（`AttachmentPart`，后端为 `GET /v1/plugins` 的 contribution 投影提供
+`part/mime` 认领）：`fileId/name/mime/size/kind`、可选尺寸、`thumbStatus`、同源
+`thumbnailUrl/downloadUrl`、本次 attempt 的 `delivery.native/reason`。MUST NOT 含字节、
+base64、data URI、CAS 路径、租户头、cookie、凭据或跨租户 URL；插件后端在本 change
+**拿不到字节句柄**。
+
+**预览槽位**：复用 `keel.ui.message-part`，贡献以 `part=attachment` 认领，可在
+`extensibility.json` 用 `mime` 收窄（`type/subtype` 或 `type/*`）。宿主按声明顺序选择
+第一个 ready、target 可用且 MIME 匹配的贡献（先声明先匹配）；没有匹配或渲染失败时回退
+宿主默认附件行。渲染器 MUST 保留文件名、大小与下载/打开入口；TUI 的 `iframe` 贡献显式
+显示不可用。
+
+交叉引用：[`BLOB-LIFECYCLE.md`](BLOB-LIFECYCLE.md) 负责 blob 存储、引用计数、TTL 与
+缩略图；本文件负责模型输入与插件投影。插件契约细节见
+[`PLUGIN-EXTENSIBILITY.md`](PLUGIN-EXTENSIBILITY.md)。
+
+## 9. 非目标（本切片）
 
 - 不做 PDF 页数解析、视频抽帧、音频转写（那需要外部进程或大依赖）。
 - 不改 `web/**`（模型元数据编辑归 model-catalog lane）。
 - 不实现 Gemini 原生 `generativelanguage` 适配器（`google` 仍走 OpenAI-compatible 线；
   一旦加适配器，在 `MediaCapsForAPI` 里声明 video/file_uri 并补请求体测试）。
+- 不给插件后端附件字节读取、签名 URL、服务端转码/OCR/PDF 抽页或预览缓存服务；这些
+  属于后续独立 change。

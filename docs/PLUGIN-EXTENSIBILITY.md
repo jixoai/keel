@@ -167,21 +167,52 @@ TUI 上的不可用必须**显式降级**：入口隐藏或显示「此面板在
 |---|---|
 | `schema` | 必须等于 `keel.plugin-extensibility/1` |
 | `plugin` / `version` | 必须与 `plugin.yaml` 的 `id` / `version` 完全一致 |
-| `slots` / `contributes` | 必须与 `plugin.yaml` 的 `provides.slots` / `contributes` 逐项一致（装配期比对） |
+| `slots` / `contributes` | 与 `plugin.yaml` 的 `provides.slots` / `contributes` 按**基础面**（slot/form/entry/payload）逐项一致；`part`/`mime` 是文档侧的认领字段，不写进 `plugin.yaml`（装配期比对） |
 | `configuration[].key` | `^[A-Z][A-Z0-9_]{0,63}$`；唯一；`type ∈ string\|integer\|number\|boolean\|string_list\|object` |
 | `hooks[].event` | 闭集 hook 事件名（与 `provides.hooks` 同语法） |
 | `providers[].port` | 小写 feature port（与 `modelprovider.ValidFeaturePort` 同规则） |
 | `examples[]` | `title` + `description` 必填 |
 | `limits[]` | `name` + `value` + `description` 必填；`value` 是展示字符串（如 `30000`、`10 MB`） |
 
-### 5.1 官方发布门禁
+### 5.1 附件预览认领（change `keel-plugin-attachment`）
+
+附件预览复用 `keel.ui.message-part`（该槽位仍是通用消息部件槽位，不归附件专属）。
+认领信息随 `extensibility.json` 的同一条贡献下发：
+
+```json
+{
+  "slot": "keel.ui.message-part",
+  "form": "chunk",
+  "entry": "ui/pdf-preview.js",
+  "part": "attachment",
+  "mime": ["application/pdf", "image/*"]
+}
+```
+
+规则：
+
+- `part` 只允许 `attachment`，且只在 `slot=keel.ui.message-part` 上合法；`mime` 必须与
+  `part=attachment` 同时出现。
+- `mime` 每项是 `type/subtype` 或 `type/*`：小写、无参数、无空项、无 `*/subtype`；
+  单条贡献最多 32 项、每项 ≤128 字节。超过 128 字节或含大写/参数/非法通配位置即字段拒绝。
+- 同一插件内**同一 MIME 模式不得重复**（`contributes[i].mime[j]` 字段路径报错）；
+  跨插件不做全局唯一。
+- 未提供 `extensibility.json` 的包不能被识别为附件渲染器；它仍可向
+  `keel.ui.message-part` 投普通消息部件。
+- 宿主按插件声明顺序选择第一个 ready、target 可用且 MIME 匹配的贡献：**先声明先匹配**。
+  多个插件声明同一模式是合法竞争，不是一个需要宿主去重/合并的配置错误；顺序就是结果。
+- 安装/启用审批展示将认领的槽位、form、`part=attachment` 与 MIME 列表；停用/卸载在同一
+  generation 撤销贡献。渲染器 MUST 保留文件名、大小与下载/打开入口。
+- `part`/`mime` 只属于 `extensibility.json`：写进 `plugin.yaml` 的 `contributes` 是字段级拒绝。
+
+### 5.2 官方发布门禁
 
 - 官方插件 MUST 在 `plugin.yaml` 声明 `extensibility.doc` + `extensibility.schema`，两个文件
   MUST 存在；缺任一字段或文件即拒绝发布（`Environment.RequireExtensibility`）。
 - 第三方插件 MAY 省略：安装不受影响，但在市场与创造模式目录中标记「不可被创造模式利用」。
 - `extensibility.json` 与 `plugin.yaml` 漂移（插件 id/版本/槽位/贡献不一致）即拒绝装载。
 
-### 5.2 创造模式聚合协议
+### 5.3 创造模式聚合协议
 
 `keel.creation` 聚合本机**所有已安装插件**（含第三方）的上述文档，形成机器可读目录，经只读
 发现工具交给 AI。目录与装配事实同源：插件启停后目录同步更新；卸载即从目录消失。

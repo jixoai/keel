@@ -20,6 +20,24 @@ machine contract in `extensibility.json`.
 4. `creation remove {id: "{{id}}"}` — uninstall, then the staged package and
    every contribution are withdrawn.
 
+## Attachment previews (optional)
+
+To render message attachments, contribute to `keel.ui.message-part` and claim
+the attachment part in `extensibility.json`:
+
+```json
+{ "slot": "keel.ui.message-part", "form": "chunk", "entry": "ui/preview.js",
+  "part": "attachment", "mime": ["application/pdf", "image/*"] }
+```
+
+- `mime` is `type/subtype` or `type/*` (lowercase, at most 32 patterns per
+  contribution). Omit it to claim every attachment MIME.
+- One plugin may not claim the same MIME pattern twice; across plugins the host
+  picks the first declared match in slot order (first declaration wins).
+- The renderer receives metadata and same-origin URLs only — never bytes. Keep
+  the file name, size and download/open entry visible.
+- Disable/uninstall withdraws the preview in the same generation.
+
 ## Boundaries
 
 - UI talks to the host only through `keel.plugin.*`; it never receives a secret.

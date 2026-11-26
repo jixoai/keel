@@ -176,7 +176,7 @@ func (d *ExtensibilityDoc) Validate() error {
 	for _, slot := range d.Slots {
 		selfSlots[slot.ID] = slot
 	}
-	validateContributionList(errs, "contributes", selfSlots, Environment{}, d.Contributes)
+	validateContributionList(errs, "contributes", selfSlots, Environment{}, d.Contributes, true)
 
 	seenConfig := map[string]bool{}
 	for index, config := range d.Configuration {
@@ -273,10 +273,28 @@ func (d *ExtensibilityDoc) ValidateAgainstManifest(m *Manifest) error {
 	if !sameJSONValue(d.Slots, m.Provides.Slots) {
 		errs.add("slots", "document slots do not match the manifest's provides.slots")
 	}
-	if !sameJSONValue(d.Contributes, m.Contributes) {
-		errs.add("contributes", "document contributions do not match the manifest's contributes")
+	// `part`/`mime` are extensibility.json claims added by change
+	// keel-plugin-attachment; the manifest contribution surface is the base
+	// (slot/form/entry/payload), and the document may narrow it with claims.
+	if !sameJSONValue(contributionSurface(d.Contributes), contributionSurface(m.Contributes)) {
+		errs.add("contributes", "document contributions do not match the manifest's contributes (attachment claims are declared in the document)")
 	}
 	return errs.err()
+}
+
+// contributionSurface strips the claim fields so the manifest and the document
+// can be compared on the declaration they must share.
+func contributionSurface(contributions []Contribution) []Contribution {
+	out := make([]Contribution, len(contributions))
+	for index, contribution := range contributions {
+		contribution.Part = ""
+		contribution.Mime = nil
+		out[index] = contribution
+	}
+	if out == nil {
+		return []Contribution{}
+	}
+	return out
 }
 
 // sameJSONValue compares two decoded values by their canonical JSON encoding.

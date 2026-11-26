@@ -112,6 +112,9 @@ type pluginApprovalAsk struct {
 	// approved. The derived decision id includes it, so a different package (or
 	// a different installed version) cannot reuse the allow.
 	ContentHash string
+	// Claims are the attachment preview claims the action will register,
+	// rendered into the question (change keel-plugin-attachment).
+	Claims []string
 }
 
 // pluginWriteContext is the single entrance of every approval-gated lifecycle
@@ -392,19 +395,42 @@ func pluginApprovalPrompt(ask pluginApprovalAsk) string {
 	if label == "" {
 		label = ask.Target
 	}
+	var prompt string
 	switch ask.Action {
 	case store.PluginActionInstall:
-		return fmt.Sprintf("Install the plugin package %s? Installing adopts its code into this deployment and lets it run.", label)
+		prompt = fmt.Sprintf("Install the plugin package %s? Installing adopts its code into this deployment and lets it run.", label)
 	case store.PluginActionEnable:
-		return fmt.Sprintf("Enable plugin %s? Enabling runs what the plugin declares (tools, hooks, triggers, UI).", label)
+		prompt = fmt.Sprintf("Enable plugin %s? Enabling runs what the plugin declares (tools, hooks, triggers, UI).", label)
 	case store.PluginActionUpdate:
-		prompt := fmt.Sprintf("Update plugin %s to a new package? The running version is replaced.", label)
+		prompt = fmt.Sprintf("Update plugin %s to a new package? The running version is replaced.", label)
 		if ask.ContentHash != "" {
 			prompt += fmt.Sprintf("\nContent hash: %s", ask.ContentHash)
 		}
-		return prompt
+	default:
+		prompt = fmt.Sprintf("Approve plugin %s of %s?", ask.Action, label)
 	}
-	return fmt.Sprintf("Approve plugin %s of %s?", ask.Action, label)
+	if len(ask.Claims) > 0 {
+		// The approver must see the attachment surface, not just the plugin name:
+		// a preview contribution is UI code that draws message content.
+		prompt += "\nThis plugin will claim: " + strings.Join(ask.Claims, "; ") + "."
+	}
+	return prompt
+}
+
+// attachmentClaimPrompts renders the attachment claims of a declaration for the
+// approval question.
+func attachmentClaimPrompts(contributions []harnessext.ExtensionContribution) []string {
+	claims := harnessext.AttachmentClaims(contributions)
+	out := make([]string, 0, len(claims))
+	for _, claim := range claims {
+		mime := "all attachment MIME types"
+		if len(claim.Mime) > 0 {
+			mime = strings.Join(claim.Mime, ", ")
+		}
+		out = append(out, fmt.Sprintf("%s attachment preview contribution (form %s) for MIME: %s",
+			claim.Slot, claim.Form, mime))
+	}
+	return out
 }
 
 // installApprovalAsk builds the ask of an install: the package path is the
@@ -434,23 +460,32 @@ func installApprovalAsk(path, contentHash string) pluginApprovalAsk {
 		}
 	}
 	id := filepath.Base(filepath.FromSlash(target))
-	return pluginApprovalAsk{
+	ask := pluginApprovalAsk{
 		Action:      store.PluginActionInstall,
 		Target:      target,
 		Label:       target,
 		PluginID:    id,
 		ContentHash: contentHash,
 	}
+	// The question names the attachment surface the package will register. The
+	// read is best-effort: an unreadable/invalid package is refused by the
+	// manager after approval, and a question without claims is still honest.
+	if pkg := pluginpkg.LoadDir(target, pluginpkg.Environment{}); pkg.Manifest != nil {
+		ask.Claims = attachmentClaimPrompts(harnessext.DecodeExtension(pkg.Dir, pkg.Manifest).Contributes)
+	}
+	return ask
 }
 
 // pluginIDApprovalAsk builds the ask of an enable or update.
 func (s *Server) pluginIDApprovalAsk(action, id string) pluginApprovalAsk {
 	version, contentHash := "", ""
+	var claims []string
 	if s.cfg.PluginManager != nil {
 		for _, view := range s.cfg.PluginManager.Snapshot().Plugins {
 			if view.ID == id {
 				version = view.Version
 				contentHash = view.ContentHash
+				claims = attachmentClaimPrompts(view.Contributes)
 				break
 			}
 		}
@@ -460,7 +495,7 @@ func (s *Server) pluginIDApprovalAsk(action, id string) pluginApprovalAsk {
 		label = id + " " + version
 	}
 	return pluginApprovalAsk{Action: action, Target: id, Label: label, PluginID: id,
-		Version: version, ContentHash: contentHash}
+		Version: version, ContentHash: contentHash, Claims: claims}
 }
 
 // pluginApprovalSession is the session namespace plugin approvals live in.

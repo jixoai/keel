@@ -310,6 +310,14 @@ type Contribution struct {
 	Entry string `yaml:"entry,omitempty" json:"entry,omitempty"`
 	// Payload is the host-consumed JSON for the data form.
 	Payload map[string]any `yaml:"payload,omitempty" json:"payload,omitempty"`
+	// Part narrows a `keel.ui.message-part` contribution to one message-part
+	// kind. Claims are declared in extensibility.json (change
+	// keel-plugin-attachment); plugin.yaml contributions carry none.
+	Part string `yaml:"part,omitempty" json:"part,omitempty"`
+	// Mime narrows an attachment contribution to MIME patterns. Each pattern is
+	// `type/subtype` or `type/*` (lowercase); a contribution without patterns
+	// claims every attachment MIME.
+	Mime []string `yaml:"mime,omitempty" json:"mime,omitempty"`
 }
 
 // Extensibility is the manifest's pointer at a plugin's extension-surface
@@ -338,6 +346,98 @@ func ReservedSlotIDs() []string {
 		"keel.ui.surface",
 		"keel.tasks.widget",
 	}
+}
+
+// The attachment preview contract (change keel-plugin-attachment): an
+// extensibility.json contribution to the message-part slot claims attachment
+// rendering with `part: attachment` and an optional `mime` narrowing.
+const (
+	// MessagePartSlotID is the generic message-part slot attachment previews
+	// reuse. It stays a general slot; `part: attachment` is the claim.
+	MessagePartSlotID = "keel.ui.message-part"
+	// AttachmentPartKind is the only message-part kind defined today.
+	AttachmentPartKind = "attachment"
+	// MimePatternsMax bounds one contribution's MIME patterns.
+	MimePatternsMax = 32
+	// MimePatternMaxBytes bounds one MIME pattern (the longest legal MIME type
+	// names are far below this; the bound keeps a plugin from storing junk).
+	MimePatternMaxBytes = 128
+	// mimeTokenMax bounds one type/subtype token inside a pattern.
+	mimeTokenMax = 127
+)
+
+// mimeTokenPattern is the grammar of one non-wildcard MIME token: lowercase
+// letters, digits and the RFC 6838 punctuation `.` `+` `-`; a leading
+// alphanumeric keeps the pattern from starting with punctuation.
+var mimeTokenPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9.+-]*$`)
+
+// MimePatternProblem reports why a MIME narrowing pattern is not `type/subtype`
+// or `type/*`. An empty result means the pattern is well-formed.
+func MimePatternProblem(pattern string) string {
+	if strings.TrimSpace(pattern) == "" {
+		return "a MIME pattern must not be empty"
+	}
+	if len(pattern) > MimePatternMaxBytes {
+		return fmt.Sprintf("a MIME pattern must be at most %d bytes", MimePatternMaxBytes)
+	}
+	if pattern != strings.ToLower(pattern) {
+		return "a MIME pattern must be lowercase"
+	}
+	slash := strings.IndexByte(pattern, '/')
+	if slash <= 0 || slash == len(pattern)-1 || strings.Count(pattern, "/") != 1 {
+		return "a MIME pattern must be type/subtype or type/*"
+	}
+	typ, subtype := pattern[:slash], pattern[slash+1:]
+	if typ == "*" {
+		return "the wildcard is only allowed as the subtype (type/*)"
+	}
+	if len(typ) > mimeTokenMax || !mimeTokenPattern.MatchString(typ) {
+		return "the MIME type token has an unsupported character"
+	}
+	if subtype == "*" {
+		return ""
+	}
+	if len(subtype) > mimeTokenMax || !mimeTokenPattern.MatchString(subtype) {
+		return "the MIME subtype token has an unsupported character"
+	}
+	return ""
+}
+
+// AttachmentClaimProblems validates the `part`/`mime` claim of one contribution
+// relative to its slot. Field paths are relative ("part", "mime[0]"); callers
+// prefix them with the contribution path they render. The duplicate rule is
+// per plugin and lives in the callers that see every contribution.
+func AttachmentClaimProblems(slot, part string, mime []string) []FieldError {
+	var problems []FieldError
+	add := func(field, format string, args ...any) {
+		problems = append(problems, FieldError{Field: field, Message: fmt.Sprintf(format, args...)})
+	}
+	slot = strings.TrimSpace(slot)
+	part = strings.TrimSpace(part)
+	if slot != MessagePartSlotID {
+		if part != "" {
+			add("part", "part is only supported on %s", MessagePartSlotID)
+		}
+		if len(mime) > 0 {
+			add("mime", "mime narrowing is only supported on %s", MessagePartSlotID)
+		}
+		return problems
+	}
+	if part != "" && part != AttachmentPartKind {
+		add("part", "part must be %s", AttachmentPartKind)
+	}
+	if len(mime) > 0 && part != AttachmentPartKind {
+		add("part", "mime narrowing requires part: %s", AttachmentPartKind)
+	}
+	if len(mime) > MimePatternsMax {
+		add("mime", "at most %d MIME patterns are allowed per contribution", MimePatternsMax)
+	}
+	for index, pattern := range mime {
+		if problem := MimePatternProblem(pattern); problem != "" {
+			add(fmt.Sprintf("mime[%d]", index), "%s", problem)
+		}
+	}
+	return problems
 }
 
 // formSupportsTarget reports whether a contribution form can render on a
@@ -1018,13 +1118,16 @@ func (m *Manifest) validateContributions(errs *fieldSet, env Environment) {
 	for _, slot := range m.Provides.Slots {
 		selfSlots[slot.ID] = slot
 	}
-	validateContributionList(errs, "contributes", selfSlots, env, m.Contributes)
+	validateContributionList(errs, "contributes", selfSlots, env, m.Contributes, false)
 }
 
 // validateContributionList is the one contribution validator shared by
-// plugin.yaml and extensibility.json.
-func validateContributionList(errs *fieldSet, fieldPrefix string, selfSlots map[string]SlotDecl, env Environment, contributions []Contribution) {
+// plugin.yaml and extensibility.json. claimsAllowed says whether the source may
+// carry `part`/`mime`: the machine-readable extensibility.json owns attachment
+// claims, plugin.yaml does not (change keel-plugin-attachment).
+func validateContributionList(errs *fieldSet, fieldPrefix string, selfSlots map[string]SlotDecl, env Environment, contributions []Contribution, claimsAllowed bool) {
 	seen := map[string]bool{}
+	claimedMime := map[string]string{}
 	for index, contribution := range contributions {
 		prefix := fmt.Sprintf("%s[%d]", fieldPrefix, index)
 		validSlot := false
@@ -1035,6 +1138,29 @@ func validateContributionList(errs *fieldSet, fieldPrefix string, selfSlots map[
 			errs.add(prefix+".slot", "slot %q must be a namespaced slot id (<plugin>.<name>)", contribution.Slot)
 		default:
 			validSlot = true
+		}
+		if !claimsAllowed && (strings.TrimSpace(contribution.Part) != "" || len(contribution.Mime) > 0) {
+			if strings.TrimSpace(contribution.Part) != "" {
+				errs.add(prefix+".part", "part is an extensibility.json claim; declare it in %s, not %s", ExtensibilityFileName, PluginFileName)
+			}
+			if len(contribution.Mime) > 0 {
+				errs.add(prefix+".mime", "mime is an extensibility.json claim; declare it in %s, not %s", ExtensibilityFileName, PluginFileName)
+			}
+		} else if claimsAllowed {
+			for _, problem := range AttachmentClaimProblems(contribution.Slot, contribution.Part, contribution.Mime) {
+				errs.add(prefix+"."+problem.Field, "%s", problem.Message)
+			}
+			// The same plugin may not claim one MIME pattern twice: the host
+			// picks the first matching contribution, so a duplicate would make
+			// declaration order the only difference between two identical claims.
+			for mimeIndex, pattern := range contribution.Mime {
+				if first, exists := claimedMime[pattern]; exists {
+					errs.add(fmt.Sprintf("%s.mime[%d]", prefix, mimeIndex),
+						"MIME pattern %q is already claimed by %s", pattern, first)
+					continue
+				}
+				claimedMime[pattern] = fmt.Sprintf("%s.mime[%d]", prefix, mimeIndex)
+			}
 		}
 		if !validSlotForm(contribution.Form) {
 			errs.add(prefix+".form", "form %q is not one of chunk|package|iframe|data", contribution.Form)

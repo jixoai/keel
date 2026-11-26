@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -523,5 +525,77 @@ func TestPluginInstallRejectsAForcedDecisionKind(t *testing.T) {
 		if strings.HasPrefix(call, "install:") {
 			t.Fatalf("the manager installed the package: %v", manager.calls)
 		}
+	}
+}
+
+// TestPluginApprovalShowsAttachmentClaims is the install-approval snapshot for
+// change keel-plugin-attachment: the question names the attachment preview
+// contribution and its MIME narrowing, so the approver sees the surface being
+// adopted before saying allow.
+func TestPluginApprovalShowsAttachmentClaims(t *testing.T) {
+	manager := &fakePluginManager{}
+	harness := newPluginAPITest(t, manager)
+	tenant := pluginTestTenant
+	dir := t.TempDir()
+	files := map[string]string{
+		"plugin.yaml": `id: vendor.preview
+version: 1.0.0
+kind: webview
+description: PDF preview
+engines:
+  keel: ">=0.1.0 <1.0.0"
+provides:
+  ui:
+    entry: ui/index.html
+contributes:
+  - { slot: keel.ui.message-part, form: chunk, entry: ui/panel.js }
+extensibility:
+  doc: EXTENSIBILITY.md
+  schema: extensibility.json
+`,
+		"EXTENSIBILITY.md": "# preview\n",
+		"extensibility.json": `{
+  "schema": "keel.plugin-extensibility/1",
+  "plugin": "vendor.preview",
+  "version": "1.0.0",
+  "summary": "PDF preview",
+  "slots": [],
+  "contributes": [
+    {"slot": "keel.ui.message-part", "form": "chunk", "entry": "ui/panel.js",
+     "part": "attachment", "mime": ["application/pdf", "image/*"]}
+  ],
+  "configuration": [],
+  "hooks": [],
+  "providers": [],
+  "examples": [],
+  "limits": []
+}`,
+		"ui/index.html": "<html>preview</html>",
+		"ui/panel.js":   "export function render() {}",
+	}
+	for name, content := range files {
+		path := filepath.Join(dir, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var asked struct {
+		ApprovalRequired bool                `json:"approvalRequired"`
+		Decision         harnessext.Decision `json:"decision"`
+	}
+	if code := harness.write(t, http.MethodPost, "/v1/plugins/install", tenant,
+		map[string]any{"path": dir}, &asked); code != http.StatusAccepted {
+		t.Fatalf("install ask = %d (%+v)", code, asked)
+	}
+	for _, want := range []string{"keel.ui.message-part", "attachment preview contribution", "application/pdf", "image/*"} {
+		if !strings.Contains(asked.Decision.Prompt, want) {
+			t.Fatalf("approval prompt lacks %q: %q", want, asked.Decision.Prompt)
+		}
+	}
+	if len(manager.calls) != 0 {
+		t.Fatalf("asking must not install: %+v", manager.calls)
 	}
 }

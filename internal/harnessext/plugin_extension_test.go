@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -104,6 +105,88 @@ func TestDecodeExtensionMissingDocumentIsNotAnInstallError(t *testing.T) {
 	}
 }
 
+// attachmentPackage writes a webview package whose plugin.yaml declares the
+// message-part contribution and whose extensibility.json carries the claim.
+func attachmentPackage(t *testing.T, id, claim string) string {
+	t.Helper()
+	manifest := `id: ` + id + `
+version: 1.0.0
+kind: webview
+description: attachment preview fixture
+engines:
+  keel: ">=0.1.0 <1.0.0"
+provides:
+  ui:
+    entry: ui/index.html
+contributes:
+  - { slot: keel.ui.message-part, form: chunk, entry: ui/panel.js }
+extensibility:
+  doc: EXTENSIBILITY.md
+  schema: extensibility.json
+`
+	doc := fmt.Sprintf(`{
+  "schema": "keel.plugin-extensibility/1",
+  "plugin": %q,
+  "version": "1.0.0",
+  "summary": "attachment preview fixture",
+  "slots": [],
+  "contributes": [%s],
+  "configuration": [],
+  "hooks": [],
+  "providers": [],
+  "examples": [],
+  "limits": []
+}`, id, claim)
+	return writePluginPackage(t, filepath.Join(t.TempDir(), strings.ReplaceAll(id, ".", "-")), map[string]string{
+		"plugin.yaml":        manifest,
+		"ui/index.html":      "<html>panel</html>",
+		"ui/panel.js":        "export function render() {}",
+		"EXTENSIBILITY.md":   "# fixture\n",
+		"extensibility.json": doc,
+	})
+}
+
+// TestDecodeExtensionMergesAttachmentClaims pins the merge rule: part/mime
+// attach to the contribution plugin.yaml declared by (slot, form, entry); they
+// never create a second entry, and the projection reaches the inventory.
+func TestDecodeExtensionMergesAttachmentClaims(t *testing.T) {
+	dir := attachmentPackage(t, "vendor.preview", `{"slot": "keel.ui.message-part", "form": "chunk", "entry": "ui/panel.js",
+     "part": "attachment", "mime": ["application/pdf", "image/*"]}`)
+	pkg := pluginpkg.LoadDir(dir, pluginpkg.Environment{KeelVersion: testKeelVersion()})
+	if !pkg.Usable() {
+		t.Fatalf("fixture package is not usable: %+v", pkg.Problem)
+	}
+	decl := DecodeExtension(pkg.Dir, pkg.Manifest)
+	if len(decl.Problems) > 0 {
+		t.Fatalf("problems = %+v", decl.Problems)
+	}
+	if len(decl.Contributes) != 1 {
+		t.Fatalf("claims created a duplicate contribution: %+v", decl.Contributes)
+	}
+	contribution := decl.Contributes[0]
+	if contribution.Part != pluginpkg.AttachmentPartKind || strings.Join(contribution.Mime, ",") != "application/pdf,image/*" {
+		t.Fatalf("merged contribution = %+v", contribution)
+	}
+	claims := AttachmentClaims(decl.Contributes)
+	if len(claims) != 1 || claims[0].Slot != pluginpkg.MessagePartSlotID ||
+		claims[0].Form != "chunk" || len(claims[0].Mime) != 2 {
+		t.Fatalf("claims = %+v", claims)
+	}
+}
+
+func TestDecodeExtensionRejectsABadAttachmentClaim(t *testing.T) {
+	dir := attachmentPackage(t, "vendor.badclaim", `{"slot": "keel.ui.message-part", "form": "chunk", "entry": "ui/panel.js",
+     "part": "attachment", "mime": ["Application/PDF"]}`)
+	pkg := pluginpkg.LoadDir(dir, pluginpkg.Environment{KeelVersion: testKeelVersion()})
+	if pkg.Usable() {
+		t.Fatal("an uppercase MIME pattern must not validate")
+	}
+	if pkg.Problem == nil || len(pkg.Problem.Fields) == 0 ||
+		!strings.Contains(pkg.Problem.Fields[0].Field, "mime") {
+		t.Fatalf("problem = %+v", pkg.Problem)
+	}
+}
+
 func TestValidateExtensionFailsClosed(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -144,6 +227,35 @@ func TestValidateExtensionFailsClosed(t *testing.T) {
 			name:  "javascript iframe",
 			decl:  ExtensionDeclaration{Contributes: []ExtensionContribution{{Slot: "keel.ui.surface", Form: "iframe", Entry: "javascript:alert(1)"}}},
 			field: "contributes[0].entry",
+		},
+		{
+			name: "attachment claim on a foreign slot",
+			decl: ExtensionDeclaration{Contributes: []ExtensionContribution{{
+				Slot: "keel.ui.action", Form: "chunk", Entry: "x.js", Part: "attachment", Mime: []string{"application/pdf"},
+			}}},
+			field: "contributes[0].part",
+		},
+		{
+			name: "mime without the attachment claim",
+			decl: ExtensionDeclaration{Contributes: []ExtensionContribution{{
+				Slot: "keel.ui.message-part", Form: "chunk", Entry: "x.js", Mime: []string{"application/pdf"},
+			}}},
+			field: "contributes[0].part",
+		},
+		{
+			name: "invalid mime pattern",
+			decl: ExtensionDeclaration{Contributes: []ExtensionContribution{{
+				Slot: "keel.ui.message-part", Form: "chunk", Entry: "x.js", Part: "attachment", Mime: []string{"Image/PNG"},
+			}}},
+			field: "contributes[0].mime[0]",
+		},
+		{
+			name: "duplicate mime pattern across contributions",
+			decl: ExtensionDeclaration{Contributes: []ExtensionContribution{
+				{Slot: "keel.ui.message-part", Form: "chunk", Entry: "a.js", Part: "attachment", Mime: []string{"application/pdf"}},
+				{Slot: "keel.ui.message-part", Form: "chunk", Entry: "b.js", Part: "attachment", Mime: []string{"application/pdf"}},
+			}},
+			field: "contributes[1].mime[0]",
 		},
 	}
 	for _, tc := range cases {
@@ -259,3 +371,37 @@ func TestPluginViewJSONCarriesTheDeclaration(t *testing.T) {
 }
 
 var _ = os.ErrNotExist
+
+// TestManagerViewCarriesAttachmentClaims pins the GET /v1/plugins projection:
+// the claim fields ride the same contribution the client already reads, so the
+// web client can select a renderer by part + MIME without a second endpoint.
+func TestManagerViewCarriesAttachmentClaims(t *testing.T) {
+	root := t.TempDir()
+	harness := newManagerHarness(t, root, nil)
+	ctx := context.Background()
+	if err := harness.manager.Boot(ctx); err != nil {
+		t.Fatal(err)
+	}
+	source := attachmentPackage(t, "vendor.preview", `{"slot": "keel.ui.message-part", "form": "chunk", "entry": "ui/panel.js",
+     "part": "attachment", "mime": ["application/pdf", "image/*"]}`)
+	if _, err := harness.manager.Install(ctx, InstallRequest{Path: source}, AuditContext{Actor: "tester"}); err != nil {
+		t.Fatal(err)
+	}
+	views := harness.manager.Snapshot().Plugins
+	if len(views) != 1 || len(views[0].Contributes) != 1 {
+		t.Fatalf("inventory = %+v", views)
+	}
+	contribution := views[0].Contributes[0]
+	if contribution.Part != pluginpkg.AttachmentPartKind || len(contribution.Mime) != 2 {
+		t.Fatalf("contribution claims = %+v", contribution)
+	}
+	raw, err := json.Marshal(views[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, needle := range []string{`"part":"attachment"`, `"mime":["application/pdf","image/*"]`} {
+		if !strings.Contains(string(raw), needle) {
+			t.Fatalf("view JSON lacks %s: %s", needle, raw)
+		}
+	}
+}
