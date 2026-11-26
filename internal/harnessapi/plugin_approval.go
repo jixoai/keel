@@ -37,6 +37,7 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"github.com/jixoai/keel/internal/access"
@@ -115,6 +116,10 @@ type pluginApprovalAsk struct {
 	// Claims are the attachment preview claims the action will register,
 	// rendered into the question (change keel-plugin-attachment).
 	Claims []string
+	// Commands are the chat commands the action will publish, rendered into the
+	// question (change keel-plugin-commands): every published name with its
+	// danger class and client targets.
+	Commands []string
 }
 
 // pluginWriteContext is the single entrance of every approval-gated lifecycle
@@ -414,6 +419,11 @@ func pluginApprovalPrompt(ask pluginApprovalAsk) string {
 		// a preview contribution is UI code that draws message content.
 		prompt += "\nThis plugin will claim: " + strings.Join(ask.Claims, "; ") + "."
 	}
+	if len(ask.Commands) > 0 {
+		// A command is a named user action the approval adopts: the published
+		// name, danger class and targets are part of what is being approved.
+		prompt += "\nThis plugin will add commands: " + strings.Join(ask.Commands, "; ") + "."
+	}
 	return prompt
 }
 
@@ -547,19 +557,94 @@ func installApprovalAsk(path, contentHash string) pluginApprovalAsk {
 	// usable package with a valid declaration contributes claims; a broken one is
 	// refused by the manager and is not described as if it would load.
 	ask.Claims = attachmentClaimsFromPackage(target)
+	ask.Commands = commandApprovalPromptsFromPackage(target)
 	return ask
+}
+
+// Command approval rendering bounds. A valid declaration's line is at most a
+// few hundred bytes; the caps keep a pathological manifest from flooding the
+// decision UI.
+const (
+	pluginApprovalCommandLineMax  = 8 << 10
+	pluginApprovalCommandsTextMax = 64 << 10
+)
+
+// commandApprovalPrompts renders the plugin's published commands for the
+// approval question: the published name, one-line summary, danger class and
+// client targets. Invalid declarations never reach here (manifest validation
+// refuses them at install/update).
+func commandApprovalPrompts(manifest *pluginpkg.Manifest) []string {
+	if manifest == nil {
+		return nil
+	}
+	commands := manifest.PublishedCommands()
+	if len(commands) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(commands))
+	total := 0
+	for _, command := range commands {
+		targets := make([]string, 0, len(command.Decl.EffectiveTargets()))
+		for _, target := range command.Decl.EffectiveTargets() {
+			targets = append(targets, string(target))
+		}
+		line := fmt.Sprintf("/%s — %s (danger: %s; targets: %s)",
+			command.Published, strings.TrimSpace(command.Decl.Summary), command.Decl.Danger, strings.Join(targets, ","))
+		line = boundApprovalText(line, pluginApprovalCommandLineMax)
+		if total+len(line) > pluginApprovalCommandsTextMax {
+			break
+		}
+		total += len(line)
+		out = append(out, line)
+	}
+	return out
+}
+
+// commandApprovalPromptsFromPackage reads the declarations of a usable package.
+// A broken package is refused later by the manager; the question then carries no
+// partial command list.
+func commandApprovalPromptsFromPackage(dir string) []string {
+	pkg := pluginpkg.LoadDir(dir, pluginpkg.Environment{})
+	if !pkg.Usable() {
+		return nil
+	}
+	return commandApprovalPrompts(pkg.Manifest)
+}
+
+// commandApprovalPromptsFromView is the installed-plugin form.
+func commandApprovalPromptsFromView(view harnessext.PluginView) []string {
+	if view.Problem != nil || view.Provides.Commands == nil {
+		return nil
+	}
+	return commandApprovalPrompts(&pluginpkg.Manifest{
+		ID:       view.ID,
+		Provides: pluginpkg.Provides{Commands: view.Provides.Commands},
+	})
+}
+
+// boundApprovalText cuts text to max bytes without splitting a UTF-8 rune.
+func boundApprovalText(value string, max int) string {
+	if len(value) <= max {
+		return value
+	}
+	cut := value[:max]
+	for len(cut) > 0 && !utf8.RuneStart(cut[len(cut)-1]) {
+		cut = cut[:len(cut)-1]
+	}
+	return strings.ToValidUTF8(cut, "")
 }
 
 // pluginIDApprovalAsk builds the ask of an enable or update.
 func (s *Server) pluginIDApprovalAsk(action, id string) pluginApprovalAsk {
 	version, contentHash := "", ""
-	var claims []string
+	var claims, commands []string
 	if s.cfg.PluginManager != nil {
 		for _, view := range s.cfg.PluginManager.Snapshot().Plugins {
 			if view.ID == id {
 				version = view.Version
 				contentHash = view.ContentHash
 				claims = attachmentClaimsFromView(view)
+				commands = commandApprovalPromptsFromView(view)
 				break
 			}
 		}
@@ -569,7 +654,7 @@ func (s *Server) pluginIDApprovalAsk(action, id string) pluginApprovalAsk {
 		label = id + " " + version
 	}
 	return pluginApprovalAsk{Action: action, Target: id, Label: label, PluginID: id,
-		Version: version, ContentHash: contentHash, Claims: claims}
+		Version: version, ContentHash: contentHash, Claims: claims, Commands: commands}
 }
 
 // pluginApprovalSession is the session namespace plugin approvals live in.

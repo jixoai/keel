@@ -725,3 +725,81 @@ func TestPluginApprovalClaimPromptListsEveryValidatedMimePattern(t *testing.T) {
 		t.Fatalf("approval line claims truncation for a valid list: %q", lines[0])
 	}
 }
+
+// TestPluginApprovalShowsCommands pins the command surface of the approval
+// question (change keel-plugin-commands, task 1.5): every published command
+// name, its danger class and its targets are visible before an install is
+// approved.
+func TestPluginApprovalShowsCommands(t *testing.T) {
+	manager := &fakePluginManager{}
+	harness := newPluginAPITest(t, manager)
+	dir := t.TempDir()
+	files := map[string]string{
+		"plugin.yaml": `id: vendor.commands
+version: 1.0.0
+kind: webview
+description: command package
+engines:
+  keel: ">=0.1.0 <1.0.0"
+provides:
+  tools: [vendor.commands.run, vendor.commands.purge]
+  commands:
+    - name: refresh
+      summary: Refresh the index.
+      tool: vendor.commands.run
+      danger: write
+      targets: [web, native]
+    - name: purge
+      summary: Delete every document.
+      tool: vendor.commands.purge
+      danger: destructive
+  ui:
+    entry: ui/index.html
+entry:
+  command: [node, backend.js]
+`,
+		"ui/index.html": "<html></html>",
+	}
+	for name, content := range files {
+		path := filepath.Join(dir, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var asked struct {
+		ApprovalRequired bool                `json:"approvalRequired"`
+		Decision         harnessext.Decision `json:"decision"`
+	}
+	if code := harness.write(t, http.MethodPost, "/v1/plugins/install", pluginTestTenant,
+		map[string]any{"path": dir}, &asked); code != http.StatusAccepted {
+		t.Fatalf("install ask = %d (%+v)", code, asked)
+	}
+	for _, want := range []string{
+		"/vendor.commands:refresh", "Refresh the index.", "danger: write", "targets: web,native",
+		"/vendor.commands:purge", "Delete every document.", "danger: destructive", "targets: web,native,tui",
+	} {
+		if !strings.Contains(asked.Decision.Prompt, want) {
+			t.Fatalf("approval prompt lacks %q: %q", want, asked.Decision.Prompt)
+		}
+	}
+	if len(manager.calls) != 0 {
+		t.Fatalf("asking must not install: %+v", manager.calls)
+	}
+}
+
+func TestCommandApprovalPromptsFromViewIgnoresInvalidView(t *testing.T) {
+	view := harnessext.PluginView{ID: "vendor.one", Problem: &pluginpkg.Problem{Reason: "invalid"}}
+	if got := commandApprovalPromptsFromView(view); got != nil {
+		t.Fatalf("invalid view rendered commands: %+v", got)
+	}
+	view = harnessext.PluginView{ID: "vendor.one", Provides: pluginpkg.Provides{Commands: []pluginpkg.CommandDecl{{
+		Name: "run", Summary: "Run.", Tool: "vendor.one.run", Danger: pluginpkg.DangerRead,
+	}}}}
+	got := commandApprovalPromptsFromView(view)
+	if len(got) != 1 || !strings.Contains(got[0], "/vendor.one:run") || !strings.Contains(got[0], "danger: read") {
+		t.Fatalf("view commands = %+v", got)
+	}
+}
