@@ -6,8 +6,9 @@
 // These cases pin the decisions the page draws; rendering is covered by
 // `superagent.tui.test.tsx`.
 import { expect, test } from "nsh/test";
-import type { SuperagentTicketView } from "./contract";
-import { superagentCounts, superagentDeadline, superagentSourceText, superagentStatusLabel } from "./superagent";
+import type { SuperagentApi, SuperagentTicketView } from "./contract";
+import { superagentAccess, superagentCounts, superagentDeadline, superagentSourceText, superagentStatusLabel } from "./superagent";
+import { store } from "./store";
 
 const ticket = (id: string, status: string, openAttentionCount = 0): SuperagentTicketView => ({
   id,
@@ -72,4 +73,58 @@ test("superagent 词表：未知状态保留原文，来源行不编造来源", 
   expect(superagentStatusLabel(undefined)).toBe("未知");
   expect(superagentSourceText({ source: "github", kind: "issue", id: "1042" })).toBe("GitHub · Issue #1042");
   expect(superagentSourceText(undefined)).toBe("未记录来源");
+});
+
+test("superagent 后台重读保留写反馈，只有手动刷新才清空", async () => {
+  let boardCalls = 0;
+  let inboxCalls = 0;
+  const transport: SuperagentApi = {
+    async superagentBoard() {
+      boardCalls += 1;
+      return { tenantId: "t-1", modeId: "superagent", tickets: [] };
+    },
+    async superagentAttention() {
+      inboxCalls += 1;
+      return { tenantId: "t-1", items: [] };
+    },
+    async answerSuperagentAttention() {
+      throw new Error("not used");
+    },
+    async resumeSuperagentTicket() {
+      throw new Error("not used");
+    },
+    async stopSuperagentTicket() {
+      throw new Error("not used");
+    },
+  };
+  store.setSuperagentTransport(transport);
+  superagentAccess.reset();
+
+  await superagentAccess.refresh();
+  expect(boardCalls).toBe(1);
+  expect(inboxCalls).toBe(1);
+
+  superagentAccess.notice.set("答复已提交，工单已继续执行。");
+  superagentAccess.actionError.set({
+    id: "a-1",
+    kind: "answer",
+    failure: { status: 403, message: "答复失败" },
+  });
+
+  // A background/SSE re-read keeps the operator's last write feedback.
+  await superagentAccess.refreshForEvent(new Set(["superagent"]));
+  expect(boardCalls).toBe(2);
+  expect(inboxCalls).toBe(2);
+  expect(superagentAccess.notice()).toBe("答复已提交，工单已继续执行。");
+  expect(superagentAccess.actionError()?.id).toBe("a-1");
+
+  // The manual 刷新 is an explicit read: it clears both.
+  await superagentAccess.refresh();
+  expect(boardCalls).toBe(3);
+  expect(inboxCalls).toBe(3);
+  expect(superagentAccess.notice()).toBe(null);
+  expect(superagentAccess.actionError()).toBe(null);
+
+  store.setSuperagentTransport(null);
+  superagentAccess.reset();
 });

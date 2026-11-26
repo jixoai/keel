@@ -285,22 +285,28 @@ export interface SuperagentActionError extends SuperagentActionState {
   failure: SuperagentFailure;
 }
 
-/** The server's super-agent refusals are English one-liners. Two of them are
- * stable operator facts a page shows; they get the product's own Chinese
- * sentence instead of surfacing the raw Go text. */
-function superagentErrorMessage(error: KeelApiError): string {
-  if (error.status === 503 && /super-agent board is not wired/i.test(error.message)) {
-    return "这个部署还没有启用超级助理工单看板；请让管理员启用 superagent 模式后重试。";
+/** The server's super-agent refusals are English one-liners. The two states a
+ * page must explain are identified by the response's own facts, not by
+ * matching its prose: a 503 is an unwired/unavailable board, and a 403 without
+ * `requiredKey` is the independent operator seam (the read/write gates always
+ * name their key). */
+type SuperagentFailureContext = "read" | "action";
+
+function superagentErrorMessage(error: KeelApiError, context: SuperagentFailureContext): string {
+  if (error.status === 503) {
+    return context === "action"
+      ? "工单操作暂时不可用（服务端审计或投递未就绪）；请确认已启用 superagent 后重试。"
+      : "工单看板暂时不可用；请确认部署已启用 superagent 模式后重试。";
   }
-  if (/operator authorization is not wired/i.test(error.message)) {
+  if (context === "action" && error.status === 403 && !error.requiredKey) {
     return "服务端还没有接通 operator 授权（OperatorAuthorizer）；恢复、停止或答复需要管理员启用该授权。";
   }
   return errorMessageOf(error);
 }
 
-const failureOf = (error: unknown): SuperagentFailure => {
+const failureOf = (error: unknown, context: SuperagentFailureContext): SuperagentFailure => {
   if (error instanceof KeelApiError) {
-    const failure: SuperagentFailure = { status: error.status, message: superagentErrorMessage(error) };
+    const failure: SuperagentFailure = { status: error.status, message: superagentErrorMessage(error, context) };
     if (error.requestId) failure.requestId = error.requestId;
     if (error.requiredKey) failure.requiredKey = error.requiredKey;
     return failure;
@@ -331,38 +337,56 @@ class SuperagentAccess {
   readonly notice = signal<string | null>(null);
 
   private readToken = 0;
+  /** A read has been attempted for this account (including a failed one). The
+   * invalidation stream may re-read then; a chapter that was never opened
+   * stays quiet. */
+  private attempted = false;
+  /** One fact arrived while a read was in flight: re-read once it settles
+   * (the in-flight answer may predate the write). */
+  private pendingRefresh = false;
 
   /** Read once when the page mounts; a failed read waits for an explicit
    * retry/refresh instead of re-issuing on every render. */
   ensure(): void {
     if (!can("task.read")) return;
     if (this.loading() || this.board() !== null || this.error() !== null) return;
+    this.attempted = true;
     void this.load();
   }
 
   async refresh(): Promise<void> {
+    this.attempted = true;
     await this.load();
   }
 
   /** Re-read the board/inbox for a `superagent` invalidation fact (the identity
-   * stream's one SSE kind). Only a page that already has a projection re-reads:
-   * a chapter the reader never opened must not fire background requests. An
-   * in-flight read already covers the fact; a burst is coalesced by the stream.
-   * The manual 刷新 control remains the explicit fallback if this was missed. */
+   * stream's one SSE kind). Only a page that already attempted a read re-reads
+   * (an error page must recover without a manual retry); a chapter the reader
+   * never opened must not fire background requests. A fact that lands while a
+   * read is in flight is remembered and re-read once after it settles; a burst
+   * is coalesced by the stream. The manual 刷新 control remains the fallback. */
   async refreshForEvent(kinds: ReadonlySet<string>): Promise<void> {
     if (!kinds.has("superagent")) return;
-    if (this.board() === null && !this.inboxLoaded()) return;
-    if (this.loading()) return;
-    await this.load();
+    if (!this.attempted) return;
+    if (this.loading()) {
+      this.pendingRefresh = true;
+      return;
+    }
+    await this.load({ silent: true });
   }
 
-  private async load(): Promise<void> {
+  private async load(options: { silent?: boolean } = {}): Promise<void> {
     const api = store.superagentApi();
     const token = ++this.readToken;
     this.loading.set(true);
     this.error.set(null);
-    this.notice.set(null);
-    this.actionError.set(null);
+    // A background/SSE re-read is not an operator action: the last write's
+    // success or failure sentence stays until an explicit action (which calls
+    // the non-silent load) or the manual 刷新 clears it.
+    if (options.silent !== true) {
+      this.notice.set(null);
+      this.actionError.set(null);
+    }
     try {
       if (!api) {
         this.board.set(null);
@@ -384,7 +408,7 @@ class SuperagentAccess {
         this.inbox.set([]);
         this.inboxLoaded.set(false);
         this.inboxError.set(null);
-        this.error.set(failureOf(boardResult.reason));
+        this.error.set(failureOf(boardResult.reason, "read"));
         return;
       }
       this.board.set(boardResult.value);
@@ -395,11 +419,21 @@ class SuperagentAccess {
       } else {
         this.inbox.set([]);
         this.inboxLoaded.set(false);
-        this.inboxError.set(failureOf(inboxResult.reason));
+        this.inboxError.set(failureOf(inboxResult.reason, "read"));
       }
       this.updatedAt.set(new Date().toISOString());
     } finally {
-      if (token === this.readToken) this.loading.set(false);
+      if (token === this.readToken) {
+        this.loading.set(false);
+        // A fact arrived during this read: its answer may predate the write
+        // that emitted the fact, so read once more now that the first answer
+        // has settled. This extra read is background work: it must not clear
+        // the operator's write feedback.
+        if (this.pendingRefresh) {
+          this.pendingRefresh = false;
+          void this.load({ silent: true });
+        }
+      }
     }
   }
 
@@ -419,7 +453,7 @@ class SuperagentAccess {
       this.notice.set(this.error() ? "答复已提交；看板刷新失败，请点「刷新」。" : "答复已提交，工单已继续执行。");
       return true;
     } catch (error) {
-      this.actionError.set({ id: attentionId, kind: "answer", failure: failureOf(error) });
+      this.actionError.set({ id: attentionId, kind: "answer", failure: failureOf(error, "action") });
       return false;
     } finally {
       this.clearAction(attentionId, "answer");
@@ -441,7 +475,7 @@ class SuperagentAccess {
       this.notice.set(this.error() ? "恢复请求已提交；看板刷新失败，请点「刷新」。" : "工单已恢复，等待新的执行结果。");
       return true;
     } catch (error) {
-      this.actionError.set({ id: ticketId, kind: "resume", failure: failureOf(error) });
+      this.actionError.set({ id: ticketId, kind: "resume", failure: failureOf(error, "action") });
       return false;
     } finally {
       this.clearAction(ticketId, "resume");
@@ -464,7 +498,7 @@ class SuperagentAccess {
       this.notice.set(this.error() ? "停止请求已提交；看板刷新失败，请点「刷新」。" : "工单已停止；Mandate 已撤销，记录保留可审计。");
       return true;
     } catch (error) {
-      this.actionError.set({ id: ticketId, kind: "stop", failure: failureOf(error) });
+      this.actionError.set({ id: ticketId, kind: "stop", failure: failureOf(error, "action") });
       return false;
     } finally {
       this.clearAction(ticketId, "stop");
@@ -474,6 +508,8 @@ class SuperagentAccess {
   /** Drop the page's state (the account changed). */
   reset(): void {
     this.readToken += 1;
+    this.attempted = false;
+    this.pendingRefresh = false;
     this.board.set(null);
     this.loading.set(false);
     this.error.set(null);

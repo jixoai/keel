@@ -178,7 +178,8 @@ test("TUI: superagent 看板五态——加载骨架 / 空（下一步）/ 错�
   const unwired = await harness(1440, "board-unwired");
   await unwired.waitFor("id:superagent-error");
   const unwiredText = unwired.texts().join("\n");
-  expect(unwiredText).toContain("还没有启用超级助理工单看板");
+  expect(unwiredText).toContain("工单看板暂时不可用");
+  expect(unwiredText).toContain("superagent 模式");
   expect(unwiredText).not.toContain("not wired");
   expect(unwiredText).toContain("请求编号 k-super-503");
 

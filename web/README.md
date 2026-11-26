@@ -151,15 +151,16 @@ web/
 - **权限门**：读=`task.read`；写=`task.write` 且服务端 `OperatorAuthorizer` 另行判定。只读账号
   看得到看板，但答复/恢复/停止控件不渲染，页面明确写出缺少 `task.write`；服务端 403 显示原因，
   operator 未接通与 503 未启用均使用中文说明。
-- **实时刷新**：identity stream 新增 `superagent` kind；已加载看板/收件箱才重读（未打开不请求），
-  一个 burst 合并成一次；手动「刷新」保留为兜底。
+- **实时刷新**：identity stream 新增 `superagent` kind；只有已尝试加载的看板/收件箱才重读
+  （未打开不请求；错误态也会自愈重读）；事件落在首屏加载中时在本次结束后补读一次；
+  后台重读不清空写操作的成功/失败反馈，手动「刷新」保留为兜底并清空反馈。
 - **视觉**：计数瓦片 + 收件箱卡片 + 工单行/详情 band，全部 solid-glass 令牌 + lucide 单色；
   ≥1024 列表与详情同屏（详情 420px），<1024 列表/详情分屏，≤767 单列、计数 2×2、44px 控件。
 - **验证**：`src/screens/books/superagent.tui.test.tsx`（成功面、最新在前、answer 选项/自由文本、
   resume/stop、五态、只读、写失败、390/768）与 `src/data/superagent.test.ts`（计数/时限/词表）；
-  `nsh test --target tui --filter 'superagent'` → `14 tests: 14 passed, 0 failed`
-  （10 TUI + 3 data + 1 identity-stream 失效事件）；全量 `nsh test --target tui` →
-  `431 tests: 431 passed, 0 failed`。
+  `nsh test --target tui --filter 'superagent'` → `17 tests: 17 passed, 0 failed`
+  （10 TUI + 4 data + 3 identity-stream 失效/竞态事件）；全量 `nsh test --target tui` →
+  `434 tests: 434 passed, 0 failed`。
 
 ## 设置页与会话模型选择（change keel-model-settings）
 
