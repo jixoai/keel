@@ -276,3 +276,15 @@ test("whoami: parsed identity is the can() source", async () => {
   expect(me.accountId).toBe("a-1");
   expect(me.permissions["session.read"]).toBe("own");
 });
+
+test("decisions: the answer POST carries only optionId (unknown fields are a 400)", async () => {
+  const { fetchImpl, calls } = stub({
+    "POST /v1/sessions/s-1/decisions/d-1": () => json(200, { status: "answered" }),
+  });
+  const http = new KeelHttp("", fetchImpl);
+  await http.commands("s-1").answerDecision("d-1", "allow");
+  expect(calls.length).toBe(1);
+  expect(calls[0]?.url).toBe("/v1/sessions/s-1/decisions/d-1");
+  // The route decodes with DisallowUnknownFields: an extra `answer` was a 400.
+  expect(JSON.parse(calls[0]?.body ?? "{}")).toEqual({ optionId: "allow" });
+});

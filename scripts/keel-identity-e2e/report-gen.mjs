@@ -216,11 +216,14 @@ const coverageBlock = (() => {
 const visualBlock = (() => {
   const list = Array.isArray(data.visualDelta) ? data.visualDelta : []
   if (!list.length) return ''
+  // `after` is one screenshot path in newer steps.json (creation E2E) and an
+  // array in older lanes; accept both without making the writer adapt.
+  const afterList = (delta) => (Array.isArray(delta.after) ? delta.after : delta.after ? [delta.after] : [])
   const card = (delta) => {
     const before = delta.before
       ? `<figure><div class="imgwrap"><img src="${esc(delta.before)}" alt="before ${esc(delta.surface)}" loading="lazy"/></div><figcaption>before · ${esc(delta.note || '设计原型')}</figcaption></figure>`
       : `<div class="nobefore">旧界面不是基线（Owner 2026-11-21）；本面以真实登录/引导截图作 after。</div>`
-    const after = (delta.after || [])
+    const after = afterList(delta)
       .map((f) => `<figure><div class="imgwrap"><img src="${esc(f)}" alt="after ${esc(delta.surface)}" loading="lazy"/></div><figcaption>after · ${esc(basename(f))}</figcaption></figure>`)
       .join('')
     return `    <article class="delta"><header><h3>${esc(delta.surface)}</h3><code>${esc((delta.files || []).join(' · '))}</code></header><div class="deltagrid"><div class="side"><span class="sidetag">before</span>${before}</div><div class="side"><span class="sidetag after">after</span>${after}</div></div></article>`
@@ -229,7 +232,7 @@ const visualBlock = (() => {
 })()
 
 for (const delta of Array.isArray(data.visualDelta) ? data.visualDelta : []) {
-  for (const ref of [delta.before, ...(delta.after || [])].filter(Boolean)) {
+  for (const ref of [delta.before, ...(Array.isArray(delta.after) ? delta.after : delta.after ? [delta.after] : [])].filter(Boolean)) {
     assertDecodableShot(ref, `visual ${delta.surface}`)
   }
 }

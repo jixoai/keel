@@ -2494,7 +2494,10 @@ export class HttpCommands implements UiCommands {
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ optionId: answer, answer }),
+        // The answer route decodes with DisallowUnknownFields: an extra
+        // `answer` field made every approval card answer a 400, so the option
+        // id is the whole body (free text goes in `text`, which no card uses).
+        body: JSON.stringify({ optionId: answer }),
       },
     );
   }

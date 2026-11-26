@@ -417,7 +417,18 @@ function readEvents(api, sessionId) {
 function toolResults(events) {
   return events
     .filter((event) => event.kind === 'tool.result')
-    .map((event) => JSON.stringify(event.payload || {}));
+    .map((event) => {
+      const payload = event.payload || {};
+      // A tool result event carries content blocks; a text block's `text` is
+      // the tool's own JSON document (creationResult). Serializing the whole
+      // payload would escape those quotes and make every raw-JSON needle miss.
+      const content = Array.isArray(payload.content) ? payload.content : [];
+      const text = content
+        .map((part) => (typeof part?.text === 'string' ? part.text : ''))
+        .filter(Boolean)
+        .join('\n');
+      return text || JSON.stringify(payload);
+    });
 }
 
 /** Wait for a tool result body to contain `needle`. The run row can already
@@ -686,11 +697,20 @@ async function step4(step, ctx) {
 
   // The chunk's HTTP contract and its same-origin session gate.
   const chunkUrl = `/plugins/${PLUGIN_ID}/ui/settings.js`;
-  const chunk = await ctx.adminPage.page.request.get(BASE + chunkUrl);
-  const chunkBody = await chunk.text();
-  check(step, 'chunk 用登录 cookie 取回 200', chunk.status() === 200, 200, chunk.status());
-  check(step, 'chunk 是 JavaScript 模块', String(chunk.headers()['content-type'] || '').includes('javascript'), 'javascript', chunk.headers()['content-type']);
-  check(step, 'chunk 内容是自包含宿主 realm 版本', chunkBody.includes('__nsh_browser_realm') && chunkBody.includes('export function render'), '__nsh_browser_realm + render', chunkBody.slice(0, 80));
+  // Fetch from inside the page, not page.request: the chunk's session gate is
+  // the browser's own keel_session cookie, and an APIRequestContext does not
+  // carry it here (the anonymous fetch below is the negative control).
+  const chunk = await ctx.adminPage.page.evaluate(async (url) => {
+    const response = await fetch(url, { credentials: 'same-origin' });
+    return {
+      status: response.status,
+      contentType: response.headers.get('content-type') || '',
+      body: await response.text(),
+    };
+  }, chunkUrl);
+  check(step, 'chunk 用登录 cookie 取回 200', chunk.status === 200, 200, chunk.status);
+  check(step, 'chunk 是 JavaScript 模块', chunk.contentType.includes('javascript'), 'javascript', chunk.contentType);
+  check(step, 'chunk 内容是自包含宿主 realm 版本', chunk.body.includes('__nsh_browser_realm') && chunk.body.includes('export function render'), '__nsh_browser_realm + render', chunk.body.slice(0, 80));
   const anonymous = await fetch(BASE + chunkUrl, { signal: AbortSignal.timeout(15000) });
   check(step, '匿名请求 chunk 被 401 拒绝', anonymous.status === 401, 401, anonymous.status);
 
@@ -778,11 +798,13 @@ async function step7(step, ctx) {
   const sessionId = ctx.creationSessionId;
   const input = await api.post(`/v1/sessions/${sessionId}/input`, { text: '请卸载 e2e.panel 插件' });
   check(step, '提交卸载指令', input.status === 201, 201, input.status);
-  const removeText = await waitToolText(api, sessionId, '"action":"remove"', 90000);
+  // The tool action is `remove`; the lifecycle operation it asks to approve is
+  // `uninstall`, and that is the action the approval document carries.
+  const removeText = await waitToolText(api, sessionId, '"action":"uninstall"', 90000);
   const run = await waitRun(api, sessionId, 90000);
   const events = await readEvents(api, sessionId);
   const allResults = toolResults(events).join('\n') || removeText;
-  check(step, 'remove 打开卸载审批', run === 'done' && allResults.includes('"action":"remove"') && allResults.includes('"approvalRequired":true'), 'remove approval', allResults.slice(-200));
+  check(step, 'remove 打开卸载审批', run === 'done' && allResults.includes('"action":"uninstall"') && allResults.includes('"approvalRequired":true'), 'remove approval', allResults.slice(-200));
   const decision = await waitOpenDecision(api, sessionId);
   check(step, '卸载审批可读', decision?.kind === 'plugin.uninstall', 'plugin.uninstall', decision?.kind);
   ctx.removeDecisionId = decision.decisionId;

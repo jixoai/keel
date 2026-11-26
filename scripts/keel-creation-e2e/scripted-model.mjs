@@ -57,8 +57,11 @@ const toolNames = (body) =>
     .filter(Boolean);
 
 const decisionIdOf = (messages) => {
-  const match = allText(messages).match(/"decisionId"\s*:\s*"([0-9a-f-]{36})"/);
-  return match ? match[1] : '';
+  // The newest decision, not the first: a remove turn follows the install
+  // turn, and answering with the install decisionId is a 400 ("does not
+  // authorize this request").
+  const matches = [...allText(messages).matchAll(/"decisionId"\s*:\s*"([0-9a-f-]{36})"/g)];
+  return matches.length ? matches[matches.length - 1][1] : '';
 };
 
 const hasToolResult = (messages, needle) =>
@@ -155,7 +158,9 @@ const server = http.createServer((req, res) => {
     const scaffolded = hasToolResult(messages, '"status":"scaffolded"');
     const validated = hasToolResult(messages, '"status":"valid"');
     const installApprovalAsked = hasToolResult(messages, '"action":"install"');
-    const removeApprovalAsked = hasToolResult(messages, '"action":"remove"');
+    // `remove` is the tool action; the approval document names the lifecycle
+    // operation it gates (`plugin.uninstall`).
+    const removeApprovalAsked = hasToolResult(messages, '"action":"uninstall"');
     const decisionId = decisionIdOf(messages);
     const lastTool = [...messages].reverse().find((message) => message?.role === 'tool');
     const lastToolText = lastTool ? textOf(lastTool.content) : '';
