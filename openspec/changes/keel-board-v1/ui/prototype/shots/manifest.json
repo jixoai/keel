@@ -1,0 +1,927 @@
+{
+  "generatedAt": "2026-11-26T23:28:37.509Z",
+  "playwright": "/Users/kzf/Development/GitHub/jixoai/fde2e/thehorizonhotel/node_modules/playwright/index.mjs",
+  "base": "file:///Users/kzf/Dev/GitHub/jixoai/fde2e/.worktrees/keel-board-ui-design/openspec/changes/keel-board-v1/ui/prototype/index.html",
+  "shots": [
+    {
+      "name": "queue-1440-success",
+      "query": "scene=queue&state=success",
+      "width": 1440,
+      "height": 1000,
+      "bytes": 137042,
+      "sha1": "bb009f63281c612df33fa7a96fe3ca10e3a53150",
+      "overflow": false,
+      "errors": []
+    },
+    {
+      "name": "queue-1440-loading",
+      "query": "scene=queue&state=loading",
+      "width": 1440,
+      "height": 1000,
+      "bytes": 56190,
+      "sha1": "b89b651c6a9a14bb6014f8d57ecf2f8304113671",
+      "overflow": false,
+      "errors": []
+    },
+    {
+      "name": "queue-1440-empty",
+      "query": "scene=queue&state=empty",
+      "width": 1440,
+      "height": 1000,
+      "bytes": 61189,
+      "sha1": "0723c931606c986d20e87a1d9d7420edf34b0518",
+      "overflow": false,
+      "errors": []
+    },
+    {
+      "name": "queue-1440-filtered-empty",
+      "query": "scene=queue&state=filtered",
+      "width": 1440,
+      "height": 1000,
+      "bytes": 77924,
+      "sha1": "73fbd21a182919a731d61c76a4fd503c21cc2587",
+      "overflow": false,
+      "errors": []
+    },
+    {
+      "name": "queue-1440-error",
+      "query": "scene=queue&state=error",
+      "width": 1440,
+      "height": 1000,
+      "bytes": 64539,
+      "sha1": "3471c4244c3a18106f4a953845f6f7d78bc825b2",
+      "overflow": false,
+      "errors": []
+    },
+    {
+      "name": "queue-1440-noread-404",
+      "query": "scene=queue&state=permission&me=reader",
+      "width": 1440,
+      "height": 1000,
+      "bytes": 44106,
+      "sha1": "670c44cea57cbab3aa72d9f0afd5a91a81000183",
+      "overflow": false,
+      "errors": []
+    },
+    {
+      "name": "queue-1440-disabled",
+      "query": "scene=queue&state=disabled",
+      "width": 1440,
+      "height": 1000,
+      "bytes": 41617,
+      "sha1": "99ece807a4c3f49f77b937e5eeeff8019c13d47f",
+      "overflow": false,
+      "errors": []
+    },
+    {
+      "name": "queue-1440-stale",
+      "query": "scene=queue&state=stale",
+      "width": 1440,
+      "height": 1000,
+      "bytes": 142640,
+      "sha1": "b5d3ca9d662783d3555c9b003c134aa78b9a2e41",
+      "overflow": false,
+      "errors": []
+    },
+    {
+      "name": "queue-1440-migrate",
+      "query": "scene=queue&state=migrate",
+      "width": 1440,
+      "height": 1000,
+      "bytes": 53048,
+      "sha1": "1778d4c24dfedc690271e395d11af6e57c66357b",
+      "overflow": false,
+      "errors": []
+    },
+    {
+      "name": "queue-1440-archive",
+      "query": "scene=queue&state=success&archive=1",
+      "width": 1440,
+      "height": 1000,
+      "bytes": 65596,
+      "sha1": "0a0ca630df0b9397f332752860f3a5e5afa239da",
+      "overflow": false,
+      "errors": []
+    },
+    {
+      "name": "queue-1440-readonly",
+      "query": "scene=queue&state=success&me=reader",
+      "width": 1440,
+      "height": 1000,
+      "bytes": 133274,
+      "sha1": "942db357ad65845d03cf60c0da44a09c5b628571",
+      "overflow": false,
+      "errors": []
+    },
+    {
+      "name": "queue-1440-light-success",
+      "query": "scene=queue&state=success&theme=light",
+      "width": 1440,
+      "height": 1000,
+      "bytes": 137503,
+      "sha1": "b857575dbdfb25f15d7cef76866cb95bf55e1562",
+      "overflow": false,
+      "errors": []
+    },
+    {
+      "name": "queue-1440-light-loading",
+      "query": "scene=queue&state=loading&theme=light",
+      "width": 1440,
+      "height": 1000,
+      "bytes": 57358,
+      "sha1": "8683bb4e2f8553411b8358ffc0528bacc80d6c03",
+      "overflow": false,
+      "errors": []
+    },
+    {
+      "name": "queue-1440-light-empty",
+      "query": "scene=queue&state=empty&theme=light",
+      "width": 1440,
+      "height": 1000,
+      "bytes": 61338,
+      "sha1": "1e67e3ee63efea78283b85f21f6635d924e80f95",
+      "overflow": false,
+      "errors": []
+    },
+    {
+      "name": "queue-1440-light-error",
+      "query": "scene=queue&state=error&theme=light",
+      "width": 1440,
+      "height": 1000,
+      "bytes": 64322,
+      "sha1": "9c1d1cfd861e8a0a7c3bb7c91ea4d3fd68b3b5f7",
+      "overflow": false,
+      "errors": []
+    },
+    {
+      "name": "queue-1440-light-noread-404",
+      "query": "scene=queue&state=permission&me=reader&theme=light",
+      "width": 1440,
+      "height": 1000,
+      "bytes": 43612,
+      "sha1": "8dc8e53b1a54469f877feeb7cd407097984c583e",
+      "overflow": false,
+      "errors": []
+    },
+    {
+      "name": "task-1440-claimed",
+      "query": "scene=task&id=812&state=success",
+      "width": 1440,
+      "height": 1000,
+      "bytes": 167720,
+      "sha1": "3d34a80df69a0560a1f54db9b4e8f2eb48c4c8d8",
+      "overflow": false,
+      "errors": []
+    },
+    {
+      "name": "task-1440-ready",
+      "query": "scene=task&id=809&state=success",
+      "width": 1440,
+      "height": 1000,
+      "bytes": 96523,
+      "sha1": "bf34eda92597473c4dd94c3ce55fe47853fa98f8",
+      "overflow": false,
+      "errors": []
+    },
+    {
+      "name": "task-1440-waiting",
+      "query": "scene=task&id=830&state=success",
+      "width": 1440,
+      "height": 1000,
+      "bytes": 101148,
+      "sha1": "1e6843a8d9a61dcce59a673bf562b718d40db103",
+      "overflow": false,
+      "errors": []
+    },
+    {
+      "name": "task-1440-blocked",
+      "query": "scene=task&id=814&state=success",
+      "width": 1440,
+      "height": 1000,
+      "bytes": 141509,
+      "sha1": "b8e561b57ad797a426eaf8e55e02cfd3671f03bd",
+      "overflow": false,
+      "errors": []
+    },
+    {
+      "name": "task-1440-blocked-owner",
+      "query": "scene=task&id=850&state=success",
+      "width": 1440,
+      "height": 1000,
+      "bytes": 108393,
+      "sha1": "3c9d27e19e85be200ec35f1996ad01df50bbaf0a",
+      "overflow": false,
+      "errors": []
+    },
+    {
+      "name": "task-1440-completed",
+      "query": "scene=task&id=806&state=success",
+      "width": 1440,
+      "height": 1000,
+      "bytes": 104078,
+      "sha1": "0e57d939b45c630af6ec7e67e012214fa0491612",
+      "overflow": false,
+      "errors": []
+    },
+    {
+      "name": "task-1440-failed",
+      "query": "scene=task&id=848&state=success",
+      "width": 1440,
+      "height": 1000,
+      "bytes": 100919,
+      "sha1": "058e5f71cafa42219ea6c8050d22dda82205f0da",
+      "overflow": false,
+      "errors": []
+    },
+    {
+      "name": "task-1440-failed-readonly",
+      "query": "scene=task&id=810&state=success",
+      "width": 1440,
+      "height": 1000,
+      "bytes": 104548,
+      "sha1": "0f8daa5ebf1a7e31f20213c00c4742e21acd5299",
+      "overflow": false,
+      "errors": []
+    },
+    {
+      "name": "task-1440-canceled",
+      "query": "scene=task&id=820&state=success",
+      "width": 1440,
+      "height": 1000,
+      "bytes": 90496,
+      "sha1": "468aa830b2a3489ca8328ff4b1ea7b57e87adcaa",
+      "overflow": false,
+      "errors": []
+    },
+    {
+      "name": "task-1440-claim-lost",
+      "query": "scene=task&id=812&state=success&claim=lost",
+      "width": 1440,
+      "height": 1000,
+      "bytes": 181685,
+      "sha1": "50a461ddeaf50fa345880addeb8678efc9a67073",
+      "overflow": false,
+      "errors": []
+    },
+    {
+      "name": "task-1440-readonly",
+      "query": "scene=task&id=809&state=success&me=reader",
+      "width": 1440,
+      "height": 1000,
+      "bytes": 95497,
+      "sha1": "bd2c766fd95827a00b273da99b74dd796beccf6f",
+      "overflow": false,
+      "errors": []
+    },
+    {
+      "name": "task-1440-mirror-readonly",
+      "query": "scene=task&id=814&state=success&bridge=0",
+      "width": 1440,
+      "height": 1000,
+      "bytes": 142277,
+      "sha1": "9d417ed44ad72c2749be05a2d5b507c2ae5089f3",
+      "overflow": false,
+      "errors": []
+    },
+    {
+      "name": "task-1440-archived",
+      "query": "scene=task&id=852&state=success",
+      "width": 1440,
+      "height": 1000,
+      "bytes": 97769,
+      "sha1": "d1e43cc8dba9440638217cd3ac3c8c955c9f1b5a",
+      "overflow": false,
+      "errors": []
+    },
+    {
+      "name": "task-390-archived",
+      "query": "scene=task&id=852&state=success",
+      "width": 390,
+      "height": 844,
+      "bytes": 52565,
+      "sha1": "1334511c8294a97340123ddf3a7ef21f3dfa230f",
+      "overflow": false,
+      "errors": []
+    },
+    {
+      "name": "task-1440-light-claimed",
+      "query": "scene=task&id=812&state=success&theme=light",
+      "width": 1440,
+      "height": 1000,
+      "bytes": 169270,
+      "sha1": "cb62fda3cbfdfaea6c87b1eb1d89d304c07c3656",
+      "overflow": false,
+      "errors": []
+    },
+    {
+      "name": "task-1440-empty-replies",
+      "query": "scene=task&id=828&state=success",
+      "width": 1440,
+      "height": 1000,
+      "bytes": 93118,
+      "sha1": "b3618e3b19e1d95af83954f9dde8668e5a1158d4",
+      "overflow": false,
+      "errors": []
+    },
+    {
+      "name": "task-1440-composer-error",
+      "query": "scene=task&id=812&state=success&composer=error",
+      "width": 1440,
+      "height": 1000,
+      "bytes": 175888,
+      "sha1": "fda987e568f370c6383ee0b19270782db0c32a8c",
+      "overflow": false,
+      "errors": []
+    },
+    {
+      "name": "task-1440-loading",
+      "query": "scene=task&id=812&state=loading",
+      "width": 1440,
+      "height": 1000,
+      "bytes": 37984,
+      "sha1": "f7a6b9a069163fbcc6542d323d6f9b2d9736a8af",
+      "overflow": false,
+      "errors": []
+    },
+    {
+      "name": "task-1440-error",
+      "query": "scene=task&id=812&state=error",
+      "width": 1440,
+      "height": 1000,
+      "bytes": 46726,
+      "sha1": "7f87d44ac36668ef9f453d373be53bf56df97568",
+      "overflow": false,
+      "errors": []
+    },
+    {
+      "name": "task-1440-permission",
+      "query": "scene=task&id=812&state=permission&me=reader",
+      "width": 1440,
+      "height": 1000,
+      "bytes": 49515,
+      "sha1": "51141cc1baa95ebee6773f6010786090c50520ee",
+      "overflow": false,
+      "errors": []
+    },
+    {
+      "name": "task-1440-dialog-complete",
+      "query": "scene=task&id=812&state=success&dialog=complete",
+      "width": 1440,
+      "height": 1000,
+      "bytes": 135732,
+      "sha1": "6e412833eaa9c87b918341b227f48d1e3d03d8be",
+      "overflow": false,
+      "errors": []
+    },
+    {
+      "name": "task-1440-dialog-fail",
+      "query": "scene=task&id=812&state=success&dialog=fail",
+      "width": 1440,
+      "height": 1000,
+      "bytes": 138402,
+      "sha1": "bc6d9ce2b208bd6844262740376af081f537ac39",
+      "overflow": false,
+      "errors": []
+    },
+    {
+      "name": "task-1440-dialog-block",
+      "query": "scene=task&id=812&state=success&dialog=block",
+      "width": 1440,
+      "height": 1000,
+      "bytes": 137690,
+      "sha1": "3f0c15397c7052f36468c6852cedea8259c89084",
+      "overflow": false,
+      "errors": []
+    },
+    {
+      "name": "task-1440-dialog-assign",
+      "query": "scene=task&id=812&state=success&dialog=assign",
+      "width": 1440,
+      "height": 1000,
+      "bytes": 138256,
+      "sha1": "a39b23f6412d86e8f159f1f8d8d3ba8fd56d8606",
+      "overflow": false,
+      "errors": []
+    },
+    {
+      "name": "task-1440-dialog-needs",
+      "query": "scene=task&id=830&state=success&dialog=needs",
+      "width": 1440,
+      "height": 1000,
+      "bytes": 116161,
+      "sha1": "a76b3ce3cefb5951fd7f3dab074fc4f7d8cea65f",
+      "overflow": false,
+      "errors": []
+    },
+    {
+      "name": "task-1440-dialog-cancel",
+      "query": "scene=task&id=812&state=success&dialog=cancel",
+      "width": 1440,
+      "height": 1000,
+      "bytes": 134646,
+      "sha1": "f4fb9f97a0b1c9ad2773c22c58a36460103448ba",
+      "overflow": false,
+      "errors": []
+    },
+    {
+      "name": "task-1440-dialog-release",
+      "query": "scene=task&id=812&state=success&dialog=release",
+      "width": 1440,
+      "height": 1000,
+      "bytes": 139411,
+      "sha1": "0b1961117f6811896df6806a63b9f6ba10846e47",
+      "overflow": false,
+      "errors": []
+    },
+    {
+      "name": "task-1440-dialog-reopen",
+      "query": "scene=task&id=848&state=success&dialog=reopen",
+      "width": 1440,
+      "height": 1000,
+      "bytes": 92646,
+      "sha1": "a460791d4890e4fa03dd56fcfd3c379e0a6df456",
+      "overflow": false,
+      "errors": []
+    },
+    {
+      "name": "task-1440-dialog-answer",
+      "query": "scene=task&id=814&state=success&dialog=answer",
+      "width": 1440,
+      "height": 1000,
+      "bytes": 123575,
+      "sha1": "8e91e112ff95aa27a063033c24a98e34a254dfdc",
+      "overflow": false,
+      "errors": []
+    },
+    {
+      "name": "task-1440-dialog-unblock",
+      "query": "scene=task&id=850&state=success&dialog=unblock",
+      "width": 1440,
+      "height": 1000,
+      "bytes": 97909,
+      "sha1": "dfe4385419d40861cbaf8029055948e39fecf170",
+      "overflow": false,
+      "errors": []
+    },
+    {
+      "name": "task-1440-dialog-force-release",
+      "query": "scene=task&id=812&claim=lost&dialog=force-release",
+      "width": 1440,
+      "height": 1000,
+      "bytes": 151203,
+      "sha1": "86ceba128197009497982599fe4dae241cf1f98a",
+      "overflow": false,
+      "errors": []
+    },
+    {
+      "name": "task-1440-dialog-access",
+      "query": "scene=task&id=812&state=success&dialog=access",
+      "width": 1440,
+      "height": 1000,
+      "bytes": 146800,
+      "sha1": "d0383726e7a9a7226558961295388841fd8012f9",
+      "overflow": false,
+      "errors": []
+    },
+    {
+      "name": "task-1440-dialog-shortcuts",
+      "query": "scene=task&id=812&state=success&dialog=shortcuts",
+      "width": 1440,
+      "height": 1000,
+      "bytes": 144244,
+      "sha1": "70d7c61027c25c476f3184c01e3b677eb78f2010",
+      "overflow": false,
+      "errors": []
+    },
+    {
+      "name": "task-1440-dialog-new",
+      "query": "scene=queue&state=success&dialog=new",
+      "width": 1440,
+      "height": 1000,
+      "bytes": 143696,
+      "sha1": "fd66ebaf805722e08a90b424b655e1255fcb0768",
+      "overflow": false,
+      "errors": []
+    },
+    {
+      "name": "sync-1440-success",
+      "query": "scene=sync&state=success",
+      "width": 1440,
+      "height": 1000,
+      "bytes": 98400,
+      "sha1": "289c6a816face873772df56e8a8d97ce3779cbd8",
+      "overflow": false,
+      "errors": []
+    },
+    {
+      "name": "sync-1440-loading",
+      "query": "scene=sync&state=loading",
+      "width": 1440,
+      "height": 1000,
+      "bytes": 32957,
+      "sha1": "301c88a604af112b246d1ba26b695e5932a4d669",
+      "overflow": false,
+      "errors": []
+    },
+    {
+      "name": "sync-1440-empty",
+      "query": "scene=sync&state=empty",
+      "width": 1440,
+      "height": 1000,
+      "bytes": 41231,
+      "sha1": "370c16b23a4ab7c6ffaebcadaddfb67ad1e1213c",
+      "overflow": false,
+      "errors": []
+    },
+    {
+      "name": "sync-1440-error",
+      "query": "scene=sync&state=error",
+      "width": 1440,
+      "height": 1000,
+      "bytes": 45374,
+      "sha1": "6ec5e3de7d6e14a6138847303372fedd8e470c20",
+      "overflow": false,
+      "errors": []
+    },
+    {
+      "name": "sync-1440-permission",
+      "query": "scene=sync&state=permission&me=reader",
+      "width": 1440,
+      "height": 1000,
+      "bytes": 39730,
+      "sha1": "56ed94f9b23de2523da0f29ea2da412d16d3fac2",
+      "overflow": false,
+      "errors": []
+    },
+    {
+      "name": "sync-1440-deadletters",
+      "query": "scene=sync&state=success&scroll=dead",
+      "width": 1440,
+      "height": 1000,
+      "bytes": 91794,
+      "sha1": "72c53e9512ebbae059d16294b67b1c1f2911598a",
+      "overflow": false,
+      "errors": []
+    },
+    {
+      "name": "sync-1440-credential-invalid",
+      "query": "scene=sync&state=success&scroll=linear",
+      "width": 1440,
+      "height": 1000,
+      "bytes": 89188,
+      "sha1": "de9a817624755e5ae1121604b877b6908a7d732d",
+      "overflow": false,
+      "errors": []
+    },
+    {
+      "name": "automation-1440-success",
+      "query": "scene=automation&state=success",
+      "width": 1440,
+      "height": 1000,
+      "bytes": 126160,
+      "sha1": "def8b5ae7b3b08d10e1d4f133c899c7f3b65c015",
+      "overflow": false,
+      "errors": []
+    },
+    {
+      "name": "automation-1440-loading",
+      "query": "scene=automation&state=loading",
+      "width": 1440,
+      "height": 1000,
+      "bytes": 35786,
+      "sha1": "9cdd1c1ee6df2458145ee541e1d1f24a1a1679c1",
+      "overflow": false,
+      "errors": []
+    },
+    {
+      "name": "automation-1440-empty",
+      "query": "scene=automation&state=empty",
+      "width": 1440,
+      "height": 1000,
+      "bytes": 46607,
+      "sha1": "8ce925bcf645e2060f7475314c0d9fa3eb3285cf",
+      "overflow": false,
+      "errors": []
+    },
+    {
+      "name": "automation-1440-error",
+      "query": "scene=automation&state=error",
+      "width": 1440,
+      "height": 1000,
+      "bytes": 49139,
+      "sha1": "02cc3598df49569d8b25e9eb6c7dea5c26d73c7f",
+      "overflow": false,
+      "errors": []
+    },
+    {
+      "name": "automation-1440-permission",
+      "query": "scene=automation&state=permission&me=reader",
+      "width": 1440,
+      "height": 1000,
+      "bytes": 42364,
+      "sha1": "7841b4e15a040507235e0b6492a32007e942b0f8",
+      "overflow": false,
+      "errors": []
+    },
+    {
+      "name": "automation-1440-failure",
+      "query": "scene=automation&state=success&scroll=schedules",
+      "width": 1440,
+      "height": 1000,
+      "bytes": 126812,
+      "sha1": "add007b6dce8b6c9f8da08e4559667f844b6a7c6",
+      "overflow": false,
+      "errors": []
+    },
+    {
+      "name": "gone-1440",
+      "query": "scene=gone",
+      "width": 1440,
+      "height": 1000,
+      "bytes": 53318,
+      "sha1": "f201add39192a10a6099072162b20d18b4427345",
+      "overflow": false,
+      "errors": []
+    },
+    {
+      "name": "queue-1024",
+      "query": "scene=queue&state=success",
+      "width": 1024,
+      "height": 1000,
+      "bytes": 125428,
+      "sha1": "77ef384a0624c7ee9d1fb4cd269c7152e42a409a",
+      "overflow": false,
+      "errors": []
+    },
+    {
+      "name": "task-1024",
+      "query": "scene=task&id=812&state=success",
+      "width": 1024,
+      "height": 1000,
+      "bytes": 106162,
+      "sha1": "81ae1297e5f70acb69ed90596388bf7fa98514a7",
+      "overflow": false,
+      "errors": []
+    },
+    {
+      "name": "queue-1180",
+      "query": "scene=queue&state=success",
+      "width": 1180,
+      "height": 1000,
+      "bytes": 126830,
+      "sha1": "0975a393695a0d5c5fa7c8bf33913be32e21d3da",
+      "overflow": false,
+      "errors": []
+    },
+    {
+      "name": "task-1180",
+      "query": "scene=task&id=812&state=success",
+      "width": 1180,
+      "height": 1000,
+      "bytes": 158386,
+      "sha1": "73822334fcc9b860006f75be84586d014e224f43",
+      "overflow": false,
+      "errors": []
+    },
+    {
+      "name": "queue-768",
+      "query": "scene=queue&state=success",
+      "width": 768,
+      "height": 1000,
+      "bytes": 113980,
+      "sha1": "a7b8772bb59991b8044f1616187b7abbdff98ae7",
+      "overflow": false,
+      "errors": []
+    },
+    {
+      "name": "queue-768-loading",
+      "query": "scene=queue&state=loading",
+      "width": 768,
+      "height": 1000,
+      "bytes": 46710,
+      "sha1": "7488d87b47b459b4655cee78d80860931c4465ef",
+      "overflow": false,
+      "errors": []
+    },
+    {
+      "name": "task-768-claimed",
+      "query": "scene=task&id=812&state=success",
+      "width": 768,
+      "height": 1000,
+      "bytes": 93940,
+      "sha1": "2dfb6d7df11309b7ca4fbdf6b3966f0f6abde039",
+      "overflow": false,
+      "errors": []
+    },
+    {
+      "name": "task-768-dialog-block",
+      "query": "scene=task&id=812&state=success&dialog=block",
+      "width": 768,
+      "height": 1000,
+      "bytes": 87511,
+      "sha1": "d4bd8cdca78143f781e5f0d01c6553d5c6b30362",
+      "overflow": false,
+      "errors": []
+    },
+    {
+      "name": "sync-768",
+      "query": "scene=sync&state=success",
+      "width": 768,
+      "height": 1000,
+      "bytes": 80512,
+      "sha1": "1204183a526c560a4dbb314c2e11cdc70abe88f2",
+      "overflow": false,
+      "errors": []
+    },
+    {
+      "name": "automation-768",
+      "query": "scene=automation&state=success",
+      "width": 768,
+      "height": 1000,
+      "bytes": 110596,
+      "sha1": "3c9db3bcb880e6fcac4b16c0ec909ae6e489e4ea",
+      "overflow": false,
+      "errors": []
+    },
+    {
+      "name": "queue-390-success",
+      "query": "scene=queue&state=success",
+      "width": 390,
+      "height": 844,
+      "bytes": 55608,
+      "sha1": "75efc60edd9ecdb61f7582cfd4eb062a6c864b33",
+      "overflow": false,
+      "errors": []
+    },
+    {
+      "name": "queue-390-loading",
+      "query": "scene=queue&state=loading",
+      "width": 390,
+      "height": 844,
+      "bytes": 33658,
+      "sha1": "96e2508e6f1b89f9863e138d66cd86ba78dda443",
+      "overflow": false,
+      "errors": []
+    },
+    {
+      "name": "queue-390-empty",
+      "query": "scene=queue&state=empty",
+      "width": 390,
+      "height": 844,
+      "bytes": 40357,
+      "sha1": "1b340158bb76f598f155f8b431c6fed2d2b7996a",
+      "overflow": false,
+      "errors": []
+    },
+    {
+      "name": "queue-390-error",
+      "query": "scene=queue&state=error",
+      "width": 390,
+      "height": 844,
+      "bytes": 43168,
+      "sha1": "917285ab14efd9539e49f6084e275be8e933c011",
+      "overflow": false,
+      "errors": []
+    },
+    {
+      "name": "queue-390-noread-404",
+      "query": "scene=queue&state=permission&me=reader",
+      "width": 390,
+      "height": 844,
+      "bytes": 29539,
+      "sha1": "84c396dee6e1bc8b84eda9f6233181bf2097e95d",
+      "overflow": false,
+      "errors": []
+    },
+    {
+      "name": "queue-390-filters",
+      "query": "scene=queue&state=success&dialog=filters",
+      "width": 390,
+      "height": 844,
+      "bytes": 43988,
+      "sha1": "5507d12f068f15feb43b43748f05ee86d3ab5bce",
+      "overflow": false,
+      "errors": []
+    },
+    {
+      "name": "queue-390-migrate",
+      "query": "scene=queue&state=migrate",
+      "width": 390,
+      "height": 844,
+      "bytes": 35976,
+      "sha1": "ceb71c6b82a22ff05e6c89edb864d9b9bd7fdf99",
+      "overflow": false,
+      "errors": []
+    },
+    {
+      "name": "queue-390-archive",
+      "query": "scene=queue&state=success&archive=1",
+      "width": 390,
+      "height": 844,
+      "bytes": 41261,
+      "sha1": "8a5cfc6ac1dcfb197c10ad500ff11ad1dec87055",
+      "overflow": false,
+      "errors": []
+    },
+    {
+      "name": "task-390-claimed",
+      "query": "scene=task&id=812&state=success",
+      "width": 390,
+      "height": 844,
+      "bytes": 49108,
+      "sha1": "2137a0955e0451074f191df3626f11c8683e834e",
+      "overflow": false,
+      "errors": []
+    },
+    {
+      "name": "task-390-facts",
+      "query": "scene=task&id=812&state=success&facts=1",
+      "width": 390,
+      "height": 844,
+      "bytes": 50993,
+      "sha1": "a7f654bd2defed49e5cbab4b07dfc3e6909df96c",
+      "overflow": false,
+      "errors": []
+    },
+    {
+      "name": "task-390-thread",
+      "query": "scene=task&id=812&state=success&scroll=thread",
+      "width": 390,
+      "height": 844,
+      "bytes": 70199,
+      "sha1": "1885bf20539e898dcf890d955f5edbfdf3819c74",
+      "overflow": false,
+      "errors": []
+    },
+    {
+      "name": "task-390-composer",
+      "query": "scene=task&id=812&state=success&scroll=composer",
+      "width": 390,
+      "height": 844,
+      "bytes": 68957,
+      "sha1": "ea239a91980dffe0147c2b5adab4449060d1c903",
+      "overflow": false,
+      "errors": []
+    },
+    {
+      "name": "task-390-dialog-complete",
+      "query": "scene=task&id=812&state=success&dialog=complete",
+      "width": 390,
+      "height": 844,
+      "bytes": 48372,
+      "sha1": "5d0792a29fbcd898886cfaf6b528e30a905e0b9b",
+      "overflow": false,
+      "errors": []
+    },
+    {
+      "name": "task-390-dialog-answer",
+      "query": "scene=task&id=814&state=success&dialog=answer",
+      "width": 390,
+      "height": 844,
+      "bytes": 49713,
+      "sha1": "278765fadfa39ebae5573cfb5776665653b6d7df",
+      "overflow": false,
+      "errors": []
+    },
+    {
+      "name": "task-390-dialog-new",
+      "query": "scene=queue&state=success&dialog=new",
+      "width": 390,
+      "height": 844,
+      "bytes": 53645,
+      "sha1": "3d6ef0f1a397d75afcd7f18f61fc0459d5d044b5",
+      "overflow": false,
+      "errors": []
+    },
+    {
+      "name": "sync-390",
+      "query": "scene=sync&state=success",
+      "width": 390,
+      "height": 844,
+      "bytes": 52233,
+      "sha1": "feae123fe8e480cc5873aad62c4da895344ca86b",
+      "overflow": false,
+      "errors": []
+    },
+    {
+      "name": "automation-390",
+      "query": "scene=automation&state=success&scroll=schedules",
+      "width": 390,
+      "height": 844,
+      "bytes": 58631,
+      "sha1": "fd0a76718136a478a32de0c2f1fb0b911f61e2f3",
+      "overflow": false,
+      "errors": []
+    },
+    {
+      "name": "gone-390",
+      "query": "scene=gone",
+      "width": 390,
+      "height": 844,
+      "bytes": 37348,
+      "sha1": "19705eb3d98791bdafaa1d9b8ba30bf3c6613735",
+      "overflow": false,
+      "errors": []
+    }
+  ]
+}

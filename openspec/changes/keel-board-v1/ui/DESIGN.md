@@ -44,19 +44,21 @@
 ```
 
 - `02 任务` 的唯一页面从「超级助理工单看板」替换为「任务队列」。
-- 章节可见性从 `task.read` 改为 `board.read`（见 §12 迁移风险）。
+- 章节可见性：正常为 `board.read`；迁移窗口内 **`board.read` 或 `task.read`** 都显示 02 任务。
+  只有 `task.read`、还没有 `board.read` 的账号进入迁移说明页，不静默隐藏章节（见 §13.3）。
 - 任务页内部再分三个视图：
 
 ```text
 02 任务
-├─ 队列          /board                 所有人（board.read）
+├─ 队列          /board                 所有人（board.read；迁移期 task.read 显示迁移页）
+│  └─ 归档筛选   /board?archive=1       只读归档（source=superagent，无动作）
 ├─ 同步          /board/sync            仅 board.manage（入口隐藏；深链给出权限页）
 └─ 自动化        /board/automation      仅 board.manage（入口隐藏；深链给出权限页）
 ```
 
 `同步` / `自动化` 是**运维面**，不是日常任务流。非管理者看不到入口；直接输入地址时显示
 “缺少 board.manage”的权限页，而不是白屏或伪造内容。管理者看到入口时带故障计数：
-`同步 1`（有凭据失效/死信）与 `自动化 2`（有失败/死信）。
+`同步 2`（有凭据失效/死信的入口）与 `自动化 2`（有失败/死信的自动化）。
 
 ### 2.2 页面层级
 
@@ -87,9 +89,10 @@
 
 | 路由 | 页面 | 权限 | 备注 |
 | --- | --- | --- | --- |
-| `/board` | 队列 | `board.read` | 无参数默认 `state=open`、全部频道、最早优先 |
+| `/board` | 队列 | `board.read`；迁移期 `task.read` 显示迁移页 | 无参数默认 `state=open`、全部频道、最早优先 |
 | `/board?state=ready&channel=work&label=priority=high` | 队列（带筛选） | `board.read` + 频道 viewer | 筛选全在 URL，可回退/分享 |
 | `/board?after=<cursor>` | 队列下一页 | 同上 | cursor 是上一页最后一个 root_id |
+| `/board?archive=1` | 只读归档筛选 | `board.read` | `source=superagent` 的归档任务；无动作、无回复 |
 | `/board/:taskId` | 任务线程 | `board.read` + 该频道 viewer | taskId 是十进制 board seq |
 | `/board/sync` | 同步健康 | `board.manage` | 静态段优先于 taskId |
 | `/board/automation` | 自动化 | `board.manage` | 同上 |
@@ -174,8 +177,8 @@
 
 - 状态 badge 永远带文字；“已认领”不写成“运行中”，避免和 Session 状态混淆。
 - `board.task` 标签不渲染成普通标签（它是状态投影）；`board.*` 只出现在“系统标签”披露区。
-- 来源不是状态：`source=superagent` 渲染为“镜像自超级助理”一行（Bot 图标），`source=github`
-  渲染为“来自 GitHub · acme/web#1042”。
+- 来源不是状态：TaskView 的 `mirror.source` 渲染为“镜像自超级助理”一行（Bot 图标），`origin`
+  渲染为“来自 GitHub · acme/web#1042”；不靠客户端解析 `source=` 标签来推断镜像/动作。
 
 ## 4. 页面规格
 
@@ -238,7 +241,7 @@
 
 ```text
 │ #812        修复结算页偶发重复扣款                      已认领       你 · 14:32 │
-│             work/production · source=superagent         需要 2 个前置 · 依赖完成 │
+│             work/production · 镜像自超级助理             需要 2 个前置 · 依赖完成 │
 ```
 
 - 左：`#812` mono 12，右对齐，固定 56px；任务 ID 可复制（点击行打开，ID 本身不是链接）。
@@ -252,10 +255,10 @@
   - failed：`失败于 13:40` / reason 首行
   - waiting：`前置 2/3` / `#810 失败`（warning）
 - 行高：桌面 68–76；手机 88–104（标题两行 + 元信息）。
-- 租约过期：行状态 badge 呈现 `可认领`，右侧 mono `租约已到期 · 曾任 周谨`，并出现主操作入口
-  （进入任务页）；不刷新、不等待事件。
-- 被指派给他人的 ready：期限列显示 `已指派 / X`；过期时显示 `租约已到期 / 指派给 X`，行内不显示
-  “认领”按钮；进入任务页后主操作说明“已指派给另一个执行身份”。
+- 租约过期：行状态 badge 呈现 `可认领`，右侧 mono `租约已到期 / 仅限 X`；进入任务页后给出
+  `认领`（仅限该 Actor）。不刷新、不等待事件。
+- 被指派给他人的 ready：期限列显示 `已指派 / 仅限 X`；过期时显示 `租约已到期 / 仅限 X`，行内不显示
+  “认领”按钮；进入任务页后主操作说明 `已指派 · 仅限 X`。
 - 选中/键盘光标：`glassState` 背景 + 焦点环；hover 只作补充。
 - 空/错/权限/加载见 §8。
 
@@ -276,6 +279,7 @@
 - 断线：保留当前列表与筛选，显示 stale banner（§9.1）；重连后从 `Last-Event-ID` 补齐，再对
   当前页做一次 refetch 兜底去重。
 - 不可见事件只有 `id:` 空帧：客户端只推进 cursor，不更新“最后事件时间”，不显示“有更新”。
+- stale 时队列右列改 `最后更新 14:02:11`，**不显示“实时更新”**；不把旧数据说成实时。
 
 #### 4.1.8 新建任务（Sheet）
 
@@ -288,15 +292,27 @@
   - 指派（可选；池中 / 我的账号 / 我的 Bot；只能指派给创建者自己的 Actor）。
   - `创建后立即认领`（Switch + 租约时长），仅 ready 且可认领时显示。
 - 提交：`创建任务`；成功 → 跳 `/board/:id` + toast；失败保留输入并显示服务端错误。
-- 手机：全屏 Sheet，底部固定提交按钮（44px）；桌面：右侧 480px Sheet。
+- 六字段固定顺序：频道、说明、标签、前置依赖、指派、创建后立即认领（Switch + 租约时长）。
+- 手机：全屏 Sheet（100vh，圆角 0，底部固定提交 44px）；桌面：右侧 480px Sheet。
+- 有前置依赖时，`创建后立即认领`不生效，任务创建为 `waiting`；UI 明确说明，不静默忽略。
 
 #### 4.1.9 频道访问（管理者 / 频道 owner）
 
 - 入口：频道筛选 pill 的 `…` → `频道访问`；任务卡频道行的 `…`。
 - Sheet：频道路径 mono；关系列表（Account/Group + viewer/editor/owner）；添加行（搜索 Account/Group
   + 关系）；移除；说明“子树继承：最近的祖先生效；给子树显式 viewer 可收窄”。
-- 这是 §11 的 G8；没有 API 时只显示当前 `can` 与说明，不伪造编辑能力。
+- 没有频道访问管理 API 时，Sheet 只显示当前关系与说明（“不能在这里授权”），**不显示添加行/编辑器**；
+  不伪造可编辑假象。
 - 非 owner/manage 不显示入口。
+
+#### 4.1.10 归档任务（只读）
+
+- 入口：队列筛选条的 `归档 N` 开关（`/board?archive=1`）；不是新页面、不是旧看板。
+- 内容：`source=superagent` 的归档 Ticket（适配器不得跳过归档），列表按最早优先，保留原 task ID。
+- 行：状态仍为终态 badge，额外 `归档` 来源标签；期限列 `只读归档 / 更新时间`。
+- 任务页：`只读归档` badge；无动作、无 Composer、无“重新打开/取消”；线程只读。
+- 空态：`还没有归档任务` + 返回队列；不显示“新建任务”。
+- 权限：`board.read`；归档不等于可写，任何写操作都不出现。
 
 ### 4.2 BoardTaskCard（任务卡，右栏 / 手机上方摘要）
 
@@ -328,10 +344,12 @@
 
 - 标题：`任务 #812` + 状态 badge；不重复根消息全文。
 - 租约块：
-  - `claimed` 且本标签页持 token：大字 `14:32` + 进度条 + `由本标签页持有` + `续租`。
-  - `claimed` 但不是本标签页：`由 发布员·小铖 持有`；若是你的 Actor 但 token 丢了，显示
-    `这是你认领的任务，但认领凭据不在本标签页`（§9.2）。
-  - `claimed` 且已过期：`租约已到期` + `按可认领呈现`；主操作变为 `认领`。
+  - `claimed` 且本标签页持有可用凭据（`moves` 含 `complete`/`renew`）：大字 `14:32` + 进度条 +
+    `由本标签页持有` + `续租`。
+  - `claimed` 但不是本标签页：`由 发布员·小铖 持有`，**永不显示“本标签页持有”**。
+  - `claimed` 且你的 Actor 丢了 token：`认领凭据不在本标签页` + `重新认领`/`收回认领`（§9.2）。
+  - `claimed` 且已过期：`租约已到期` + `按可认领呈现`；有 `claim` move 时主操作变为 `认领`，
+    否则说明“当前身份不能认领”。
   - 非 claimed：不显示进度条，显示状态说明（例如 `等待 2 个前置完成`）。
 - 事实行：频道、创建者（owner Account）、发起操作（by Actor）、指派给（for Actor / 池中）、
   创建/更新时间。`by` 与 `for` 用文字标签，不混成“负责人”。
@@ -347,14 +365,18 @@
   - 失败：一行错误（截断）+ `查看同步`（manage）或 `等待重试`（普通成员）。
   - 无副本：不显示该区块，不写“暂无”。
   - Slack entry 显示 `重复风险` 小字说明（无 idempotency key），不假装 exactly-once。
-- 动作区：见 §6。动作排在事实/依赖之后、标签与外部副本之前，保证 1000px 高视口内主操作可见；标签与副本属于低频信息。
+- 动作区：见 §6。**只渲染 TaskView.moves 中的动作**，不按 `source=`/标签推断；动作排在事实/依赖之后、
+  标签与外部副本之前，保证 1000px 高视口内主操作可见；标签与副本属于低频信息。
+- 归档/镜像只读：显示 `只读归档` / `镜像任务只读` 说明，除复制链接外无动作。
 
 #### 4.2.2 手机/平板
 
 - ≤1179：任务卡从右栏落到线程上方，成为横向摘要：
   - 第一行：状态 + 租约大字 + 主操作。
-  - 第二行：事实折叠为 `创建者 · 指派 · 频道`，`详情` 展开。
-  - needs / blocked / result 默认展开（这些是“为什么不能做”的关键信息），标签与外部副本折叠。
+  - 第二行：只保留 `频道`、`创建者`；`详情` 展开 `发起操作/指派/来源`。
+  - needs / blocked / result 默认展开（这些是“为什么不能做”的关键信息）；标签与外部副本折叠，
+    `详情` 一并展开。
+  - 1024/768 同样折叠，让根消息进入首屏；1180 起回到双栏、完整事实。
 - ≤767：单列；主操作 full width，次要动作 2 列；`更多` 打开 bottom sheet（同一动作集合）。
 - 任务卡是 sticky（≥1180），不遮挡线程；焦点进入卡内时不会被 sticky 重新定位打断。
 
@@ -394,9 +416,10 @@
 - 快捷键：`Cmd/Ctrl+Enter` 发送；`Enter` 换行。发送中按钮 loading、输入锁定；成功清空并 toast
   （或不 toast，直接出现）；失败保留草稿 + 红色 inline 错误 + `重试`。
 - 计数：≤9,000 不显示（避免噪声）；>9,000 显示 `9,120 / 10,000`，超限禁用发送。
-- 权限：
-  - 无 `board.write` 或频道非 editor：不渲染输入框，显示 `你在该频道只有查看权限；回复需要编辑权限。`
+- 权限：**只看 `TaskView.moves` 是否包含 `reply`**。
+  - 无 `reply` move：不渲染输入框；普通频道显示 `你在该频道只有查看权限；回复需要编辑权限。`
   - 镜像只读：`该任务由超级助理管理，命令桥未开启；在超级助理里回复。`
+  - 归档：`归档任务只读；不能再回复。`
 - 手机：Composer 吸底在全局底部 tab 之上（safe-area padding）；内容区预留同高 padding，避免最后
   一条回复被遮住；键盘弹出时输入框保持在可视区（TUI 无此问题）。
 - 错误态：`回复没有发出去` + 服务端 message + request id + `重试` / `复制草稿`；草稿不丢。
@@ -625,7 +648,12 @@ BoardRoute
 
 ## 6. 交互与动作矩阵
 
-### 6.1 动作可见性（客户端保守镜像，服务端最终裁决）
+### 6.1 动作可见性（服务端 moves 为准）
+
+**TaskView MUST 返回 `moves: string[]` 与 `mirror {source, readOnly, bridge}`；UI MUST 只渲染
+`moves` 中的动作，禁止按 `source=`、标签、频道关系或客户端状态自行推断。** 本表是服务端生成
+`moves` 的规则参考与测试矩阵，不是第二套客户端判定逻辑。未知 move 忽略；`moves` 为空时只显示
+只读/归档/镜像说明。
 
 记号：`✓` 显示；`—` 不显示；`H` 仅 claim holder（token 在本标签页）；`O` owner/manage；
 `C` 频道 owner / board.manage；`R` 需要 `board.write` + 频道 editor。
@@ -634,20 +662,23 @@ BoardRoute
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | 认领 claim | — | ✓ R（for 匹配） | —（过期后按 ready） | — | — | — | — | 租约 30s–3600s，默认 900s |
 | 续租 renew | — | — | H | — | — | — | — | 租约内任意时刻 |
-| 释放 release | — | — | H | — | — | — | — | 二次确认 |
+| 释放 release | — | — | H（正常）/ O/M（强制） | — | — | — | — | 正常释放需 token；强制收回见 §6.2 |
+| 收回认领 release.force | — | — | O/M | — | — | — | — | 无 token，写审计；二次确认 |
+| 重新认领 takeover | — | — | H（同 Actor，token 丢失） | — | — | — | — | 作废旧 epoch，签发新 token；不写他人 claim |
 | 完成 complete | — | — | H | — | — | — | — | 对话框，可选 result |
 | 失败 fail | — | — | H | — | — | — | — | 对话框，必填 reason |
 | 阻塞 block | — | O | H 或 O | — | — | — | — | claim 时需 holder；非 claim 需 owner |
 | 解除阻塞 unblock | — | — | — | O | — | — | — | 可选补充回复 |
-| 回答 answer | — | — | — | O / H（镜像 needs_input） | — | — | — | 需命令桥（G1） |
+| 回答 answer | — | — | — | O / H（镜像 needs_input） | — | — | — | 需 `mirror.bridge=true` 事实；见 moves |
 | 重新打开 reopen | — | — | — | — | — | O | — | 回到 ready |
 | 指派 assign | O | O | O | O | — | — | — | failed 先 reopen |
 | 改依赖 needs | O | O | — | O | — | — | — | 有 live claim 不可改 |
 | 取消 cancel | O | O | O | O | — | O | — | 终态拒绝 |
-| 回复 reply | R | R | R | R | R | R | R | 需频道 editor |
+| 回复 reply | R | R | R | R | R | R | R | 归档/镜像只读时 moves 不含 reply |
 | 新建任务 | R | R | R | R | R | R | R | 需 board.write |
 | 频道访问 | C | C | C | C | C | C | C | 与任务状态无关 |
 | 同步/自动化 | manage | manage | manage | manage | manage | manage | manage | 运维面 |
+| 归档/镜像只读 | — | — | — | — | — | — | — | `moves=[]`；只保留复制链接/查看 |
 
 补充规则：
 
@@ -658,7 +689,9 @@ BoardRoute
   `展开结果`。
 - `failed` 只接受 reopen/cancel；`blocked` 只接受 unblock/cancel/assign/needs（owner）。
 - 只读成员（频道 viewer）：看得到任务与线程，看不到写动作；任务卡底部一行 `只有查看权限` 说明。
-- 镜像只读（命令桥关闭）：除查看外全部隐藏；`回答` 也不显示，改为说明（G1）。
+- 镜像只读（`mirror.readOnly=true`）：`moves=[]`，除查看/复制链接外全部隐藏；
+  `回答` 也不显示，改为说明。是否只读由服务端 `mirror` 事实决定，不看 `source=` 标签。
+- 归档（`archived=true`）：`moves=[]`，只读；不显示 Composer、完成/取消/重开。
 
 ### 6.2 动作流程与文案
 
@@ -685,6 +718,25 @@ BoardRoute
 - AlertDialog：标题 `释放 #812？`；描述 `任务会回到池中，其他人可以认领。已发布的回复不会撤回。`
   按钮 `继续持有` / `释放`（destructive）。
 - 成功 toast `已释放 #812`；任务回到 ready。
+
+#### Force release / Takeover（收回认领 / 重新认领）
+
+**API 依赖（P0-1 已决）**：
+
+- `POST /tasks/{id}/release` 增加 owner/manage 的**强制收回**形式：`{force:true}`（不需要 epoch/token）；
+  结束当前 claim、state→ready、写 `task.released` 审计（actor=调用者，detail 不含正文/token）；
+  非 claimed 为幂等 no-op；不是 owner/manage 返回 409 `task_not_owned`。
+- `POST /tasks/{id}/takeover`：仅当前 Actor 的 claim 使用（同 Actor，token 丢失）；校验当前 claim
+  的 actor 等于调用者 Actor，epoch+1，签发新 token（仅响应一次），写 `task.claimed` 审计；
+  非本人 claim 返回 409 `claim_lost`，不碰他人的 claim。
+
+**UI**：
+
+- 刷新/换标签页丢 token 时，卡片显示 `认领凭据不在本标签页`，主操作 `重新认领`（takeover），
+  次操作 `收回认领`（force release，仅 owner/manage）；不再让用户等 15 分钟。
+- 非 holder 的 owner/manage 只看到 `收回认领`；确认框写明“当前持有者会失去完成/续租能力；
+  如果对方正在执行，请先沟通”，并提示写审计。
+- 成功后 409/网络错误：不重复提交；刷新任务并按新 `moves` 渲染。
 
 #### Complete（完成）
 
@@ -751,7 +803,7 @@ BoardRoute
 
 - Dialog：标题 `回答并解除阻塞`；引用 `提问：移动端通知文案由谁定稿？`（blocked.reason）；
   `回复` 必填（≤10,000）；描述 `回答会作为回复写入线程，并把问题交回超级助理。`
-- 成功：任务 unblocked + 回复出现 + toast；失败保留输入；桥关闭时入口不显示（G1）。
+- 成功：任务 unblocked + 回复出现 + toast；失败保留输入；`mirror.readOnly=true` 时 moves 不含 answer，入口不显示。
 
 #### Reply（回复）
 
@@ -792,6 +844,7 @@ BoardRoute
 | `claimTokens` | 内存 `Map<taskId,{epoch,token,until}>` | **不进 localStorage** |
 | `drafts` | 内存 | 回复/对话框草稿；刷新即丢 |
 | `actions` | 内存 | in-flight、error、确认目标 |
+| `task view` | TaskView | `moves[]`（唯一动作来源）、`mirror{source,readOnly,bridge}`、`origin`、`archived`；claim 无 token |
 
 ### 7.2 派生
 
@@ -832,11 +885,12 @@ deadlineText(task, now):
 
 - token 由客户端生成（32 字节随机，base64url），只存当前标签页内存；服务端只存 SHA-256。
 - 刷新/重开标签页：token 丢失。若任务仍是 claimed 且 holder 是我：
-  - 显示 `这是你认领的任务，但认领凭据不在本标签页。`
-  - 不显示 complete/renew；显示租约剩余 + `租约到期后可重新认领`。
-  - 可做的只有 owner/manage 操作（cancel/assign/needs，按规则）；提供 `复制任务链接`。
-  - 这是诚实的限制，不用 localStorage 恢复 token；恢复路径缺口见 §11 G4。
-- 同一浏览器其他标签页：显示 `由你（另一个标签页）持有`，同样不可结算。
+  - 显示 `认领凭据不在本标签页` + 租约剩余；**不显示 complete/renew**。
+  - 主操作 `重新认领`（`takeover`，同 Actor，作废旧 epoch、签发新 token）；owner/manage 还有
+    `收回认领`（`release.force`，无 token，写审计）。不再要求等待 15 分钟。
+  - 非 owner 的 holder 只有 `重新认领`；owner/manage 非 holder 只有 `收回认领`。
+  - 不把 token 放进 localStorage；恢复靠上述两个服务端动作，不靠浏览器存储。
+- 同一浏览器其他标签页：显示 `由你（另一个标签页）持有`，同样不可结算；可 takeover 或由 owner 收回。
 
 ## 8. 权限、403/404 与五态
 
@@ -844,7 +898,7 @@ deadlineText(task, now):
 
 | 层 | 判定 | UI |
 | --- | --- | --- |
-| 章节入口 | `board.read` | 不可读则整章不渲染（shell 规则：隐藏，不灰） |
+| 章节入口 | 正常 `board.read`；迁移期 `board.read` 或 `task.read` | 只有 `task.read` → 菜单保留并进入迁移页；两者都无 → 菜单隐藏，深链 404 |
 | 队列页 | `board.read` + 至少一个可读频道 | 无频道 → “你还没有可访问的频道”引导 |
 | 写动作 | `board.write` + 频道 editor | 只读 → `只读` badge + 动作隐藏 + 一句说明 |
 | 管理动作 | `board.write` + 频道 owner 或 `board.manage` | 指派/取消/解除/重开/改依赖/频道访问 |
@@ -866,10 +920,10 @@ deadlineText(task, now):
 
 | 界面 | loading | empty | error | permission | success |
 | --- | --- | --- | --- | --- | --- |
-| 队列 | 6 行骨架（与真实行同高）；筛选条保留 | 无打开任务 / 无匹配筛选 / 无可读频道 三种文案 | 错误 + request id + 重试；保留筛选与已加载行（stale banner） | 无 board.read / 未登录 / board_disabled 三态 | 行 + 分页 + 实时 |
-| 任务 | 标题 + 根 + 回复骨架 | 无回复 ≠ 无任务；根永远在 | 读失败：返回队列 + 重试；已有内容标 stale | 不可读频道 404；只读 403 内容可见 | 卡 + 线程 + 动作 |
-| 同步 | 摘要 + 2 卡骨架 | 同步未启用 / 无入口 | 状态读取失败 + 重试；保留旧数据 | 无 board.manage | 入口/目标/死信 |
-| 自动化 | 列表骨架 | 无监视器/定时任务 | 读取失败 + 重试 | 无 board.manage | 监视器/定时任务 |
+| 队列 | 桌面 6 行骨架/390 3 行 × 3 段；tabs + filter 保留 | 无打开任务 / 无匹配筛选 / 无可读频道 / 无归档任务 四种文案 | 错误 + request id + 重试；保留 tabs/筛选与已加载行（stale banner）；**不显示实时更新** | 无 board.read → 404；legacy task.read → 迁移页；board_disabled → 404；未登录 → 401 | 行 + 分页 + 实时 |
+| 任务 | 标题 + 根 + 回复骨架 | 无回复 ≠ 无任务；根永远在 | 读失败：返回队列 + 重试；已有内容标 stale | 不可读频道 404；只读 403 内容可见；归档/镜像只读 | 卡 + 线程 + 由 moves 渲染的动作 |
+| 同步 | 摘要 + 2 卡骨架；保留 view tabs | 同步未启用 / 无入口；badge 0 | 状态读取失败 + 重试；保留 view tabs/旧数据 | 无 board.manage | 入口/目标/死信 |
+| 自动化 | 列表骨架；保留 view tabs | 无监视器/定时任务；badge 0 | 读取失败 + 重试；保留 view tabs | 无 board.manage | 监视器/定时任务 |
 
 ### 8.3 空态文案（三分别）
 
@@ -877,12 +931,15 @@ deadlineText(task, now):
 | --- | --- | --- | --- |
 | 没有打开的任务 | `队列是空的` | `没有打开的任务。新任务会实时出现在这里。` | `新建任务` / `查看已完成` |
 | 筛选无结果 | `没有符合筛选的任务` | `当前筛选：频道 work/release · 标签 priority=high · 创建者 林岚。` | `清空筛选` / `新建任务` |
-| 没有可读频道 | `你还没有可访问的频道` | `任务按频道隔离。找频道 owner 或租户管理员把你加入 viewer/editor。` | `复制申请说明` / `返回工作区` |
+| 没有可读频道 | `你还没有可访问的频道` | `任务按频道隔离。找频道所有者或租户管理员给你查看或编辑权限。` | `复制申请说明` / `返回工作区` |
+| 无归档任务 | `还没有归档任务` | `旧的超级助理工单归档后会出现在这里，只读保留；不会恢复旧看板。` | `返回队列` |
+| 迁移 | `任务面已升级，还差一步` | 旧 task.read 仍在、新 board.read 未生效；管理员启用时 bootstrap；归档记录只读保留 | `复制申请说明` / `返回工作区` |
+| 无 board.read 404 | `任务面不存在，或你没有访问权限` | 不区分不存在与无权限；不泄露原因 | `返回工作区` / `复制说明` |
 | 无回复 | `还没有回复` | `写下第一条工作日志，说明你看到了什么、准备怎么做。` | `写回复` |
 | 无前置 | `无前置` | （不写段落） | — |
 | 同步未启用 | `同步没有启用` | `这个租户还没有开启外部同步；任务与线程不受影响。` | `返回队列` |
 | 无同步入口 | `还没有同步入口` | `入口由部署配置声明，这里只观察健康与处置故障。` | `返回队列` |
-| 无自动化 | `还没有监视器或定时任务` | `自动化在部署/API 里声明；这里只显示运行状态与启停。` | `返回队列` |
+| 无自动化 | `还没有监视器或定时任务` | `自动化在部署配置里声明；这里只显示运行状态与启停。` | `返回队列` |
 | 无死信 | `没有死信` | `所有入站事件都已处理或正在重试。` | — |
 
 ### 8.4 错误态文案
@@ -894,8 +951,8 @@ deadlineText(task, now):
 | `not_found` | `任务不存在，或你没有访问这个频道` | `地址没有对应到你可读的任务；它可能已被删除，或频道权限已变化。` | `返回队列` |
 | `board_disabled` | `任务看板未启用` | `这个租户还没有开启任务看板。找租户管理员开启后再试。` | `返回工作区` |
 | `task_claimed` | `任务刚被认领` | `{actor} 在几秒前认领了它；页面已更新。` | `刷新任务` |
-| `claim_lost` | `认领已失效` | `租约到期、已被结算，或凭据来自另一个标签页。` | `刷新任务` |
-| `task_assigned` | `已指派给另一个执行身份` | `这个任务指派给 {actor}；只有该身份能认领。` | `查看任务` |
+| `claim_lost` | `认领已失效` | `租约到期、已被结算，或凭据来自另一个标签页。` | `重新认领`（同 Actor）/ `收回认领`（owner/manage）/ `刷新` |
+| `task_assigned` | `已指派 · 仅限 {actor}` | `这个任务指派给 {actor}；只有该身份能认领。` | `查看任务` |
 | `task_not_owned` | `只有创建者或频道管理员可以这样做` | `你仍可以查看线程；指派/取消/改依赖需要任务 owner 或频道 owner。` | — |
 | `task_finished` | `任务已结束` | `已完成或已取消的任务不能再改状态。` | `刷新任务` |
 | `already_a_task` | `这个线程已经是任务` | `一个线程只能对应一个任务。` | `打开任务` |
@@ -931,17 +988,20 @@ deadlineText(task, now):
 
 - 倒计时用 `claim.until` 与本地时钟；每秒更新；服务端时钟偏差在 ±2s 内忽略。
 - <60s：warning 色 + 文本 `剩余 58 秒`；<10s：danger + `即将到期`。
-- 到点：行/卡即时按 ready 呈现，显示 `租约已到期`，认领动作出现；不等待服务端事件。
+- 到点：行/卡即时按 ready 呈现，显示 `租约已到期`；只有 `moves` 含 `claim` 才出现认领动作，
+  否则说明“当前身份不能认领”。不等待服务端事件。
 - 到点后用户点认领，服务端若已写入 expired/被他人认领，按 409 处理并刷新。
-- 刷新丢失 token：§7.4。
-- 续租失败 `claim_lost`：不弹重复对话框；inline + 刷新。
-- Owner 不能强制释放他人的 claim；UI 不提供该按钮（G4）。
+- 刷新丢失 token：`重新认领`（takeover）或 `收回认领`（owner/manage force release），见 §7.4；
+  不再让用户干等 15 分钟。
+- 续租失败 `claim_lost`：不弹重复对话框；inline 显示 `重新认领`/`收回认领` + 刷新。
+- Owner/manage 可以强制收回他人的 claim（`release.force`，无 token，审计）；UI 在确认框写明
+  “持有者会失去完成/续租能力”。
 
 ### 9.3 同步故障
 
 | 现象 | 位置 | 呈现 |
 | --- | --- | --- |
-| entry `credential_invalid` | 同步页 | 红色 Alert：已停止收发（fail closed）；轮换后恢复；不显示 secret |
+| entry `credential_invalid` | 同步页 | 红色 Alert：凭据失效，已停止收发；轮换后恢复；不显示凭据内容 |
 | inbox lag > 5min | entry 卡 | `入站积压 6 分钟` warning + `待处理 12`；不阻塞 board |
 | outbox lag > 5min | entry 卡 | `出站积压 8 分钟` warning + `待投递 3` |
 | 单条投递失败 | 任务卡外部副本 + 同步页 | `重试中 3/5` / `失败` + 最后错误；后续成功会清除 undelivered |
@@ -956,7 +1016,7 @@ deadlineText(task, now):
 | 现象 | 呈现 |
 | --- | --- |
 | watcher 投递失败 | 行内 `最近一次失败：<error>`；失败计数 +1；Switch 仍可用；死信可重试 |
-| watcher 无权限 | `Bot 缺少频道 editor 权限`；动作不执行；不重试到成功幻觉 |
+| watcher 无权限 | `Bot 缺少频道编辑权限`；动作不执行；不重试到成功幻觉 |
 | schedule 权限被回收 | `创建者已失去 <channel> 的编辑权限，已自动停发。`；只能取消 |
 | schedule 失败 | `已失败` + last_error；不提供“强制重试”，避免绕过权限复检 |
 | 启停失败 | Switch 回滚到原值 + inline 错误 + toast；不假装成功 |
@@ -1005,7 +1065,9 @@ deadlineText(task, now):
 - 不用“暂无数据”四个字；空态必须解释为什么空。
 - 时间用 `今天 14:02` / `3 小时前`；任务 ID 用 `#812`；频道用 mono。
 - 不出现 fixture/测试/内部 id（除 task id、request id、channel path、actor 名）。
-- 中文 + 专有名词（Slack/GitHub/Linear/Bot/claim token 只出现在技术详情）；不混英文状态词。
+- 中文 + 专有名词（Slack/GitHub/Linear/Bot）；`claim token`、`moves`、`board.read` 只出现在
+  技术详情/迁移说明，不写进普通状态文案。
+- 归档写 `只读归档`，不写“旧看板”；镜像只读写 `镜像任务只读`，不靠 `source=` 标签解释。
 
 ## 11. 响应式策略（390 / 768 / 1440）
 
@@ -1025,7 +1087,9 @@ deadlineText(task, now):
   - 第一行：`#812` mono 11 + 状态 badge + 右侧倒计时（mono 12）。
   - 第二行：标题（14，2 行）。
   - 第三行：频道 + 指派/创建者 + `依赖 2/3`（12 muted，换行）。
-- 筛选按钮与 `新建任务` 同一行；两者 44px；筛选 badge 显示活动条件数。
+- 筛选按钮、`新建任务`、view tabs、状态 tabs、子 chips、`归档` 开关、Switch 都必须 ≥44px；
+  筛选 badge 显示活动条件数；Switch 用 44×44 命中区（视觉轨道仍 36×20）。
+- 390 loading：3 行骨架，每行 3 段（ID+状态 / 标题 / 元信息），tabs+filter 保留。
 - 任务摘要卡：
   - 状态 + 主操作同一行；租约大字第二行。
   - `详情` 展开事实；needs/blocked/result 默认展开。
@@ -1033,15 +1097,18 @@ deadlineText(task, now):
 - Composer 吸底：`position: sticky; bottom: 56px`（底部 tab 高度）+ safe-area；内容区底部 padding
   等于 Composer 高度，避免最后一条回复被遮。
 - 对话框：`Sheet` 从底部升起，圆角 16 顶部；标题 + 描述 + 字段 + 底部按钮（primary full width）。
+  `新建任务` 手机端 **全屏 100vh**（圆角 0），字段/按钮 44px，底部提交固定。
 - 无横向滚动：`overflow-x: clip`；长频道路径/actor 名 `min-width: 0` + ellipsis；代码块横向滚动
   只限自身。
 - 触控目标 ≥44px；Switch 行高 ≥44；行内链接/图标按钮 44。
 
-### 11.2 平板（768）
+### 11.2 平板（768 / 1024）
 
 - icon rail 60（与 shell 一致），内容 padding 24。
 - 队列保留列头与四列栅格（768 仍放得下）；标题与元信息自然换行，右列保留期限/归属。
-- 任务卡横向摘要：左 240（状态/租约），右 1fr（事实），动作整行；needs/blocked 全宽。
+- 任务卡横向摘要：左 240（状态/租约），右 1fr（事实），动作整行；needs/blocked 结果全宽。
+- **≤1179 折叠次要信息**：只显示 `频道/创建者`，`详情` 展开 `发起操作/指派/来源` 与标签/外部副本；
+  1024 与 768 都折叠，让根消息进入首屏。1180 起恢复双栏完整卡。
 - 同步 entry 指标 2×2；目标默认 2 行 + 展开。
 - 不把桌面双栏硬压成 3 栏；1024 以下不出现被挤压的第三列。
 
@@ -1086,6 +1153,64 @@ deadlineText(task, now):
 - Composer `Ctrl+Enter` 发送；无鼠标可完成全部动作。
 - 同一 fixture 在 web 与 TUI 的 `texts()`/`accessibility()` 包含相同状态词与动作标签。
 
+### 12.4 TUI 线框与 smoke（设计，不是运行证据）
+
+> 本切片没有 nsh TSX 实现，以下为**设计线框**，不是 TUI 截图；smoke 用例待实现后执行，
+> REVIEW 必须保持“TUI 未验证”。线框只描述信息顺序与焦点，不规定终端绘图字符。
+
+**80×24（队列）**
+
+```text
+┌ Keel · 任务队列 ──────────────────────────────────────────────────────────┐
+│ 02 / 任务 · 队列   [打开 17] [完成 4] [失败 2] [全部 24]     [同步 2]      │
+│ 打开的任务 · 最早优先 · 本页 8 条                                  [筛选]  │
+├───────────────────────────────────────────────────────────────────────────┤
+│ #798  等待依赖  上线新的渠道对账任务        work/release  前置 1/2 失败     │
+│ #809  可认领    补齐退款审计日志            work          林岚 · 池中        │
+│>#812  已认领    修复结算页偶发重复扣款      work/prod     14:32 本标签页    │
+│ #814  等待回复  为移动端接入任务通知        work/prod     等待人工          │
+│ #816  可认领    归档 Q3 事故复盘            work/release  周谨 · 池中        │
+│ ...                                                                       │
+├───────────────────────────────────────────────────────────────────────────┤
+│ j/k 移动  Enter 打开  c 认领  e 完成  b 阻塞  ? 快捷键  q 返回           │
+└───────────────────────────────────────────────────────────────────────────┘
+```
+
+**120×40（任务线程）**
+
+```text
+┌ Keel · 任务 #812 ──────────────────────────────────────────────────────────┐
+│ 队列 / #812   修复结算页偶发重复扣款        [已认领] [实时]                 │
+├ 线程 720 ────────────────────────────────┬ 任务卡 340 ──────────────────────┤
+│ 陈墨 今天 11:08 #work/production          │ [已认领] 14:32 ███████ 本标签页  │
+│ 结算页在弱网下会重复提交…                  │ 创建者 陈墨 / 发起 陈墨 / 池中   │
+│ 回复 · 超级助理·接单器 11:12              │ 前置 #806 已完成                 │
+│ 回复 · 发布员·小铖 12:04                  │ 外部副本 Slack 已同步 / GitHub 重试 │
+│ [加载更早的回复]                          │ [完成] [续租] [释放] [阻塞]      │
+│ Composer: …                               │ [回复] [更多]                    │
+└───────────────────────────────────────────┴──────────────────────────────────┘
+```
+
+- **焦点**：一个焦点游标；队列列表是单一 list focus，Tab 进入状态 tabs/filter，Enter 打开；
+  任务页焦点在“任务卡动作 → 线程 → Composer → 返回”之间移动；Esc 从对话框/任务返回队列。
+- **动作**：只渲染 `TaskView.moves` 中的动作；单字母键无对应 move 时不响应；输入框聚焦时
+  单字母失效，Ctrl+Enter 发送。
+- **无色**：状态 badge 永远是文字（`等待依赖/可认领/已认领/待回复/已完成/已失败/已取消`），
+  不依赖颜色；焦点用行首 `>` 与反白/下划线。
+
+**TUI smoke（实现后执行，未执行）**
+
+| # | 场景 | 期望 |
+| --- | --- | --- |
+| T1 | 80×24 打开队列 | 至少 4 行完整任务；`#id/状态/标题/期限` 不折行；`j/k` 光标移动，Enter 打开 |
+| T2 | 120×40 任务页 | 线程与任务卡同屏；Tab 在动作/线程/Composer 间移动；Esc 返回 |
+| T3 | 动作矩阵 | 只出现 `moves` 内动作；无权限/归档/镜像只读时无动作 |
+| T4 | claim 丢失 | `重新认领` 与 `收回认领` 可达；成功后恢复 complete/renew |
+| T5 | Composer | Ctrl+Enter 发送一次；空输入禁用；错误保留草稿 |
+| T6 | 断线 | 状态行 `重连中`；旧内容保留；恢复后从 cursor 补齐 |
+| T7 | 归档/404/迁移 | 归档只读、无动作；无 board.read 404；legacy 迁移页 |
+| T8 | 键盘焦点 | 对话框焦点陷阱；关闭回触发点；无 hover-only 信息 |
+
 ## 13. 破坏性变更：旧 `/superagent` 看板退役
 
 ### 13.1 删除清单
@@ -1111,17 +1236,20 @@ deadlineText(task, now):
   root seq 不是同一 id 空间，重定向只能猜。
 - 浏览器书签/文档链接失效：下线页给出 `/board` 入口；CHANGELOG/README 升级说明写清。
 - 旧看板的本地草稿/答复状态不迁移；旧看板没有 claim/lease 语义。
-- 已归档 Ticket：旧看板删除后，若适配器选择“跳过归档”，用户将没有入口查看；见 §11 G11 / REVIEW。
+- 已归档 Ticket：**适配器 MUST NOT 跳过归档**；board 以 `archived=true` + `source=superagent` 的只读
+  任务保留（队列 `归档` 筛选）。旧看板删除后，归档记录仍有入口；不恢复旧 UI、不留兼容开关。
 
-### 13.3 权限迁移风险
+### 13.3 权限迁移（已决）
 
-- 章节可见性从 `task.read` 改为 `board.read`。**只拥有 `task.read` 的账号会看不到 02 任务**。
-- 这是有意的破坏性变更：board 是新权限面。上线前必须：
-  - 租户管理员给相关角色授予 `board.read`（以及需要的 `board.write`/`board.manage`）；
-  - 或在首次开启 board 时给默认角色/管理员一次性 bootstrap（需 Owner 决定，G10）；
-  - 发布说明写清“旧 `task.read` 不再打开任务章节；任务日志（Session 内）仍用 task.read”。
+- **启用 board 时给默认角色 bootstrap `board.read`**（以及需要的 `board.write`/`board.manage` 由
+  租户管理员按角色授予）；发布说明写迁移公告。
+- **迁移窗口**：章节可见性为 `board.read` 或 `task.read`；只有 `task.read` 的账号进入迁移说明页
+  （`任务面已升级，还差一步`），不静默隐藏 02 任务。这是过渡期 UI，不是兼容开关，也不恢复旧看板。
+- 发布说明写清：“旧 `task.read` 不再直接打开任务队列；任务日志（Session 内）仍用 task.read；
+  管理员启用 board 时会给默认角色加 `board.read`。”
 - 频道关系：新频道创建者自动获得 owner；其他成员由 owner/manage 授予。没有批量迁移旧工单的
   频道关系（旧看板无频道概念）。运维需在启用前排好频道访问。
+- 迁移窗口结束后（Owner 决定日期）可移除 `task.read` 的章节例外；本 change 不设自动移除。
 
 ### 13.4 验收
 
@@ -1139,19 +1267,21 @@ deadlineText(task, now):
 open openspec/changes/keel-board-v1/ui/prototype/index.html
 # 或带参数：
 #   ?scene=queue|task|sync|automation|gone
-#   &state=success|loading|empty|filtered|error|permission|disabled|stale
-#   &me=manager|reader|none
+#   &state=success|loading|empty|filtered|error|permission|disabled|migrate|stale
+#   &me=manager|reader|none|legacy
 #   &id=812
-#   &dialog=complete|fail|block|assign|needs|cancel|release|reopen|answer|filters|access
+#   &dialog=complete|fail|block|assign|needs|cancel|release|force-release|reopen|answer|unblock|new|filters|access|shortcuts
 #   &sync=success|loading|none|error
 #   &automation=success|loading|none|error
 #   &claim=lost
+#   &archive=1       # 只读归档筛选
 #   &composer=error
 #   &facts=1         # 手机任务卡展开事实
 #   &bridge=0        # 镜像任务命令桥关闭（只读）
 #   &scroll=thread|composer|dead|linear|schedules
 #   &chrome=0        # 隐藏原型工具条（截图用）
 #   &theme=light
+#   &theme=light + state=permission&me=reader -> 浅色 404
 ```
 
 - 原型用 fixture 数据；工具条明确标注“设计样例”。生产 UI 不得用假数据。
@@ -1159,18 +1289,19 @@ open openspec/changes/keel-board-v1/ui/prototype/index.html
 
 ### 14.2 截图
 
-`prototype/shots/` 下的 PNG 由本地 Chrome + Playwright 生成，覆盖 390/768/1440 与五态/对话框。
-构建身份：`index.html` SHA-256 `69c9605cdb3a4bcd08d91e7c77758e7e51477dfa78479467827de343e29b9291`。截图矩阵（`shoot.mjs`）、尺寸/非空白/差异统计与可复算命令见 [`REVIEW.md`](REVIEW.md) §6。
+`prototype/shots/` 下的 PNG 由本地 Chrome + Playwright 生成，覆盖 390/768/1024/1180/1440 与五态/对话框/归档/迁移/404/浅色。
+构建身份：`index.html` SHA-256 `46f6b0261846e63cf0e9cc934cb3b32ecf0e9b36fe64c9f02e8146ca974ea3f7`。92 张截图（63×1440、6×768、19×390、2×1024、2×1180），含浅色五态、归档、迁移、404、强制收回；`shots/manifest.json` 与 `interact.log` 见 `prototype/`。可复算命令见 [`REVIEW.md`](REVIEW.md) §7。
 
 ### 14.3 设计工作台
 
-- **OpenMotion Design Studio**：项目 ID `acb9e7de-491e-42d5-a87f-a1c15b17a1af`，v1 导入
+- **OpenMotion Design Studio**：项目 ID `5e8f42d0-3237-4d8e-b37b-2676f5ea7866`，v1 导入
   （`scenario=prototype`，entry `index.html`）。
-  - 本机预览：`http://127.0.0.1:63535/motion-api/design/raw/acb9e7de-491e-42d5-a87f-a1c15b17a1af/index.html`
-  - 本机编辑器：`http://127.0.0.1:63535/?page=design&scene=projects&designProject=acb9e7de-491e-42d5-a87f-a1c15b17a1af`
+  - 本机预览：`http://127.0.0.1:63535/motion-api/design/raw/5e8f42d0-3237-4d8e-b37b-2676f5ea7866/index.html`
+  - 本机编辑器：`http://127.0.0.1:63535/?page=design&scene=projects&designProject=5e8f42d0-3237-4d8e-b37b-2676f5ea7866`
   - 说明：以上是**设计工作站本机地址**，不是 Owner 交付链接；公网暴露需走 alpha/隧道。
   - 仓库内静态原型是唯一可版本化源；工作台副本是 v1 导入，后续修改以仓库为准再重新导入。
-- 静态原型是可复算的基线（`shoot.mjs` 逐 URL 生成 74 张截图；`interact.mjs` 跑 10 组交互断言）。
+- 静态原型是可复算的基线（`shoot.mjs` 逐 URL 生成 92 张截图 + `shots/manifest.json`；
+  `interact.mjs` 跑 20 组交互断言 + `interact.log`）。
 
 ## 15. 后端契约缺口（设计倒逼，待确认）
 
@@ -1179,18 +1310,29 @@ open openspec/changes/keel-board-v1/ui/prototype/index.html
 
 | ID | 缺口 | 为什么需要 | 建议 |
 | --- | --- | --- | --- |
-| **G1** | 任务视图没有权威 `moves` / `mirror` / bridge 状态 | 客户端镜像规则会漂移；镜像只读/回答入口需要知道命令桥是否开启 | `task.moves: string[]`、`task.mirror: {source, readOnly, bridge}`；或 `/me` 带 flags |
+| **G1（已决）** | TaskView 必须返回权威 `moves` / `mirror` | 客户端不再按 source/标签推断动作 | `task.moves: string[]`、`task.mirror: {source, readOnly, bridge}`；UI 只渲染 moves |
 | **G2** | `/tasks` 没有状态计数聚合 | 状态 tabs 不显示假总数 | `GET /v1/board/tasks/summary?channel&label&owner&for` → `{open:{waiting,ready,claimed,blocked}, completed, failed, canceled, all}` |
 | **G3** | 线程只有 `after`（向后）游标 | “加载更早的回复”无法实现 | `GET /messages/{id}?before=` 或返回 `headCursor` |
-| **G4** | claim 凭据丢失后无恢复路径 | 刷新/换标签页后 holder 不能 complete/renew；owner 也不能强制 release | `POST /tasks/{id}/release` 允许 owner/manage（无 token，需审计）或 `claim {takeover:true}`（同 Actor） |
+| **G4（已决）** | claim 凭据丢失恢复 | 不让用户等 15 分钟 | `POST /release {force:true}`（owner/manage，无 token，审计）+ `POST /takeover`（同 Actor，epoch+1） |
 | **G5** | 消息视图没有 `origin` / `copies` | 线程无法显示“来自 Slack”、外部副本失败 | message/task 视图带 `origin {key,platform,target,author}` 与 `copies[{target,status,lastError}]`；或 `GET /messages/{id}/sync` |
 | **G6** | watcher/schedule 启停与状态形状未在 API 表定义 | 自动化页需要 pause/resume/status/最近投递 | `PATCH /watchers/{id} {enabled}`、`PATCH /schedules/{id} {status:paused|pending}`、`GET .../deliveries`；返回字段按 §4.5 |
 | **G7** | 同步管理状态无实时通道 | 秒级健康面 | `GET /sync/status` 带 `updatedAt` + 可见期 10s 轮询，或 `events/stream` 支持 `sync.*` 管理事件（不作为任务实时通道） |
 | **G8** | 频道访问关系无管理 API | 频道 owner 无法在 UI 授权 | `GET/POST/DELETE /channels/{path}/relations`（Account/Group × viewer/editor/owner） |
 | **G9** | `for` 过滤没有“池中”值；`/actors` 形状未定 | 指派筛选与 Actor 名称 | `for=pool` 或 `for=null` 约定；`GET /actors` 返回 account/bot 显示名 |
-| **G10** | `task.read` → `board.read` 的权限迁移/bootstrap | 否则旧账号看不到任务章 | 租户启用 board 时给默认角色授予 `board.read`（Owner 决策） |
-| **G11** | 归档 Ticket 在旧看板删除后无入口 | 审计/回溯需求 | 适配器镜像归档 Ticket（只读）或在 board 提供“归档来源”只读页；否则保留一个只读导出 |
-| **G12** | 任务视图没有 `links`（superagent source/ticket/archive） | 来源行、镜像只读提示 | `task.links[]` 或按 labels 约定读取；不建议只靠 `source=` 标签 |
+| **G10（已决）** | `task.read` → `board.read` 迁移 | 旧账号不能静默失去任务面 | 启用时默认角色 bootstrap `board.read`；发布公告；legacy 显示迁移页 |
+| **G11（已决）** | 归档 Ticket 入口 | 审计/回溯 | 适配器 MUST NOT 跳过归档；TaskView `archived=true`，队列 `归档` 筛选只读；无动作 |
+| **G12** | 任务视图没有 `links`（superagent source/ticket/archive） | 来源行展示 | `task.links[]`；`mirror/origin/archived` 已由 G1 提供，`ticket` 仍可从标签读作内容，但不用于动作 |
+
+**P0 已决：Phase 2 UI 依赖的契约（必须先进 keel-board/keel）**
+
+| 契约 | 形状 | 用途 |
+| --- | --- | --- |
+| TaskView | `moves: string[]`、`mirror {source, readOnly, bridge}`、`archived: boolean`、`origin {platform, ref}` | 唯一动作来源；镜像/归档/来源事实 |
+| 强制收回 | `POST /v1/board/tasks/{id}/release` body `{force:true}`（owner/manage，无 epoch/token，写审计） | claim 丢失/接管；不动他人 token |
+| 重新认领 | `POST /v1/board/tasks/{id}/takeover`（同 Actor，epoch+1，响应含新 token） | 刷新/换标签页后恢复持有 |
+| 归档筛选 | `GET /v1/board/tasks?archived=1&label=source=superagent&state=all` | 只读归档入口；适配器不得跳过归档 |
+| 迁移 | 租户启用 board 时默认角色 bootstrap `board.read`；legacy `task.read` 页面 | 不静默失去任务面 |
+
 
 ## 16. 验收清单（设计 → 实现）
 
@@ -1198,14 +1340,17 @@ open openspec/changes/keel-board-v1/ui/prototype/index.html
       状态/needs/租约倒计时；URL 可恢复。
 - [ ] `/board/:id` 任务卡：全部动作按 §6.1 显示；每个危险动作有二次确认与后果文案。
 - [ ] 线程：根卡、回复分页、空/错、Composer 成功/失败/只读、`Cmd/Ctrl+Enter`。
-- [ ] 租约：倒计时、<60s 警告、到点 ready、刷新丢 token 提示、claim_lost 处理。
+- [ ] 租约：倒计时、<60s 警告、到点 ready、`重新认领`/`收回认领`、claim_lost 处理。
 - [ ] live tail：四态、断线保留内容、重连补齐、隐藏事件不泄露。
 - [ ] 同步：entries/targets/lag/failures/dead letter/凭据失效/启停/重试/收件箱（manage）。
 - [ ] 自动化：watchers/schedules 状态、启停、失败、权限被回收自动停发、死信重试。
-- [ ] 五态：队列/任务/同步/自动化 × loading/empty/error/permission/success 均有专属帧。
+- [ ] 五态：队列/任务/同步/自动化 × loading/empty/error/permission/success 均有专属帧；
+      含 legacy 迁移页、无 board.read 404、归档只读、浅色五态。
 - [ ] 权限：403/404/401/board_disabled/task_not_owned/task_assigned/mirror_read_only 文案与入口。
 - [ ] 键盘：§10.1 全部键位；焦点环；对话框焦点陷阱；无 hover-only 信息。
 - [ ] web/TUI：同一 TSX；80×24/120×40；状态/筛选/动作/文案一致。
-- [ ] 响应式：390/768/1440 截图；无横向溢出；Composer 不被底部 tab 遮挡。
+- [ ] 响应式：390/768/1024/1180/1440 截图；无横向溢出；Composer 不被底部 tab 遮挡；
+      768/1024 折叠次要信息让线程进首屏。
 - [ ] 退役：`/superagent` 404 下线页；旧文件/路由/数据源/测试 id 清除；无重定向/兼容开关。
-- [ ] 证据：脚本生成截图 + HTML 报告，`UNCOVERED=0`；独立子代理复核（禁 Codex）P0/P1 清零。
+- [ ] 证据：`shoot.mjs` 生成截图 + `shots/manifest.json`；`interact.mjs` + `interact.log`；
+      `UNCOVERED=0`；独立子代理复核（禁 Codex）P0/P1 清零。

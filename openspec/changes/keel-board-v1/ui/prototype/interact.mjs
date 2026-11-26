@@ -7,6 +7,7 @@
 // they prove the designed action set, confirmations, read-only faces and mobile
 // sheet are reachable and do not throw.
 import assert from "node:assert/strict";
+import { writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -19,7 +20,8 @@ const errors = [];
 const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
 page.on("pageerror", (error) => errors.push(`pageerror: ${error.message}`));
 page.on("console", (message) => { if (message.type() === "error") errors.push(`console: ${message.text()}`); });
-const pass = (name) => console.log(`PASS ${name}`);
+const logLines = [];
+const pass = (name) => { console.log(`PASS ${name}`); logLines.push(`PASS ${name}`); };
 
 await page.goto(`${base}?chrome=0&scene=queue`);
 await page.waitForTimeout(250);
@@ -80,7 +82,7 @@ await page.goto(`${base}?chrome=0&scene=queue`);
 await page.waitForTimeout(250);
 await page.locator('[data-action="tab"][data-tab="completed"]').click();
 await page.waitForTimeout(200);
-assert.equal(await page.locator(".row").count(), 3);
+assert.equal(await page.locator(".row").count(), 4);
 await page.locator('[data-action="tab"][data-tab="failed"]').click();
 await page.waitForTimeout(200);
 assert.equal(await page.locator(".row").count(), 2);
@@ -131,7 +133,110 @@ assert.equal(await page.locator("#f-channel").evaluate((el) => getComputedStyle(
 assert.equal(await page.locator('.dialog .actions .btn[data-action="dialog-close"]').evaluate((el) => getComputedStyle(el).height), "44px");
 pass("mobile filter sheet uses 44px fields and actions");
 
-await browser.close();
+// P1 / P0 faces: loading, stale, empty badges, assigned, read-only claim,
+// archive, migration, 404, claim-lost recovery, six-field NewTask, access.
+await page.goto(`${base}?chrome=0&scene=queue&state=loading`);
+await page.waitForTimeout(200);
+assert.equal(await page.locator(".tabs-tray").count(), 1);
+assert.equal(await page.locator(".filter-bar").count(), 1);
+assert.ok((await page.locator(".skeleton-row").count()) >= 3);
+pass("queue loading keeps tabs/filter and shows skeletons");
+
+await page.goto(`${base}?chrome=0&scene=queue&state=stale`);
+await page.waitForTimeout(200);
+const staleMeta = await page.locator(".queue-meta").innerText();
+assert.match(staleMeta, /最后更新 14:02:11/);
+assert.doesNotMatch(staleMeta, /实时更新/);
+pass("stale queue does not claim live-updating");
+
+await page.goto(`${base}?chrome=0&scene=sync&state=empty`);
+await page.waitForTimeout(200);
+assert.equal(await page.locator('[data-view="sync"] .count').innerText(), "0");
+await page.goto(`${base}?chrome=0&scene=automation&state=empty`);
+await page.waitForTimeout(200);
+assert.equal(await page.locator('[data-view="automation"] .count').innerText(), "0");
+pass("sync/automation empty states report zero issues");
+
+await page.goto(`${base}?chrome=0&scene=task&id=824`);
+await page.waitForTimeout(200);
+assert.match(await page.locator(".task-card").innerText(), /仅限 审计员·阿岚/);
+pass("assigned ready names the only allowed claimant");
+
+await page.goto(`${base}?chrome=0&scene=task&id=812&me=reader`);
+await page.waitForTimeout(200);
+const readOnlyCard = await page.locator(".task-card").innerText();
+assert.doesNotMatch(readOnlyCard, /由本标签页持有/);
+assert.match(readOnlyCard, /持有者 陈墨/);
+pass("read-only never claims the tab holds a claim");
+
+await page.goto(`${base}?chrome=0&scene=queue&archive=1`);
+await page.waitForTimeout(200);
+assert.equal(await page.locator(".row").count(), 1);
+assert.equal(await page.locator(".archive-banner").count(), 1);
+await page.goto(`${base}?chrome=0&scene=task&id=852`);
+await page.waitForTimeout(200);
+assert.match(await page.locator(".task-card").innerText(), /归档任务只读/);
+assert.equal(await page.locator('[data-action="send-reply"]').count(), 0);
+assert.equal(await page.locator('[data-action="dialog"][data-dialog="complete"]').count(), 0);
+pass("archived tasks are read-only and actionless");
+
+await page.goto(`${base}?chrome=0&scene=queue&state=migrate`);
+await page.waitForTimeout(200);
+assert.match(await page.locator("#main").innerText(), /任务面已升级/);
+assert.equal(await page.locator(".tabs-tray").count(), 0);
+await page.goto(`${base}?chrome=0&scene=queue&state=permission&me=none`);
+await page.waitForTimeout(200);
+assert.match(await page.locator("#main").innerText(), /任务面不存在/);
+assert.equal(await page.locator(".tabs-tray").count(), 0);
+pass("migration and no-read 404 are explicit, not silent");
+
+await page.goto(`${base}?chrome=0&scene=task&id=812&claim=lost`);
+await page.waitForTimeout(200);
+assert.equal(await page.locator('[data-action="takeover"]').count(), 1);
+assert.equal(await page.locator('[data-action="dialog"][data-dialog="force-release"]').count(), 1);
+await page.locator('[data-action="takeover"]').click();
+await page.waitForTimeout(250);
+assert.equal(await page.locator('[data-action="dialog"][data-dialog="complete"]').count(), 1);
+assert.match(await page.locator(".task-card").innerText(), /由本标签页持有/);
+pass("claim-lost offers takeover and force release and recovers");
+
+await page.goto(`${base}?chrome=0&scene=queue&dialog=new`);
+await page.waitForTimeout(200);
+assert.equal(await page.locator(".dialog .form-row").count(), 6);
+assert.equal(await page.locator('[data-action="toggle-new-claim"]').count(), 1);
+assert.equal(await page.locator(".dialog.full").count(), 1);
+pass("new task sheet has six fields and is full-screen on mobile");
+
+await page.goto(`${base}?chrome=0&scene=task&id=812&dialog=access`);
+await page.waitForTimeout(200);
+assert.equal(await page.locator(".dialog input").count(), 0);
+assert.match(await page.locator(".dialog").innerText(), /不能在这里授权/);
+pass("channel access sheet is read-only without an API");
+
+// Mobile 44px tab/chip/switch targets.
+await page.setViewportSize({ width: 390, height: 844 });
+await page.goto(`${base}?chrome=0&scene=queue`);
+await page.waitForTimeout(200);
+assert.equal(await page.locator(".tab").first().evaluate((el) => Math.round(el.getBoundingClientRect().height)), 44);
+assert.equal(await page.locator(".chip").first().evaluate((el) => Math.round(el.getBoundingClientRect().height)), 44);
+await page.goto(`${base}?chrome=0&scene=sync`);
+await page.waitForTimeout(200);
+assert.equal(await page.locator(".switch").first().evaluate((el) => Math.round(el.getBoundingClientRect().height)), 44);
+pass("mobile tabs, chips and switches meet the 44px floor");
+
 assert.deepEqual(errors, []);
-console.log("PASS no page or console errors");
+pass("no page or console errors");
+const log = [
+  "# keel-board task-face prototype interaction log",
+  `generatedAt: ${new Date().toISOString()}`,
+  `node: ${process.version}`,
+  `playwright: ${modulePath}`,
+  `base: ${base}`,
+  "",
+  ...logLines,
+  "",
+  `errors: ${errors.length}`
+].join("\n");
+await writeFile(join(here, "interact.log"), log + "\n");
+await browser.close();
 console.log(`\n${errors.length} errors`);

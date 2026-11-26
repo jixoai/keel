@@ -10,7 +10,7 @@
 //
 // Output: ./shots/<name>.png (do not commit node_modules or browser caches).
 import { createHash } from "node:crypto";
-import { mkdir, readFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, unlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -27,10 +27,17 @@ const shots = [
   ["queue-1440-empty", "scene=queue&state=empty", 1440, 1000],
   ["queue-1440-filtered-empty", "scene=queue&state=filtered", 1440, 1000],
   ["queue-1440-error", "scene=queue&state=error", 1440, 1000],
-  ["queue-1440-permission", "scene=queue&state=permission&me=reader", 1440, 1000],
+  ["queue-1440-noread-404", "scene=queue&state=permission&me=reader", 1440, 1000],
   ["queue-1440-disabled", "scene=queue&state=disabled", 1440, 1000],
   ["queue-1440-stale", "scene=queue&state=stale", 1440, 1000],
+  ["queue-1440-migrate", "scene=queue&state=migrate", 1440, 1000],
+  ["queue-1440-archive", "scene=queue&state=success&archive=1", 1440, 1000],
   ["queue-1440-readonly", "scene=queue&state=success&me=reader", 1440, 1000],
+  ["queue-1440-light-success", "scene=queue&state=success&theme=light", 1440, 1000],
+  ["queue-1440-light-loading", "scene=queue&state=loading&theme=light", 1440, 1000],
+  ["queue-1440-light-empty", "scene=queue&state=empty&theme=light", 1440, 1000],
+  ["queue-1440-light-error", "scene=queue&state=error&theme=light", 1440, 1000],
+  ["queue-1440-light-noread-404", "scene=queue&state=permission&me=reader&theme=light", 1440, 1000],
   // 1440 — task states
   ["task-1440-claimed", "scene=task&id=812&state=success", 1440, 1000],
   ["task-1440-ready", "scene=task&id=809&state=success", 1440, 1000],
@@ -44,6 +51,9 @@ const shots = [
   ["task-1440-claim-lost", "scene=task&id=812&state=success&claim=lost", 1440, 1000],
   ["task-1440-readonly", "scene=task&id=809&state=success&me=reader", 1440, 1000],
   ["task-1440-mirror-readonly", "scene=task&id=814&state=success&bridge=0", 1440, 1000],
+  ["task-1440-archived", "scene=task&id=852&state=success", 1440, 1000],
+  ["task-390-archived", "scene=task&id=852&state=success", 390, 844],
+  ["task-1440-light-claimed", "scene=task&id=812&state=success&theme=light", 1440, 1000],
   ["task-1440-empty-replies", "scene=task&id=828&state=success", 1440, 1000],
   ["task-1440-composer-error", "scene=task&id=812&state=success&composer=error", 1440, 1000],
   ["task-1440-loading", "scene=task&id=812&state=loading", 1440, 1000],
@@ -60,6 +70,7 @@ const shots = [
   ["task-1440-dialog-reopen", "scene=task&id=848&state=success&dialog=reopen", 1440, 1000],
   ["task-1440-dialog-answer", "scene=task&id=814&state=success&dialog=answer", 1440, 1000],
   ["task-1440-dialog-unblock", "scene=task&id=850&state=success&dialog=unblock", 1440, 1000],
+  ["task-1440-dialog-force-release", "scene=task&id=812&claim=lost&dialog=force-release", 1440, 1000],
   ["task-1440-dialog-access", "scene=task&id=812&state=success&dialog=access", 1440, 1000],
   ["task-1440-dialog-shortcuts", "scene=task&id=812&state=success&dialog=shortcuts", 1440, 1000],
   ["task-1440-dialog-new", "scene=queue&state=success&dialog=new", 1440, 1000],
@@ -78,6 +89,11 @@ const shots = [
   ["automation-1440-permission", "scene=automation&state=permission&me=reader", 1440, 1000],
   ["automation-1440-failure", "scene=automation&state=success&scroll=schedules", 1440, 1000],
   ["gone-1440", "scene=gone", 1440, 1000],
+  // 1024 / 1180
+  ["queue-1024", "scene=queue&state=success", 1024, 1000],
+  ["task-1024", "scene=task&id=812&state=success", 1024, 1000],
+  ["queue-1180", "scene=queue&state=success", 1180, 1000],
+  ["task-1180", "scene=task&id=812&state=success", 1180, 1000],
   // 768
   ["queue-768", "scene=queue&state=success", 768, 1000],
   ["queue-768-loading", "scene=queue&state=loading", 768, 1000],
@@ -90,20 +106,28 @@ const shots = [
   ["queue-390-loading", "scene=queue&state=loading", 390, 844],
   ["queue-390-empty", "scene=queue&state=empty", 390, 844],
   ["queue-390-error", "scene=queue&state=error", 390, 844],
-  ["queue-390-permission", "scene=queue&state=permission&me=reader", 390, 844],
+  ["queue-390-noread-404", "scene=queue&state=permission&me=reader", 390, 844],
   ["queue-390-filters", "scene=queue&state=success&dialog=filters", 390, 844],
+  ["queue-390-migrate", "scene=queue&state=migrate", 390, 844],
+  ["queue-390-archive", "scene=queue&state=success&archive=1", 390, 844],
   ["task-390-claimed", "scene=task&id=812&state=success", 390, 844],
   ["task-390-facts", "scene=task&id=812&state=success&facts=1", 390, 844],
   ["task-390-thread", "scene=task&id=812&state=success&scroll=thread", 390, 844],
   ["task-390-composer", "scene=task&id=812&state=success&scroll=composer", 390, 844],
   ["task-390-dialog-complete", "scene=task&id=812&state=success&dialog=complete", 390, 844],
   ["task-390-dialog-answer", "scene=task&id=814&state=success&dialog=answer", 390, 844],
+  ["task-390-dialog-new", "scene=queue&state=success&dialog=new", 390, 844],
   ["sync-390", "scene=sync&state=success", 390, 844],
   ["automation-390", "scene=automation&state=success&scroll=schedules", 390, 844],
   ["gone-390", "scene=gone", 390, 844]
 ];
 
-await mkdir(join(here, "shots"), { recursive: true });
+const shotsDir = join(here, "shots");
+await mkdir(shotsDir, { recursive: true });
+const wanted = new Set(shots.map(([name]) => `${name}.png`));
+for (const file of await readdir(shotsDir)) {
+  if (file.endsWith(".png") && !wanted.has(file)) await unlink(join(shotsDir, file));
+}
 const browser = await chromium.launch({ headless: true, channel: "chrome" });
 const results = [];
 let failed = 0;
@@ -120,16 +144,23 @@ for (const [name, query, width, height] of shots) {
     clientWidth: document.documentElement.clientWidth,
     scrollHeight: document.documentElement.scrollHeight
   }));
-  const path = join(here, "shots", `${name}.png`);
+  const path = join(shotsDir, `${name}.png`);
   await page.screenshot({ path, fullPage: false });
   const bytes = await readFile(path);
-  const hash = createHash("sha1").update(bytes).digest("hex").slice(0, 12);
-  results.push({ name, width, height, bytes: bytes.length, hash, overflow: metrics.scrollWidth > metrics.clientWidth, errors });
+  const hash = createHash("sha1").update(bytes).digest("hex");
+  results.push({ name, query, width, height, bytes: bytes.length, sha1: hash, overflow: metrics.scrollWidth > metrics.clientWidth, errors });
   if (metrics.scrollWidth > metrics.clientWidth) { console.error(`OVERFLOW ${name}: ${metrics.scrollWidth} > ${metrics.clientWidth}`); failed += 1; }
   if (errors.length) { console.error(`CONSOLE ${name}: ${errors.join(" | ")}`); failed += 1; }
   await page.close();
 }
 await browser.close();
+const manifest = {
+  generatedAt: new Date().toISOString(),
+  playwright: process.env.PLAYWRIGHT_MODULE || "playwright",
+  base: base,
+  shots: results
+};
+if (!only) await writeFile(join(shotsDir, "manifest.json"), JSON.stringify(manifest, null, 2) + "\n");
 for (const row of results) console.log(JSON.stringify(row));
 console.log(`\n${results.length} shots; failures: ${failed}`);
 process.exitCode = failed ? 1 : 0;

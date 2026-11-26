@@ -24,7 +24,7 @@
   --secondary:rgba(255,255,255,.10); --secondary-fg:#f8f8f8;
   --muted:rgba(255,255,255,.07); --muted-fg:#b5b5b5;
   --accent:rgba(255,255,255,.08); --accent-fg:#f8f8f8;
-  --destructive:#ff5c5c; --destructive-fg:#ffffff;
+  --destructive:#ff5c5c; --destructive-fg:#171717;
   --border:rgba(255,255,255,.11); --input:rgba(255,255,255,.13); --ring:#858585;
   --header-border:rgba(255,255,255,.10);
   --glass-rim:rgba(255,255,255,.16); --glass-inner:rgba(255,255,255,.04);
@@ -60,7 +60,7 @@
   --popover:rgba(251,251,251,.96); --popover-fg:#404040;
   --primary:#1f1f1f; --primary-fg:#fbfbfb;
   --secondary:rgba(30,30,38,.09); --secondary-fg:#1f1f1f;
-  --muted:rgba(30,30,38,.07); --muted-fg:#6e6e6e;
+  --muted:rgba(30,30,38,.07); --muted-fg:#666666;
   --accent:rgba(30,30,38,.09); --accent-fg:#1f1f1f;
   --destructive:#dc2626; --destructive-fg:#ffffff;
   --border:rgba(30,30,38,.13); --input:rgba(30,30,38,.15); --ring:#a3a3a3;
@@ -299,6 +299,10 @@ svg{display:block}
 .need-chip{display:inline-flex;align-items:center;gap:3px;height:18px;padding:0 5px;border-radius:4px;background:var(--muted);font-family:var(--font-mono);font-size:10px;color:var(--muted-fg)}
 .need-chip.ok{color:var(--success)}
 .need-chip.bad{color:var(--warning)}
+.archive-banner{display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:8px;background:var(--muted);border:1px solid var(--glass-edge);font-size:12px;color:var(--muted-fg);margin:0 0 8px}
+.archive-banner b{color:var(--foreground);font-weight:600}
+.archive-banner .btn{margin-left:auto}
+.archive-toggle.is-active{border-color:var(--ring);box-shadow:inset 0 1px 0 var(--field-rim),0 0 0 1px color-mix(in srgb,var(--ring) 45%,transparent)}
 .queue-notice{display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:8px;background:var(--info-tint);border:1px solid color-mix(in srgb,var(--info) 25%,transparent);font-size:12px;color:var(--foreground);margin:8px 0}
 .queue-notice.warn{background:var(--warning-tint);border-color:color-mix(in srgb,var(--warning) 25%,transparent)}
 .load-more{display:flex;flex-direction:column;align-items:center;gap:6px;padding:20px 0 8px}
@@ -405,6 +409,8 @@ svg{display:block}
 .action-primary .btn:first-child{flex:1;min-width:0}
 .action-secondary{display:grid;grid-template-columns:1fr 1fr;gap:6px}
 .action-secondary .btn:only-child{grid-column:1/-1}
+.action-secondary > .filter-wrap:last-child{grid-column:1/-1}
+.action-secondary > .filter-wrap .btn{width:100%}
 .action-note{font-size:11px;line-height:1.5;color:var(--muted-fg)}
 .action-note.warn{color:var(--warning)}
 .action-note.danger{color:var(--destructive)}
@@ -479,8 +485,16 @@ svg{display:block}
 .empty p{font-size:12px;line-height:1.6;color:var(--muted-fg);max-width:52ch}
 .empty-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:center;margin-top:2px}
 .request-id{font-family:var(--font-mono);font-size:11px;color:var(--muted-fg)}
-.skeleton-row{display:grid;grid-template-columns:56px 104px minmax(0,1fr) 180px;gap:16px;align-items:center;height:74px;border-bottom:1px solid var(--border);padding:0 8px}
-.sk{height:10px;border-radius:6px;background:var(--muted);box-shadow:inset 0 1px 0 var(--glass-inner),inset 0 0 0 1px var(--glass-edge);animation:pulse 1.4s ease-in-out infinite}
+.skeleton-row{display:grid;grid-template-columns:160px minmax(0,1fr) 180px;gap:16px;align-items:center;height:74px;border-bottom:1px solid var(--border);padding:0 8px}
+.sk{height:10px;border-radius:6px;background:var(--muted);box-shadow:inset 0 1px 0 var(--glass-inner),inset 0 0 0 1px var(--glass-edge);animation:pulse 1.4s ease-in-out infinite;display:block}
+.sk-top{display:flex;align-items:center;gap:12px}
+.sk-id{width:28px;margin-left:auto}
+.sk-state{width:72px;height:22px;border-radius:6px}
+.sk-main{display:flex;flex-direction:column;gap:8px;min-width:0}
+.sk-main .title{height:14px;width:58%}
+.sk-main .meta{width:38%}
+.sk-deadline{display:flex;flex-direction:column;gap:8px;align-items:flex-end}
+.sk-deadline .d1{width:64px}.sk-deadline .d2{width:44px}
 .sk.block{height:22px;border-radius:6px}
 .sk.title{height:14px}
 @keyframes pulse{0%,100%{opacity:.55}50%{opacity:.95}}
@@ -516,6 +530,9 @@ svg{display:block}
 @media (max-width:767px){
   .scrim{align-items:flex-end;padding:0}
   .dialog{width:100%;max-height:88vh;border-radius:16px 16px 0 0;padding:20px 16px calc(20px + env(safe-area-inset-bottom))}
+  .dialog.full{height:100vh;max-height:100vh;border-radius:0;padding-top:calc(20px + env(safe-area-inset-top))}
+  .dialog.full .body{overflow:auto;flex:1}
+  .dialog.full .actions{padding-bottom:calc(12px + env(safe-area-inset-bottom))}
   .dialog .actions{position:sticky;bottom:0;background:var(--popover);padding-top:12px}
   .dialog .actions .btn{flex:1;height:44px}
   .dialog .field{height:44px}
@@ -566,6 +583,13 @@ body.no-chrome .paper-inner{padding-bottom:32px}
 @media (max-width:1179px){
   .task-grid{grid-template-columns:minmax(0,1fr)}
   .task-aside{position:static;order:-1;max-height:none;overflow:visible;padding-right:0}
+  .task-facts-toggle{display:inline-flex;margin-left:auto}
+  .task-card:not(.show-facts) .fact-secondary{display:none}
+  .task-card:not(.show-facts) .task-labels-section{display:none}
+  .task-card:not(.show-facts) .task-sync-section{display:none}
+  .task-card.show-facts .fact-secondary{display:flex}
+  .task-card.show-facts .task-labels-section{display:flex}
+  .task-card.show-facts .task-sync-section{display:flex}
   .task-card{display:grid;grid-template-columns:240px minmax(0,1fr);gap:12px 20px;align-items:start}
   .task-card-head{grid-column:1/-1}
   .task-card .lease-block{grid-row:2/span 2;align-self:stretch;justify-content:center}
@@ -576,6 +600,13 @@ body.no-chrome .paper-inner{padding-bottom:32px}
   .task-card .task-labels-section{grid-column:1/-1}
 }
 @media (max-width:1023px){
+  .task-facts-toggle{display:inline-flex;margin-left:auto}
+  .task-card:not(.show-facts) .fact-secondary{display:none}
+  .task-card:not(.show-facts) .task-labels-section{display:none}
+  .task-card:not(.show-facts) .task-sync-section{display:none}
+  .task-card.show-facts .fact-secondary{display:flex}
+  .task-card.show-facts .task-labels-section{display:flex}
+  .task-card.show-facts .task-sync-section{display:flex}
   .sync-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
   .dead-row{grid-template-columns:92px 1fr 100px;grid-auto-rows:auto}
   .dead-row .att{display:none}
@@ -593,12 +624,13 @@ body.no-chrome .paper-inner{padding-bottom:32px}
   .view-tabs{gap:12px;overflow-x:auto;scrollbar-width:none}
   .view-tabs::-webkit-scrollbar{display:none}
   .view-tab{height:44px;font-size:12px}
-  .tab{height:34px;padding:0 9px;font-size:12px}
+  .tab{height:44px;padding:0 10px;font-size:12px}
   .tabs-tray{gap:0;padding:2px}
   .chips{gap:2px}
-  .chip{height:32px;padding:0 8px;font-size:11px}
+  .chip{height:44px;padding:0 9px;font-size:11px}
   .filter-bar{gap:6px}
   .filter-pill{height:44px;flex:1;min-width:0}
+  .archive-toggle{height:44px}
   .filter-pill .value{max-width:none}
   .filter-wrap.desktop-only{display:none}
   .filter-mobile{display:inline-flex!important}
@@ -616,6 +648,15 @@ body.no-chrome .paper-inner{padding-bottom:32px}
   .deadline-main{font-size:11px;white-space:normal;text-align:right}
   .deadline-sub{font-size:10px;white-space:normal;text-align:right;max-width:110px}
   .queue-meta{font-size:10px}
+  .skeleton-row{display:grid;grid-template-columns:auto 1fr auto;grid-template-areas:"top top deadline" "title title title" "meta meta meta";gap:6px 8px;height:auto;padding:12px 6px;align-items:center}
+  .sk-top{grid-area:top;display:flex;align-items:center;gap:8px}
+  .sk-id{width:36px;margin-left:0}
+  .sk-state{width:78px;height:20px}
+  .sk-main{display:contents}
+  .sk-main .title{grid-area:title;width:72%}
+  .sk-main .meta{grid-area:meta;width:46%}
+  .sk-deadline{grid-area:deadline;flex-direction:row;align-items:center;justify-content:flex-end;gap:6px}
+  .sk-deadline .d1{width:48px}.sk-deadline .d2{width:36px}
   .load-more .btn{height:44px}
   .task-title-row h1{font-size:20px;max-width:100%}
   .task-title-row .task-id{padding-top:2px}
@@ -654,6 +695,15 @@ body.no-chrome .paper-inner{padding-bottom:32px}
   .toast{font-size:12px}
 }
 .filter-mobile{display:none}
+@media (max-width:767px){
+  .switch{width:44px;height:44px;background:transparent;border:0;box-shadow:none}
+  .switch[aria-checked="true"]{background:transparent;border:0;box-shadow:none}
+  .switch::before{content:"";position:absolute;left:4px;top:12px;width:36px;height:20px;border-radius:999px;background:var(--muted);border:1px solid var(--glass-edge);box-shadow:inset 0 1px 1.5px var(--well-shade),inset 0 -1px 0 var(--well-rim);transition:background 120ms ease}
+  .switch[aria-checked="true"]::before{background:var(--success);border-color:color-mix(in srgb,var(--success) 40%,transparent)}
+  .switch.warn[aria-checked="true"]::before{background:var(--warning);border-color:color-mix(in srgb,var(--warning) 40%,transparent)}
+  .switch::after{top:15px;left:6px;z-index:1}
+  .switch[aria-checked="true"]::after{transform:translateX(16px)}
+}
 @media (prefers-reduced-motion:reduce){
   *,*::before,*::after{animation-duration:.001ms!important;animation-iteration-count:1!important;transition-duration:.001ms!important}
 }
@@ -755,13 +805,13 @@ body.no-chrome .paper-inner{padding-bottom:32px}
       <option value="queue">队列</option><option value="task">任务</option><option value="sync">同步</option><option value="automation">自动化</option><option value="gone">旧地址</option>
     </select>
     <select id="p-state" aria-label="状态">
-      <option value="success">正常</option><option value="loading">加载</option><option value="empty">空</option><option value="filtered">筛选无结果</option><option value="error">错误</option><option value="permission">无权限</option><option value="disabled">未启用</option><option value="stale">掉线/过期数据</option>
+      <option value="success">正常</option><option value="loading">加载</option><option value="empty">空</option><option value="filtered">筛选无结果</option><option value="error">错误</option><option value="permission">无权限/404</option><option value="disabled">未启用</option><option value="migrate">权限迁移</option><option value="stale">掉线/过期数据</option>
     </select>
     <select id="p-me" aria-label="身份">
-      <option value="manager">管理者</option><option value="reader">只读成员</option><option value="none">无 board.read</option>
+      <option value="manager">管理者</option><option value="reader">只读成员</option><option value="none">无 board.read</option><option value="legacy">旧 task.read</option>
     </select>
     <select id="p-id" aria-label="任务">
-      <option value="812">#812 已认领</option><option value="809">#809 可认领</option><option value="814">#814 待回复（镜像）</option><option value="798">#798 等待依赖</option><option value="806">#806 已完成</option><option value="810">#810 已失败（只读）</option><option value="820">#820 已取消</option><option value="816">#816 无回复</option><option value="830">#830 等待依赖（可编辑）</option><option value="848">#848 已失败（可重开）</option><option value="850">#850 待回复（可解除）</option>
+      <option value="812">#812 已认领</option><option value="809">#809 可认领</option><option value="814">#814 待回复（镜像）</option><option value="798">#798 等待依赖</option><option value="806">#806 已完成</option><option value="810">#810 已失败（只读）</option><option value="820">#820 已取消</option><option value="816">#816 无回复</option><option value="830">#830 等待依赖（可编辑）</option><option value="848">#848 已失败（可重开）</option><option value="850">#850 待回复（可解除）</option><option value="852">#852 只读归档</option>
     </select>
     <select id="p-dialog" aria-label="对话框">
       <option value="">无对话框</option><option value="complete">完成</option><option value="fail">失败</option><option value="block">阻塞</option><option value="assign">指派</option><option value="needs">依赖</option><option value="cancel">取消</option><option value="release">释放</option><option value="reopen">重新打开</option><option value="answer">回答</option><option value="filters">筛选</option><option value="access">频道访问</option><option value="shortcuts">快捷键</option>
@@ -786,7 +836,8 @@ const ME = {
     channels: { "work": "editor", "work/production": "owner", "work/release": "viewer", "superagent": "editor", "support": "viewer" } },
   reader: { name: "陈墨", login: "chen", actor: "陈墨（账号）", read: true, write: false, manage: false,
     channels: { "work": "viewer", "work/production": "viewer", "work/release": "viewer", "superagent": "viewer", "support": "viewer" } },
-  none: { name: "陈墨", login: "chen", actor: "陈墨（账号）", read: false, write: false, manage: false, channels: {} }
+  none: { name: "陈墨", login: "chen", actor: "陈墨（账号）", read: false, write: false, manage: false, channels: {} },
+  legacy: { name: "陈墨", login: "chen", actor: "陈墨（账号）", read: false, write: false, manage: false, taskRead: true, channels: {} }
 };
 
 const STATES = {
@@ -814,14 +865,14 @@ const TASKS = [
     labels: { area: "ops" }, needs: [], created: "昨天 16:40", updated: "今天 09:41", reason: "源库只读，缺少导出权限；导出账号的 SELECT 授权还在审批。",
     body: "把 2024–2025 的历史对账记录迁到新表，保留原始 ID。\n\n失败原因：源库只读，导出账号缺少 SELECT 授权。" },
   { id: "812", title: "修复结算页偶发重复扣款", state: "claimed", channel: "work/production", owner: "陈墨", by: "陈墨（账号）", for: "池中",
-    labels: { source: "superagent", ticket: "tkt_9f3c", area: "billing", priority: "urgent" }, needs: ["806"], created: "今天 11:08", updated: "今天 13:47",
+    labels: { source: "superagent", ticket: "tkt_9f3c", area: "billing", priority: "urgent" }, needs: ["806"], created: "今天 11:08", updated: "今天 13:47", mirror: { source: "superagent", readOnly: false, bridge: true },
     body: "结算页在弱网下会重复提交：用户双击「确认支付」后产生两笔扣款。\n\n目标：幂等键覆盖整个提交链路；重复请求返回同一结果；补一条回归测试。\n\n完成条件：`qa/refund-double` 场景通过，灰度 5% 观察 30 分钟无重复。",
     claim: { actor: "陈墨（账号）", mine: true, until: NOW + 872000, lease: 900 } },
   { id: "814", title: "为移动端接入任务通知", state: "blocked", channel: "work/production", owner: "陈墨", by: "超级助理·接单器", for: "超级助理·接单器",
     labels: { source: "superagent", ticket: "tkt_71ab", area: "mobile" }, needs: [], created: "今天 12:20", updated: "今天 13:12",
     body: "移动端接入任务通知：任务被认领、被阻塞、被完成时各推一条；需要确定文案与频率。",
     blocked: { kind: "needs_input", reason: "移动端通知文案由谁定稿？是沿用「任务有更新」，还是按状态分文案？" },
-    mirror: true, bridge: true },
+    mirror: { source: "superagent", readOnly: false, bridge: true } },
   { id: "816", title: "归档 Q3 事故复盘", state: "ready", channel: "work/release", owner: "周谨", by: "周谨（账号）", for: "池中",
     labels: { area: "release" }, needs: [], created: "今天 10:40", updated: "今天 10:40",
     body: "把 Q3 的三份事故复盘归档到记录 / 审计，并在发布说明里链接。\n\n注意：不要在任务线程里粘贴客户信息。" },
@@ -836,7 +887,7 @@ const TASKS = [
     body: "渠道 A 的结算差异 0.02 元/笔，累计 43 笔。核对是否是四舍五入规则不同。",
     claim: { actor: "审计员·阿岚", mine: false, until: NOW - 60000, lease: 900, expired: true } },
   { id: "826", title: "Slack #prs 的同步回执丢失", state: "ready", channel: "work/production", owner: "陈墨", by: "陈墨（账号）", for: "池中",
-    labels: { source: "github", repo: "acme/web" }, needs: [], created: "今天 10:15", updated: "今天 10:15",
+    labels: { source: "github", repo: "acme/web" }, origin: { platform: "github", ref: "acme/web#1042" }, needs: [], created: "今天 10:15", updated: "今天 10:15",
     body: "Slack #prs 有两条回复没有回执；GitHub PR #1042 仍显示未同步。\n\n先确认 outbox 的 delivery_id 是否重复。" },
   { id: "828", title: "把发布窗口写进值班表", state: "ready", channel: "work/production", owner: "陈墨", by: "陈墨（账号）", for: "池中",
     labels: { area: "ops" }, needs: [], created: "今天 09:00", updated: "今天 09:00",
@@ -848,7 +899,7 @@ const TASKS = [
     labels: { area: "frontend" }, needs: [], created: "今天 11:30", updated: "今天 11:30",
     body: "在移动端的任务卡里补一行快捷键说明；不新增手势。" },
   { id: "834", title: "核对 Linear 状态映射", state: "ready", channel: "work/release", owner: "周谨", by: "周谨（账号）", for: "池中",
-    labels: { source: "linear", team: "ENG" }, needs: [], created: "今天 12:05", updated: "今天 12:05",
+    labels: { source: "linear", team: "ENG" }, origin: { platform: "linear", ref: "ENG-212" }, needs: [], created: "今天 12:05", updated: "今天 12:05",
     body: "核对 Linear 的 triage/backlog/unstarted/started/completed/canceled 与 board 七态的映射。" },
   { id: "836", title: "归档 11 月事故复盘", state: "ready", channel: "work", owner: "陈墨", by: "陈墨（账号）", for: "池中",
     labels: { area: "release" }, needs: [], created: "今天 12:40", updated: "今天 12:40",
@@ -869,6 +920,10 @@ const TASKS = [
   { id: "846", title: "把结算修复写进发布说明", state: "waiting", channel: "work/release", owner: "林岚", by: "林岚（账号）", for: "池中",
     labels: { area: "release" }, needs: ["812"], created: "今天 13:50", updated: "今天 13:50",
     body: "等 #812 完成后，把幂等键修复写进 11-28 的发布说明，并链接回归测试。" },
+  { id: "852", title: "归档：渠道 C 退款工单", state: "completed", channel: "superagent", owner: "陈墨", by: "超级助理·接单器", for: "池中",
+    labels: { source: "superagent", ticket: "tkt_archive_77" }, needs: [], created: "昨天 10:00", updated: "昨天 10:20",
+    result: "工单已关闭，归档只读保留。", body: "渠道 C 的退款工单已关闭；归档只读保留，不再执行。",
+    archived: true, mirror: { source: "superagent", readOnly: true, bridge: false } },
   { id: "848", title: "重放失败的结算对账", state: "failed", channel: "work/production", owner: "陈墨", by: "陈墨（账号）", for: "池中",
     labels: { area: "billing" }, needs: [], created: "今天 13:55", updated: "今天 13:56",
     reason: "重放脚本在第三步超时，已停止，未产生资金操作。",
@@ -966,7 +1021,7 @@ const SCHEDULES = [
    ========================================================================== */
 const S = {
   scene: "queue", state: "success", me: "manager", id: "812", dialog: "", sync: "success", automation: "success",
-  claimLost: false, composerError: false, chrome: true, theme: "dark", showFacts: false,
+  claimLost: false, composerError: false, chrome: true, theme: "dark", showFacts: false, archive: false, newClaim: false,
   tab: "open", sub: "all", page: 0, selected: 0,
   filters: { channel: "all", label: "all", owner: "all", for: "all" },
   draft: "", replyMore: false, sending: false, sendFailed: false
@@ -1026,20 +1081,23 @@ function ordinaryLabels(t) {
   return Object.entries(t.labels || {}).filter(([k]) => !["source", "ticket", "repo", "team", "mandate", "policy"].includes(k) && !k.startsWith("board."));
 }
 function sourceLine(t) {
-  if (t.labels?.source === "superagent") return { icon: "bot", text: "镜像自超级助理", short: "超级助理" };
-  if (t.labels?.source === "github") return { icon: "git", text: `来自 GitHub · ${t.labels.repo || ""}`, short: "GitHub" };
-  if (t.labels?.source === "linear") return { icon: "hash", text: `来自 Linear · ${t.labels.team || ""}`, short: "Linear" };
+  if (t.archived) return { icon: "layers", text: "归档自超级助理", short: "归档" };
+  if (t.mirror?.source === "superagent") return { icon: "bot", text: "镜像自超级助理", short: "超级助理" };
+  if (t.origin?.platform === "github") return { icon: "git", text: `来自 GitHub · ${t.origin.ref || ""}`, short: "GitHub" };
+  if (t.origin?.platform === "linear") return { icon: "hash", text: `来自 Linear · ${t.origin.ref || ""}`, short: "Linear" };
   return null;
 }
 function matches(t, ignoreTab = false) {
   const st = effective(t);
-  if (!ignoreTab) {
+  if (S.archive) {
+    if (!t.archived) return false;
+  } else if (!ignoreTab) {
     if (S.tab === "open" && !isOpen(st)) return false;
     if (S.tab === "completed" && st !== "completed") return false;
     if (S.tab === "failed" && st !== "failed") return false;
     if (S.tab === "canceled" && st !== "canceled") return false;
   }
-  if (S.tab === "open" && S.sub !== "all" && st !== S.sub) return false;
+  if (!S.archive && S.tab === "open" && S.sub !== "all" && st !== S.sub) return false;
   const f = S.filters;
   if (f.channel !== "all" && !(t.channel === f.channel || t.channel.startsWith(f.channel + "/"))) return false;
   if (f.label !== "all") {
@@ -1073,6 +1131,47 @@ function countTab(tab) {
 function countSub(sub) {
   return TASKS.filter((t) => matchesFiltersOnly(t) && isOpen(effective(t)) && (sub === "all" || effective(t) === sub)).length;
 }
+
+/* The prototype's stand-in for the server's TaskView.moves / mirror facts.
+   The renderer below only reads t.moves and t.mirror; it never infers an
+   action from source labels or channel relations. */
+function fixtureMoves(t) {
+  if (t.archived || t.mirror?.readOnly) return [];
+  const rel = me().channels[t.channel] || null;
+  const write = !!(can("write") && rel && rel !== "viewer");
+  const owner = !!(can("write") && rel === "owner");
+  const st = effective(t);
+  const moves = [];
+  if (write) moves.push("reply");
+  if (st === "ready") {
+    if (write && (!t.for || t.for === "池中" || t.for.startsWith(me().name))) moves.push("claim");
+    if (owner) moves.push("assign", "needs", "block", "cancel");
+  } else if (st === "claimed") {
+    if (t.claim?.mine && write) {
+      if (S.claimLost) {
+        moves.push("takeover");
+        if (owner) moves.push("release.force");
+      } else moves.push("renew", "release", "complete", "fail", "block");
+      if (owner) moves.push("assign", "cancel");
+    } else if (owner) {
+      moves.push("release.force", "assign", "cancel");
+    }
+  } else if (st === "blocked") {
+    if (t.mirror?.bridge && t.blocked?.kind === "needs_input") moves.push("answer");
+    if (owner) moves.push("unblock", "assign", "needs", "cancel");
+  } else if (st === "failed") {
+    if (owner) moves.push("reopen", "cancel");
+  } else if (st === "waiting") {
+    if (owner) moves.push("assign", "needs", "block", "cancel");
+  }
+  return moves;
+}
+function applyFixtureMoves() {
+  TASKS.forEach((t) => {
+    if (t.mirror) t.mirror.readOnly = !t.mirror.bridge;
+    t.moves = fixtureMoves(t);
+  });
+}
 function activeFilterCount() {
   return Object.values(S.filters).filter((v) => v !== "all").length;
 }
@@ -1086,9 +1185,9 @@ function liveBadge() {
 }
 function header(opts) {
   const badges = [];
-  const forbidden = opts.quiet || S.state === "permission" || S.state === "disabled" || !can("read");
+  const forbidden = opts.quiet || S.state === "permission" || S.state === "disabled" || S.state === "migrate" || !can("read");
   if (!forbidden) {
-    badges.push(liveBadge());
+    badges.push(S.archive ? `<span class="badge outline">${icon("layers")}归档只读</span>` : liveBadge());
     if (!can("write")) badges.push(`<span class="badge outline">${icon("lock")}只读</span>`);
     if (can("manage") && opts.syncIssue) badges.push(`<span class="badge warning">${icon("alert")}同步 ${syncIssueCount()}</span>`);
   }
@@ -1099,7 +1198,7 @@ function header(opts) {
         <h1>${esc(opts.title)}</h1>
         <div class="title-badges">${badges.join("")}</div>
         <div class="head-actions">
-          ${opts.quiet || S.state === "disabled" ? "" : `<button class="btn ghost" data-action="refresh" aria-label="刷新">${icon("refresh")}<span class="btn-label">刷新</span></button>`}
+          ${opts.quiet || S.state === "disabled" || S.state === "permission" || S.state === "migrate" ? "" : `<button class="btn ghost" data-action="refresh" aria-label="刷新">${icon("refresh")}<span class="btn-label">刷新</span></button>`}
           ${opts.quiet || S.state === "permission" || S.state === "disabled" ? "" : (opts.primary || "")}
         </div>
       </div>
@@ -1107,9 +1206,11 @@ function header(opts) {
     </header>`;
 }
 function syncIssueCount() {
+  if (S.scene === "sync" && (S.state === "empty" || S.sync === "none")) return 0;
   return SYNC.filter((e) => e.status === "credential_invalid").length + SYNC.filter((e) => e.dead > 0).length;
 }
 function autoIssueCount() {
+  if (S.scene === "automation" && (S.state === "empty" || S.automation === "none")) return 0;
   return WATCHERS.filter((w) => w.fail > 0 || w.dead > 0).length + SCHEDULES.filter((s) => s.status === "failed").length;
 }
 function viewTabs(active) {
@@ -1163,6 +1264,7 @@ function filterBar() {
       ${filterPill("filter", "label", "标签", labelText, [["all", "全部标签"], ["priority=high", "priority=high"], ["priority=urgent", "priority=urgent"], ["source=superagent", "source=superagent"], ["area=billing", "area=billing"]], f.label !== "all")}
       ${filterPill("user", "owner", "创建者", ownerText, [["all", "全部创建者"], ["陈墨", "陈墨"], ["林岚", "林岚"], ["周谨", "周谨"]], f.owner !== "all")}
       ${filterPill("corner", "for", "指派", forText, [["all", "全部指派"], ["pool", "池中"], ["陈墨（账号）", "陈墨（账号）"], ["发布员·小铖", "发布员·小铖"]], f.for !== "all")}
+      <button class="btn outline archive-toggle ${S.archive ? "is-active" : ""}" data-action="archive-toggle" aria-pressed="${S.archive}">${icon("layers", "sm")}归档<span class="badge secondary small">${TASKS.filter((t) => t.archived).length}</span></button>
       <button class="btn ghost filter-clear" data-action="clear-filters" ${active ? "" : "hidden"}>清空</button>
       <button class="btn outline filter-mobile" data-action="dialog" data-dialog="filters">${icon("filter", "sm")}筛选${active ? `<span class="badge secondary small">${active}</span>` : ""}</button>
       <span class="sort-note">${icon("clock", "xs")}最早优先</span>
@@ -1191,14 +1293,14 @@ function queueRow(t, index) {
   if (st === "claimed" && t.claim) {
     const left = t.claim.until - Date.now();
     deadlineMain = `<span data-countdown="${t.id}">${countdown(left)}</span>`;
-    deadlineSub = t.claim.mine ? "由本标签页持有" : `由 ${esc(t.claim.actor)} 持有`;
+    deadlineSub = t.claim.mine && (t.moves || []).includes("complete") ? "由本标签页持有" : `由 ${esc(t.claim.actor)} 持有`;
   } else if (st === "ready" && t.claim?.expired) {
     deadlineMain = "租约已到期";
-    deadlineSub = t.for && t.for !== "池中" ? `指派给 ${t.for}` : `曾任 ${t.claim.actor}`;
+    deadlineSub = t.for && t.for !== "池中" ? `仅限 ${t.for}` : `曾任 ${t.claim.actor}`;
     deadlineClass = "warn";
   } else if (st === "ready") {
     deadlineMain = t.for && t.for !== "池中" ? "已指派" : t.owner;
-    deadlineSub = t.for && t.for !== "池中" ? t.for : "池中";
+    deadlineSub = t.for && t.for !== "池中" ? `仅限 ${t.for}` : "池中";
   } else if (st === "blocked") {
     deadlineMain = "等待人工";
     deadlineSub = t.blocked?.kind === "awaiting_approval" ? "等待审批" : "等待回复";
@@ -1208,6 +1310,9 @@ function queueRow(t, index) {
     deadlineMain = `前置 ${(t.needs || []).filter((id) => effective(taskById(id) || {}) === "completed").length}/${(t.needs || []).length}`;
     deadlineSub = bad ? "有前置失败" : "等待前置完成";
     deadlineClass = bad ? "warn" : "";
+  } else if (t.archived) {
+    deadlineMain = "只读归档";
+    deadlineSub = t.updated || "已归档";
   } else if (st === "completed") {
     deadlineMain = t.updated || "已完成";
     deadlineSub = t.result ? t.result.split("。")[0] : "已完成";
@@ -1242,10 +1347,10 @@ function queueRow(t, index) {
 function skeletonRows(n = 6) {
   return `<div class="queue-list" aria-label="加载中" aria-busy="true">${Array.from({ length: n }).map((_, i) => `
     <div class="skeleton-row">
-      <span class="sk" style="width:28px;justify-self:end"></span>
-      <span class="sk block" style="width:72px"></span>
-      <span style="display:flex;flex-direction:column;gap:8px"><span class="sk title" style="width:58%"></span><span class="sk" style="width:38%"></span></span>
-      <span style="display:flex;flex-direction:column;gap:8px;align-items:flex-end"><span class="sk" style="width:64px"></span><span class="sk" style="width:44px"></span></span>
+      <div class="sk-top"><span class="sk sk-id"></span><span class="sk sk-state"></span></div>
+      <div class="sk-main"><span class="sk title"></span><span class="sk meta"></span></div>
+      <div class="sk-deadline"><span class="sk d1"></span><span class="sk d2"></span></div>
+      <span class="sr-only">加载中</span>
     </div>`).join("")}</div>`;
 }
 function emptyState(opts) {
@@ -1256,6 +1361,13 @@ function emptyState(opts) {
     ${opts.actions ? `<div class="empty-actions">${opts.actions}</div>` : ""}
     ${opts.requestId ? `<div class="request-id">请求编号 ${esc(opts.requestId)}</div>` : ""}
   </div>`;
+}
+function migrationState() {
+  return emptyState({
+    icon: "layers", title: "任务面已升级，还差一步",
+    description: "你仍有旧的任务查看权限（<span class=\"mono\">task.read</span>），但新任务面需要 <span class=\"mono\">board.read</span>。启用时会由管理员给默认角色授予 <span class=\"mono\">board.read</span>；如果这里还没生效，请联系管理员。旧工单记录已作为只读归档迁移到任务面。",
+    actions: `<button class="btn outline" data-action="copy-request">复制申请说明</button><button class="btn ghost" data-action="nav" data-scene="workspace">返回工作区</button>`
+  });
 }
 function permissionState(kind) {
   if (kind === "permission" && (S.scene === "sync" || S.scene === "automation")) {
@@ -1274,9 +1386,9 @@ function permissionState(kind) {
   }
   if (S.me === "none") {
     return emptyState({
-      icon: "lock", tone: "danger", title: "你没有查看任务队列的权限",
-      description: `需要「查看任务」能力（<span class="mono">board.read</span>）。找这台部署的管理员，把你的账号「${esc(me().name)}」加入有该能力的权限组。`,
-      actions: `<button class="btn outline" data-action="nav" data-scene="workspace">返回工作区</button><button class="btn ghost" data-action="copy-request">复制申请说明</button>`
+      icon: "lock", tone: "danger", title: "任务面不存在，或你没有访问权限",
+      description: "为避免泄露，这里不区分「不存在」与「无权限」。如果地址来自旧链接，请从任务队列重新进入。",
+      actions: `<button class="btn outline" data-action="nav" data-scene="workspace">返回工作区</button><button class="btn ghost" data-action="copy-404">复制说明</button>`
     });
   }
   return emptyState({
@@ -1308,17 +1420,21 @@ function renderQueue() {
   const filtersActive = activeFilterCount() > 0;
   let content = "";
   if (S.state === "loading") {
-    content = skeletonRows(6);
+    content = skeletonRows(window.innerWidth <= 767 ? 3 : 6);
   } else if (S.state === "error") {
     content = errorState({ title: "没能读到任务队列", message: "实时连接正常，但列表请求失败了。", requestId: "req_7a1e0c" });
   } else if (S.state === "permission") {
     content = permissionState("permission");
   } else if (S.state === "disabled") {
     content = permissionState("disabled");
+  } else if (S.state === "migrate") {
+    content = migrationState();
   } else if (S.state === "empty" || rows.length === 0) {
     const noChannels = Object.keys(me().channels).length === 0;
     const filtered = filtersActive || S.state === "filtered";
-    if (noChannels) {
+    if (S.archive) {
+      content = emptyState({ icon: "layers", title: "还没有归档任务", description: "旧的超级助理工单归档后会出现在这里，只读保留；不会恢复旧看板。", actions: `<button class="btn outline" data-action="archive-toggle">返回队列</button>` });
+    } else if (noChannels) {
       content = emptyState({ icon: "hash", title: "你还没有可访问的频道", description: "任务按频道隔离。找频道所有者或租户管理员给你查看或编辑权限后，这里会出现任务。", actions: `<button class="btn outline" data-action="copy-request">复制申请说明</button><button class="btn ghost" data-action="nav" data-scene="workspace">返回工作区</button>` });
     } else if (filtered) {
       const desc = `当前筛选：${filterDescription()}。清空筛选可以看到其他打开的任务。`;
@@ -1329,18 +1445,23 @@ function renderQueue() {
   } else {
     content = `
       ${S.state === "stale" ? staleBanner("实时连接已断开，显示的是 14:02:11 的数据。恢复后会自动补齐。") : ""}
-      <div class="queue-meta"><span>${filtersActive ? "筛选后" : "打开的任务"}</span><span class="mono">本页 ${shown.length} 条 · 实时更新</span></div>
+      <div class="queue-meta"><span>${S.archive ? "归档任务 · 只读" : filtersActive ? "筛选后" : "打开的任务"}</span><span class="mono">本页 ${shown.length} 条 · ${S.archive ? "不实时" : S.state === "stale" ? "最后更新 14:02:11" : "实时更新"}</span></div>
       <div class="column-head" aria-hidden="true"><span style="text-align:right">任务</span><span>状态</span><span>标题 / 频道 / 依赖</span><span style="text-align:right">期限 / 归属</span></div>
       <div class="queue-list" role="listbox" aria-label="任务队列">
         ${shown.map((t, i) => queueRow(t, i)).join("")}
       </div>
       ${hasMore ? `<div class="load-more"><button class="btn outline" data-action="load-more">${icon("chevron-down")}加载更多（较新）</button><span class="hint">已显示 ${shown.length} / ${rows.length} · 最早优先</span></div>` : `<div class="list-end">已经到队列末尾 · 最早优先</div>`}
-      <div class="queue-foot"><span>${rows.length} 条${filtersActive ? "（筛选后）" : "打开的任务"}</span><span>cursor ${S.page === 0 ? "0" : shown[shown.length - 1]?.id || "—"}</span></div>`;
+      <div class="queue-foot"><span>${rows.length} 条${S.archive ? "归档任务" : filtersActive ? "（筛选后）" : "打开的任务"}</span><span>cursor ${S.page === 0 ? "0" : shown[shown.length - 1]?.id || "—"}</span></div>`;
   }
+  const migrate = S.state === "migrate";
+  const unavailable = S.state === "permission" || S.state === "disabled";
+  const headTitle = migrate ? "任务面迁移" : unavailable ? (S.state === "disabled" ? "任务看板未启用" : "任务面不可用") : S.archive ? "归档任务" : "任务队列";
+  const headKicker = migrate ? "迁移" : unavailable ? "不可用" : S.archive ? "归档" : "队列";
+  const headPurpose = migrate ? "旧任务权限仍可读，新任务面需要一次权限迁移。" : unavailable ? (S.state === "disabled" ? "这个租户还没有开启任务看板。" : "地址没有对应到可访问的任务面。") : S.archive ? "归档任务只读保留，不提供动作与回复；按最早优先。" : "打开的任务，最早优先；认领后租约倒计时，过期自动回到可认领。";
   return `
-    ${header({ kicker: "队列", title: "任务队列", icon: "inbox", purpose: "打开的任务，最早优先；认领后租约倒计时，过期自动回到可认领。", primary: can("write") ? `<button class="btn primary" data-action="dialog" data-dialog="new">${icon("plus")}<span class="btn-label">新建任务</span></button>` : "", syncIssue: can("manage") && S.scene !== "sync" })}
-    ${S.state === "permission" || S.state === "disabled" ? "" : viewTabs("queue")}
-    ${["success", "stale", "empty", "filtered", "error"].includes(S.state) ? stateTabs(S.state === "empty" || S.state === "error") + filterBar() : ""}
+    ${header({ kicker: headKicker, title: headTitle, icon: migrate ? "layers" : unavailable ? "lock" : "inbox", purpose: headPurpose, primary: can("write") && !S.archive && !unavailable ? `<button class="btn primary" data-action="dialog" data-dialog="new">${icon("plus")}<span class="btn-label">新建任务</span></button>` : "", syncIssue: can("manage") && S.scene !== "sync" && !unavailable })}
+    ${S.state === "permission" || S.state === "disabled" || migrate ? "" : viewTabs("queue")}
+    ${["success", "stale", "loading", "empty", "filtered", "error"].includes(S.state) ? (S.archive ? `<div class="archive-banner">${icon("layers", "sm")}<span><b>归档任务</b> · 只读保留，不提供动作与回复</span><button class="btn ghost sm" data-action="archive-toggle">返回队列</button></div>` : stateTabs(S.state === "loading" || S.state === "empty" || S.state === "error")) + filterBar() : ""}
     ${content}`;
 }
 function filterDescription() {
@@ -1378,9 +1499,9 @@ function needsSection(t) {
     </button>`;
   }).join("")}</div>` : `<div class="need-empty">无前置</div>`;
   const bad = needs.some((id) => ["failed", "canceled"].includes(effective(taskById(id) || {})));
-  const canEdit = ownerCan(t) && can("write") && channelCan(t.channel) !== "viewer" && !(t.mirror && !t.bridge) && ["waiting", "ready", "blocked"].includes(effective(t));
+  const canEdit = (t.moves || []).includes("needs");
   return `
-    <section class="task-section task-labels-section">
+    <section class="task-section task-needs-section">
       <div class="task-section-head">${icon("layers", "xs")}前置依赖 <span class="mono">${needs.filter((id) => effective(taskById(id) || {}) === "completed").length}/${needs.length}</span>${canEdit ? `<button class="btn ghost sm" data-action="dialog" data-dialog="needs">编辑</button>` : ""}</div>
       ${body}
       ${bad ? `<div class="alert warning">${icon("alert", "sm")}<div class="alert-body"><b>前置不会自动就绪</b><p>${esc(needs.map((id) => taskById(id)).filter((n) => n && ["failed", "canceled"].includes(effective(n))).map((n) => `#${n.id} ${n.title}（${STATES[effective(n)].label}）`).join("、"))}。可改依赖，或等它重新打开并完成。</p></div></div>` : ""}
@@ -1391,7 +1512,7 @@ function labelsSection(t) {
   const labels = ordinaryLabels(t);
   const system = Object.entries(t.labels || {}).filter(([k]) => k.startsWith("board."));
   return `
-    <section class="task-section">
+    <section class="task-section task-labels-section">
       <div class="task-section-head">${icon("filter", "xs")}标签</div>
       ${labels.length ? `<div class="labels">${labels.map(([k, v]) => `<span class="label-chip">${esc(k)}=${esc(v)}</span>`).join("")}</div>` : `<div class="need-empty">无普通标签</div>`}
       ${system.length ? `<details class="hint"><summary>系统标签 · ${system.length}</summary><div class="labels" style="margin-top:6px">${system.map(([k, v]) => `<span class="label-chip">${esc(k)}=${esc(v)}</span>`).join("")}</div></details>` : ""}
@@ -1404,7 +1525,7 @@ function syncCopiesSection(t) {
     : t.id === "814" ? [{ p: "Slack", target: "#errors-www", state: "failed", error: "rate_limited" }]
     : [{ p: "GitHub", target: "acme/web#1042", state: "failed", error: "receipt missing" }];
   return `
-    <section class="task-section">
+    <section class="task-section task-sync-section">
       <div class="task-section-head">${icon("refresh", "xs")}外部副本 ${can("manage") ? `<button class="btn ghost sm" data-action="view" data-view="sync">查看同步</button>` : ""}</div>
       <div class="sync-copies">${copies.map((c) => `<div class="sync-copy">
         <span class="badge ${c.state === "synced" ? "success" : c.state === "retry" ? "info" : "destructive"}">${c.state === "synced" ? "已同步" : c.state === "retry" ? `重试中 ${c.attempt}` : "失败"}</span>
@@ -1414,113 +1535,127 @@ function syncCopiesSection(t) {
       ${t.id === "812" ? `<div class="hint">Slack 不保证只投递一次；极端崩溃窗口可能重复一条消息。</div>` : ""}
     </section>`;
 }
-function taskActions(t) {
+const MOVE_META = {
+  complete: { label: "完成", icon: "check" },
+  claim: { label: "认领", icon: "inbox" },
+  takeover: { label: "重新认领", icon: "inbox" },
+  answer: { label: "回答并解除", icon: "message" },
+  unblock: { label: "解除阻塞", icon: "message" },
+  reopen: { label: "重新打开", icon: "rotate" },
+  "release.force": { label: "收回认领", icon: "lock" },
+  renew: { label: "续租", icon: "clock" },
+  release: { label: "释放", icon: "corner" },
+  block: { label: "阻塞", icon: "message" },
+  reply: { label: "回复", icon: "message" },
+  fail: { label: "标记失败", icon: "alert" },
+  assign: { label: "指派", icon: "user" },
+  needs: { label: "改依赖", icon: "layers" },
+  cancel: { label: "取消任务", icon: "trash" }
+};
+function actionButton(move, t, kind) {
+  const meta = MOVE_META[move];
+  if (!meta) return "";
+  const dialogFor = { complete: "complete", answer: "answer", unblock: "unblock", reopen: "reopen", "release.force": "force-release", release: "release", block: "block", fail: "fail", assign: "assign", needs: "needs", cancel: "cancel" };
+  let action = "";
+  if (move === "claim" || move === "takeover") action = `data-action="${move}" data-id="${t.id}"`;
+  else if (move === "renew" || move === "reply") action = `data-action="${move}"`;
+  else action = `data-action="dialog" data-dialog="${dialogFor[move]}"`;
+  if (kind === "menu") return `<button class="menu-item" ${action}>${icon(meta.icon, "sm")}${meta.label}</button>`;
+  if (kind === "primary") return `<button class="btn primary" ${action}>${icon(meta.icon)}${meta.label}</button>`;
+  return `<button class="btn outline" ${action}>${icon(meta.icon)}${meta.label}</button>`;
+}
+function statusPrimary(t, moves) {
   const st = effective(t);
-  const mine = isMine(t);
-  const lost = S.claimLost && st === "claimed" && mine;
-  const claimed = st === "claimed" && t.claim;
-  const expired = st === "ready" && t.claim?.expired;
-  const readOnly = !can("write") || channelCan(t.channel) === "viewer";
-  const mirrorReadOnly = t.mirror && !t.bridge;
-  if (readOnly || mirrorReadOnly) {
+  if (st === "claimed" && !(t.claim?.mine && moves.includes("complete"))) return `<button class="btn outline wide" disabled>${icon("lock")}由 ${esc(t.claim?.actor || "他人")} 持有</button>`;
+  if (st === "ready" && t.for && t.for !== "池中" && !moves.includes("claim")) return `<button class="btn outline wide" disabled>${icon("lock")}已指派 · 仅限 ${esc(t.for)}</button>`;
+  if (st === "waiting") return `<button class="btn outline wide" disabled>${icon("clock")}等待前置完成</button>`;
+  if (st === "blocked") return `<button class="btn outline wide" disabled>${icon("lock")}等待创建者解除</button>`;
+  if (st === "failed") return `<button class="btn outline wide" disabled>${icon("lock")}只有创建者可以重新打开</button>`;
+  if (st === "completed") return `<button class="btn outline wide" disabled>${icon("check")}已完成，不可变更</button>`;
+  if (st === "canceled") return `<button class="btn outline wide" disabled>${icon("x")}已取消，不可变更</button>`;
+  return `<button class="btn outline wide" disabled>${icon("lock")}没有可用的状态动作</button>`;
+}
+function taskActions(t) {
+  const moves = t.moves || [];
+  const has = (move) => moves.includes(move);
+  if (t.archived || t.mirror?.readOnly || !moves.length) {
+    const note = t.archived
+      ? "归档任务只读：旧工单已关闭，只保留记录；不提供动作与回复。"
+      : t.mirror?.readOnly
+        ? "镜像任务只读：该任务由超级助理管理，命令桥未开启；在超级助理里处理。"
+        : "你在该频道只有查看权限；认领、回复与状态变更需要编辑权限。";
     return `<div class="task-actions">
-      <div class="read-only-note">${icon("lock", "sm")}<span>${mirrorReadOnly ? "镜像任务只读：该任务由超级助理管理，命令桥未开启；在超级助理里处理。" : "你在该频道只有查看权限；认领、回复与状态变更需要编辑权限。"}</span></div>
+      <div class="read-only-note">${icon("lock", "sm")}<span>${esc(note)}</span></div>
       <div class="action-secondary"><button class="btn outline" data-action="copy-link">${icon("link")}复制链接</button></div>
     </div>`;
   }
-  let primary = "", secondary = [], note = "";
-  if (st === "ready") {
-    if (canClaim(t)) {
-      primary = `<button class="btn primary" data-action="claim" data-id="${t.id}">${icon("inbox")}认领</button><button class="btn outline icon" data-action="claim-options" aria-label="选择认领时长" title="认领时长">${icon("chevron-down")}</button>`;
-      note = expired ? "租约已到期，任何人都可以重新认领。" : "认领后开始计租约；到期未完成会自动回到可认领。";
-    } else {
-      primary = `<button class="btn outline wide" disabled>${icon("lock")}已指派给 ${esc(t.for || "其他执行身份")}</button>`;
-      note = "这个任务指派给另一个执行身份；只有该身份能认领。";
-    }
-    secondary = [["reply", "回复", "message"], ["more", "更多", "more"]];
-  } else if (st === "claimed" && mine && lost) {
-    primary = `<button class="btn outline wide" disabled>${icon("lock")}认领凭据不在本标签页</button>`;
-    secondary = [["reply", "回复", "message"], ["copy-link", "复制链接", "link"]];
-    note = "这是你认领的任务，但凭据不在本标签页。为了不把认领凭据写进浏览器存储，刷新后不能完成或续租；租约到期后可重新认领。";
-  } else if (st === "claimed" && mine) {
-    primary = `<button class="btn primary" data-action="dialog" data-dialog="complete">${icon("check")}完成</button>`;
-    secondary = [["renew", "续租", "clock"], ["dialog:block", "阻塞", "message"], ["dialog:release", "释放", "corner"], ["more", "更多", "more"]];
-    note = `完成后，${(TASKS.filter((x) => (x.needs || []).includes(t.id)).length)} 个依赖任务会变为可认领。`;
-  } else if (st === "claimed") {
-    primary = `<button class="btn outline wide" disabled>${icon("lock")}由 ${esc(t.claim?.actor || "他人")} 持有</button>`;
-    secondary = [["reply", "回复", "message"], ["more", "更多", "more"]];
-    note = `租约剩余 ${countdown((t.claim?.until || Date.now()) - Date.now())}；到期后会自动回到可认领。`;
-  } else if (st === "blocked") {
-    if (t.mirror && t.blocked?.kind === "needs_input") {
-      primary = `<button class="btn primary" data-action="dialog" data-dialog="answer">${icon("message")}回答并解除</button>`;
-      note = "回答会作为回复写入线程，并把问题交回超级助理。";
-    } else if (ownerCan(t)) {
-      primary = `<button class="btn primary" data-action="dialog" data-dialog="unblock">${icon("message")}解除阻塞</button>`;
-      note = "解除后按前置依赖回到可认领或等待依赖。";
-    } else {
-      primary = `<button class="btn outline wide" disabled>${icon("lock")}等待创建者解除</button>`;
-    }
-    secondary = [["reply", "回复", "message"], ["more", "更多", "more"]];
-  } else if (st === "failed") {
-    if (ownerCan(t)) primary = `<button class="btn primary" data-action="dialog" data-dialog="reopen">${icon("rotate")}重新打开</button>`;
-    else primary = `<button class="btn outline wide" disabled>${icon("lock")}只有创建者可以重新打开</button>`;
-    secondary = [["reply", "回复", "message"], ["more", "更多", "more"]];
-    note = "失败原因会保留在记录里；依赖者仍会等到它完成。";
-  } else if (st === "waiting") {
-    primary = `<button class="btn outline wide" disabled>${icon("clock")}等待前置完成</button>`;
-    secondary = [["reply", "回复", "message"], ["more", "更多", "more"]];
-    note = "前置完成后会自动回到可认领；不会跳过依赖。";
-  } else if (st === "completed") {
-    primary = `<button class="btn outline wide" disabled>${icon("check")}已完成，不可变更</button>`;
-    secondary = [["copy-link", "复制链接", "link"]];
-  } else {
-    primary = `<button class="btn outline wide" disabled>${icon("x")}已取消，不可变更</button>`;
-    secondary = [["copy-link", "复制链接", "link"]];
-  }
+  let primary = "";
+  if (has("complete")) primary = actionButton("complete", t, "primary");
+  else if (has("claim")) primary = actionButton("claim", t, "primary");
+  else if (has("takeover")) primary = actionButton("takeover", t, "primary");
+  else if (has("answer")) primary = actionButton("answer", t, "primary");
+  else if (has("unblock")) primary = actionButton("unblock", t, "primary");
+  else if (has("reopen")) primary = actionButton("reopen", t, "primary");
+  else if (has("release.force") && !t.claim?.mine) primary = actionButton("release.force", t, "primary");
+  else primary = statusPrimary(t, moves);
+
+  const secondary = [];
+  if (has("renew")) secondary.push(actionButton("renew", t, "secondary"));
+  if (has("release")) secondary.push(actionButton("release", t, "secondary"));
+  if (has("block")) secondary.push(actionButton("block", t, "secondary"));
+  if (has("reply")) secondary.push(actionButton("reply", t, "secondary"));
+  if (has("release.force") && (has("takeover") || t.claim?.mine)) secondary.push(actionButton("release.force", t, "secondary"));
+
   const overflow = [];
-  if (ownerCan(t) && st === "failed") {
-    overflow.push(`<button class="menu-item" data-action="dialog" data-dialog="cancel">${icon("trash", "sm")}取消任务</button>`);
-  } else if (ownerCan(t) && !["completed", "canceled"].includes(st)) {
-    if (["waiting", "ready"].includes(st)) overflow.push(`<button class="menu-item" data-action="dialog" data-dialog="block">${icon("message", "sm")}阻塞</button>`);
-    overflow.push(`<button class="menu-item" data-action="dialog" data-dialog="assign">${icon("user", "sm")}指派</button>`);
-    if (!["waiting", "ready", "blocked"].includes(st)) overflow.push(`<button class="menu-item" data-action="dialog" data-dialog="needs" disabled style="opacity:.5">${icon("layers", "sm")}改依赖（先释放）</button>`);
-    overflow.push(`<button class="menu-item" data-action="dialog" data-dialog="cancel">${icon("trash", "sm")}取消任务</button>`);
-  }
-  if (st === "claimed" && mine) {
-    overflow.push(`<button class="menu-item" data-action="dialog" data-dialog="fail">${icon("alert", "sm")}标记失败</button>`);
-  }
+  ["fail", "assign", "needs", "cancel", "unblock", "answer", "release.force"].forEach((move) => {
+    if (!has(move)) return;
+    if (move === "release.force" && (has("takeover") || t.claim?.mine || primary.includes("收回认领"))) return;
+    if (move === "unblock" && primary.includes("解除阻塞")) return;
+    if (move === "answer" && primary.includes("回答并解除")) return;
+    if (move === "assign" || move === "needs" || move === "cancel" || move === "fail") overflow.push(actionButton(move, t, "menu"));
+    else if (move === "unblock" || move === "answer" || move === "release.force") overflow.push(actionButton(move, t, "menu"));
+  });
   const moreBtn = overflow.length ? `<div class="filter-wrap"><button class="btn outline" data-action="menu" aria-haspopup="menu" aria-expanded="false">${icon("more")}更多</button><div class="menu glass-popover" role="menu">${overflow.join("")}</div></div>` : "";
-  const secondaryHtml = secondary.map(([act, label, ic]) => {
-    if (act === "more") return moreBtn;
-    if (act.startsWith("dialog:")) return `<button class="btn outline" data-action="dialog" data-dialog="${act.split(":")[1]}">${icon(ic)}${label}</button>`;
-    return `<button class="btn outline" data-action="${act}">${icon(ic)}${label}</button>`;
-  }).join("");
+  let note = "";
+  if (has("complete")) note = `完成后，${TASKS.filter((x) => (x.needs || []).includes(t.id)).length} 个依赖任务会变为可认领。`;
+  else if (has("takeover")) note = "这是你认领的任务，但凭据不在本标签页；重新认领会作废旧 epoch 并签发新凭据。";
+  else if (has("release.force") && !t.claim?.mine) note = "强制结束当前认领，任务回到可认领；写审计记录。";
+  else if (has("claim")) note = "认领后开始计租约；到期未完成会自动回到可认领。";
+  else if (has("unblock") || has("answer")) note = "回答或解除后按前置依赖回到可认领或等待依赖。";
+  else if (has("reopen")) note = "失败原因会保留在记录里；依赖者仍会等到它完成。";
+  else if (effective(t) === "waiting") note = "前置完成后会自动回到可认领；不会跳过依赖。";
+  else if (effective(t) === "claimed" && !t.claim?.mine) note = `租约剩余 ${countdown((t.claim?.until || Date.now()) - Date.now())}；到期后会自动回到可认领。`;
   return `<div class="task-actions">
     <div class="action-primary">${primary}</div>
-    <div class="action-secondary">${secondaryHtml}</div>
+    <div class="action-secondary">${secondary.join("")}${moreBtn}</div>
     ${note ? `<div class="action-note">${esc(note)}</div>` : ""}
   </div>`;
 }
 function leaseBlock(t) {
   const st = effective(t);
-  const lost = S.claimLost && st === "claimed" && t.claim?.mine;
+  const moves = t.moves || [];
+  const holderInTab = !!(t.claim?.mine && moves.includes("complete"));
+  const lost = !!(S.claimLost && st === "claimed" && t.claim?.mine);
   if (st === "claimed" && t.claim) {
     const left = Math.max(0, t.claim.until - Date.now());
     const total = (t.claim.lease || 900) * 1000;
     const pct = Math.max(2, Math.min(100, Math.round((left / total) * 100)));
     const cls = left < 10000 ? "danger" : left < 60000 ? "warn" : "";
     return `<div class="lease-block">
-      <div class="lease-top"><span class="lease-num" data-countdown="${t.id}">${countdown(left)}</span><span class="lease-label">${lost ? "由你认领 · 本标签页无凭据" : t.claim.mine ? "由本标签页持有" : "剩余租约"}</span></div>
+      <div class="lease-top"><span class="lease-num" data-countdown="${t.id}">${countdown(left)}</span><span class="lease-label">${lost ? "由你认领 · 本标签页无凭据" : holderInTab ? "由本标签页持有" : "剩余租约"}</span></div>
       <div class="lease-bar"><div class="lease-fill ${cls}" data-lease-fill="${t.id}" style="width:${pct}%"></div></div>
-      <div class="lease-note ${lost ? "warn" : cls}">${lost ? "刷新或换标签页后认领凭据丢失；到期后可重新认领，不会用浏览器存储恢复。" : t.claim.mine ? "租约到期前完成，或续租；刷新页面会丢失认领凭据。" : `持有者 ${esc(t.claim.actor)}；到期后自动回到可认领。`}</div>
+      <div class="lease-note ${lost ? "warn" : cls}">${lost ? "认领凭据不在本标签页；可由你重新认领，或由创建者/管理员收回。凭据不会用浏览器存储恢复。" : holderInTab ? "租约到期前完成，或续租；刷新页面会丢失认领凭据。" : `持有者 ${esc(t.claim.actor)}；到期后自动回到可认领。`}</div>
     </div>`;
   }
   if (st === "ready" && t.claim?.expired) {
-    return `<div class="lease-block"><div class="lease-top"><span class="lease-num">到期</span><span class="lease-label">按可认领呈现</span></div><div class="lease-note warn">租约已到期 · 曾任 ${esc(t.claim.actor)}。服务端事件会把它改成可认领；现在即可认领。</div></div>`;
+    return `<div class="lease-block"><div class="lease-top"><span class="lease-num">到期</span><span class="lease-label">按可认领呈现</span></div><div class="lease-note warn">租约已到期 · 曾任 ${esc(t.claim.actor)}。服务端事件会把它改成可认领；${moves.includes("claim") ? "现在即可认领。" : "当前身份不能认领。"}</div></div>`;
+  }
+  if (t.archived) {
+    return `<div class="lease-block"><div class="lease-top"><span class="lease-num" style="font-size:16px">只读归档</span><span class="lease-label">存档工单</span></div><div class="lease-note">归档任务保留记录，不再执行动作；线程可查看。</div></div>`;
   }
   const notes = {
     waiting: "等待前置完成；不会自动跳过依赖。",
-    ready: (can("write") && channelCan(t.channel) !== "viewer") ? "尚未认领。认领后开始计租约。" : "尚未认领。你没有该频道的编辑权限，不能认领。",
+    ready: moves.includes("claim") ? "尚未认领。认领后开始计租约。" : "尚未认领。当前身份不能认领。",
     blocked: "阻塞会结束认领；解除后按前置回到可认领或等待。",
     completed: "已完成，状态不可变更。",
     failed: "任务已失败；可重新打开或取消。",
@@ -1529,19 +1664,24 @@ function leaseBlock(t) {
   return `<div class="lease-block"><div class="lease-top"><span class="lease-num" style="font-size:16px">${esc(stateMeta(t).label)}</span></div><div class="lease-note">${esc(notes[st] || "")}</div></div>`;
 }
 function taskHeader(t) {
-  const readOnly = !can("write") || channelCan(t.channel) === "viewer";
-  const purpose = readOnly
-    ? "任务卡负责状态与动作；线程记录工作日志。你可以查看；认领、回复与状态变更需要频道编辑权限。"
-    : (effective(t) === "claimed" && t.claim?.mine)
-      ? "任务卡负责状态与动作；线程记录工作日志。刷新会丢失本标签页的认领凭据。"
-      : "任务卡负责状态与动作；线程记录工作日志。";
+  const moves = t.moves || [];
+  const readOnly = !moves.includes("reply");
+  const purpose = t.archived
+    ? "归档任务只读保留；线程与结果可查看，不再执行动作。"
+    : t.mirror?.readOnly
+      ? "镜像任务由超级助理管理；命令桥未开启时这里只读。"
+      : readOnly
+        ? "任务卡负责状态与动作；线程记录工作日志。你可以查看；认领、回复与状态变更需要频道编辑权限。"
+        : (S.claimLost && effective(t) === "claimed" && t.claim?.mine)
+          ? "任务卡负责状态与动作；线程记录工作日志。认领凭据不在本标签页。"
+          : "任务卡负责状态与动作；线程记录工作日志。";
   return `
     <div class="breadcrumb"><button data-action="view" data-view="queue">${icon("arrow-left", "xs")}队列</button><span>/</span><span class="mono">#${esc(t.id)}</span></div>
     <header class="page-head">
       <div class="kicker">${icon("inbox", "xs")} 02 / 任务 · 线程</div>
       <div class="title-row">
         <h1>${esc(t.title)}</h1>
-        <div class="title-badges">${badge(t)}${liveBadge()}${!can("write") ? `<span class="badge outline">${icon("lock")}只读</span>` : ""}</div>
+        <div class="title-badges">${badge(t)}${t.archived ? `<span class="badge outline">${icon("layers")}只读归档</span>` : liveBadge()}${readOnly && !t.archived ? `<span class="badge outline">${icon("lock")}只读</span>` : ""}</div>
         <div class="head-actions">
           <button class="btn ghost" data-action="copy-link" aria-label="复制任务链接">${icon("link")}<span class="btn-label">复制链接</span></button>
           <button class="btn ghost" data-action="refresh" aria-label="刷新任务">${icon("refresh")}<span class="btn-label">刷新</span></button>
@@ -1572,7 +1712,7 @@ function taskCard(t) {
 function replyList(t) {
   const replies = REPLIES[t.id] || [];
   if (!replies.length) {
-    const writable = can("write") && channelCan(t.channel) !== "viewer" && !(t.mirror && !t.bridge);
+    const writable = (t.moves || []).includes("reply");
     return `<div class="replies">${emptyState({ icon: "message", title: "还没有回复", description: writable ? "写下第一条工作日志，说明你看到了什么、准备怎么做。" : "线程里还没有工作日志。", actions: writable ? `<button class="btn outline" data-action="focus-composer">写回复</button>` : "" })}</div>`;
   }
   const older = S.replyMore ? [
@@ -1593,9 +1733,14 @@ function replyList(t) {
   </div>`;
 }
 function composer(t) {
-  const readOnly = !can("write") || channelCan(t.channel) === "viewer" || (t.mirror && !t.bridge);
+  const readOnly = !(t.moves || []).includes("reply");
   if (readOnly) {
-    return `<div class="composer" data-readonly="true"><div class="composer-readonly">${icon("lock", "sm")}<span>${t.mirror && !t.bridge ? "该任务由超级助理管理，命令桥未开启；在超级助理里回复。" : "你在该频道只有查看权限；回复需要编辑权限。"}</span></div></div>`;
+    const note = t.archived
+      ? "归档任务只读；不能再回复。"
+      : t.mirror?.readOnly
+        ? "该任务由超级助理管理，命令桥未开启；在超级助理里回复。"
+        : "你在该频道只有查看权限；回复需要编辑权限。";
+    return `<div class="composer" data-readonly="true"><div class="composer-readonly">${icon("lock", "sm")}<span>${esc(note)}</span></div></div>`;
   }
   const len = S.draft.length;
   return `<div class="composer">
@@ -1611,7 +1756,7 @@ function composer(t) {
 function renderTask() {
   const t = taskById(S.id) || TASKS.find((x) => x.id === "812");
   if (S.state === "loading") {
-    return `${header({ kicker: "任务", title: t.title, icon: "inbox", purpose: "读取任务与线程…" })}${skeletonRows(5)}`;
+    return `${header({ kicker: "任务", title: t.title, icon: "inbox", purpose: "读取任务与线程…" })}${skeletonRows(window.innerWidth <= 767 ? 3 : 5)}`;
   }
   if (S.state === "error") {
     return `${header({ kicker: "任务", title: "没能读到这条任务", icon: "alert", purpose: "任务与线程没有加载出来。" })}${errorState({ title: "没能读到这条任务", message: "实时连接正常，但请求失败了。", requestId: "req_5c9d21", back: true })}`;
@@ -1676,10 +1821,14 @@ function syncCard(e) {
 }
 function renderSync() {
   if (S.state === "loading") {
-    return `${header({ kicker: "同步", title: "同步", icon: "refresh", purpose: "外部平台的线程与任务双向镜像。" })}${skeletonRows(3)}`;
+    return `${header({ kicker: "同步", title: "同步", icon: "refresh", purpose: "外部平台的线程与任务双向镜像。" })}
+      ${viewTabs("sync")}
+      ${skeletonRows(3)}`;
   }
   if (S.state === "error") {
-    return `${header({ kicker: "同步", title: "同步", icon: "refresh", purpose: "外部平台的线程与任务双向镜像。" })}${errorState({ title: "没能读到同步状态", message: "健康数据没有加载出来；任务队列不受影响。", requestId: "req_sync_41", back: true })}`;
+    return `${header({ kicker: "同步", title: "同步", icon: "refresh", purpose: "外部平台的线程与任务双向镜像。" })}
+      ${viewTabs("sync")}
+      ${errorState({ title: "没能读到同步状态", message: "健康数据没有加载出来；任务队列不受影响。", requestId: "req_sync_41", back: true })}`;
   }
   if (S.state === "permission" || !can("manage")) {
     return `${header({ kicker: "同步", title: "同步", icon: "refresh", purpose: "外部平台的线程与任务双向镜像。" })}${permissionState("permission")}`;
@@ -1732,10 +1881,14 @@ function scheduleRow(s) {
 }
 function renderAutomation() {
   if (S.state === "loading") {
-    return `${header({ kicker: "自动化", title: "自动化", icon: "activity", purpose: "监视器按事件触发已声明的动作；定时任务按计划发消息。" })}${skeletonRows(3)}`;
+    return `${header({ kicker: "自动化", title: "自动化", icon: "activity", purpose: "监视器按事件触发已声明的动作；定时任务按计划发消息。" })}
+      ${viewTabs("automation")}
+      ${skeletonRows(3)}`;
   }
   if (S.state === "error") {
-    return `${header({ kicker: "自动化", title: "自动化", icon: "activity", purpose: "监视器按事件触发已声明的动作；定时任务按计划发消息。" })}${errorState({ title: "没能读到自动化状态", message: "监视器与定时任务没有加载出来；任务队列不受影响。", requestId: "req_auto_19", back: true })}`;
+    return `${header({ kicker: "自动化", title: "自动化", icon: "activity", purpose: "监视器按事件触发已声明的动作；定时任务按计划发消息。" })}
+      ${viewTabs("automation")}
+      ${errorState({ title: "没能读到自动化状态", message: "监视器与定时任务没有加载出来；任务队列不受影响。", requestId: "req_auto_19", back: true })}`;
   }
   if (S.state === "permission" || !can("manage")) {
     return `${header({ kicker: "自动化", title: "自动化", icon: "activity", purpose: "监视器按事件触发已声明的动作；定时任务按计划发消息。" })}${permissionState("permission")}`;
@@ -1771,6 +1924,7 @@ function renderGone() {
    Render
    ========================================================================== */
 function render() {
+  applyFixtureMoves();
   document.documentElement.dataset.theme = S.theme;
   document.body.classList.toggle("no-chrome", !S.chrome);
   const activeView = S.scene === "sync" ? "sync" : S.scene === "automation" ? "automation" : "queue";
@@ -1787,7 +1941,7 @@ function render() {
     el.classList.toggle("active", (S.scene === "queue" && scene === "queue") || (S.scene === "sync" && scene === "queue") || (S.scene === "automation" && scene === "queue") || (S.scene === "task" && scene === "queue") || (S.scene === "gone" && scene === "queue") || scene === S.scene);
   });
   document.getElementById("p-scene").value = S.scene;
-  document.getElementById("p-state").value = ["success", "loading", "empty", "filtered", "error", "permission", "disabled", "stale"].includes(S.state) ? S.state : "success";
+  document.getElementById("p-state").value = ["success", "loading", "empty", "filtered", "error", "permission", "disabled", "migrate", "stale"].includes(S.state) ? S.state : "success";
   document.getElementById("p-me").value = S.me;
   document.getElementById("p-id").value = S.id;
   document.getElementById("p-dialog").value = S.dialog || "";
@@ -1805,7 +1959,7 @@ function prop(n) { return n * 2; }
    ========================================================================== */
 function dialogShell(title, desc, body, actions, opts = {}) {
   return `<div class="scrim" data-action="scrim" role="presentation">
-    <div class="dialog glass-popover" role="dialog" aria-modal="true" aria-labelledby="dlg-title" ${opts.id ? `id="${opts.id}"` : ""}>
+    <div class="dialog glass-popover ${opts.full ? "full" : ""}" role="dialog" aria-modal="true" aria-labelledby="dlg-title" ${opts.id ? `id="${opts.id}"` : ""}>
       <h2 id="dlg-title">${esc(title)}</h2>
       ${desc ? `<p class="desc">${desc}</p>` : ""}
       <div class="body">${body}</div>
@@ -1864,11 +2018,15 @@ function renderDialog() {
       `<div class="form-row"><label for="d-note">补充说明（可选，会作为回复发布）</label><textarea class="textarea" id="d-note" maxlength="10000" placeholder="为什么可以继续。"></textarea></div>`,
       `${close}<button class="btn primary" data-action="confirm" data-kind="unblock">${icon("message")}解除阻塞</button>`);
   } else if (S.dialog === "new") {
-    html = dialogShell("新建任务", "首行是标题，全文是任务说明。创建后可以在任务页认领、指派或改依赖。",
-      `<div class="form-row"><label for="d-channel">频道</label><div class="field"><select id="d-channel">${CHANNELS.map((c) => `<option>${esc(c.path)}</option>`).join("")}</select>${icon("chevron-down", "sm")}</div></div>
-      <div class="form-row"><label for="d-text">任务说明（必填）</label><textarea class="textarea" id="d-text" maxlength="10000" placeholder="要做什么；完成条件是什么；有什么风险。"></textarea></div>
-      <div class="form-row"><label for="d-label">标签（可选）</label><div class="field"><input id="d-label" placeholder="key=value，多个用空格分隔"><span class="hint">board.* 是系统标签</span></div></div>`,
-      `${close}<button class="btn primary" data-action="confirm" data-kind="new">创建任务</button>`);
+    const candidates = TASKS.filter((x) => !x.archived && x.state !== "canceled").slice(0, 6);
+    html = dialogShell("新建任务", "六个字段：频道、说明、标签、前置依赖、指派与是否立即认领。首行是标题，全文是任务说明。",
+      `<div class="form-row"><label for="d-channel">1 · 频道</label><div class="field"><select id="d-channel">${CHANNELS.map((c) => `<option>${esc(c.path)}</option>`).join("")}</select>${icon("chevron-down", "sm")}</div></div>
+      <div class="form-row"><label for="d-text">2 · 任务说明（必填）</label><textarea class="textarea" id="d-text" maxlength="10000" placeholder="要做什么；完成条件是什么；有什么风险。"></textarea></div>
+      <div class="form-row"><label for="d-label">3 · 标签（可选）</label><div class="field"><input id="d-label" placeholder="key=value，多个用空格分隔"><span class="hint">board.* 是系统标签</span></div></div>
+      <div class="form-row"><label>4 · 前置依赖（可选，最多 20）</label><div class="check-list" style="max-height:160px">${candidates.map((x) => `<label class="check-row"><input type="checkbox" name="d-needs-new" value="${x.id}"><span class="id">#${x.id}</span><span class="title">${esc(x.title)}</span><span class="badge outline small">${esc(STATES[effective(x)].label)}</span></label>`).join("")}</div></div>
+      <div class="form-row"><label for="d-assign-new">5 · 指派</label><div class="field"><select id="d-assign-new"><option>池中（任何有编辑权限的人）</option><option>陈墨（账号）</option><option>发布员·小铖（陈墨的 Bot）</option></select>${icon("chevron-down", "sm")}</div></div>
+      <div class="form-row"><label>6 · 创建后立即认领</label><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><button class="switch" role="switch" aria-checked="${S.newClaim}" aria-label="创建后立即认领" data-action="toggle-new-claim"></button><div class="field" style="width:180px"><select id="d-lease"><option value="900">15 分钟</option><option value="1800">30 分钟</option><option value="3600">60 分钟</option></select>${icon("chevron-down", "sm")}</div><span class="hint">有前置依赖时先创建为等待依赖，不会立即认领。</span></div></div>`,
+      `${close}<button class="btn primary" data-action="confirm" data-kind="new">创建任务</button>`, { full: true });
   } else if (S.dialog === "filters") {
     html = dialogShell("筛选任务", "选择后立即应用；清空会回到全部频道与全部条件。",
       `<div class="form-row"><label>频道</label><div class="field"><select id="f-channel"><option value="all">全部频道</option>${CHANNELS.map((c) => `<option value="${esc(c.path)}" ${S.filters.channel === c.path ? "selected" : ""}>${esc(c.label)}</option>`).join("")}</select>${icon("chevron-down", "sm")}</div></div>
@@ -1877,15 +2035,14 @@ function renderDialog() {
       <div class="form-row"><label>指派</label><div class="field"><select id="f-for"><option value="all">全部指派</option><option value="pool" ${S.filters.for === "pool" ? "selected" : ""}>池中</option><option ${S.filters.for === "陈墨（账号）" ? "selected" : ""}>陈墨（账号）</option><option ${S.filters.for === "发布员·小铖" ? "selected" : ""}>发布员·小铖</option></select>${icon("chevron-down", "sm")}</div></div>`,
       `<button class="btn ghost left" data-action="clear-filters">清空</button>${close}<button class="btn primary" data-action="confirm" data-kind="filters">应用筛选</button>`);
   } else if (S.dialog === "access") {
-    html = dialogShell("频道访问 · work/production", "子树继承：最近的祖先生效；给子树单独设置查看权限可以收窄。",
+    html = dialogShell("频道访问 · work/production", "当前访问关系（只读）。子树继承：最近的祖先生效；给子树单独设置查看权限可以收窄。",
       `<div class="check-list" style="max-height:none">
         <div class="check-row"><span class="id">陈墨</span><span class="title">账号</span><span class="badge default small">所有者</span></div>
         <div class="check-row"><span class="id">林岚</span><span class="title">账号</span><span class="badge secondary small">可编辑</span></div>
         <div class="check-row"><span class="id">审计组</span><span class="title">权限组</span><span class="badge outline small">可查看</span></div>
       </div>
-      <div class="form-row"><label>添加账号或权限组</label><div class="field"><input placeholder="搜索账号 / 权限组">${icon("search", "sm")}</div></div>
-      <div class="hint">只有频道所有者或任务面管理员可以修改。</div>`,
-      `${close}<button class="btn primary" data-action="dialog-close">完成</button>`);
+      <div class="alert info">${icon("info", "sm")}<div class="alert-body">这个部署还没有提供频道访问管理接口，不能在这里授权；请找频道所有者或任务面管理员。</div></div>`,
+      `<button class="btn primary" data-action="dialog-close">关闭</button>`);
   } else if (S.dialog === "shortcuts") {
     html = dialogShell("快捷键", "输入框聚焦时，单字母动作键失效；Cmd/Ctrl+Enter 始终发送回复。",
       `<div class="facts" style="grid-template-columns:84px 1fr;gap:6px 12px">
@@ -1903,6 +2060,10 @@ function renderDialog() {
         <div class="dead-row" style="grid-template-columns:1fr 90px 80px"><span class="id">Ev08K2S1M</span><span class="received">13:52</span><span class="badge destructive small">dead</span></div>
       </div>`,
       `${close}<button class="btn primary" data-action="dialog-close">关闭</button>`);
+  } else if (S.dialog === "force-release") {
+    html = dialogShell(`收回 #${t.id} 的认领？`, "强制结束当前认领（无需 token）；任务回到可认领，写审计记录。",
+      `<div class="alert warning">${icon("alert", "sm")}<div class="alert-body">当前持有者会失去完成/续租能力；如果对方正在执行，请先沟通。</div></div>`,
+      `<button class="btn outline" data-action="dialog-close">保持认领</button><button class="btn destructive" data-action="confirm" data-kind="force-release">${icon("lock")}收回认领</button>`);
   } else if (S.dialog === "confirm-disable-sync") {
     const e = SYNC.find((x) => x.key === S.syncKey);
     html = dialogShell(`停用同步入口 ${S.syncKey}？`, "停用后不再收发外部消息；已同步的副本保留，可以随时重新启用。",
@@ -1931,7 +2092,7 @@ function toast(text, kind = "success") {
   setTimeout(() => { el.style.opacity = "0"; el.style.transition = "opacity 160ms"; setTimeout(() => el.remove(), 180); }, 3600);
 }
 function closeMenus() { document.querySelectorAll(".menu.open").forEach((m) => m.classList.remove("open")); }
-function closeDialog() { S.dialog = ""; document.getElementById("dialog-root").innerHTML = ""; }
+function closeDialog() { S.dialog = ""; S.newClaim = false; document.getElementById("dialog-root").innerHTML = ""; }
 function setScene(scene, view) {
   if (scene === "sync" || scene === "automation") S.scene = scene;
   else if (scene === "task") S.scene = "task";
@@ -1948,6 +2109,7 @@ function saveHistory() {
   if (S.state !== "success") p.set("state", S.state);
   if (S.me !== "manager") p.set("me", S.me);
   if (S.scene === "task") p.set("id", S.id);
+  if (S.archive) p.set("archive", "1");
   if (S.dialog) p.set("dialog", S.dialog);
   if (S.scene === "sync" && S.sync !== "success") p.set("sync", S.sync);
   if (S.scene === "automation" && S.automation !== "success") p.set("automation", S.automation);
@@ -2023,8 +2185,17 @@ function confirmAction(kind) {
     const id = String(900 + TASKS.length);
     const channel = document.getElementById("d-channel")?.value || "work";
     const labels = parseLabels(document.getElementById("d-label")?.value || "");
-    TASKS.push({ id, title: text.split("\n")[0].slice(0, 80), state: "ready", channel, owner: me().name, by: me().actor, for: "池中", labels, needs: [], created: "刚刚", updated: "刚刚", body: text });
-    closeDialog(); S.scene = "task"; S.id = id; toast(`已创建任务 #${id}`); rerender();
+    const needs = Array.from(document.querySelectorAll('input[name="d-needs-new"]:checked')).map((x) => x.value);
+    const assignValue = document.getElementById("d-assign-new")?.value || "池中（任何有编辑权限的人）";
+    const forActor = assignValue.startsWith("池中") ? "池中" : assignValue.replace("（账号）", "（账号）");
+    const task = { id, title: text.split("\n")[0].slice(0, 80), state: needs.length ? "waiting" : "ready", channel, owner: me().name, by: me().actor, for: forActor, labels, needs, created: "刚刚", updated: "刚刚", body: text };
+    if (S.newClaim && !needs.length) {
+      const lease = Number(document.getElementById("d-lease")?.value || 900);
+      task.state = "claimed"; task.claim = { actor: me().actor, mine: true, until: Date.now() + lease * 1000, lease };
+    }
+    TASKS.push(task);
+    closeDialog(); S.scene = "task"; S.id = id;
+    toast(S.newClaim && !needs.length ? `已创建并认领 #${id}` : `已创建任务 #${id}`); rerender();
   } else if (kind === "filters") {
     S.filters.channel = document.getElementById("f-channel")?.value || "all";
     S.filters.label = document.getElementById("f-label")?.value || "all";
@@ -2035,6 +2206,9 @@ function confirmAction(kind) {
     const s = SCHEDULES.find((x) => x.id === "渠道 B 对账提醒");
     if (s) s.status = "canceled", s.cadence = "已取消", s.error = "";
     closeDialog(); toast("已取消定时任务"); rerender();
+  } else if (kind === "force-release") {
+    t.state = "ready"; t.claim = null; t.updated = "刚刚";
+    closeDialog(); toast(`已收回 #${t.id} 的认领`); rerender();
   } else if (kind === "disable-sync") {
     const e = SYNC.find((x) => x.key === S.syncKey);
     if (e) { e.enabled = false; e.status = "paused"; }
@@ -2097,6 +2271,14 @@ document.addEventListener("click", (event) => {
     S.scene = "task"; S.id = el.dataset.id; S.state = "success"; S.dialog = ""; S.claimLost = false; S.page = 0; S.replyMore = false;
     rerender(); document.getElementById("paper").scrollTop = 0; return;
   }
+  if (action === "takeover") {
+    const t = taskById(el.dataset.id || S.id);
+    t.epoch = (t.epoch || 0) + 1;
+    t.state = "claimed";
+    t.claim = { actor: me().actor, mine: true, until: Date.now() + 900000, lease: 900 };
+    S.claimLost = false;
+    toast(`已重新认领 #${t.id} · 新凭据只在本标签页`); rerender(); return;
+  }
   if (action === "claim") {
     const t = taskById(el.dataset.id || S.id);
     t.state = "claimed"; t.claim = { actor: me().actor, mine: true, until: Date.now() + 900000, lease: 900 }; t.updated = "刚刚";
@@ -2107,6 +2289,9 @@ document.addEventListener("click", (event) => {
     const t = taskById(S.id);
     if (t.claim) { t.claim.until = Date.now() + 900000; t.claim.lease = 900; toast("租约已延长 15 分钟"); rerender(); }
     return;
+  }
+  if (action === "toggle-new-claim") {
+    S.newClaim = !S.newClaim; render(); return;
   }
   if (action === "toggle-facts") {
     const card = document.querySelector(".task-card");
@@ -2121,8 +2306,13 @@ document.addEventListener("click", (event) => {
     const url = location.href.split("?")[0] + `?scene=task&id=${S.id}`;
     copyText(url); toast("任务链接已复制"); return;
   }
-  if (action === "copy-request" || action === "copy-explain") {
-    copyText(action === "copy-request" ? `我需要「查看任务」能力（board.read），请把我的账号「${me().name}」加入有该能力的权限组。` : "旧「超级助理工单看板」已下线；任务与回复现在在任务看板 /board。"); toast("已复制"); return;
+  if (action === "copy-request" || action === "copy-explain" || action === "copy-404") {
+    const text = action === "copy-request"
+      ? `我需要「查看任务」能力（board.read），请把我的账号「${me().name}」加入有该能力的权限组。`
+      : action === "copy-404"
+        ? "这个地址没有对应到可访问的任务面；为避免泄露，不区分不存在与无权限。"
+        : "旧「超级助理工单看板」已下线；任务与回复现在在任务看板 /board。";
+    copyText(text); toast("已复制"); return;
   }
   if (action === "copy-draft") { copyText(S.draft); toast("草稿已复制"); return; }
   if (action === "refresh" || action === "retry") {
@@ -2150,6 +2340,11 @@ document.addEventListener("click", (event) => {
   if (action === "confirm") { confirmAction(el.dataset.kind); return; }
   if (action === "theme") {
     S.theme = S.theme === "dark" ? "light" : "dark"; rerender(); return;
+  }
+  if (action === "archive-toggle") {
+    S.archive = !S.archive;
+    S.tab = "all"; S.sub = "all"; S.page = 0; S.state = "success";
+    rerender(); return;
   }
   if (action === "clear-filters") {
     S.filters = { channel: "all", label: "all", owner: "all", for: "all" }; S.page = 0; S.state = "success"; closeDialog(); rerender(); return;
@@ -2231,8 +2426,19 @@ document.addEventListener("input", (event) => {
 
 document.addEventListener("change", (event) => {
   if (event.target.id === "p-scene") { S.scene = event.target.value; S.state = "success"; S.dialog = ""; rerender(); }
-  if (event.target.id === "p-state") { S.state = event.target.value; rerender(); }
-  if (event.target.id === "p-me") { S.me = event.target.value; rerender(); }
+  if (event.target.id === "p-state") {
+    S.state = event.target.value;
+    if (S.state === "migrate") S.me = "legacy";
+    else if (S.state === "permission") S.me = "none";
+    rerender();
+  }
+  if (event.target.id === "p-me") {
+    S.me = event.target.value;
+    if (S.me === "legacy") S.state = "migrate";
+    else if (S.me === "none") S.state = "permission";
+    else if (S.state === "migrate" || S.state === "permission") S.state = "success";
+    rerender();
+  }
   if (event.target.id === "p-id") { S.scene = "task"; S.id = event.target.value; S.state = "success"; rerender(); }
   if (event.target.id === "p-dialog") { S.dialog = event.target.value; render(); }
 });
@@ -2289,7 +2495,7 @@ function boot() {
   S.automation = p.get("automation") || "success";
   if (S.sync === "loading" || S.sync === "error") S.state = S.sync;
   if (S.automation === "loading" || S.automation === "error") S.state = S.automation;
-  if (p.get("bridge") === "0") { const m = TASKS.find((x) => x.id === "814"); if (m) m.bridge = false; }
+  if (p.get("bridge") === "0") { const m = TASKS.find((x) => x.id === "814"); if (m?.mirror) { m.mirror.bridge = false; m.mirror.readOnly = true; } }
   S.chrome = p.get("chrome") !== "0";
   S.theme = p.get("theme") === "light" ? "light" : "dark";
   S.tab = p.get("tab") || "open";
@@ -2306,7 +2512,9 @@ function boot() {
   }
   document.getElementById("proto").classList.toggle("is-collapsed", window.innerWidth <= 767);
   if (S.state === "permission") S.me = "none";
+  if (S.state === "migrate") S.me = "legacy";
   if (p.get("facts") === "1") S.showFacts = true;
+  if (p.get("archive") === "1") S.archive = true;
   render();
   saveHistory();
   const scrollTo = p.get("scroll");
