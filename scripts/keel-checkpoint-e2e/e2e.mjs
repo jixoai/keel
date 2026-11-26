@@ -730,17 +730,23 @@ async function runAll() {
   await shot('restart-1440');
 
   const beforeRestartFinished = (await events(created.sessionId)).filter((event) => event.kind === 'run.finished').length;
+  const recoveryBefore = await metrics();
   await sendInput(created.sessionId, '重启后继续：验证 checkpoint 恢复。', 'e2e-after-restart-1');
   await waitEvents(created.sessionId, (all) => {
     const finished = all.filter((event) => event.kind === 'run.finished');
     return finished.length >= beforeRestartFinished + 1 && finished[finished.length - 1].payload?.status === 'done';
   });
   const recoveryMetrics = await metrics();
-  check('checkpoint recovery metric advanced', (recoveryMetrics.keel_checkpoint_recovered_total || 0) >= 1, recoveryMetrics.keel_checkpoint_recovered_total, '>= 1');
+  const recoveredBefore = recoveryBefore.keel_checkpoint_recovered_total || 0;
+  const recoveredAfter = recoveryMetrics.keel_checkpoint_recovered_total || 0;
+  check('checkpoint recovery metric advanced', recoveredAfter > recoveredBefore, `${recoveredBefore}→${recoveredAfter}`, 'delta > 0');
   const afterRestartEvents = await events(created.sessionId);
   const seqs = afterRestartEvents.map((event) => event.seq);
   check('event seqs stay strictly increasing', seqs.every((seq, index) => index === 0 || seq > seqs[index - 1]), seqs.slice(-6), 'strictly increasing');
-  check('no event was lost', afterRestartEvents.length >= beforeRestart.length, { before: beforeRestart.length, after: afterRestartEvents.length }, '>= before');
+  // Append-only: the pre-restart log must be the exact prefix of the new one.
+  const prefixKept = beforeRestart.length <= afterRestartEvents.length &&
+    beforeRestart.every((event, index) => afterRestartEvents[index]?.seq === event.seq);
+  check('no event was lost', prefixKept, { before: beforeRestart.length, after: afterRestartEvents.length }, 'exact prefix');
   record({ metricsAfterRestart: recoveryMetrics });
   finishStep();
 

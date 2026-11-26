@@ -3,6 +3,7 @@ package metrics
 import (
 	"context"
 	"testing"
+	"time"
 )
 
 // TestCheckpointMetrics pins the checkpoint families and their fixed
@@ -13,8 +14,8 @@ func TestCheckpointMetrics(t *testing.T) {
 	set := NewSet(reg)
 	ctx := context.Background()
 
-	set.CheckpointCreated(9000, 1500)
-	set.CheckpointCreated(9000, 1500)
+	set.CheckpointCreated(9000, 1500, 12*time.Millisecond)
+	set.CheckpointCreated(9000, 1500, 12*time.Millisecond)
 	set.CheckpointRecovered()
 	set.CheckpointFailed("save")
 	set.CheckpointFailed("save")

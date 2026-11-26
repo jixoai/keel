@@ -70,6 +70,7 @@ type ManualCompactResult struct {
 // calling the model again. The original context is preserved on every failure;
 // only a successful summary is committed.
 func (r *Runner) CompactNow(ctx context.Context, lease kernel.Lease, requestID string) (ManualCompactResult, error) {
+	started := time.Now()
 	requestID = strings.TrimSpace(requestID)
 	if requestID == "" {
 		return ManualCompactResult{}, errors.New("agent: manual compaction needs a requestId")
@@ -318,14 +319,16 @@ func (r *Runner) CompactNow(ctx context.Context, lease kernel.Lease, requestID s
 		return ManualCompactResult{}, err
 	}
 	if r.CheckpointMetrics != nil {
-		r.CheckpointMetrics.CheckpointCreated(res.TokensBefore, tokensAfter)
+		r.CheckpointMetrics.CheckpointCreated(res.TokensBefore, tokensAfter, time.Since(started))
 	}
 	r.pruneCheckpointsFor(ctx, lease.Scope, policy)
 	r.Logger.Info("manual checkpoint created",
 		"tenant_id", lease.Scope.TenantID, "session_id", lease.Scope.SessionID,
+		"owner", lease.Token.Owner, "epoch", lease.Token.Epoch,
 		"cut_seq", seq, "kept_from_seq", anchor,
 		"tokens_before", res.TokensBefore, "tokens_after", tokensAfter,
-		"policy_version", policy.Version(), "request_id", requestID)
+		"policy_version", policy.Version(), "request_id", requestID,
+		"duration_ms", time.Since(started).Milliseconds())
 	return ManualCompactResult{
 		CheckpointID:  seq,
 		Performed:     true,

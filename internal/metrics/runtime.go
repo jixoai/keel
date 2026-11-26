@@ -33,6 +33,8 @@ type Set struct {
 	finishErrors       *Counter
 	compactions        *Counter
 	checkpointCreate   *Counter
+	checkpointTokens   *Histogram
+	checkpointSaveTime *Histogram
 	checkpointRecover  *Counter
 	checkpointFailures *CounterVec
 	checkpointPruned   *Counter
@@ -65,6 +67,10 @@ func NewSet(reg *Registry) *Set {
 			"Compaction events committed to the event log."),
 		checkpointCreate: reg.NewCounter("keel_checkpoint_created_total",
 			"Checkpoint projections written without error."),
+		checkpointTokens: reg.NewHistogram("keel_checkpoint_tokens_after",
+			"Context tokens after a checkpoint's retained tail.", []float64{500, 1000, 2000, 5000, 10000, 20000, 50000, 100000, 200000}),
+		checkpointSaveTime: reg.NewHistogram("keel_checkpoint_save_seconds",
+			"Wall-clock duration of one checkpoint projection write.", DefaultDurationBuckets),
 		checkpointRecover: reg.NewCounter("keel_checkpoint_recovered_total",
 			"Model contexts rebuilt from a valid checkpoint plus retained tail."),
 		checkpointFailures: reg.NewCounterVec("keel_checkpoint_failed_total",
@@ -142,9 +148,14 @@ func (s *Set) EventCommitted(kind string) {
 	}
 }
 
-// CheckpointCreated counts one checkpoint projection (automatic or manual).
-// Token counts are intentionally not labels.
-func (s *Set) CheckpointCreated(int, int) { s.checkpointCreate.Inc() }
+// CheckpointCreated counts one checkpoint projection (automatic or manual) and
+// observes its retained size and write time. Token/session identities are
+// values, never labels.
+func (s *Set) CheckpointCreated(tokensBefore, tokensAfter int, duration time.Duration) {
+	s.checkpointCreate.Inc()
+	s.checkpointTokens.Observe(float64(tokensAfter))
+	s.checkpointSaveTime.Observe(duration.Seconds())
+}
 
 // CheckpointRecovered counts one model context rebuilt from a valid checkpoint
 // plus its retained tail.

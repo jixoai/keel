@@ -66,7 +66,7 @@ type CheckpointPolicyResolver interface {
 // the implementation; callers pass only bounded reasons (save/summary/load/
 // corrupt/anchor/prune/conflict/policy), never message bodies or identifiers.
 type CheckpointMetrics interface {
-	CheckpointCreated(tokensBefore, tokensAfter int)
+	CheckpointCreated(tokensBefore, tokensAfter int, duration time.Duration)
 	CheckpointRecovered()
 	CheckpointFailed(reason string)
 	CheckpointPruned(n int64)
@@ -1236,6 +1236,7 @@ func (r *Runner) run(ctx context.Context, lease kernel.Lease, span telemetry.Spa
 			default:
 				anchor = r.checkpointAnchor(ctx, lease.Scope, e.FirstKeptTranscriptIndex, seq)
 			}
+			saveStarted := time.Now()
 			if err := r.Checkpoints.SaveCheckpoint(ctx, lease.Scope, kernel.CheckpointRecord{
 				UptoSeq:       seq,
 				KeptFromSeq:   anchor,
@@ -1249,8 +1250,20 @@ func (r *Runner) run(ctx context.Context, lease kernel.Lease, span telemetry.Spa
 					r.CheckpointMetrics.CheckpointFailed("save")
 				}
 			} else {
+				r.Logger.Info("checkpoint created",
+					"tenant_id", lease.Scope.TenantID,
+					"session_id", lease.Scope.SessionID,
+					"owner", lease.Token.Owner,
+					"epoch", lease.Token.Epoch,
+					"cut_seq", seq,
+					"kept_from_seq", anchor,
+					"policy_version", attemptCheckpointPolicy.Version(),
+					"tokens_before", e.TokensBefore,
+					"tokens_after", e.TokensAfter,
+					"reason", e.Reason,
+					"duration_ms", time.Since(saveStarted).Milliseconds())
 				if r.CheckpointMetrics != nil {
-					r.CheckpointMetrics.CheckpointCreated(e.TokensBefore, e.TokensAfter)
+					r.CheckpointMetrics.CheckpointCreated(e.TokensBefore, e.TokensAfter, time.Since(saveStarted))
 				}
 				r.pruneCheckpointsFor(ctx, lease.Scope, attemptCheckpointPolicy)
 			}
@@ -1836,6 +1849,16 @@ func (r *Runner) loadModelView(ctx context.Context, scope kernel.Scope, events [
 	if observe && r.CheckpointMetrics != nil {
 		r.CheckpointMetrics.CheckpointRecovered()
 	}
+	if observe {
+		r.Logger.Info("checkpoint recovered",
+			"tenant_id", scope.TenantID,
+			"session_id", scope.SessionID,
+			"checkpoint_seq", cp.UptoSeq,
+			"kept_from_seq", cp.KeptFromSeq,
+			"policy_version", cp.PolicyVersion,
+			"tokens_before", cp.TokensBefore,
+			"tokens_after", cp.TokensAfter)
+	}
 	trimmed := make([]store.Event, 0, len(events))
 	for _, ev := range events {
 		if ev.Seq < cp.KeptFromSeq {
@@ -1900,12 +1923,14 @@ func corruptCheckpointReason(cp kernel.Checkpoint, events []store.Event) string 
 	}
 	compactionFound := false
 	tailFound := false
+	tailKind := ""
 	for _, ev := range events {
 		if ev.Seq == cp.UptoSeq && ev.Kind == store.EventCompaction {
 			compactionFound = true
 		}
 		if ev.Seq == cp.KeptFromSeq {
 			tailFound = true
+			tailKind = ev.Kind
 		}
 	}
 	if !compactionFound {
@@ -1913,6 +1938,9 @@ func corruptCheckpointReason(cp kernel.Checkpoint, events []store.Event) string 
 	}
 	if !tailFound {
 		return "retained tail anchor is missing"
+	}
+	if tailKind != store.EventUserMessage && tailKind != store.EventAssistantMessage {
+		return "retained tail anchor is not a message boundary"
 	}
 	return ""
 }
@@ -1998,7 +2026,25 @@ func (r *Runner) checkpointAnchor(ctx context.Context, scope kernel.Scope, first
 	if anchor <= 0 || anchor >= uptoSeq {
 		return 0
 	}
+	// The anchor is a message boundary, never a tool result. When unread inputs
+	// were moved to the tail, the loop's index and the log order can disagree;
+	// mapping without this check can retain a tool result whose call was
+	// summarized away, which is not a context the provider accepts.
+	if !messageBoundaryEvent(before, anchor) {
+		return 0
+	}
 	return anchor
+}
+
+// messageBoundaryEvent reports whether seq names a user or assistant message in
+// the committed log: the only safe starts for a retained tail.
+func messageBoundaryEvent(events []store.Event, seq int64) bool {
+	for _, ev := range events {
+		if ev.Seq == seq {
+			return ev.Kind == store.EventUserMessage || ev.Kind == store.EventAssistantMessage
+		}
+	}
+	return false
 }
 
 // checkpointPolicy is the effective checkpoint policy of this attempt. A

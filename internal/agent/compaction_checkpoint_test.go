@@ -576,3 +576,29 @@ func firstUserMessageWith(msgs agentcore.MessageList, needle string) (agentcore.
 	}
 	return agentcore.UserMessage{}, false
 }
+
+// TestCheckpointTailAnchorMustBeMessageBoundary pins the recovery guard: a
+// projection whose retained tail starts at a tool result cannot stand in for
+// the summarized prefix (the call that produced it may be gone), so replay must
+// fall back to the full event log instead of feeding the provider an orphan.
+func TestCheckpointTailAnchorMustBeMessageBoundary(t *testing.T) {
+	cp := kernel.Checkpoint{UptoSeq: 9, KeptFromSeq: 8, Summary: "summary"}
+	events := []store.Event{
+		{Seq: 8, Kind: store.EventToolResult},
+		{Seq: 9, Kind: store.EventCompaction},
+	}
+	if reason := corruptCheckpointReason(cp, events); !strings.Contains(reason, "message boundary") {
+		t.Fatalf("reason = %q, want a message-boundary refusal", reason)
+	}
+	events[0].Kind = store.EventUserMessage
+	if reason := corruptCheckpointReason(cp, events); reason != "" {
+		t.Fatalf("a user-message tail anchor must be valid, got %q", reason)
+	}
+	events[0].Kind = store.EventAssistantMessage
+	if reason := corruptCheckpointReason(cp, events); reason != "" {
+		t.Fatalf("an assistant-message tail anchor must be valid, got %q", reason)
+	}
+	if messageBoundaryEvent(events, 8) != true || messageBoundaryEvent([]store.Event{{Seq: 8, Kind: store.EventToolResult}}, 8) != false {
+		t.Fatal("messageBoundaryEvent does not separate messages from tool results")
+	}
+}
