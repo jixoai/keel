@@ -17,7 +17,7 @@ repo_root="$(git rev-parse --show-toplevel)"
 evidence_dir="$repo_root/openspec/changes/keel-board-v1/evidence"
 evidence="$evidence_dir/phase-1-sync.md"
 e2e_html="$evidence_dir/phase-1-sync-e2e.html"
-base_ref="${KEEL_BOARD_BASE:-a088058}"
+base_ref="${KEEL_BOARD_BASE:-8435b3dd}"
 budget_kb="${KEEL_BOARD_BINARY_BUDGET_KB:-2048}"
 if [ -z "${KEEL_TEST_DSN:-}" ]; then
   echo "keel-board-phase1-sync-gate: KEEL_TEST_DSN is required for the real-PostgreSQL suites" >&2
@@ -27,6 +27,7 @@ mkdir -p "$evidence_dir"
 cd "$repo_root"
 
 section() { printf '\n## %s\n\n' "$1" >>"$evidence"; }
+gate_failed=0
 # block records a command's output and exit status without aborting the rest of
 # the evidence run: a failing gate must be visible in the report, not stop it.
 block() {
@@ -40,6 +41,9 @@ block() {
     printf '```\n'
     printf 'exit=%d\n' "$status"
   } >>"$evidence" 2>&1
+  if [ "$status" -ne 0 ]; then
+    gate_failed=1
+  fi
   return 0
 }
 
@@ -68,7 +72,7 @@ block env KEEL_TEST_DSN="$KEEL_TEST_DSN" go test -race ./internal/boardintegrati
 section "13.1 repository-wide unit/integration suite (CI runs -p 1)"
 block env KEEL_TEST_DSN="$KEEL_TEST_DSN" go test -p 1 ./... -count=1
 
-section "13.1 keel-board v0.1.0 conformance (module dependency, not copied)"
+section "13.1 keel-board v0.1.1 conformance (module dependency, not copied)"
 block env KEEL_BOARD_TEST_DSN="$KEEL_TEST_DSN" go test github.com/jixoai/keel-board/conformance -count=1
 
 section "13.2 sync E2E: fake Slack/GitHub/Linear/Chat SDK bridge on real PostgreSQL"
@@ -79,10 +83,10 @@ block sh -c 'test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }'
 block go vet ./internal/boardintegration/ ./internal/store/ ./internal/host/ ./cmd/keel/ ./cmd/board-sync-e2e/
 
 section "Binary size (keel + runtime, linux/amd64+arm64; budget $budget_kb KiB)"
-printf 'The lane brief states the foundation budget is %s KiB. The checked-in foundation CI still passes\n' "$budget_kb" >>"$evidence"
-printf '\`--budget-kb 256\`; this gate reports the actual delta under the stated budget and never edits the\n' >>"$evidence"
-printf 'checked-in budget. A delta over 2048 KiB is a real failure.\n\n' >>"$evidence"
+printf 'The foundation budget is %s KiB per binary and target (checked-in CI uses the same value).\n' "$budget_kb" >>"$evidence"
+printf 'The delta is measured against the rebased foundation HEAD.\n\n' >>"$evidence"
 block scripts/binary-size.sh --budget-kb "$budget_kb" --base "$base_ref"
 
 printf '\nEvidence written to %s\n' "$evidence"
 printf 'E2E report written to %s\n' "$e2e_html"
+exit "$gate_failed"

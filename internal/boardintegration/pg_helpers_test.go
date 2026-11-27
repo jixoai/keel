@@ -39,6 +39,7 @@ type testEnv struct {
 	st       *keelstore.Store
 	bridge   *accesswire.Bridge
 	surf     *Surface
+	options  Options
 
 	alice   kAccount
 	bob     kAccount
@@ -147,6 +148,7 @@ func newTestEnvBefore(t *testing.T, mutate func(*Options), before func(*testEnv)
 		SecretBox:           env.box,
 		BlobDir:             t.TempDir(),
 		DisableAutomation:   true,
+		SyncMonitorInterval: 20 * time.Millisecond,
 	}
 	if mutate != nil {
 		mutate(&options)
@@ -155,6 +157,7 @@ func newTestEnvBefore(t *testing.T, mutate func(*Options), before func(*testEnv)
 		env.schema = options.Schema
 	}
 	env.boardDSN = options.DSN
+	env.options = options
 	if before != nil {
 		before(env)
 	}

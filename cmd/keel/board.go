@@ -68,6 +68,22 @@ func boardFileHosts() []string {
 	return out
 }
 
+// boardProviderHosts reads the custom platform API endpoint allowlist. Empty
+// keeps every adapter on its built-in endpoint.
+func boardProviderHosts() []string {
+	raw := strings.TrimSpace(os.Getenv("KEEL_BOARD_PROVIDER_HOSTS"))
+	if raw == "" {
+		return nil
+	}
+	out := make([]string, 0, 4)
+	for _, part := range strings.Split(raw, ",") {
+		if host := strings.TrimSpace(part); host != "" {
+			out = append(out, host)
+		}
+	}
+	return out
+}
+
 // boardWiring is the board surface as the serve loop mounts it. A disabled
 // deployment still supplies handlers (404 board_disabled) so the route shape
 // does not change with the flag.

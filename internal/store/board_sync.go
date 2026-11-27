@@ -186,6 +186,19 @@ func (s *Store) UpdateBoardSyncEntry(ctx context.Context, record BoardSyncEntryR
 	return updated, nil
 }
 
+// DeleteBoardSyncEntry removes one configuration row. It is the rollback path
+// when the board's local entry row could not be written; a missing row is not
+// an error.
+func (s *Store) DeleteBoardSyncEntry(ctx context.Context, tenantID uuid.UUID, key string) (bool, error) {
+	tag, err := s.pool.Exec(ctx,
+		`DELETE FROM board_tenant_sync_entries WHERE tenant_id = $1 AND key = $2`,
+		tenantID, key)
+	if err != nil {
+		return false, fmt.Errorf("store: delete board sync entry: %w", err)
+	}
+	return tag.RowsAffected() > 0, nil
+}
+
 // SetBoardSyncEntryEnabled flips only the enabled flag, leaving the credential
 // and routing document untouched. It is the immediate-effect path a PATCH uses
 // for a plain enable/disable.

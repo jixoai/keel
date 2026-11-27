@@ -79,6 +79,7 @@ export KEEL_BOARD_SCHEMA=board       # 可选；board 表独立 schema（不存�
 export KEEL_BOARD_CHANNEL_SCAN=5m    # 可选；频道 owner 关系修复间隔，负值只跑启动扫描
 export KEEL_SECRET_KEY='…'           # sync 凭据必需：32 字节；缺失时 credential=missing，sync fail closed
 export KEEL_BOARD_FILE_HOSTS=files.slack.com,api.github.com # 可选；入站文件/链接允许的 host，空=全部拒绝
+export KEEL_BOARD_PROVIDER_HOSTS=gateway.internal # 可选；自定义平台 API endpoint 的 HTTPS host 白名单；loopback 恒允许（测试）
 export KEEL_BOARD_MAX_FILE_BYTES=26214400  # 可选；单文件上限（默认 50 MiB）
 export KEEL_BOARD_MAX_FILES=10       # 可选；单条消息文件数
 export KEEL_BOARD_MAX_LINKS=10       # 可选；单条消息链接数
@@ -135,7 +136,8 @@ export KEEL_BOARD_FILE_TIMEOUT=10s   # 可选；单个入站文件下载超时
   停用（安全失败，旧凭据不会继续服务），响应 `restartRequired:true`。
 - `GET /v1/board/sync/credentials`（board.manage）返回每个 entry 的
   `configured|missing|invalid`；`GET /metrics` 的 `board_sync_credential_status{key,status}`
-  同口径。凭据只报状态，不含值或密文。
+  同口径。凭据只报状态，不含值或密文。entry 同时返回 `restartRequired`：凭据本身可能已是
+  configured，但本进程仍持有旧 provider 时它明确标为待重启，而不是假装已生效。
 - `platform` 支持 `slack` / `github` / `linear` / `chatsdk`；GitHub 需 `repos`（入站）与
   `writeRepos`（出站，空=不写），Linear 需 `botUserId` + `teamKeys`，chatsdk 需
   `settings.platform`、`bridgeUrl`、`selfIds` 与 `secretRef.bridgeSecret`。
@@ -232,6 +234,17 @@ KEEL_TEST_DSN='postgres://…' go run ./cmd/board-sync-e2e \
 - 轮换/创建/路由变更的运行期语义是“持久化 + 停用 + 重启装载”，不是热替换：本进程的
   provider 仍持有旧凭据，keel 主动停用 board sync row 使 webhook 无副作用；重启后按新
   `secret_ref` 重建 provider。启停是即时的；禁用时已排队的 outbox 在重启/重新启用后继续。
+- 自定义 `apiBaseUrl`/`bridgeUrl` 只接受 loopback、平台官方 host 或
+  `KEEL_BOARD_PROVIDER_HOSTS` 中的 HTTPS host；请求体不能把平台 token 指向任意公网地址。
+- 每个进程每 5s（`SyncMonitorInterval`）读取 tenant flags、durable entry 和凭据指纹：
+  `board.enabled`/`board.sync.enabled` 关闭、entry 被停用、配置 revision 文档变化、或同名
+  secret 被改写/删除时，inbound/outbound worker、board root-start 和 automation watcher
+  都会暂停；重新打开 flags 后恢复。多副本共享同一 durable row，因此任一副本做出的停用/
+  轮换会在一个监控周期内被其他副本观察，不依赖请求落在哪台。
+- webhook、Chat SDK bridge、`POST /sync/threads`（attach）与 `GET /sources/{key}/read|join`
+  在进入 board 处理前都做同一 durable 检查：disabled/缺失返回 404 `sync_disabled`，配置或
+  凭据与启动快照不一致返回 503 `sync_pending_restart`；旧 provider 不可能通过这些路径
+  继续工作。
 
 ## 遥测导出插件（`keel.telemetry`）
 

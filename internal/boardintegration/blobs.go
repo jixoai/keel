@@ -74,7 +74,7 @@ func (b *keelBlobs) Get(ctx context.Context, key string) ([]byte, string, error)
 	if b == nil {
 		return nil, "", boardblob.ErrNotFound
 	}
-	mapping, found, err := b.store.GetBoardBlobKey(ctx, key)
+	mapping, found, err := b.mappingForKey(ctx, key)
 	if err != nil {
 		return nil, "", err
 	}
@@ -99,7 +99,7 @@ func (b *keelBlobs) Stat(ctx context.Context, key string) (int64, error) {
 	if b == nil {
 		return 0, boardblob.ErrNotFound
 	}
-	mapping, found, err := b.store.GetBoardBlobKey(ctx, key)
+	mapping, found, err := b.mappingForKey(ctx, key)
 	if err != nil {
 		return 0, err
 	}
@@ -114,10 +114,32 @@ func (b *keelBlobs) Delete(ctx context.Context, key string) error {
 		return nil
 	}
 	// Deleting a key that isn't there is not an error, per the board's
-	// contract. The bytes stay in keel's blob store for dedupe/GC; no board
-	// route relies on physical deletion timing.
-	_, _, err := b.store.DeleteBoardBlobKey(ctx, key)
+	// contract. Verify the key's tenant segment matches the mapping before the
+	// delete so a forged cross-tenant key cannot remove another tenant's row.
+	mapping, found, err := b.mappingForKey(ctx, key)
+	if err != nil || !found {
+		return err
+	}
+	_, _, err = b.store.DeleteBoardBlobKey(ctx, mapping.Key)
 	return err
+}
+
+// mappingForKey reads a translation row only when the key's tenant segment
+// matches the row's tenant. The key is otherwise opaque; this is the tenant
+// predicate the board's key-addressed interface cannot supply.
+func (b *keelBlobs) mappingForKey(ctx context.Context, key string) (store.BoardBlobKey, bool, error) {
+	mapping, found, err := b.store.GetBoardBlobKey(ctx, key)
+	if err != nil || !found {
+		return mapping, found, err
+	}
+	hash, err := tenantHashFromKey(key)
+	if err != nil {
+		return store.BoardBlobKey{}, false, nil
+	}
+	if hashTenant(mapping.TenantID) != hash {
+		return store.BoardBlobKey{}, false, nil
+	}
+	return mapping, true, nil
 }
 
 // tenantForKey resolves the tenant hash the board placed in a key. The board

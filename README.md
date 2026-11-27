@@ -198,7 +198,8 @@ env 文件路径：`FDE2E_ENV_PERSONAL`，默认取主仓根目录的 `.env.pers
   （`board.manage` + `secret.write`）创建/启停/轮换/路由；启停即时生效，创建/轮换/路由变更
   在重启后装载（变更期间 entry 在 board sync store 中停用，旧凭据不会继续服务）。
   inbox/outbox、board 事件订阅、watcher/schedule worker 随 `keel serve` 启动；
-  board 附件的字节走 keel blob store（真实读写，不再 501）。
+  每 5s 跟随 tenant flags、durable entry 与凭据指纹，关闭/停用/轮换即暂停，多副本由同一
+  durable row 收敛。board 附件的字节走 keel blob store（真实读写，不再 501）。
 - **部署入口**：Dockerfile/`cmd/runtime` 不含 board；board 只在 `keel serve` 中启用。
 - **superagent 镜像/命令桥**：tenant 文档 `board.superagent.{mirror,bridge,channel}`（默认
   `false/false/"superagent"`）。`mirror=true` 把 Ticket/Assignment/Attention/report 单向投影为

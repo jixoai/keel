@@ -12,9 +12,12 @@ package boardintegration
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/google/uuid"
@@ -185,6 +188,30 @@ func credentialRoles(platform string) (required, optional []string) {
 	default:
 		return nil, nil
 	}
+}
+
+// entryFingerprint hashes the resolved credential values of one entry. It is
+// an in-process comparison token: never rendered, logged, stored, or audited.
+// A change means the provider this process built is stale and the entry must
+// stop serving until a restart rebuilds it.
+func (r SecretResolver) entryFingerprint(ctx context.Context, tenantID uuid.UUID, platform string, ref map[string]string) (string, CredentialStatus) {
+	report := r.resolveEntryCredential(ctx, tenantID, platform, ref)
+	if report.Status != CredentialConfigured {
+		return "", report.Status
+	}
+	roles := make([]string, 0, len(report.Secret))
+	for role := range report.Secret {
+		roles = append(roles, role)
+	}
+	sort.Strings(roles)
+	hash := sha256.New()
+	for _, role := range roles {
+		hash.Write([]byte(role))
+		hash.Write([]byte{0})
+		hash.Write([]byte(report.Secret[role].Reveal()))
+		hash.Write([]byte{0})
+	}
+	return hex.EncodeToString(hash.Sum(nil)), report.Status
 }
 
 // knownCredentialRoles reports whether a role belongs to the platform's closed

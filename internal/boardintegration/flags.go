@@ -68,6 +68,12 @@ func ParseBoardFlags(document []byte) (BoardFlags, error) {
 	return flags, nil
 }
 
+// BoardFlagReader is the tenant-switch read seam (TenantFlags in production,
+// a fake in tests).
+type BoardFlagReader interface {
+	Get(ctx context.Context, tenantID uuid.UUID) (BoardFlags, error)
+}
+
 // TenantFlags reads and caches tenant switch documents.
 type TenantFlags struct {
 	Store *store.Store

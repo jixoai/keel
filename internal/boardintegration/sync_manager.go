@@ -25,6 +25,7 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jixoai/keel/internal/store"
@@ -38,10 +39,18 @@ import (
 
 // Audit kinds keel adds for the credential/entry lifecycle. board_audit stores
 // bounded tokens; the detail carries names/status only, never a value.
+// errSyncEntryUnavailable marks a storage failure on the entry path. The HTTP
+// layer answers 503, never 400 or a success.
+var errSyncEntryUnavailable = errors.New("boardintegration: sync entry storage is unavailable")
+
 const (
 	auditKindEntryCreated   = "sync.entry.created"
 	auditKindEntryUpdated   = "sync.entry.updated"
 	auditKindCredentialSeen = "sync.credential.status"
+
+	// defaultSyncMonitor bounds how long a flag switch, a durable disable or a
+	// credential rotation can go unnoticed by this process's workers.
+	defaultSyncMonitor = 5 * time.Second
 )
 
 // syncBoot is the immutable result of reading configuration at start. The
@@ -54,6 +63,19 @@ type syncBoot struct {
 	bridgeSecrets map[boardsync.Key]boardsync.Secret
 	subscribed    map[boardsync.Key]bool
 	statuses      map[boardsync.Key]CredentialStatus
+	gate          *runtimeGate
+	// loaded is the configuration and credential fingerprint this process
+	// actually built. A durable entry that no longer matches it is pending a
+	// restart and must not serve through the old provider.
+	loaded map[boardsync.Key]loadedSyncEntry
+}
+
+// loadedSyncEntry is the boot snapshot of one configured connection. The
+// fingerprint covers the resolved secret values; it is compared in-process and
+// never rendered or logged.
+type loadedSyncEntry struct {
+	record      store.BoardSyncEntryRecord
+	fingerprint string
 }
 
 // syncManager owns the runtime entry set: listing, credential status, the
@@ -70,12 +92,22 @@ type syncManager struct {
 	bridgeSecrets map[boardsync.Key]boardsync.Secret
 	subscribed    map[boardsync.Key]bool
 	statuses      map[boardsync.Key]CredentialStatus
-	// pendingRestart marks a key whose configured provider is not the one this
-	// process holds (create/rotation/routes). Enabling it must not fall back to
-	// the old provider: the board sync row stays disabled until a restart.
-	pendingMu      sync.Mutex
-	pendingRestart map[boardsync.Key]bool
-	gauge          *credentialGauge
+	loaded        map[boardsync.Key]loadedSyncEntry
+	gauge         *credentialGauge
+
+	flags         BoardFlagReader
+	monitor       time.Duration
+	providerHosts []string
+	// externalRegistry means an embedding test/deployment supplied its own
+	// registry; keel has no durable entry document to compare, so the durable
+	// gate is not applied.
+	externalRegistry bool
+
+	// stateMu serializes entry mutations (create/update/enable) and the
+	// monitor's decisions. A structural change and an enable racing on one
+	// process must not both decide from the same pre-change snapshot.
+	stateMu sync.Mutex
+	runCtx  context.Context
 
 	server *boardserver.Server
 	pool   *syncWorkerPool
@@ -91,6 +123,8 @@ func loadSyncBoot(ctx context.Context, opts Options, syncEnabled bool, syncdb *b
 		bridgeSecrets: make(map[boardsync.Key]boardsync.Secret),
 		subscribed:    make(map[boardsync.Key]bool),
 		statuses:      make(map[boardsync.Key]CredentialStatus),
+		gate:          newRuntimeGate(),
+		loaded:        make(map[boardsync.Key]loadedSyncEntry),
 	}
 	if !syncEnabled || opts.TenantID == uuid.Nil || opts.Store == nil {
 		return boot, nil
@@ -109,6 +143,15 @@ func loadSyncBoot(ctx context.Context, opts Options, syncEnabled bool, syncdb *b
 			_ = upsertSyncStoreEntry(ctx, syncdb, tenant, record.Key, record.Platform, false, opts.Logger)
 			continue
 		}
+		if err := validateProviderEndpoints(record, opts.ProviderHosts); err != nil {
+			opts.Logger.Warn("board sync entry endpoint is not allowed",
+				"tenant", tenant, "key", record.Key, "error", err)
+			boot.statuses[boardsync.Key(record.Key)] = CredentialInvalid
+			_ = upsertSyncStoreEntry(ctx, syncdb, tenant, record.Key, record.Platform, false, opts.Logger)
+			continue
+		}
+		fingerprint, _ := resolver.entryFingerprint(ctx, opts.TenantID, record.Platform, record.SecretRef)
+		boot.loaded[boardsync.Key(record.Key)] = loadedSyncEntry{record: record, fingerprint: fingerprint}
 		provider, report, buildErr := buildSyncProvider(ctx, opts.TenantID, record, resolver)
 		boot.statuses[boardsync.Key(record.Key)] = report.Status
 		if buildErr != nil || provider == nil {
@@ -118,6 +161,7 @@ func loadSyncBoot(ctx context.Context, opts Options, syncEnabled bool, syncdb *b
 			_ = upsertSyncStoreEntry(ctx, syncdb, tenant, record.Key, effectivePlatform(record, provider), false, opts.Logger)
 			continue
 		}
+		provider = wrapSyncProvider(provider, boardsync.Key(record.Key), boot.gate)
 		platform := provider.Platform()
 		fn, routes := syncFunctions(record.Routes)
 		if err := boot.registry.Add(boardsync.Entry{
@@ -226,8 +270,9 @@ func sanitizedBuildError(err error) string {
 	return text
 }
 
-// newSyncManager wraps a boot result with the process store, audit and gauge.
-func newSyncManager(boot *syncBoot, st *store.Store, syncdb *boardsyncstore.Postgres, audit *boardaudit.Postgres, tenant uuid.UUID, box *store.SecretBox, logger *slog.Logger, metricsRegistry *boardmetrics.Registry) *syncManager {
+// newSyncManager wraps a boot result with the process store, audit, tenant
+// switches and gauge.
+func newSyncManager(boot *syncBoot, st *store.Store, syncdb *boardsyncstore.Postgres, audit *boardaudit.Postgres, tenant uuid.UUID, box *store.SecretBox, logger *slog.Logger, metricsRegistry *boardmetrics.Registry, flags BoardFlagReader, monitor time.Duration, providerHosts []string) *syncManager {
 	if boot == nil {
 		boot = &syncBoot{
 			registry:      boardsync.NewRegistry(),
@@ -235,23 +280,53 @@ func newSyncManager(boot *syncBoot, st *store.Store, syncdb *boardsyncstore.Post
 			bridgeSecrets: make(map[boardsync.Key]boardsync.Secret),
 			subscribed:    make(map[boardsync.Key]bool),
 			statuses:      make(map[boardsync.Key]CredentialStatus),
+			loaded:        make(map[boardsync.Key]loadedSyncEntry),
 		}
+	}
+	if boot.loaded == nil {
+		boot.loaded = make(map[boardsync.Key]loadedSyncEntry)
+	}
+	if monitor <= 0 {
+		monitor = defaultSyncMonitor
 	}
 	manager := &syncManager{
 		store: st, syncdb: syncdb, audit: audit,
-		tenant: tenant, logger: logger,
-		resolver:       SecretResolver{Store: st, Box: box},
-		registry:       boot.registry,
-		bridgeSecrets:  boot.bridgeSecrets,
-		subscribed:     boot.subscribed,
-		statuses:       boot.statuses,
-		pendingRestart: make(map[boardsync.Key]bool),
+		tenant: tenant, logger: logger, flags: flags, monitor: monitor,
+		providerHosts: append([]string(nil), providerHosts...),
+		resolver:      SecretResolver{Store: st, Box: box},
+		registry:      boot.registry,
+		bridgeSecrets: boot.bridgeSecrets,
+		subscribed:    boot.subscribed,
+		statuses:      boot.statuses,
+		loaded:        boot.loaded,
 	}
 	if metricsRegistry != nil {
 		manager.gauge = newCredentialGauge(metricsRegistry)
 	}
 	for key, status := range manager.statuses {
 		manager.gauge.set(key, status)
+	}
+	if boot.gate != nil {
+		boot.gate.set(func(ctx context.Context, key boardsync.Key) error {
+			if manager.flags != nil {
+				flags, flagErr := manager.flags.Get(ctx, manager.tenant)
+				if flagErr != nil || !flags.FullyEnabled() {
+					return errSyncPaused
+				}
+			}
+			state, _, err := manager.connectionState(ctx, key)
+			if err != nil {
+				return errSyncPaused
+			}
+			switch state {
+			case connectionOK:
+				return nil
+			case connectionDisabled, connectionPending, connectionMissing:
+				return errSyncPaused
+			default:
+				return errSyncPaused
+			}
+		})
 	}
 	return manager
 }
@@ -262,12 +337,14 @@ func (m *syncManager) Attach(server *boardserver.Server, tenant string) {
 	if server == nil {
 		return
 	}
-	m.pool = newSyncWorkerPool(server, m.syncdb, m.registry, tenant, m.logger)
+	m.pool = newSyncWorkerPool(server, &gatedSyncStore{Store: m.syncdb, allowed: m.workerAllowed}, m.registry, tenant, m.logger)
 }
 
-// Start prepares the sync cursors, then starts the board subscription and the
-// workers for every connection enabled at boot. It must run before the HTTP
-// listener accepts writes, or a root posted in the gap is skipped as history.
+// Start prepares the sync cursors, then starts the board subscription, the
+// workers for every connection enabled at boot, and the monitor that pauses
+// them when the tenant flags close, the durable entry is disabled/rotated, or
+// a credential changes. ctx is the process lifetime, never a request context:
+// an enable PATCH must start workers that outlive the HTTP request.
 func (m *syncManager) Start(ctx context.Context) error {
 	if m == nil || m.server == nil {
 		return nil
@@ -275,6 +352,9 @@ func (m *syncManager) Start(ctx context.Context) error {
 	if err := m.server.PrepareSync(ctx); err != nil {
 		return err
 	}
+	m.stateMu.Lock()
+	m.runCtx = ctx
+	m.stateMu.Unlock()
 	if m.pool == nil {
 		return nil
 	}
@@ -286,15 +366,165 @@ func (m *syncManager) Start(ctx context.Context) error {
 	if len(m.subscribed) > 0 {
 		go m.pool.RunBoardSubscription(ctx)
 	}
+	go m.monitorLoop(ctx)
 	return nil
 }
 
-// Stop stops workers. The Surface calls it before closing the stores.
+// Stop stops the monitor and workers. The Surface calls it before closing the
+// stores.
 func (m *syncManager) Stop() {
-	if m == nil || m.pool == nil {
+	if m == nil {
 		return
 	}
-	m.pool.StopAll()
+	if m.pool != nil {
+		m.pool.StopAll()
+	}
+}
+
+// monitorLoop reconciles this process's workers with the durable configuration
+// and tenant switches. It is the cross-replica half of disable/rotation: every
+// process observes the same keel row, so a change made through one replica
+// pauses the others within one interval.
+func (m *syncManager) monitorLoop(ctx context.Context) {
+	ticker := time.NewTicker(m.monitor)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			m.reconcile(ctx)
+		}
+	}
+}
+
+// reconcile pauses or resumes workers. A flag read or store failure pauses
+// everything: fail closed beats a stale credential or a disabled board still
+// writing.
+func (m *syncManager) reconcile(ctx context.Context) {
+	if m == nil || m.pool == nil || m.flags == nil {
+		return
+	}
+	flags, err := m.flags.Get(ctx, m.tenant)
+	if err != nil || !flags.FullyEnabled() {
+		if err != nil {
+			m.logger.Warn("board sync monitor could not read tenant flags; pausing workers", "tenant", m.tenant, "error", err)
+		}
+		m.pool.StopAll()
+		return
+	}
+	m.stateMu.Lock()
+	defer m.stateMu.Unlock()
+	for key := range m.subscribed {
+		state, record, _, stateErr := m.connectionStateLocked(ctx, key)
+		if stateErr != nil {
+			m.logger.Warn("board sync monitor could not read its entry; pausing the key",
+				"tenant", m.tenant, "key", key, "error", stateErr)
+			m.pool.Stop(key)
+			continue
+		}
+		status := m.credentialStatus(ctx, record)
+		m.gauge.set(key, status)
+		m.statuses[key] = status
+		switch state {
+		case connectionOK:
+			if err := m.pool.Start(ctx, key); err != nil {
+				m.logger.Warn("board sync monitor could not restart workers",
+					"tenant", m.tenant, "key", key, "error", err)
+				m.pool.Stop(key)
+			}
+		case connectionPending:
+			m.pool.Stop(key)
+			if err := upsertSyncStoreEntry(ctx, m.syncdb, m.tenant.String(), record.Key, effectiveStoredPlatform(record), false, m.logger); err != nil {
+				m.logger.Warn("board sync monitor could not disable a pending entry",
+					"tenant", m.tenant, "key", key, "error", err)
+			}
+		case connectionDisabled, connectionMissing:
+			m.pool.Stop(key)
+			if state == connectionMissing {
+				continue
+			}
+			if err := upsertSyncStoreEntry(ctx, m.syncdb, m.tenant.String(), record.Key, effectiveStoredPlatform(record), false, m.logger); err != nil {
+				m.logger.Warn("board sync monitor could not keep a disabled entry disabled",
+					"tenant", m.tenant, "key", key, "error", err)
+			}
+		}
+	}
+}
+
+// workerAllowed is the store gate's durable check before a lease. The tenant
+// switches are part of the check so a closed board/sync pauses new leases even
+// before the monitor's next tick (within the flags cache window).
+func (m *syncManager) workerAllowed(ctx context.Context, key boardsync.Key) bool {
+	if m.flags != nil {
+		flags, err := m.flags.Get(ctx, m.tenant)
+		if err != nil || !flags.FullyEnabled() {
+			return false
+		}
+	}
+	state, _, err := m.connectionState(ctx, key)
+	return err == nil && state == connectionOK
+}
+
+// connectionState is the durable answer for one live connection. It is the
+// gate every platform-facing path (webhook, attach, source read, worker start)
+// shares, so a stale process cannot keep using an old provider.
+type connectionState int
+
+const (
+	connectionOK connectionState = iota
+	connectionDisabled
+	connectionPending
+	connectionMissing
+)
+
+// connectionState reports whether this process may serve key right now. A
+// missing row is a 404; a disabled row is a 404; a row whose enabled flag or
+// configuration differs from this process's boot snapshot, or whose resolved
+// credential no longer matches the fingerprint the provider was built with, is
+// pending a restart.
+func (m *syncManager) connectionState(ctx context.Context, key boardsync.Key) (connectionState, store.BoardSyncEntryRecord, error) {
+	// loaded and subscribed are immutable after Start; only the store lookup is
+	// live. Do not take stateMu here: a worker gated store may call this while
+	// an update holds stateMu and waits for that worker to stop.
+	state, record, _, err := m.connectionStateLocked(ctx, key)
+	return state, record, err
+}
+
+func (m *syncManager) connectionStateLocked(ctx context.Context, key boardsync.Key) (connectionState, store.BoardSyncEntryRecord, string, error) {
+	if m != nil && m.externalRegistry {
+		return connectionOK, store.BoardSyncEntryRecord{Key: string(key), Enabled: true}, "", nil
+	}
+	if m == nil || m.store == nil || m.tenant == uuid.Nil {
+		return connectionMissing, store.BoardSyncEntryRecord{}, "", nil
+	}
+	record, found, err := m.store.GetBoardSyncEntry(ctx, m.tenant, string(key))
+	if err != nil {
+		return connectionPending, store.BoardSyncEntryRecord{}, "", err
+	}
+	if !found {
+		return connectionMissing, store.BoardSyncEntryRecord{}, "", nil
+	}
+	if !record.Enabled {
+		return connectionDisabled, record, "", nil
+	}
+	// Compare the durable document after the same normalization the boot
+	// loader applied (default start channels, lowercase platform). A row
+	// written by an older/direct path must not look structurally different
+	// forever just because the loader fills a derived default.
+	normalized := cloneEntryRecord(record)
+	if err := validateSyncEntry(&normalized); err != nil {
+		return connectionPending, record, "", nil
+	}
+	loaded, ok := m.loaded[key]
+	if !ok || !sameEntryDocument(loaded.record, normalized) || !m.subscribed[key] {
+		return connectionPending, record, "", nil
+	}
+	fingerprint, status := m.resolver.entryFingerprint(ctx, m.tenant, normalized.Platform, normalized.SecretRef)
+	if status != CredentialConfigured || fingerprint != loaded.fingerprint {
+		return connectionPending, record, fingerprint, nil
+	}
+	return connectionOK, record, fingerprint, nil
 }
 
 // List returns every configured entry for the tenant with its current
@@ -312,7 +542,11 @@ func (m *syncManager) List(ctx context.Context) ([]SyncEntryView, error) {
 	for _, record := range records {
 		status := m.credentialStatus(ctx, record)
 		m.gauge.set(boardsync.Key(record.Key), status)
-		views = append(views, viewOf(record, status))
+		view := viewOf(record, status)
+		if state, _, err := m.connectionState(ctx, boardsync.Key(record.Key)); err == nil && record.Enabled {
+			view.RestartRequired = state == connectionPending
+		}
+		views = append(views, view)
 	}
 	return views, nil
 }
@@ -325,14 +559,19 @@ func (m *syncManager) Get(ctx context.Context, key string) (SyncEntryView, bool,
 	}
 	status := m.credentialStatus(ctx, record)
 	m.gauge.set(boardsync.Key(record.Key), status)
-	return viewOf(record, status), true, nil
+	view := viewOf(record, status)
+	if state, _, err := m.connectionState(ctx, boardsync.Key(record.Key)); err == nil && record.Enabled {
+		view.RestartRequired = state == connectionPending
+	}
+	return view, true, nil
 }
 
 // Create persists a new entry. The running process intentionally does not
-// adopt it: the response says a restart is required, and the board sync row is
-// enabled as requested only for the next boot. Until then a webhook for an
-// enabled key answers 503 (retry), never 200 with a silent drop.
+// adopt it: the response says a restart is required, and an enabled webhook
+// answers 503 (retry) until the process loads the configured provider.
 func (m *syncManager) Create(ctx context.Context, input SyncEntryInput) (SyncEntryView, bool, error) {
+	m.stateMu.Lock()
+	defer m.stateMu.Unlock()
 	enabled := true
 	if input.Enabled != nil {
 		enabled = *input.Enabled
@@ -356,21 +595,29 @@ func (m *syncManager) Create(ctx context.Context, input SyncEntryInput) (SyncEnt
 	if err != nil {
 		return SyncEntryView{}, false, err
 	}
+	if err := upsertSyncStoreEntry(ctx, m.syncdb, m.tenant.String(), created.Key, effectiveStoredPlatform(created), created.Enabled, m.logger); err != nil {
+		// The keel row and the board's local row are two stores. Do not leave a
+		// configuration row whose board half was never written: remove the keel
+		// row and answer 503 so the operator can retry.
+		if _, delErr := m.store.DeleteBoardSyncEntry(ctx, m.tenant, created.Key); delErr != nil {
+			m.logger.Error("board sync entry rollback failed after a board sync store error",
+				"tenant", m.tenant, "key", created.Key, "error", delErr)
+		}
+		return SyncEntryView{}, false, fmt.Errorf("%w: %v", errSyncEntryUnavailable, err)
+	}
 	status := m.credentialStatus(ctx, created)
 	m.gauge.set(boardsync.Key(created.Key), status)
-	if err := upsertSyncStoreEntry(ctx, m.syncdb, m.tenant.String(), created.Key, effectiveStoredPlatform(created), created.Enabled, m.logger); err != nil {
-		m.logger.Warn("board sync store entry could not be created",
-			"tenant", m.tenant, "key", created.Key, "error", err)
-	}
-	m.markPending(boardsync.Key(created.Key))
 	m.auditEntry(ctx, auditKindEntryCreated, created, status)
 	return viewOf(created, status), true, nil
 }
 
 // Update applies a PATCH. A structural change is persisted but disabled at the
 // board sync layer until restart; an enable/disable toggle is immediate for a
-// connection this process loaded at boot.
+// connection this process loaded at boot and serves with its process-lifetime
+// context.
 func (m *syncManager) Update(ctx context.Context, key string, patch SyncEntryPatch) (SyncEntryView, bool, bool, error) {
+	m.stateMu.Lock()
+	defer m.stateMu.Unlock()
 	current, found, err := m.store.GetBoardSyncEntry(ctx, m.tenant, key)
 	if err != nil {
 		return SyncEntryView{}, false, false, err
@@ -404,106 +651,107 @@ func (m *syncManager) Update(ctx context.Context, key string, patch SyncEntryPat
 	if err := validateSyncEntry(&next); err != nil {
 		return SyncEntryView{}, false, false, err
 	}
-	structural := !sameEntryDocument(current, next)
-	restartRequired := false
-	if structural {
-		if err := m.validateProviderConfig(ctx, next); err != nil {
-			return SyncEntryView{}, false, false, err
-		}
-		updated, err := m.store.UpdateBoardSyncEntry(ctx, next, current.Revision)
-		if err != nil {
-			return SyncEntryView{}, false, false, err
-		}
-		// Fail closed: the running provider still holds the old credential and
-		// routes. Disable the board sync row and stop this key's workers until
-		// a restart loads the new document.
-		m.markPending(boardsync.Key(updated.Key))
-		if m.pool != nil {
-			m.pool.Stop(boardsync.Key(updated.Key))
-		}
-		if err := upsertSyncStoreEntry(ctx, m.syncdb, m.tenant.String(), updated.Key, effectiveStoredPlatform(updated), false, m.logger); err != nil {
-			m.logger.Warn("board sync store entry could not be disabled after a structural change",
-				"tenant", m.tenant, "key", updated.Key, "error", err)
-		}
-		status := m.credentialStatus(ctx, updated)
-		m.gauge.set(boardsync.Key(updated.Key), status)
-		m.auditEntry(ctx, auditKindEntryUpdated, updated, status)
-		return viewOf(updated, status), true, true, nil
-	}
-	// A pending-restart key must never revive the provider this process holds.
-	// Its desired enabled flag is persisted, but the board sync row stays
-	// disabled until a restart loads the configured provider.
-	if patch.Enabled != nil && *patch.Enabled && m.isPending(boardsync.Key(key)) {
-		updated := current
-		if !current.Enabled {
-			var err error
-			updated, err = m.store.SetBoardSyncEntryEnabled(ctx, m.tenant, key, true)
-			if err != nil {
-				return SyncEntryView{}, false, false, err
-			}
-		}
-		if err := upsertSyncStoreEntry(ctx, m.syncdb, m.tenant.String(), updated.Key, effectiveStoredPlatform(updated), false, m.logger); err != nil {
-			return SyncEntryView{}, false, false, err
-		}
-		status := m.credentialStatus(ctx, updated)
-		m.gauge.set(boardsync.Key(updated.Key), status)
-		m.auditEntry(ctx, auditKindEntryUpdated, updated, status)
-		return viewOf(updated, status), true, true, nil
+	if !sameEntryDocument(current, next) {
+		return m.structuralUpdate(ctx, current, next)
 	}
 	// Only Enabled may have changed (or nothing at all).
-	if patch.Enabled != nil && *patch.Enabled != current.Enabled {
-		updated, err := m.store.SetBoardSyncEntryEnabled(ctx, m.tenant, key, *patch.Enabled)
+	if patch.Enabled == nil {
+		status := m.credentialStatus(ctx, current)
+		m.gauge.set(boardsync.Key(current.Key), status)
+		return viewOf(current, status), true, false, nil
+	}
+	if !*patch.Enabled {
+		if !current.Enabled {
+			status := m.credentialStatus(ctx, current)
+			m.gauge.set(boardsync.Key(current.Key), status)
+			return viewOf(current, status), true, false, nil
+		}
+		updated, err := m.store.SetBoardSyncEntryEnabled(ctx, m.tenant, key, false)
 		if err != nil {
 			return SyncEntryView{}, false, false, err
 		}
-		if *patch.Enabled {
-			registered := false
-			if _, ok := m.registry.Get(m.tenant.String(), boardsync.Key(key)); ok {
-				registered = true
-			}
-			switch {
-			case registered && m.subscribed[boardsync.Key(key)]:
-				if err := upsertSyncStoreEntry(ctx, m.syncdb, m.tenant.String(), updated.Key, effectiveStoredPlatform(updated), true, m.logger); err != nil {
-					return SyncEntryView{}, false, false, err
-				}
-				if m.pool != nil {
-					if err := m.pool.Start(ctx, boardsync.Key(key)); err != nil {
-						return SyncEntryView{}, false, false, err
-					}
-				}
-			default:
-				// No worker subscription exists in this process. Keep the
-				// board sync row disabled so a webhook is acknowledged without
-				// a side effect; the entry becomes live only at restart. The
-				// response says restartRequired.
-				m.markPending(boardsync.Key(key))
-				if err := upsertSyncStoreEntry(ctx, m.syncdb, m.tenant.String(), updated.Key, effectiveStoredPlatform(updated), false, m.logger); err != nil {
-					return SyncEntryView{}, false, false, err
-				}
-				restartRequired = true
-			}
-		} else {
-			if m.pool != nil {
-				m.pool.Stop(boardsync.Key(key))
-			}
-			if err := upsertSyncStoreEntry(ctx, m.syncdb, m.tenant.String(), updated.Key, effectiveStoredPlatform(updated), false, m.logger); err != nil {
-				return SyncEntryView{}, false, false, err
-			}
+		if m.pool != nil {
+			m.pool.Stop(boardsync.Key(key))
+		}
+		if err := upsertSyncStoreEntry(ctx, m.syncdb, m.tenant.String(), updated.Key, effectiveStoredPlatform(updated), false, m.logger); err != nil {
+			return SyncEntryView{}, false, false, fmt.Errorf("%w: %v", errSyncEntryUnavailable, err)
 		}
 		status := m.credentialStatus(ctx, updated)
 		m.gauge.set(boardsync.Key(updated.Key), status)
 		m.auditEntry(ctx, auditKindEntryUpdated, updated, status)
-		return viewOf(updated, status), true, restartRequired, nil
+		return viewOf(updated, status), true, false, nil
 	}
-	status := m.credentialStatus(ctx, current)
-	m.gauge.set(boardsync.Key(current.Key), status)
-	return viewOf(current, status), true, false, nil
+	// Enable (or confirm an already-enabled entry). It may only start workers
+	// when the durable document and this process's boot snapshot agree.
+	updated := current
+	if !current.Enabled {
+		var err error
+		updated, err = m.store.SetBoardSyncEntryEnabled(ctx, m.tenant, key, true)
+		if err != nil {
+			return SyncEntryView{}, false, false, err
+		}
+	}
+	status := m.credentialStatus(ctx, updated)
+	m.gauge.set(boardsync.Key(updated.Key), status)
+	state, _, _, stateErr := m.connectionStateLocked(ctx, boardsync.Key(key))
+	if stateErr != nil {
+		return SyncEntryView{}, false, false, fmt.Errorf("%w: %v", errSyncEntryUnavailable, stateErr)
+	}
+	if state != connectionOK || m.pool == nil || m.runCtx == nil || m.runCtx.Err() != nil {
+		if err := upsertSyncStoreEntry(ctx, m.syncdb, m.tenant.String(), updated.Key, effectiveStoredPlatform(updated), false, m.logger); err != nil {
+			return SyncEntryView{}, false, false, fmt.Errorf("%w: %v", errSyncEntryUnavailable, err)
+		}
+		m.auditEntry(ctx, auditKindEntryUpdated, updated, status)
+		return viewOf(updated, status), true, true, nil
+	}
+	if err := upsertSyncStoreEntry(ctx, m.syncdb, m.tenant.String(), updated.Key, effectiveStoredPlatform(updated), true, m.logger); err != nil {
+		return SyncEntryView{}, false, false, fmt.Errorf("%w: %v", errSyncEntryUnavailable, err)
+	}
+	if err := m.pool.Start(m.runCtx, boardsync.Key(key)); err != nil {
+		// The worker failed to start after the entry was enabled. Disable both
+		// the row and the desired flag, so a retry can try again cleanly and the
+		// platform never believes a dead worker is serving.
+		_, _ = m.store.SetBoardSyncEntryEnabled(ctx, m.tenant, key, false)
+		_ = upsertSyncStoreEntry(ctx, m.syncdb, m.tenant.String(), updated.Key, effectiveStoredPlatform(updated), false, m.logger)
+		return SyncEntryView{}, false, false, fmt.Errorf("%w: start workers: %v", errSyncEntryUnavailable, err)
+	}
+	m.auditEntry(ctx, auditKindEntryUpdated, updated, status)
+	return viewOf(updated, status), true, false, nil
+}
+
+// structuralUpdate applies a rotation/route/settings change. The old provider
+// must stop before the response: the durable row is disabled and any failure is
+// surfaced, never reported as a successful live change.
+func (m *syncManager) structuralUpdate(ctx context.Context, current, next store.BoardSyncEntryRecord) (SyncEntryView, bool, bool, error) {
+	if err := m.validateProviderConfig(ctx, next); err != nil {
+		return SyncEntryView{}, false, false, err
+	}
+	updated, err := m.store.UpdateBoardSyncEntry(ctx, next, current.Revision)
+	if err != nil {
+		return SyncEntryView{}, false, false, err
+	}
+	if m.pool != nil {
+		m.pool.Stop(boardsync.Key(updated.Key))
+	}
+	if err := upsertSyncStoreEntry(ctx, m.syncdb, m.tenant.String(), updated.Key, effectiveStoredPlatform(updated), false, m.logger); err != nil {
+		status := m.credentialStatus(ctx, updated)
+		m.gauge.set(boardsync.Key(updated.Key), status)
+		m.auditEntry(ctx, auditKindEntryUpdated, updated, status)
+		return SyncEntryView{}, true, false, fmt.Errorf("%w: disable pending entry: %v", errSyncEntryUnavailable, err)
+	}
+	status := m.credentialStatus(ctx, updated)
+	m.gauge.set(boardsync.Key(updated.Key), status)
+	m.auditEntry(ctx, auditKindEntryUpdated, updated, status)
+	return viewOf(updated, status), true, true, nil
 }
 
 // validateProviderConfig builds the provider without I/O when the credentials
 // happen to be configured. A missing credential is not a 400 (the operator may
 // be about to store it); a malformed platform setting is.
 func (m *syncManager) validateProviderConfig(ctx context.Context, record store.BoardSyncEntryRecord) error {
+	if err := validateProviderEndpoints(record, m.providerHosts); err != nil {
+		return err
+	}
 	provider, report, err := buildSyncProvider(ctx, m.tenant, record, m.resolver)
 	if err != nil {
 		if report.Status == CredentialMissing {
@@ -546,21 +794,6 @@ func (m *syncManager) BridgeSecret(tenant string, key boardsync.Key) (boardsync.
 		return "", false
 	}
 	return bridgeSecretFunc(m.bridgeSecrets)(tenant, key)
-}
-
-func (m *syncManager) markPending(key boardsync.Key) {
-	m.pendingMu.Lock()
-	if m.pendingRestart == nil {
-		m.pendingRestart = make(map[boardsync.Key]bool)
-	}
-	m.pendingRestart[key] = true
-	m.pendingMu.Unlock()
-}
-
-func (m *syncManager) isPending(key boardsync.Key) bool {
-	m.pendingMu.Lock()
-	defer m.pendingMu.Unlock()
-	return m.pendingRestart[key]
 }
 
 func (m *syncManager) auditEntry(ctx context.Context, kind string, record store.BoardSyncEntryRecord, status CredentialStatus) {

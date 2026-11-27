@@ -76,12 +76,20 @@ type Options struct {
 	// FileHosts is the inbound file/link URL host allowlist. Empty refuses
 	// every URL, which is the safe default.
 	FileHosts []string
+	// ProviderHosts is the custom platform API endpoint allowlist (HTTPS hosts;
+	// loopback is always accepted for tests). Empty means only the adapters'
+	// built-in endpoints are usable.
+	ProviderHosts []string
 	// TenantFlagsTTL bounds how long a tenant switch read is cached. Zero uses
 	// 5s; a negative value disables the cache (tests).
 	TenantFlagsTTL time.Duration
 	// SyncStoreConfig bounds the board sync store's retry/lease policy. Zero
 	// uses the board module's defaults; tests shorten the delays.
 	SyncStoreConfig boardsyncstore.Config
+	// SyncMonitorInterval bounds how long a flag switch, a durable disable or a
+	// credential rotation can go unnoticed by this process's workers. Zero uses
+	// 5s; tests shorten it.
+	SyncMonitorInterval time.Duration
 	// MaxWebhookBody, MaxFileBytes, MaxFiles, MaxLinks and FileFetchTimeout
 	// bound untrusted platform input. Zero keeps the board defaults.
 	MaxWebhookBody   int64
@@ -117,7 +125,7 @@ type Surface struct {
 	flags         *TenantFlags
 	manager       *syncManager
 	webhookTenant uuid.UUID
-	stopAuto      func()
+	auto          *automationSupervisor
 	cancel        context.CancelFunc
 	done          chan struct{}
 	closeOnce     sync.Once
@@ -291,10 +299,11 @@ func New(ctx context.Context, opts Options) (*Surface, error) {
 		Store: opts.Store, Audit: opts.Access, Schema: opts.Schema, DSN: opts.DSN,
 		Logger: opts.Logger,
 	}
-	manager := newSyncManager(boot, opts.Store, syncdb, auditStore, deploymentTenant, opts.SecretBox, opts.Logger, metricsRegistry)
+	manager := newSyncManager(boot, opts.Store, syncdb, auditStore, deploymentTenant, opts.SecretBox, opts.Logger, metricsRegistry, flags, opts.SyncMonitorInterval, opts.ProviderHosts)
+	manager.externalRegistry = opts.SyncRegistry != nil
 	manager.Attach(server, deploymentTenant.String())
 	runCtx, cancel := context.WithCancel(context.Background())
-	admin := &syncAdmin{manager: manager, bridge: opts.Access, tenant: deploymentTenant, logger: opts.Logger}
+	admin := &syncAdmin{manager: manager, bridge: opts.Access, tenant: deploymentTenant, next: server, logger: opts.Logger}
 	handler := &handler{
 		next:      server,
 		board:     board,
@@ -338,19 +347,10 @@ func New(ctx context.Context, opts Options) (*Surface, error) {
 	}
 	if automationStore != nil && deploymentTenant != uuid.Nil {
 		workerAuthorizer := &WorkerAuthorizer{Bridge: opts.Access, Store: opts.Store, Decision: authorizer}
-		stop, autoErr := startAutomationWorkers(runCtx, opts.Logger, automationStore, board, workerAuthorizer, deploymentTenant.String())
-		if autoErr != nil {
-			cancel()
-			manager.Stop()
-			if automationStore != nil {
-				automationStore.Close()
-			}
-			auditStore.Close()
-			syncdb.Close()
-			store.Close()
-			return nil, autoErr
-		}
-		surface.stopAuto = stop
+		surface.auto = newAutomationSupervisor(runCtx, flags, deploymentTenant, opts.SyncMonitorInterval, opts.Logger,
+			func(workerCtx context.Context) (func(), error) {
+				return startAutomationWorkers(workerCtx, opts.Logger, automationStore, board, workerAuthorizer, deploymentTenant.String())
+			})
 	}
 	go func() {
 		defer close(surface.done)
@@ -368,7 +368,47 @@ func (s *Surface) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if !s.checkBoardFlags(w, r) {
 		return
 	}
+	if boardBridgePath(r.URL.Path) && !s.checkBridgeConnection(w, r) {
+		return
+	}
 	s.handler.ServeHTTP(w, r)
+}
+
+// checkBridgeConnection gates the signed Chat SDK event route on the same
+// durable state as a webhook. The route has no keel session; its tenant is the
+// deployment tenant.
+func (s *Surface) checkBridgeConnection(w http.ResponseWriter, r *http.Request) bool {
+	key := bridgeKeyFromPath(r.URL.Path)
+	if key == "" {
+		return true
+	}
+	state, _, err := s.manager.connectionState(r.Context(), boardsync.Key(key))
+	if err != nil {
+		writeAdminError(w, http.StatusServiceUnavailable, "unavailable", "sync state is unavailable")
+		return false
+	}
+	switch state {
+	case connectionOK:
+		return true
+	case connectionDisabled, connectionMissing:
+		writeDisabled(w, "the sync connection is disabled", "sync_disabled")
+	case connectionPending:
+		writeAdminError(w, http.StatusServiceUnavailable, "sync_pending_restart", "the sync connection is pending a restart")
+	}
+	return false
+}
+
+func bridgeKeyFromPath(path string) string {
+	const prefix = "/v1/board/sync/bridge/"
+	if !strings.HasPrefix(path, prefix) {
+		return ""
+	}
+	rest := strings.TrimPrefix(path, prefix)
+	index := strings.IndexByte(rest, '/')
+	if index <= 0 {
+		return ""
+	}
+	return rest[:index]
 }
 
 // checkBoardFlags answers false when the request was already refused.
@@ -417,8 +457,39 @@ func (s *Surface) Webhook() http.Handler {
 		if !s.checkWebhookFlags(w, r) {
 			return
 		}
+		if !s.checkWebhookConnection(w, r) {
+			return
+		}
 		s.webhook.ServeHTTP(w, r)
 	})
+}
+
+// checkWebhookConnection is the durable before-consume gate for a platform
+// webhook. The board's webhook handler checks its local sync-store row; this
+// check also rejects a process whose loaded provider no longer matches the
+// keel entry (created/rotated/disabled in another replica).
+func (s *Surface) checkWebhookConnection(w http.ResponseWriter, r *http.Request) bool {
+	if s == nil || s.manager == nil {
+		return true
+	}
+	key := strings.TrimPrefix(r.URL.Path, "/webhooks/")
+	if key == "" || strings.Contains(key, "/") {
+		return true
+	}
+	state, _, err := s.manager.connectionState(r.Context(), boardsync.Key(key))
+	if err != nil {
+		writeAdminError(w, http.StatusServiceUnavailable, "unavailable", "sync state is unavailable")
+		return false
+	}
+	switch state {
+	case connectionOK:
+		return true
+	case connectionDisabled, connectionMissing:
+		writeDisabled(w, "the sync connection is disabled", "sync_disabled")
+	case connectionPending:
+		writeAdminError(w, http.StatusServiceUnavailable, "sync_pending_restart", "the sync connection is pending a restart")
+	}
+	return false
 }
 
 func (s *Surface) checkWebhookFlags(w http.ResponseWriter, r *http.Request) bool {
@@ -485,8 +556,9 @@ func (s *Surface) Close() {
 		if s.manager != nil {
 			s.manager.Stop()
 		}
-		if s.stopAuto != nil {
-			s.stopAuto()
+		if s.auto != nil {
+			s.auto.Stop()
+			s.auto.Wait()
 		}
 		if s.done != nil {
 			<-s.done

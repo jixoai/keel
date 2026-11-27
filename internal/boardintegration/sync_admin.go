@@ -25,6 +25,8 @@ import (
 	"github.com/jixoai/keel/internal/access"
 	"github.com/jixoai/keel/internal/accesswire"
 	"github.com/jixoai/keel/internal/store"
+
+	boardsync "github.com/jixoai/keel-board/sync"
 )
 
 const syncAdminBodyLimit = 64 << 10
@@ -33,6 +35,7 @@ type syncAdmin struct {
 	manager *syncManager
 	bridge  *accesswire.Bridge
 	tenant  uuid.UUID
+	next    http.Handler
 	logger  syncLogger
 }
 
@@ -51,11 +54,13 @@ func (a *syncAdmin) handles(r *http.Request) bool {
 	path := strings.TrimSuffix(r.URL.Path, "/")
 	switch r.Method {
 	case http.MethodPost:
-		return path == "/v1/board/sync/entries"
+		return path == "/v1/board/sync/entries" || path == "/v1/board/sync/threads" ||
+			(strings.HasPrefix(path, "/v1/board/sources/") && strings.HasSuffix(path, "/join"))
 	case http.MethodPatch:
 		return strings.HasPrefix(path, "/v1/board/sync/entries/")
 	case http.MethodGet:
-		return path == "/v1/board/sync/credentials"
+		return path == "/v1/board/sync/credentials" ||
+			(strings.HasPrefix(path, "/v1/board/sources/") && strings.HasSuffix(path, "/read"))
 	default:
 		return false
 	}
@@ -79,13 +84,78 @@ func (a *syncAdmin) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		a.update(w, r, tenantID, key)
 	case r.Method == http.MethodGet && path == "/v1/board/sync/credentials":
 		a.credentials(w, r, tenantID)
+	case r.Method == http.MethodPost && path == "/v1/board/sync/threads":
+		a.attach(w, r)
+	case strings.HasPrefix(path, "/v1/board/sources/"):
+		a.source(w, r, path)
 	default:
 		writeAdminError(w, http.StatusNotFound, "not_found", "no such route")
 	}
 }
 
 func (a *syncAdmin) needsSecretWrite(r *http.Request) bool {
-	return r.Method == http.MethodPost || r.Method == http.MethodPatch
+	path := strings.TrimSuffix(r.URL.Path, "/")
+	return (r.Method == http.MethodPost && path == "/v1/board/sync/entries") ||
+		(r.Method == http.MethodPatch && strings.HasPrefix(path, "/v1/board/sync/entries/"))
+}
+
+// permitConnection is the shared durable-state gate for the board's own sync
+// routes. The board module checks its local sync-store row; this adds the keel
+// configuration truth (enabled, same provider as this process, credential
+// unchanged) so a stale replica cannot attach/read through an old provider.
+func (a *syncAdmin) permitConnection(w http.ResponseWriter, r *http.Request, key string) bool {
+	state, _, err := a.manager.connectionState(r.Context(), boardsync.Key(key))
+	if err != nil {
+		writeAdminError(w, http.StatusServiceUnavailable, "unavailable", "sync state is unavailable")
+		return false
+	}
+	switch state {
+	case connectionOK:
+		return true
+	case connectionDisabled, connectionMissing:
+		writeAdminError(w, http.StatusNotFound, "sync_disabled", "the sync connection is disabled")
+	case connectionPending:
+		writeAdminError(w, http.StatusServiceUnavailable, "sync_pending_restart", "the sync connection is pending a restart")
+	}
+	return false
+}
+
+// attach checks the entry's durable state before the board's attach route can
+// resolve a target through this process's (possibly old) registry entry.
+func (a *syncAdmin) attach(w http.ResponseWriter, r *http.Request) {
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, syncAdminBodyLimit))
+	if err != nil {
+		writeAdminError(w, http.StatusBadRequest, "invalid", "request body could not be read")
+		return
+	}
+	r.Body = io.NopCloser(bytes.NewReader(body))
+	var request struct {
+		Key string `json:"key"`
+	}
+	if len(bytes.TrimSpace(body)) > 0 {
+		_ = json.Unmarshal(body, &request)
+	}
+	if key := strings.TrimSpace(request.Key); key != "" {
+		if !a.permitConnection(w, r, key) {
+			return
+		}
+	}
+	a.next.ServeHTTP(w, r)
+}
+
+// source gates GET read / POST join on the same durable state, then forwards.
+func (a *syncAdmin) source(w http.ResponseWriter, r *http.Request, path string) {
+	rest := strings.TrimPrefix(path, "/v1/board/sources/")
+	index := strings.IndexByte(rest, '/')
+	if index <= 0 {
+		writeAdminError(w, http.StatusNotFound, "not_found", "no such sync connection")
+		return
+	}
+	key := rest[:index]
+	if !a.permitConnection(w, r, key) {
+		return
+	}
+	a.next.ServeHTTP(w, r)
 }
 
 // authorize resolves the edge principal and checks the two keys. It returns
@@ -181,10 +251,11 @@ func (a *syncAdmin) update(w http.ResponseWriter, r *http.Request, tenantID uuid
 }
 
 type credentialEntryView struct {
-	Key        string           `json:"key"`
-	Platform   string           `json:"platform"`
-	Enabled    bool             `json:"enabled"`
-	Credential CredentialStatus `json:"credential"`
+	Key             string           `json:"key"`
+	Platform        string           `json:"platform"`
+	Enabled         bool             `json:"enabled"`
+	Credential      CredentialStatus `json:"credential"`
+	RestartRequired bool             `json:"restartRequired,omitempty"`
 }
 
 // credentials answers GET /v1/board/sync/credentials: the configured/missing/
@@ -200,7 +271,8 @@ func (a *syncAdmin) credentials(w http.ResponseWriter, r *http.Request, tenantID
 	views := make([]credentialEntryView, 0, len(entries))
 	for _, entry := range entries {
 		views = append(views, credentialEntryView{
-			Key: entry.Key, Platform: entry.Platform, Enabled: entry.Enabled, Credential: entry.Credential,
+			Key: entry.Key, Platform: entry.Platform, Enabled: entry.Enabled,
+			Credential: entry.Credential, RestartRequired: entry.RestartRequired,
 		})
 	}
 	writeAdminJSON(w, http.StatusOK, map[string]any{"entries": views})
@@ -238,6 +310,10 @@ func readAdminBody(w http.ResponseWriter, r *http.Request) ([]byte, bool) {
 }
 
 func writeEntryError(w http.ResponseWriter, err error) {
+	if errors.Is(err, errSyncEntryUnavailable) {
+		writeAdminError(w, http.StatusServiceUnavailable, "unavailable", "sync entry storage is unavailable")
+		return
+	}
 	switch {
 	case errors.Is(err, store.ErrBoardSyncEntryExists):
 		writeAdminError(w, http.StatusConflict, "already_exists", "a sync connection with that key already exists")

@@ -96,6 +96,11 @@ func TestSyncEntryAdminRoutes(t *testing.T) {
 	if resp := env.do(t, server, http.MethodPost, "/v1/board/sync/entries", "alice", body); resp.status != 409 {
 		t.Fatalf("duplicate create = %d %s", resp.status, resp.body)
 	}
+	// A PATCH names the deployment tenant; another tenant's manager gets 404
+	// and never reaches this tenant's row.
+	if resp := env.do(t, server, http.MethodPatch, "/v1/board/sync/entries/slack", "dave", map[string]any{"enabled": false}); resp.status != 404 {
+		t.Fatalf("cross-tenant PATCH = %d %s", resp.status, resp.body)
+	}
 
 	// Credential status: missing -> configured -> invalid, never the value.
 	if resp := env.do(t, server, http.MethodGet, "/v1/board/sync/credentials", "alice", nil); len(resp.body) == 0 || !strings.Contains(string(resp.body), `"credential":"missing"`) {

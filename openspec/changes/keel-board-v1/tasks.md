@@ -85,9 +85,8 @@
 ## 10. Phase 1：keel 导入与基础设施适配
 
 > Phase 1 基础设施（10.1–10.5、10.7）证据：`evidence/phase-1-infrastructure.md`
-> （`scripts/keel-board-phase1-gate.sh` 生成）。10.6 由 secret-store lane 继续；
-> 10.7 的 credential 状态派生自 10.6 的 entry/secret，本 lane 先交付指标、
-> `permission.denied` 与 board audit（credential 状态随 10.6 补齐）。
+> （`scripts/keel-board-phase1-gate.sh` 生成）。10.6 与 12.x/13.1-13.2 由
+> secret-store/sync lane 完成；10.7 的 credential 状态由 10.6 的 entry/secret 派生。
 > **owner 写入正式偏离**：board 模块与 keel 关系表不能共享事务；201 后立即写 owner，
 > 启动/周期 reconciler 按 `channel.created` 与最早 `message.posted` root 补偿（非原子）。
 > Phase 2 做频道 ACL 撤销时必须加 revocation marker，否则 reconciler 会重新补授。
