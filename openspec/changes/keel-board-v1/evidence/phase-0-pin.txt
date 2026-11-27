@@ -1,0 +1,8 @@
+module github.com/jixoai/keel-board
+version v0.1.0
+commit d5a9e0a6d983685994b5df49c266350d80ab4dbd
+tag-object d1cb67dd60e02eab04c2b9cc68068d742569208e
+license Apache-2.0
+license-files LICENSE NOTICE
+upstream vercel/board@26428ed4e0661ff362c59abdf1215997c59891b0
+remote https://github.com/jixoai/keel-board

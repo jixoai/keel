@@ -1,3 +1,6 @@
-gofmt	0	1
-vet	0	16
-test	0	75
+gofmt	0	0
+vet	0	0
+test	0	59
+race	0	76
+e2e	0	24
+stress	0	816

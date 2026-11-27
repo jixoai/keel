@@ -1,0 +1,562 @@
+[
+  {
+    "at": "2026-11-27T15:36:54.931472+08:00",
+    "host": "files.slack.com",
+    "method": "GET",
+    "path": "/files-pri/T-F/run.log",
+    "status": 200,
+    "detail": "download"
+  },
+  {
+    "at": "2026-11-27T15:36:55.200884+08:00",
+    "host": "slack.com",
+    "method": "POST",
+    "path": "/api/assistant.threads.setStatus",
+    "status": 200,
+    "detail": "assistant.threads.setStatus"
+  },
+  {
+    "at": "2026-11-27T15:36:55.201143+08:00",
+    "host": "slack.com",
+    "method": "POST",
+    "path": "/api/auth.test",
+    "status": 200,
+    "detail": "auth.test"
+  },
+  {
+    "at": "2026-11-27T15:36:55.201339+08:00",
+    "host": "slack.com",
+    "method": "POST",
+    "path": "/api/chat.postMessage",
+    "status": 200,
+    "detail": "chat.postMessage"
+  },
+  {
+    "at": "2026-11-27T15:36:55.293681+08:00",
+    "host": "slack.com",
+    "method": "POST",
+    "path": "/api/chat.postMessage",
+    "status": 200,
+    "detail": "chat.postMessage"
+  },
+  {
+    "at": "2026-11-27T15:36:55.29389+08:00",
+    "host": "slack.com",
+    "method": "POST",
+    "path": "/api/files.getUploadURLExternal",
+    "status": 200,
+    "detail": "files.getUploadURLExternal"
+  },
+  {
+    "at": "2026-11-27T15:36:55.294516+08:00",
+    "host": "files.slack.com",
+    "method": "POST",
+    "path": "/upload/v1/F0101",
+    "status": 200,
+    "detail": "upload 19 bytes"
+  },
+  {
+    "at": "2026-11-27T15:36:55.29471+08:00",
+    "host": "slack.com",
+    "method": "POST",
+    "path": "/api/files.completeUploadExternal",
+    "status": 200,
+    "detail": "files.completeUploadExternal"
+  },
+  {
+    "at": "2026-11-27T15:36:55.36016+08:00",
+    "host": "slack.com",
+    "method": "POST",
+    "path": "/api/assistant.threads.setStatus",
+    "status": 200,
+    "detail": "assistant.threads.setStatus"
+  },
+  {
+    "at": "2026-11-27T15:36:55.360314+08:00",
+    "host": "slack.com",
+    "method": "POST",
+    "path": "/api/chat.postMessage",
+    "status": 200,
+    "detail": "chat.postMessage"
+  },
+  {
+    "at": "2026-11-27T15:36:55.520267+08:00",
+    "host": "slack.com",
+    "method": "POST",
+    "path": "/api/assistant.threads.setStatus",
+    "status": 200,
+    "detail": "assistant.threads.setStatus"
+  },
+  {
+    "at": "2026-11-27T15:36:55.520431+08:00",
+    "host": "slack.com",
+    "method": "POST",
+    "path": "/api/chat.postMessage",
+    "status": 200,
+    "detail": "chat.postMessage"
+  },
+  {
+    "at": "2026-11-27T15:36:55.579107+08:00",
+    "host": "slack.com",
+    "method": "POST",
+    "path": "/api/chat.update",
+    "status": 200,
+    "detail": "chat.update"
+  },
+  {
+    "at": "2026-11-27T15:36:55.639508+08:00",
+    "host": "slack.com",
+    "method": "POST",
+    "path": "/api/reactions.add",
+    "status": 200,
+    "detail": "reactions.add"
+  },
+  {
+    "at": "2026-11-27T15:36:55.69082+08:00",
+    "host": "slack.com",
+    "method": "POST",
+    "path": "/api/reactions.remove",
+    "status": 200,
+    "detail": "reactions.remove"
+  },
+  {
+    "at": "2026-11-27T15:36:55.750331+08:00",
+    "host": "slack.com",
+    "method": "POST",
+    "path": "/api/chat.delete",
+    "status": 200,
+    "detail": "chat.delete"
+  },
+  {
+    "at": "2026-11-27T15:36:56.450075+08:00",
+    "host": "slack.com",
+    "method": "POST",
+    "path": "/api/chat.postMessage",
+    "status": 200,
+    "detail": "chat.postMessage"
+  },
+  {
+    "at": "2026-11-27T15:36:56.461384+08:00",
+    "host": "slack.com",
+    "method": "POST",
+    "path": "/api/assistant.threads.setStatus",
+    "status": 200,
+    "detail": "assistant.threads.setStatus"
+  },
+  {
+    "at": "2026-11-27T15:36:56.461675+08:00",
+    "host": "slack.com",
+    "method": "POST",
+    "path": "/api/chat.postMessage",
+    "status": 200,
+    "detail": "chat.postMessage"
+  },
+  {
+    "at": "2026-11-27T15:36:56.466532+08:00",
+    "host": "slack.com",
+    "method": "POST",
+    "path": "/api/assistant.threads.setStatus",
+    "status": 200,
+    "detail": "assistant.threads.setStatus"
+  },
+  {
+    "at": "2026-11-27T15:36:56.46667+08:00",
+    "host": "slack.com",
+    "method": "POST",
+    "path": "/api/chat.postMessage",
+    "status": 200,
+    "detail": "chat.postMessage"
+  },
+  {
+    "at": "2026-11-27T15:36:57.24141+08:00",
+    "host": "slack.com",
+    "method": "POST",
+    "path": "/api/assistant.threads.setStatus",
+    "status": 200,
+    "detail": "assistant.threads.setStatus"
+  },
+  {
+    "at": "2026-11-27T15:36:57.241705+08:00",
+    "host": "slack.com",
+    "method": "POST",
+    "path": "/api/chat.postMessage",
+    "status": 200,
+    "detail": "chat.postMessage"
+  },
+  {
+    "at": "2026-11-27T15:36:57.350157+08:00",
+    "host": "slack.com",
+    "method": "POST",
+    "path": "/api/assistant.threads.setStatus",
+    "status": 200,
+    "detail": "assistant.threads.setStatus"
+  },
+  {
+    "at": "2026-11-27T15:36:57.350327+08:00",
+    "host": "slack.com",
+    "method": "POST",
+    "path": "/api/chat.postMessage",
+    "status": 500,
+    "detail": "chat.postMessage injected 500: **dev**: TRANSIENT-RETRY board reply"
+  },
+  {
+    "at": "2026-11-27T15:36:57.38867+08:00",
+    "host": "slack.com",
+    "method": "POST",
+    "path": "/api/assistant.threads.setStatus",
+    "status": 200,
+    "detail": "assistant.threads.setStatus"
+  },
+  {
+    "at": "2026-11-27T15:36:57.388827+08:00",
+    "host": "slack.com",
+    "method": "POST",
+    "path": "/api/chat.postMessage",
+    "status": 200,
+    "detail": "chat.postMessage"
+  },
+  {
+    "at": "2026-11-27T15:36:57.460878+08:00",
+    "host": "slack.com",
+    "method": "POST",
+    "path": "/api/assistant.threads.setStatus",
+    "status": 200,
+    "detail": "assistant.threads.setStatus"
+  },
+  {
+    "at": "2026-11-27T15:36:57.461061+08:00",
+    "host": "slack.com",
+    "method": "POST",
+    "path": "/api/chat.postMessage",
+    "status": 500,
+    "detail": "chat.postMessage injected 500: **dev**: DEAD-LETTER board reply"
+  },
+  {
+    "at": "2026-11-27T15:36:57.501338+08:00",
+    "host": "slack.com",
+    "method": "POST",
+    "path": "/api/assistant.threads.setStatus",
+    "status": 200,
+    "detail": "assistant.threads.setStatus"
+  },
+  {
+    "at": "2026-11-27T15:36:57.501506+08:00",
+    "host": "slack.com",
+    "method": "POST",
+    "path": "/api/chat.postMessage",
+    "status": 500,
+    "detail": "chat.postMessage injected 500: **dev**: DEAD-LETTER board reply"
+  },
+  {
+    "at": "2026-11-27T15:36:57.570351+08:00",
+    "host": "slack.com",
+    "method": "POST",
+    "path": "/api/assistant.threads.setStatus",
+    "status": 200,
+    "detail": "assistant.threads.setStatus"
+  },
+  {
+    "at": "2026-11-27T15:36:57.570529+08:00",
+    "host": "slack.com",
+    "method": "POST",
+    "path": "/api/chat.postMessage",
+    "status": 500,
+    "detail": "chat.postMessage injected 500: **dev**: DEAD-LETTER board reply"
+  },
+  {
+    "at": "2026-11-27T15:36:57.600379+08:00",
+    "host": "slack.com",
+    "method": "POST",
+    "path": "/api/assistant.threads.setStatus",
+    "status": 200,
+    "detail": "assistant.threads.setStatus"
+  },
+  {
+    "at": "2026-11-27T15:36:57.600568+08:00",
+    "host": "slack.com",
+    "method": "POST",
+    "path": "/api/chat.postMessage",
+    "status": 200,
+    "detail": "chat.postMessage"
+  },
+  {
+    "at": "2026-11-27T15:36:58.2912+08:00",
+    "host": "slack.com",
+    "method": "POST",
+    "path": "/api/assistant.threads.setStatus",
+    "status": 200,
+    "detail": "assistant.threads.setStatus"
+  },
+  {
+    "at": "2026-11-27T15:36:58.291539+08:00",
+    "host": "slack.com",
+    "method": "POST",
+    "path": "/api/chat.postMessage",
+    "status": 500,
+    "detail": "chat.postMessage aborted: **dev**: RESTART-BLOCK board reply"
+  },
+  {
+    "at": "2026-11-27T15:37:00.465603+08:00",
+    "host": "slack.com",
+    "method": "POST",
+    "path": "/api/assistant.threads.setStatus",
+    "status": 200,
+    "detail": "assistant.threads.setStatus"
+  },
+  {
+    "at": "2026-11-27T15:37:00.466511+08:00",
+    "host": "slack.com",
+    "method": "POST",
+    "path": "/api/auth.test",
+    "status": 200,
+    "detail": "auth.test"
+  },
+  {
+    "at": "2026-11-27T15:37:00.466866+08:00",
+    "host": "slack.com",
+    "method": "POST",
+    "path": "/api/chat.postMessage",
+    "status": 200,
+    "detail": "chat.postMessage"
+  },
+  {
+    "at": "2026-11-27T15:37:00.482493+08:00",
+    "host": "slack.com",
+    "method": "POST",
+    "path": "/api/assistant.threads.setStatus",
+    "status": 200,
+    "detail": "assistant.threads.setStatus"
+  },
+  {
+    "at": "2026-11-27T15:37:00.482618+08:00",
+    "host": "slack.com",
+    "method": "POST",
+    "path": "/api/chat.postMessage",
+    "status": 200,
+    "detail": "chat.postMessage"
+  },
+  {
+    "at": "2026-11-27T15:37:00.796684+08:00",
+    "host": "api.github.com",
+    "method": "POST",
+    "path": "/repos/acme/www/issues/123/comments",
+    "status": 200,
+    "detail": "create issue comment"
+  },
+  {
+    "at": "2026-11-27T15:37:00.85002+08:00",
+    "host": "api.github.com",
+    "method": "PATCH",
+    "path": "/repos/acme/www/issues/comments/9101",
+    "status": 200,
+    "detail": "update issue comment"
+  },
+  {
+    "at": "2026-11-27T15:37:00.899514+08:00",
+    "host": "api.github.com",
+    "method": "POST",
+    "path": "/repos/acme/www/issues/comments/9101/reactions",
+    "status": 200,
+    "detail": "react issue comment"
+  },
+  {
+    "at": "2026-11-27T15:37:00.961355+08:00",
+    "host": "api.github.com",
+    "method": "DELETE",
+    "path": "/repos/acme/www/issues/comments/9101",
+    "status": 200,
+    "detail": "delete issue comment"
+  },
+  {
+    "at": "2026-11-27T15:37:02.430808+08:00",
+    "host": "api.linear.app",
+    "method": "POST",
+    "path": "/graphql",
+    "status": 200,
+    "detail": "commentCreate"
+  },
+  {
+    "at": "2026-11-27T15:37:02.491913+08:00",
+    "host": "api.linear.app",
+    "method": "POST",
+    "path": "/graphql",
+    "status": 200,
+    "detail": "commentUpdate"
+  },
+  {
+    "at": "2026-11-27T15:37:02.542514+08:00",
+    "host": "api.linear.app",
+    "method": "POST",
+    "path": "/graphql",
+    "status": 200,
+    "detail": "reactionCreate"
+  },
+  {
+    "at": "2026-11-27T15:37:02.605403+08:00",
+    "host": "api.linear.app",
+    "method": "POST",
+    "path": "/graphql",
+    "status": 200,
+    "detail": "commentDelete"
+  },
+  {
+    "at": "2026-11-27T15:37:03.19947+08:00",
+    "host": "slack.com",
+    "method": "POST",
+    "path": "/api/conversations.info",
+    "status": 200,
+    "detail": "conversations.info"
+  },
+  {
+    "at": "2026-11-27T15:37:03.199866+08:00",
+    "host": "slack.com",
+    "method": "POST",
+    "path": "/api/conversations.history",
+    "status": 200,
+    "detail": "conversations.history"
+  },
+  {
+    "at": "2026-11-27T15:37:03.201671+08:00",
+    "host": "slack.com",
+    "method": "POST",
+    "path": "/api/conversations.info",
+    "status": 200,
+    "detail": "conversations.info"
+  },
+  {
+    "at": "2026-11-27T15:37:03.20195+08:00",
+    "host": "slack.com",
+    "method": "POST",
+    "path": "/api/conversations.replies",
+    "status": 200,
+    "detail": "conversations.replies"
+  },
+  {
+    "at": "2026-11-27T15:37:03.204563+08:00",
+    "host": "slack.com",
+    "method": "POST",
+    "path": "/api/conversations.info",
+    "status": 200,
+    "detail": "conversations.info channel_not_found"
+  },
+  {
+    "at": "2026-11-27T15:37:03.205928+08:00",
+    "host": "slack.com",
+    "method": "POST",
+    "path": "/api/conversations.info",
+    "status": 200,
+    "detail": "conversations.info"
+  },
+  {
+    "at": "2026-11-27T15:37:03.213206+08:00",
+    "host": "slack.com",
+    "method": "POST",
+    "path": "/api/conversations.info",
+    "status": 200,
+    "detail": "conversations.info"
+  },
+  {
+    "at": "2026-11-27T15:37:03.213405+08:00",
+    "host": "slack.com",
+    "method": "POST",
+    "path": "/api/conversations.history",
+    "status": 200,
+    "detail": "conversations.history invalid_cursor"
+  },
+  {
+    "at": "2026-11-27T15:37:03.214788+08:00",
+    "host": "slack.com",
+    "method": "POST",
+    "path": "/api/conversations.info",
+    "status": 200,
+    "detail": "conversations.info"
+  },
+  {
+    "at": "2026-11-27T15:37:03.214977+08:00",
+    "host": "slack.com",
+    "method": "POST",
+    "path": "/api/conversations.join",
+    "status": 200,
+    "detail": "conversations.join"
+  },
+  {
+    "at": "2026-11-27T15:37:03.216207+08:00",
+    "host": "slack.com",
+    "method": "POST",
+    "path": "/api/conversations.info",
+    "status": 200,
+    "detail": "conversations.info"
+  },
+  {
+    "at": "2026-11-27T15:37:03.220596+08:00",
+    "host": "api.linear.app",
+    "method": "POST",
+    "path": "/graphql",
+    "status": 200,
+    "detail": "IssueByKey"
+  },
+  {
+    "at": "2026-11-27T15:37:03.220844+08:00",
+    "host": "api.linear.app",
+    "method": "POST",
+    "path": "/graphql",
+    "status": 200,
+    "detail": "IssueByID"
+  },
+  {
+    "at": "2026-11-27T15:37:03.224826+08:00",
+    "host": "api.github.com",
+    "method": "GET",
+    "path": "/repos/acme/www/issues/45",
+    "status": 200,
+    "detail": "get issue"
+  },
+  {
+    "at": "2026-11-27T15:37:03.225025+08:00",
+    "host": "api.github.com",
+    "method": "GET",
+    "path": "/repos/acme/www/issues/45/comments",
+    "status": 200,
+    "detail": "list issue comments"
+  },
+  {
+    "at": "2026-11-27T15:37:03.226352+08:00",
+    "host": "api.github.com",
+    "method": "GET",
+    "path": "/repos/acme/www/issues/45",
+    "status": 200,
+    "detail": "get issue"
+  },
+  {
+    "at": "2026-11-27T15:37:03.226572+08:00",
+    "host": "api.github.com",
+    "method": "GET",
+    "path": "/repos/acme/www/issues/45/comments",
+    "status": 200,
+    "detail": "list issue comments"
+  },
+  {
+    "at": "2026-11-27T15:37:03.229703+08:00",
+    "host": "api.github.com",
+    "method": "GET",
+    "path": "/repos/acme/www/pulls/42",
+    "status": 200,
+    "detail": "get pull"
+  },
+  {
+    "at": "2026-11-27T15:37:03.229948+08:00",
+    "host": "api.github.com",
+    "method": "GET",
+    "path": "/repos/acme/www/issues/42/comments",
+    "status": 200,
+    "detail": "list issue comments"
+  },
+  {
+    "at": "2026-11-27T15:37:03.238806+08:00",
+    "host": "slack.com",
+    "method": "POST",
+    "path": "/api/assistant.threads.setStatus",
+    "status": 200,
+    "detail": "assistant.threads.setStatus"
+  }
+]

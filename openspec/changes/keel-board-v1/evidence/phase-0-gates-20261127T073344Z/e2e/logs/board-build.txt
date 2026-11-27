@@ -1,0 +1,7 @@
+go build ./cmd/board
+binary: <temporary build; removed after the run>
+size: 20108786
+mode: -rwxr-xr-x
+sha256: 01328d533a2ddf968febb02a73705b9a53c03d7d8dd51993b6688ae31c8f0d98
+commit: d5a9e0a
+board version: 0.1.0

@@ -7,76 +7,80 @@
 
 ## 1. Phase 0：独立仓库与契约
 
-- [ ] 1.1 创建 `github.com/jixoai/keel-board`（Apache-2.0）：`LICENSE`、`NOTICE`（上游 `vercel/board@26428ed4…` 归属 + 独立实现声明）、README、CI、Go module、`cmd/board`；`go test ./...` 通过。
-- [ ] 1.2 实现 `board` 领域包：Channel/Message/Thread/Task/Claim/Needs/Label/Attachment/Block 类型、事件 kind 闭集、错误码、七态状态机；表驱动测试覆盖每条边与非法边。
-- [ ] 1.3 实现 token（32 字节 base64url/SHA-256/常量时间）、cursor、标签文法、needs 上限、文本/graph 校验；单测覆盖边界与非法输入。
-- [ ] 1.4 写 conformance 契约测试骨架：同一个测试套件可跑 in-memory store 与 PG store；fake auth/authorizer 可切换；`go test ./conformance` 通过。
+- [x] 1.1 创建 `github.com/jixoai/keel-board`（Apache-2.0）：`LICENSE`、`NOTICE`（上游 `vercel/board@26428ed4…` 归属 + 独立实现声明）、README、CI、Go module、`cmd/board`；`go test ./...` 通过。
+- [x] 1.2 实现 `board` 领域包：Channel/Message/Thread/Task/Claim/Needs/Label/Attachment/Block 类型、事件 kind 闭集、错误码、七态状态机；表驱动测试覆盖每条边与非法边。
+- [x] 1.3 实现 token（32 字节 base64url/SHA-256/常量时间）、cursor、标签文法、needs 上限、文本/graph 校验；单测覆盖边界与非法输入。
+- [x] 1.4 写 conformance 契约测试骨架：同一个测试套件可跑 in-memory store 与 PG store；fake auth/authorizer 可切换；`go test ./conformance` 通过。
 
 ## 2. Phase 0：核心日志与存储
 
-- [ ] 2.1 增加 core schema（`board_heads/board_events/board_requests`）、索引、FORCE RLS 与幂等迁移；投影为进程内确定性 fold（不建 PG 投影表，见 design §4.2）；`go test ./store -run 'Board|Postgres'` 验证重复迁移与 A/B 租户隔离。
-- [ ] 2.2 实现 `Append` 引擎：tenant head 锁、seq、事件与幂等结果同事务、提交后进程内 fold；属性测试验证增量 fold 与全量 replay 一致。
-- [ ] 2.3 实现幂等缓存（digest 定义幂等范围：post/task 的落点、batch 的 request key；同 key 同结果、不同 digest 409 `duplicate_id`、result 脱敏）与 cursor 编解码；测试创建/claim/complete 重试。
-- [ ] 2.4 实现频道/消息/线程：首帖建频道、幂等创建、根/回复、版本/修订、频道计数、线程汇总；集成测试读回与排序。
-- [ ] 2.5 实现任务创建/list/owner/by/for、channel 与 re 两种入口、重复 re 409 `already_a_task`；测试 owner Account/Bot 差异。
-- [ ] 2.6 实现 claim-ready 顺序、claim/renew/release、epoch/token 围栏、租约计算；PG 并发测试断言只有一个 claim 成功。
-- [ ] 2.7 实现 complete/fail/block/unblock/reopen/assign/needs/cancel 的守卫与事件；表驱动测试覆盖 no-op 与终态拒绝。
-- [ ] 2.8 实现 lazy expiry、可选 sweeper、读修复（ready 补齐）；可注入时钟测试旧 claim 失败、新 claim 成功。
-- [ ] 2.9 实现 needs 校验（存在/可读/非 canceled/自环/环/500 上限）与完成传播；测试 20 上限、环、超深、失败/取消前置。
-- [ ] 2.10 实现 `board.*` 保留标签、`board.task` 投影、按根标签过滤回复；测试客户端写保留标签被拒。
+- [x] 2.1 增加 core schema（`board_heads/board_events/board_requests`）、索引、FORCE RLS 与幂等迁移；投影为进程内确定性 fold（不建 PG 投影表，见 design §4.2）；`go test ./store -run 'Board|Postgres'` 验证重复迁移与 A/B 租户隔离。
+- [x] 2.2 实现 `Append` 引擎：tenant head 锁、seq、事件与幂等结果同事务、提交后进程内 fold；属性测试验证增量 fold 与全量 replay 一致。
+- [x] 2.3 实现幂等缓存（digest 定义幂等范围：post/task 的落点、batch 的 request key；同 key 同结果、不同 digest 409 `duplicate_id`、result 脱敏）与 cursor 编解码；测试创建/claim/complete 重试。
+- [x] 2.4 实现频道/消息/线程：首帖建频道、幂等创建、根/回复、版本/修订、频道计数、线程汇总；集成测试读回与排序。
+- [x] 2.5 实现任务创建/list/owner/by/for、channel 与 re 两种入口、重复 re 409 `already_a_task`；测试 owner Account/Bot 差异。
+- [x] 2.6 实现 claim-ready 顺序、claim/renew/release、epoch/token 围栏、租约计算；PG 并发测试断言只有一个 claim 成功。
+- [x] 2.7 实现 complete/fail/block/unblock/reopen/assign/needs/cancel 的守卫与事件；表驱动测试覆盖 no-op 与终态拒绝。
+- [x] 2.8 实现 lazy expiry、可选 sweeper、读修复（ready 补齐）；可注入时钟测试旧 claim 失败、新 claim 成功。
+- [x] 2.9 实现 needs 校验（存在/可读/非 canceled/自环/环/500 上限）与完成传播；测试 20 上限、环、超深、失败/取消前置。
+- [x] 2.10 实现 `board.*` 保留标签、`board.task` 投影、按根标签过滤回复；测试客户端写保留标签被拒。
 
 ## 3. Phase 0：完整 board 表面
 
-- [ ] 3.1 实现消息 edit/delete/tombstone、`if-revision`、标签 API、批量任务/plan、threads 列表与 older 分页；测试 revision 冲突、根删除取消、非 owner 编辑阻塞。
-- [ ] 3.2 实现 attachments（blob lifecycle、4MB/10 per message、签名直传可选）、reactions、mentions、schema 校验的 JSON blocks；测试读权限、引用计数、删除隐藏、非法 block。
-- [ ] 3.3 实现 watchers（`board_watchers`/`board_watch_deliveries`，durable consumer、lease/ack、退避、死信）与 schedules（`board_schedules`、权限复检、幂等消息键）；测试失败隔离。
-- [ ] 3.4 实现 `/v1/board` core API、SSE（Last-Event-ID、过滤、隐藏事件、心跳）、权限矩阵、404/403、审计/指标；`/metrics` 暴露 design §18.2 的核心指标，sync 审计写 `board_audit`（无正文/secret）；HTTP 与 SSE 集成测试通过。
-- [ ] 3.5 实现投影一致性检查与重建命令/测试；水位不一致拒绝写入，重建后哈希一致。
+- [x] 3.1 实现消息 edit/delete/tombstone、`if-revision`、标签 API、批量任务/plan、threads 列表与 older 分页；测试 revision 冲突、根删除取消、非 owner 编辑阻塞。
+- [x] 3.2 实现 attachments（blob lifecycle、4MB/10 per message、签名直传可选）、reactions、mentions、schema 校验的 JSON blocks；测试读权限、引用计数、删除隐藏、非法 block。
+- [x] 3.3 实现 watchers（`board_watchers`/`board_watch_deliveries`，durable consumer、lease/ack、退避、死信）与 schedules（`board_schedules`、权限复检、幂等消息键）；测试失败隔离。
+- [x] 3.4 实现 `/v1/board` core API、SSE（Last-Event-ID、过滤、隐藏事件、心跳）、权限矩阵、404/403、审计/指标；`/metrics` 暴露 design §18.2 的核心指标，sync 审计写 `board_audit`（无正文/secret）；HTTP 与 SSE 集成测试通过。
+- [x] 3.5 实现投影一致性检查与重建命令/测试；水位不一致拒绝写入，重建后哈希一致。
 
 ## 4. Phase 0：Sync 引擎
 
-- [ ] 4.1 增加 sync schema：`board_sync_entries/inbox/threads/copies/outbox/source_cursors/bridge_nonces` + 索引 + RLS；迁移幂等。
-- [ ] 4.2 实现 inbound：provider 验签结果落 inbox、dedupe 唯一、lease/ack、失败退避/dead letter、重启恢复；测试重复 webhook 只导入一次。
-- [ ] 4.3 实现 outbound：board 事件→outbox、每 thread lane 保序、确定性 delivery_id、receipt/copy、失败重试/`message.sync_failed`/后续继续；测试失败与清除。
-- [ ] 4.4 实现 thread mirror：root 起 thread、attach channel 的 root+backfill、thread target 只未来、subthread 归组与回复路由、`noSync`、来源 target/key 跳过；测试各路径。
-- [ ] 4.5 实现 echo 抑制：bot 身份、隐藏 marker、bridge/平台无身份时 fail closed；测试不自激、不重复。
-- [ ] 4.6 实现 sync 管理/源读取 API（entries/status/inbox/retry/sources read/join/webhooks/bridge events）与权限；entries 的创建/轮换在 Phase 1 接 tenant secret store 后提供（10.6），Phase 0 由部署配置构造 registry；测试 board.manage 与未知 key。
-- [ ] 4.7 实现文件/链接/mentions/typing：入站文件抓取与降级、出站上传/说明行、link snapshot、native mention、typing ephemeral；测试大小/失败降级。
+- [x] 4.1 增加 sync schema：`board_sync_entries/inbox/threads/copies/outbox/source_cursors/bridge_nonces` + 索引 + RLS；迁移幂等。
+- [x] 4.2 实现 inbound：provider 验签结果落 inbox、dedupe 唯一、lease/ack、失败退避/dead letter、重启恢复；测试重复 webhook 只导入一次。
+- [x] 4.3 实现 outbound：board 事件→outbox、每 thread lane 保序、确定性 delivery_id、receipt/copy、失败重试/`message.sync_failed`/后续继续；测试失败与清除。
+- [x] 4.4 实现 thread mirror：root 起 thread、attach channel 的 root+backfill、thread target 只未来、subthread 归组与回复路由、`noSync`、来源 target/key 跳过；测试各路径。
+- [x] 4.5 实现 echo 抑制：bot 身份、隐藏 marker、bridge/平台无身份时 fail closed；测试不自激、不重复。
+- [x] 4.6 实现 sync 管理/源读取 API（entries/status/inbox/retry/sources read/join/webhooks/bridge events）与权限；entries 的创建/轮换在 Phase 1 接 tenant secret store 后提供（10.6），Phase 0 由部署配置构造 registry；测试 board.manage 与未知 key。
+- [x] 4.7 实现文件/链接/mentions/typing：入站文件抓取与降级、出站上传/说明行、link snapshot、native mention、typing ephemeral；测试大小/失败降级。
 
 ## 5. Phase 0：Slack 原生适配器
 
-- [ ] 5.1 实现 Slack webhook 验签、事件归一化（message/edit/delete/reaction/files/link）、dedupe、3 秒内存先落盘；测试伪造签名与重复投递。
-- [ ] 5.2 实现 Slack 出站：post/edit/delete/react/files/typing、thread/reply、bot 身份与 `chat:write.customize` 降级；测试失败/限流/文件拒绝。
-- [ ] 5.3 实现频道名称/ID 解析、permalink、source read、join opt-in、echo 识别；测试私有/未知频道与权限。
-- [ ] 5.4 Slack 契约测试 + fake Slack 服务器端到端：双向 message/edit/delete/reaction/file/typing，全部通过。
+- [x] 5.1 实现 Slack webhook 验签、事件归一化（message/edit/delete/reaction/files/link）、dedupe、3 秒内存先落盘；测试伪造签名与重复投递。
+- [x] 5.2 实现 Slack 出站：post/edit/delete/react/files/typing、thread/reply、bot 身份与 `chat:write.customize` 降级；测试失败/限流/文件拒绝。
+- [x] 5.3 实现频道名称/ID 解析、permalink、source read、join opt-in、echo 识别；测试私有/未知频道与权限。
+- [x] 5.4 Slack 契约测试 + fake Slack 服务器端到端：双向 message/edit/delete/reaction/file/typing，全部通过。
 
 ## 6. Phase 0：GitHub 原生适配器
 
-- [ ] 6.1 实现 GitHub App webhook 验签与事件归一化：PR/issue opened/closed/reopened、comments、review submitted/dismissed、workflow run；测试重复 delivery。
-- [ ] 6.2 实现生命周期/状态标签：`state/review/head/tag.*/assignee.*` reconcile、review thread 归组、CI pass/fail；测试 PR/issue 全生命周期。
-- [ ] 6.3 实现出站 comment/edit/delete/reaction、`botUserId`/`viewer` 识别、rate limit；测试评论双向与不回显。
-- [ ] 6.4 GitHub 契约测试 + fake GitHub 服务器端到端；验证 board root 默认不创建 issue、已有线程双向。
+- [x] 6.1 实现 GitHub App webhook 验签与事件归一化：PR/issue opened/closed/reopened、comments、review submitted/dismissed、workflow run；测试重复 delivery。
+- [x] 6.2 实现生命周期/状态标签：`state/review/head/tag.*/assignee.*` reconcile、review thread 归组、CI pass/fail；测试 PR/issue 全生命周期。
+- [x] 6.3 实现出站 comment/edit/delete/reaction、`botUserId`/`viewer` 识别、rate limit；测试评论双向与不回显。
+- [x] 6.4 GitHub 契约测试 + fake GitHub 服务器端到端；验证 board root 默认不创建 issue、已有线程双向。
 
 ## 7. Phase 0：Linear 原生适配器
 
-- [ ] 7.1 实现 Linear webhook 验签与事件归一化：issue created/updated、comments、properties/labels/assignee；测试重复与未知 team。
-- [ ] 7.2 实现入站映射：root/comment/state/property、comment thread 归组；测试状态类型与 issue 更新。
-- [ ] 7.3 实现出站：board root 创建 issue、comment/edit/delete、状态/属性、reaction 尽力；测试创建与失败。
-- [ ] 7.4 实现 Linear source read（team/project/issue）与权限；契约 + fake Linear 服务器端到端。
+- [x] 7.1 实现 Linear webhook 验签与事件归一化：issue created/updated、comments、properties/labels/assignee；测试重复与未知 team。
+- [x] 7.2 实现入站映射：root/comment/state/property、comment thread 归组；测试状态类型与 issue 更新。
+- [x] 7.3 实现出站：board root 创建 issue、comment/edit/delete、状态/属性、reaction 尽力；测试创建与失败。
+- [x] 7.4 实现 Linear source read（team/project/issue）与权限；契约 + fake Linear 服务器端到端。
 
 ## 8. Phase 0：Chat SDK 通用 bridge
 
-- [ ] 8.1 定义 bridge 契约：归一化 `InboundEvent[]`、`deliver/resolve`、错误码、大小上限、HMAC v1、timestamp/nonce、重放窗口；写 JSON schema/文档。
-- [ ] 8.2 实现 board 侧 bridge：`POST /sync/bridge/{key}/events` 验 HMAC/nonce/落 inbox；board→sidecar 的 `resolve/deliver` 客户端与重试；测试坏签名/重放。
-- [ ] 8.3 实现参考 sidecar fixture（测试用 fake Chat SDK adapter，不嵌入生产运行时）：inbound/outbound/resolve；测试任意 adapter 形状。
-- [ ] 8.4 bridge conformance：与原生 provider 共用测试套件，验证 Chat SDK 通用路径可替代平台适配器。
+- [x] 8.1 定义 bridge 契约：归一化 `InboundEvent[]`、`deliver/resolve`、错误码、大小上限、HMAC v1、timestamp/nonce、重放窗口；写 JSON schema/文档。
+- [x] 8.2 实现 board 侧 bridge：`POST /sync/bridge/{key}/events` 验 HMAC/nonce/落 inbox；board→sidecar 的 `resolve/deliver` 客户端与重试；测试坏签名/重放。
+- [x] 8.3 实现参考 sidecar fixture（测试用 fake Chat SDK adapter，不嵌入生产运行时）：inbound/outbound/resolve；测试任意 adapter 形状。
+- [x] 8.4 bridge conformance：与原生 provider 共用测试套件，验证 Chat SDK 通用路径可替代平台适配器。
 
 ## 9. Phase 0：门禁与发布
 
-- [ ] 9.1 跑 `go test ./...`、`go test -race`、PG 集成、conformance、`go test -count=10`（store/log/syncstore/automation/conformance）与 E2E；全绿并记录输出。
-- [ ] 9.2 E2E（独立仓库）：fake Slack/GitHub/Linear + fake Chat SDK bridge，覆盖双向镜像、edit/delete/reaction/file/typing、attach/backfill、失败/重试/dead letter、重启恢复；脚本生成 HTML 报告。
-- [ ] 9.3 独立子代理复核（禁 Codex）：并发/租约、sync 去重/回声、凭据/不可信输入、跨租户；P0/P1 清零并记录 findings。
-- [ ] 9.4 产出不可变 commit 与 `v0.1.0` tag；写 phase 0 evidence 与 pin 记录（module + commit + Apache-2.0）；完成阶段归档检查点并签收。
+- [x] 9.1 跑 `go test ./...`、`go test -race`、PG 集成、conformance、`go test -count=10`（store/log/syncstore/automation/conformance）与 E2E；全绿并记录输出。
+- [x] 9.2 E2E（独立仓库）：fake Slack/GitHub/Linear + fake Chat SDK bridge，覆盖双向镜像、edit/delete/reaction/file/typing、attach/backfill、失败/重试/dead letter、重启恢复；脚本生成 HTML 报告。
+- [x] 9.3 独立子代理复核（禁 Codex）：并发/租约、sync 去重/回声、凭据/不可信输入、跨租户；P0/P1 清零并记录 findings。
+- [x] 9.4 产出不可变 commit 与 `v0.1.0` tag；写 phase 0 evidence 与 pin 记录（module + commit + Apache-2.0）；完成阶段归档检查点并签收。
+  > tag `v0.1.0` 指向 `d5a9e0a`（annotated `d1cb67d`，已推 origin）；脚本证据
+  > `evidence/phase-0-gates-20261127T073344Z/phase-0-gates.md`（gofmt/vet/test/race/E2E/stress 全 exit 0，
+  > stress 816s；最终独立复审 PASS，P0/P1=0）；pin `evidence/phase-0-pin.txt`。
+  > Phase 0 门禁：CI run 45956949204 同一 commit test+stress 全绿。
 
 ## 10. Phase 1：keel 导入与基础设施适配
 
