@@ -186,7 +186,7 @@ assert.match(await page.locator("#main").innerText(), /任务面已升级/);
 assert.equal(await page.locator(".tabs-tray").count(), 0);
 await page.goto(`${base}?chrome=0&scene=queue&state=permission&me=none`);
 await page.waitForTimeout(200);
-assert.match(await page.locator("#main").innerText(), /任务面不存在/);
+assert.match(await page.locator("#main").innerText(), /任务面不可用/);
 assert.equal(await page.locator(".tabs-tray").count(), 0);
 pass("migration and no-read 404 are explicit, not silent");
 
@@ -255,11 +255,16 @@ assert.match(await page.locator(".dialog h2").innerText(), /完成 #812/);
 await page.keyboard.press("Escape");
 await page.goto(`${base}?chrome=0&scene=task&id=806&dialog=cancel`);
 await page.waitForTimeout(200);
-await page.locator('[data-action="confirm"][data-kind="cancel"]').click();
-await page.waitForTimeout(200);
-assert.equal(await stateOf("806"), "completed");
 assert.equal(await page.locator(".dialog").count(), 0);
-pass("keyboard and confirmAction are fenced by moves");
+assert.equal(await stateOf("806"), "completed");
+await page.goto(`${base}?chrome=0&scene=task&id=812&dialog=complete`);
+await page.waitForTimeout(200);
+await page.evaluate(() => { eval('taskById("812")').moves = []; });
+await page.locator('[data-action="confirm"][data-kind="complete"]').click();
+await page.waitForTimeout(200);
+assert.equal(await stateOf("812"), "claimed");
+assert.equal(await page.locator(".dialog").count(), 0);
+pass("keyboard, dialog= and confirmAction are fenced by moves");
 
 // P1-2: desktop NewTask is a 480px right sheet with a visible footer; mobile is full screen.
 await page.goto(`${base}?chrome=0&scene=queue&dialog=new`);
@@ -382,6 +387,89 @@ await page.keyboard.press("2");
 await page.waitForTimeout(150);
 assert.ok((await page.locator('[data-action="sub"][data-sub="waiting"]').getAttribute("class")).includes("active"));
 pass("shortcut help aligns with implemented keys and tab/subfilter keys work");
+
+// P1-1: mobile Composer is fixed above the tab bar, and max scroll/focus work.
+await page.setViewportSize({ width: 390, height: 844 });
+await page.goto(`${base}?chrome=0&scene=task&id=812`);
+await page.waitForTimeout(300);
+const composerBox = await page.locator(".composer").evaluate((el) => {
+  const r = el.getBoundingClientRect();
+  return { position: getComputedStyle(el).position, top: r.top, bottom: r.bottom, height: r.height };
+});
+assert.equal(composerBox.position, "fixed");
+assert.ok(composerBox.top >= 0 && composerBox.bottom <= 788, JSON.stringify(composerBox));
+await page.goto(`${base}?chrome=0&scene=task&id=812&scroll=bottom`);
+await page.waitForTimeout(300);
+const lastReplyBottom2 = await page.locator(".reply").last().evaluate((el) => el.getBoundingClientRect().bottom);
+const composerTop2 = await page.locator(".composer").evaluate((el) => el.getBoundingClientRect().top);
+assert.ok(lastReplyBottom2 <= composerTop2 - 4, `reply ${lastReplyBottom2} composer ${composerTop2}`);
+assert.ok(composerTop2 - lastReplyBottom2 <= 32, `gap ${composerTop2 - lastReplyBottom2}`);
+await page.goto(`${base}?chrome=0&scene=task&id=812&focus=reply`);
+await page.waitForTimeout(400);
+assert.equal(await page.evaluate(() => document.activeElement?.id), "composer-input");
+assert.ok(await page.locator(".composer").evaluate((el) => { const r = el.getBoundingClientRect(); return r.top >= 0 && r.bottom <= 788; }));
+pass("mobile Composer is fixed, max-scroll gap is tight and reply focuses it");
+
+// P1-2: mobile more opens a bottom sheet above the tab bar with 44px rows.
+await page.goto(`${base}?chrome=0&scene=task&id=812`);
+await page.waitForTimeout(250);
+await page.locator('[data-action="menu"][data-mobile-sheet="1"]').click();
+await page.waitForTimeout(250);
+assert.equal(await page.locator(".dialog.sheet").count(), 1);
+const moreItems = await page.locator(".dialog .menu-item").evaluateAll((els) => els.map((el) => { const r = el.getBoundingClientRect(); return { top: r.top, bottom: r.bottom, height: r.height }; }));
+assert.ok(moreItems.length > 0);
+assert.ok(moreItems.every((r) => r.height >= 44 && r.bottom <= 844), JSON.stringify(moreItems));
+pass("mobile more is a bottom sheet above the tab bar with 44px rows");
+
+// P1-3: capability-driven 404/403; state=permission does not mislabel surfaces.
+for (const [scene, needle] of [["queue", "任务面不可用"], ["task", "任务不存在"], ["sync", "同步不可用"], ["automation", "自动化不可用"]]) {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  const id = scene === "task" ? "&id=812" : "";
+  await page.goto(`${base}?chrome=0&scene=${scene}${id}&state=success&me=none`);
+  await page.waitForTimeout(200);
+  assert.match(await page.locator("#main").innerText(), new RegExp(needle));
+}
+await page.goto(`${base}?chrome=0&scene=sync&state=permission`);
+await page.waitForTimeout(200);
+assert.match(await page.locator("#main").innerText(), /管理任务面/);
+assert.doesNotMatch(await page.locator("#main").innerText(), /实时|只读/);
+await page.goto(`${base}?chrome=0&scene=automation&state=permission`);
+await page.waitForTimeout(200);
+assert.match(await page.locator("#main").innerText(), /管理任务面/);
+assert.doesNotMatch(await page.locator("#main").innerText(), /实时|只读/);
+await page.goto(`${base}?chrome=0&scene=queue&state=permission`);
+await page.waitForTimeout(200);
+assert.match(await page.locator("#main").innerText(), /任务面不可用/);
+pass("me=none deep links are 404, reader is 403 and permission frames are labeled correctly");
+
+// P2: stale/error writes disabled; dialog= guarded; NewTask board.* rejected; needs search.
+await page.goto(`${base}?chrome=0&scene=task&id=812&state=stale`);
+await page.waitForTimeout(200);
+assert.equal(await page.locator('[data-action="dialog"][data-dialog="complete"]').count(), 0);
+await page.keyboard.press("e");
+await page.waitForTimeout(150);
+assert.equal(await page.locator(".dialog").count(), 0);
+await page.goto(`${base}?chrome=0&scene=task&id=812&state=error`);
+await page.waitForTimeout(200);
+assert.equal(await page.locator('[data-action="dialog"][data-dialog="complete"]').count(), 0);
+assert.equal(await page.locator('[data-action="send-reply"]').count(), 0);
+await page.goto(`${base}?chrome=0&scene=task&id=806&dialog=cancel`);
+await page.waitForTimeout(200);
+assert.equal(await page.locator(".dialog").count(), 0);
+await page.goto(`${base}?chrome=0&scene=queue&dialog=new`);
+await page.waitForTimeout(200);
+await page.locator("#d-text").fill("测试 board 标签拒绝");
+await page.locator("#d-label").fill("board.task=ready");
+await page.locator('[data-action="confirm"][data-kind="new"]').click();
+await page.waitForTimeout(200);
+assert.equal(await page.locator(".dialog").count(), 1);
+assert.match(await page.locator(".toast").last().innerText(), /board\.\*/);
+await page.goto(`${base}?chrome=0&scene=task&id=830&dialog=needs`);
+await page.waitForTimeout(200);
+await page.locator("#d-needs-search").fill("809");
+await page.waitForTimeout(150);
+assert.equal(await page.locator(".check-row:visible").count(), 1);
+pass("stale/error writes are disabled, board.* is rejected and needs search works");
 
 assert.deepEqual(errors, []);
 pass("no page or console errors");

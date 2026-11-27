@@ -287,7 +287,7 @@
 - 字段：
   - 频道（必填；只列有 editor 的频道；默认当前筛选频道，否则第一个可编辑频道）。
   - 任务说明（Textarea，必填，≤10,000；首行作为标题，全文作为根消息）。
-  - 标签（可选；key/value 行；`board.*` 拒绝并提示 `board.* 是系统标签`）。
+  - 标签（可选；key/value 行；`board.*` **在提交时显式拒绝**并提示“board.* 是系统标签”，不静默丢弃）。
   - 前置依赖（可选；最多 20；不可选已取消/不可读任务）。
   - 指派（可选；池中 / 我的账号 / 我的 Bot；只能指派给创建者自己的 Actor）。
   - `创建后立即认领`（Switch + 租约时长），仅 ready 且可认领时显示。
@@ -379,7 +379,8 @@
   - needs / blocked / result 默认展开（这些是“为什么不能做”的关键信息）；标签与外部副本折叠，
     `详情` 一并展开。
   - 1024/768 同样折叠，让根消息进入首屏；1180 起回到双栏、完整事实。
-- ≤767：单列；主操作 full width，次要动作 2 列；`更多` 打开 bottom sheet（同一动作集合）。
+- ≤767：单列；主操作 full width，次要动作 2 列；`更多` 打开 **bottom sheet**（不是卡内 dropdown），
+  位于 tab 之上、菜单项 ≥44px。
 - 任务卡是 sticky（≥1180），不遮挡线程；焦点进入卡内时不会被 sticky 重新定位打断。
 
 ### 4.3 BoardThread + Composer（`/board/:taskId`）
@@ -788,8 +789,8 @@ BoardRoute
 
 #### Needs（前置依赖）
 
-- Dialog：标题 `前置依赖 #812`；当前 chips；搜索/选择任务（按 #id 或标题）；最多 20；保存空数组
-  表示无前置。
+- Dialog：标题 `前置依赖 #812`；当前 chips；**搜索框按 #id/标题过滤**；最多 20（选中 20 后禁用未选项，
+  显示 N/20）；保存空数组表示无前置。
 - 错误：
   - `invalid_needs`：`这个前置不可用（不存在、无权查看、已取消，或会形成循环）。`
   - 超 20：`最多 20 个前置。`
@@ -903,7 +904,7 @@ deadlineText(task, now):
 
 | 层 | 判定 | UI |
 | --- | --- | --- |
-| 章节入口 | 正常 `board.read`；迁移期 `board.read` 或 `task.read` | 只有 `task.read` → 菜单保留并进入迁移页；两者都无 → 菜单隐藏，深链 404 |
+| 章节入口 | 正常 `board.read`；迁移期 `board.read` 或 `task.read` | 只有 `task.read` → 菜单保留并进入迁移页；两者都无 → 菜单隐藏，深链 404；404 帧不出现 02 入口 |
 | 队列页 | `board.read` + 至少一个可读频道 | 无频道 → “你还没有可访问的频道”引导 |
 | 写动作 | `board.write` + 频道 editor | 只读 → `只读` badge + 动作隐藏 + 一句说明 |
 | 管理动作 | `board.write` + 频道 owner 或 `board.manage` | 指派/取消/解除/重开/改依赖/频道访问 |
@@ -920,6 +921,11 @@ deadlineText(task, now):
 - `board_disabled`：404；页面 `任务看板未启用`，说明由租户管理员开启，不是“没权限”。
 - 未登录：401；登录入口 + 返回路径。
 - owner-only 动作由非 owner 发起：409 `task_not_owned`；只对可读任务显示 inline 说明，不进 403 页。
+- **capability 矩阵**：`me=none` 时队列/任务/同步/自动化全部 **404**；`me=reader` 时队列/任务可读
+  （只读），同步/自动化 **403**（缺 `board.manage`）。`state=permission` 只作为帧参数：队列/任务映射
+  到 none→404，同步/自动化映射到 reader→403，不能把 403 帧标成 404。
+- 404/403 页 header 为 quiet：不显示“实时”“只读”badge，不显示队列 tabs/filter。
+- `stale`/`error` 时任务卡与 Composer **禁用写操作**，只保留刷新/复制；键盘与确认动作同样拒绝。
 
 ### 8.2 五态矩阵
 
@@ -1056,8 +1062,9 @@ deadlineText(task, now):
 | `Space` | 切换 Switch | 自动化 |
 
 - 输入框/Textarea 聚焦时，单字母动作键失效；`Cmd/Ctrl+Enter` 仍有效。
-- **所有单字母动作先判 `TaskView.moves`**；`confirmAction` 在写入前再次校验。矩阵外的键不弹对话框、
-  不改状态；ShortcutHelp 只列已实现的键。
+- **所有单字母动作先判 `TaskView.moves`**；`confirmAction` 在写入前再次校验；`?dialog=` 直接打开
+  不可用动作也不渲染对话框。矩阵外的键不弹对话框、不改状态；ShortcutHelp 只列已实现的键
+  （含 Home/End、j/k 仅队列、`/` 队列筛选）。
 - 每个动作按钮都有 `accessibilityLabel` 与可见文字；图标按钮（复制、更多、刷新）有 tooltip +
   aria-label；不依赖 hover。
 - 焦点顺序与视觉顺序一致；对话框打开时焦点进入标题/第一个字段，`Tab` 循环，关闭后回到触发按钮。
@@ -1085,7 +1092,7 @@ deadlineText(task, now):
 | **1440** | 208 rail；纸面 max 1180；列头 + 右侧期限列；筛选一行；每页 50 | 双栏：线程 1fr（≤760）+ 任务卡 340 sticky | 2 列入卡片或单列宽卡（1180）；死信表 |
 | **1024–1279** | 60 icon rail；纸面满宽；筛选可换行；列头保留，右列压到 140 | 双栏在 ≥1180；1180 以下任务卡落到线程上方 | 单列卡；指标 2×2 |
 | **768–1023** | 60 icon rail；列头保留；筛选可换行；行保持四列但标题/元信息自然换行；期限在右列 | 单列：摘要卡 → 根 → 回复 → Composer；动作行内（34px） | 单列；entry 指标 2×2；死信列表 |
-| **≤767** | 无 rail；底部四 tab；行卡片；筛选底 Sheet；状态 chips 换行；44px 控件 | 摘要卡（动作 full width）→ 根 → 回复 → Composer 吸底；标签/副本折叠 | 单列；指标 2×2；死信卡片；危险动作 bottom sheet |
+| **≤767** | 无 rail；底部四 tab；行卡片；筛选底 Sheet；状态 chips 换行；44px 控件 | 摘要卡（动作 full width）→ 根 → 回复 → Composer fixed；标签/副本折叠 | 单列；指标 2×2；死信卡片；危险动作/更多 bottom sheet |
 
 ### 11.1 手机细节（390）
 
@@ -1101,14 +1108,15 @@ deadlineText(task, now):
   - 顶部是状态 + 租约大字；主操作在首屏内（事实/依赖之后），不要求与状态同一行。
   - `详情` 展开事实；needs/blocked/result 默认展开。
   - 次要动作 2 列；`更多` 打开菜单（同一动作集合）。
-- Composer 吸底：`position: sticky; bottom: 56px`（底部 tab 高度）+ safe-area；内容区底部 padding =
-  `56px + Composer 高度（约 128px） + safe-area + 16px`，最后一条回复与最后动作必须能滚到
-  Tab/Composer 之上。Composer 的发送键 ≥44px。
+- Composer **fixed**：`left:0; right:0; bottom: calc(56px + safe)`；高度运行时测量写入 `--composer-h`；
+  内容区 padding = `56px + --composer-h + safe-area + 16px`。首屏可见；最大滚动最后回复/动作在 Composer
+  之上且无固定空洞；发送键 ≥44px；“回复”按钮 scrollIntoView + focus。
 - 对话框：`Sheet` 从底部升起，圆角 16 顶部；标题 + 描述 + 字段 + 底部按钮（primary full width）。
   `新建任务` 手机端 **全屏 100vh**（圆角 0），字段/按钮 44px，底部提交固定。
 - 无横向滚动：`overflow-x: clip`；长频道路径/actor 名 `min-width: 0` + ellipsis；代码块横向滚动
   只限自身。
-- 触控目标 ≥44px；Switch 行高 ≥44；行内链接/图标按钮 44。
+- 触控目标 ≥44px；Switch 44×44 命中区；详情、面包屑按钮、filter tag 删除、菜单项都 ≥44px；
+  行内链接/图标按钮 44。
 
 ### 11.2 平板（768 / 1024）
 
@@ -1298,18 +1306,18 @@ open openspec/changes/keel-board-v1/ui/prototype/index.html
 ### 14.2 截图
 
 `prototype/shots/` 下的 PNG 由本地 Chrome + Playwright 生成，覆盖 390/768/1024/1180/1440 与五态/对话框/归档/迁移/404/浅色。
-构建身份：`index.html` SHA-256 `5660b319b7cf73becc504a1d6099d3386168c3474ebf2d718ed58227a3cbfd18`。92 张截图（63×1440、6×768、19×390、2×1024、2×1180），含浅色五态、归档、迁移、404、强制收回；`shots/manifest.json` 与 `interact.log` 见 `prototype/`。可复算命令见 [`REVIEW.md`](REVIEW.md) §7。
+构建身份：`index.html` SHA-256 `db534069f3d3206bbd3c8b0ad7bf751a2735e9d7b8789a30b43be2b135f361be`。96 张截图（65×1440、6×768、21×390、2×1024、2×1180），含浅色五态、归档、迁移、4 个 no-read 深链、强制收回、390 首屏/最大滚动/回复聚焦/更多 sheet；`shots/manifest.json` 与 `interact.log` 见 `prototype/`。可复算命令见 [`REVIEW.md`](REVIEW.md) §7。
 
 ### 14.3 设计工作台
 
-- **OpenMotion Design Studio**：项目 ID `92ebe246-f8ab-4acb-a76c-b96ee5d74b35`，v1 导入
+- **OpenMotion Design Studio**：项目 ID `1c8da8bd-0b54-4a08-907f-3e57fa691cac`，v1 导入
   （`scenario=prototype`，entry `index.html`）。
-  - 本机预览：`http://127.0.0.1:63535/motion-api/design/raw/92ebe246-f8ab-4acb-a76c-b96ee5d74b35/index.html`
-  - 本机编辑器：`http://127.0.0.1:63535/?page=design&scene=projects&designProject=92ebe246-f8ab-4acb-a76c-b96ee5d74b35`
+  - 本机预览：`http://127.0.0.1:63535/motion-api/design/raw/1c8da8bd-0b54-4a08-907f-3e57fa691cac/index.html`
+  - 本机编辑器：`http://127.0.0.1:63535/?page=design&scene=projects&designProject=1c8da8bd-0b54-4a08-907f-3e57fa691cac`
   - 说明：以上是**设计工作站本机地址**，不是 Owner 交付链接；公网暴露需走 alpha/隧道。
   - 仓库内静态原型是唯一可版本化源；工作台副本是 v1 导入，后续修改以仓库为准再重新导入。
-- 静态原型是可复算的基线（`shoot.mjs` 逐 URL 生成 92 张截图 + `shots/manifest.json`；
-  `interact.mjs` 跑 28 组交互断言 + `interact.log`）。
+- 静态原型是可复算的基线（`shoot.mjs` 逐 URL 生成 96 张截图 + `shots/manifest.json`，含
+  document 与 `#paper` 两处 overflow；`interact.mjs` 跑 32 组交互断言 + `interact.log`）。
 
 ## 15. 后端契约缺口（设计倒逼，待确认）
 

@@ -11,8 +11,8 @@
   归档只读、服务端 `moves` 权威动作。
 - 上一轮 P1 清单已全部修复（§4；loading 与 390 骨架拆成两条），并补了浅色五态、1024/1180、无 board.read 404、
   TUI 线框/键位/焦点/smoke 清单。
-- 证据重生成：**92 张**真实 Chrome/Playwright 截图，92/92 无横向溢出、无 console/page error，
-  92 个 SHA1 全部不同；`shots/manifest.json` 与 `interact.log` 可复核。
+- 证据重生成：**96 张**真实 Chrome/Playwright 截图，96/96 无横向溢出、无 console/page error，
+  96 个 SHA1 全部不同；`shots/manifest.json` 与 `interact.log` 可复核。
 - 仍未验证/未交付：真实 nsh TSX/TUI 渲染、真实后端、独立视觉评审、真机安全区、生产 token 改动。
   本文件不把这些写成“已通过”。
 
@@ -22,9 +22,9 @@
 | --- | --- |
 | `ui/DESIGN.md` | IA、路由、组件树、状态模型、moves 动作矩阵、权限/403/404、五态、键盘、TUI 线框、响应式、sync/自动化故障、归档/迁移、退役、契约依赖 |
 | `ui/prototype/index.html` | 自包含原型（内嵌 CSS/JS，零构建、零运行时依赖） |
-| `ui/prototype/shoot.mjs` | 截图矩阵 + `shots/manifest.json` 生成；逐 URL 记录 bytes/sha1/overflow/errors |
-| `ui/prototype/interact.mjs` | 28 组原型交互断言；生成 `interact.log` |
-| `ui/prototype/shots/*.png` | 92 张：1440×1000（63）、768×1000（6）、390×844（19）、1024×1000（2）、1180×1000（2） |
+| `ui/prototype/shoot.mjs` | 截图矩阵 + `shots/manifest.json` 生成；逐 URL 记录 bytes/sha1/overflow/paperOverflow/errors |
+| `ui/prototype/interact.mjs` | 32 组原型交互断言；生成 `interact.log` |
+| `ui/prototype/shots/*.png` | 96 张：1440×1000（65）、768×1000（6）、390×844（21）、1024×1000（2）、1180×1000（2） |
 | `ui/prototype/shots/manifest.json` | 每张图的 name/query/width/height/bytes/sha1/overflow/errors |
 | `ui/prototype/interact.log` | 20 条 PASS、生成时间、Playwright 路径、errors=0 |
 | `ui/REVIEW.md` | 本文件 |
@@ -61,9 +61,13 @@
 | 手机 tabs/chips/switch ≥44 | view tabs/state tabs/chips/归档/switch 全部 44px；switch 44×44 命中区 | 交互断言实测 44；`queue-390-success.png`、`sync-390.png` |
 | 键盘/confirm 只走 moves | 单字母动作先判 moves；confirmAction 再校验；矩阵外键不弹框/不改状态；waiting 无 block | 交互断言 `keyboard and confirmAction are fenced by moves` |
 | NewTask 右侧 Sheet + 固定 footer | 桌面 480px 右侧 Sheet，body 滚动、footer 可见；手机全屏 100vh | `task-1440-dialog-new.png`、`task-390-dialog-new.png`；交互断言 footer 在视口内 |
-| 手机最后元素不被遮挡 | 内容 padding = tab 56 + Composer 高 + safe-area；最后动作/回复在 tab/Composer 之上；发送 44px | `task-390-composer.png`、`automation-390.png`、`sync-390.png`；交互断言几何 |
+| 手机 Composer 固定吸底 | fixed 于 tab 上方；高度运行时测量写入 `--composer-h`；首屏可见、max scroll 无空洞、回复聚焦可见 | `task-390-claimed.png`（首屏）、`task-390-max-scroll.png`、`task-390-reply-focus.png`；交互断言 fixed/间距/焦点 |
+| 手机“更多”底部 Sheet | ≤767 从卡内菜单改为 bottom sheet，高 44px，位于 tab 之上 | `task-390-more.png`；交互断言 sheet/44px/底部 |
+| capability 404/403 | me=none 四表面 404；reader sync/automation 403；state=permission 映射正确；4 个深链帧 | `queue-1440-noread-deeplink.png`、`task-1440-noread-deeplink.png`、`sync-1440-noread-deeplink.png`、`automation-1440-noread-deeplink.png`、`queue-390-noread-deeplink.png`；交互断言 |
+| 44px 细节/面包屑/tag 删除 | 手机详情、面包屑、filter tag 删除、菜单项 ≥44 | 交互样式断言/截图 |
+| 手机最后元素不被遮挡 | 内容 padding = tab 56 + Composer 高 + safe-area；最后动作/回复在 tab/Composer 之上；发送 44px | `task-390-max-scroll.png`、`automation-390.png`、`sync-390.png`；交互断言几何 |
 | 错误保留数据 + 分页文案 | 队列保留筛选；任务/同步/自动化不写“你的筛选”；已加载数据标 stale | `queue-1440-error.png`、`task-1440-error.png`、`sync-1440-error.png`、`automation-1440-error.png`；交互断言 |
-| 无 board.read 404 隐藏入口 | shell 按 `board.read || task.read`；404 帧隐藏 02 rail/mobile tab；legacy 保留 | `queue-1440-noread-404.png`、`queue-390-noread-404.png`；交互断言 |
+| 无 board.read 404 隐藏入口 | shell 按 `board.read || task.read`；404 帧隐藏 02 rail/mobile tab；legacy 保留 | `queue-1440-noread-deeplink.png`、`queue-390-noread-deeplink.png`；交互断言 |
 | 镜像只读入口按事实 | `taskActions` 只看 `moves`/`mirror.readOnly`；不看 `source=` | `task-1440-mirror-readonly.png` |
 | NewTask 6 字段 | 频道/说明/标签/依赖/指派/立即认领；手机全屏 100vh | `task-1440-dialog-new.png`、`task-390-dialog-new.png`；交互断言 |
 | TUI 线框/键位/焦点/smoke | DESIGN §12.4 80×24/120×40 线框、焦点模型、8 条 smoke；**未执行** | DESIGN §12.4；§8 未验证 |
@@ -89,6 +93,14 @@
 | REVIEW #824 指针 | 改为 `queue-1440-success.png` 的 #824 行（不再指向不存在的 assigned 帧） |
 | 生产 theme token 排期 | §5.2 明确：原型已改，生产 `web/theme.json` 单独 PR 修改 |
 | TUI smoke | DESIGN §12.4 明确“未执行”，不写成证据 |
+| ShortcutHelp 补 Home/End、j/k、/ | help 列出 Home/End、j/k 仅队列、/ 打开队列筛选 | 交互断言 |
+| `dialog=` 校验 moves | URL 直接打开不可用动作不渲染对话框；confirm 再校验 | 交互断言 |
+| 403 页去实时/只读 | sync/automation 403 页 header quiet，无实时/只读 badge | 交互断言 |
+| stale/error 禁用写 | 任务卡/Composer 只留刷新与复制；键盘/confirm 也拒绝 | 交互断言 |
+| NewTask board.* 显式拒绝 | 输入 `board.task=...` 保留对话框并提示系统标签 | 交互断言 |
+| needs 搜索/20 上限 | 搜索框过滤、选中计数、20 后禁用未选项 | 交互断言 |
+| overflow #paper | `shoot.mjs` 同时记录 document 与 #paper 的 scrollWidth/clientWidth | `manifest.json` 的 `paperOverflow` |
+| 390 新帧 | 首屏 Composer / max scroll / 回复聚焦 / 更多 sheet / no-read | 对应文件 |
 
 ## 5. 视觉与可测量自检
 
@@ -141,7 +153,7 @@
 | 旧地址 | `gone-1440.png`、`gone-390.png` |
 | 390 手机 | `queue-390-*`、`task-390-*`、`sync-390`、`automation-390`、`gone-390` |
 
-- 无 board.read：`queue-1440-noread-404.png`（404 文案，不泄露原因）；legacy：`queue-1440-migrate.png`。
+- 无 board.read：`queue-1440-noread-deeplink.png`（404 文案，不泄露原因）；legacy：`queue-1440-migrate.png`。
 - 归档：`queue-1440-archive.png`、`task-1440-archived.png`；无动作、无 Composer。
 - 旧 `/superagent` 仍是 404 下线页，不重定向。
 
@@ -149,26 +161,26 @@
 
 ### 7.1 截图
 
-- 构建身份：`prototype/index.html` SHA-256 `5660b319b7cf73becc504a1d6099d3386168c3474ebf2d718ed58227a3cbfd18`。
-- 92 张：1440×1000（63）、768×1000（6）、390×844（19）、1024×1000（2）、1180×1000（2）。
-  **上一轮“50/53”计数已纠正为 manifest 实测的 63 张 1440。**
+- 构建身份：`prototype/index.html` SHA-256 `db534069f3d3206bbd3c8b0ad7bf751a2735e9d7b8789a30b43be2b135f361be`。
+- 96 张：1440×1000（65）、768×1000（6）、390×844（21）、1024×1000（2）、1180×1000（2）。
+  **上一轮“50/53”计数已纠正为 manifest 实测的 65 张 1440。**
 - 生成：
   ```bash
   cd openspec/changes/keel-board-v1/ui/prototype
   PLAYWRIGHT_MODULE=/absolute/path/to/playwright/index.mjs node shoot.mjs
   ```
-- `shots/manifest.json` 记录每张图的 name/query/width/height/bytes/sha1/overflow/errors；
-  本次结果：`overflow:false` 92/92、`errors:[]` 92/92、SHA1 92/92 不同。
+- `shots/manifest.json` 记录每张图的 name/query/width/height/bytes/sha1/overflow/paperOverflow/errors；
+  本次结果：`overflow:false` 96/96、`paperOverflow:false` 96/96、`errors:[]` 96/96、SHA1 96/96 不同。
 - 非空白门限（本设计板定档）：数据页非主色像素 ≥5%，空/权限/迁移页 ≥4%；unique colors ≥100；
-  文件 ≥20 KB。实测最小：非主色 4.18%（`queue-390-noread-404.png`）、unique 203
-  （`queue-390-migrate.png`）、28 KB（`queue-390-noread-404.png`），全部通过。空白/黑图为 0% / 1 色，
+  文件 ≥20 KB。实测最小：非主色 4.32%（`queue-390-noread-deeplink.png`）、unique 203
+  （`queue-390-migrate.png`）、28 KB（`queue-390-noread-deeplink.png`），全部通过。空白/黑图为 0% / 1 色，
   会被拦下。
 - 可复算边界：字体/Chrome 版本不同会改变字节；承诺结论级复算（同一矩阵、同一状态、同一
   overflow/error 结论），不是跨机器逐字节相同。
 
 ### 7.2 交互
 
-- `interact.mjs` 28 组断言全 PASS，生成 `interact.log`（含生成时间、Playwright 路径、errors=0）。
+- `interact.mjs` 32 组断言全 PASS（33 条 PASS，含 no-errors），生成 `interact.log`（含生成时间、Playwright 路径、errors=0）。
 - 覆盖：分页、claim、complete+依赖就绪、answer、reply、tabs/filter、claim-lost takeover/force-release、
   read-only、watcher/schedule 开关、手机 44px Sheet、loading tabs/filter、stale 无实时、空态 badge 0、
   assigned 仅限、readonly 持有者、归档无动作、迁移/404、6 字段 NewTask、访问 Sheet 只读。
@@ -222,8 +234,8 @@
 - [x] 无硬编码 hex 到组件；只用 token。
 - [x] 五态、迁移、404、归档、镜像只读均有专属帧。
 - [x] 无 hover-only 信息；焦点环单一规则。
-- [x] 92 张截图全部真实生成、互不相同、无 overflow/console error。
-- [x] 无横向溢出（92/92 measured）。
+- [x] 96 张截图全部真实生成、互不相同、无 overflow/console error。
+- [x] 无横向溢出（96/96 measured）。
 - [x] Composer 不被底部 tab 遮挡；手机 44px。
 - [x] 镜像/归档动作由 moves/mirror 决定，不按 source 标签推断。
 - [x] 访问 Sheet 无 API 时不显示可编辑假象。
@@ -237,10 +249,10 @@
 ```bash
 cd openspec/changes/keel-board-v1/ui/prototype
 
-# 92 张截图 + manifest.json
+# 96 张截图 + manifest.json
 PLAYWRIGHT_MODULE=/absolute/path/to/playwright/index.mjs node shoot.mjs
 
-# 28 组交互 + interact.log
+# 32 组交互 + interact.log
 PLAYWRIGHT_MODULE=/absolute/path/to/playwright/index.mjs node interact.mjs
 
 # 单张
@@ -251,9 +263,9 @@ PLAYWRIGHT_MODULE=/absolute/path/to/playwright/index.mjs node shoot.mjs --only q
 
 ## 12. OpenMotion
 
-- 项目 ID：`92ebe246-f8ab-4acb-a76c-b96ee5d74b35`
-- 本机预览：`http://127.0.0.1:63535/motion-api/design/raw/92ebe246-f8ab-4acb-a76c-b96ee5d74b35/index.html`
-- 本机编辑器：`http://127.0.0.1:63535/?page=design&scene=projects&designProject=92ebe246-f8ab-4acb-a76c-b96ee5d74b35`
+- 项目 ID：`1c8da8bd-0b54-4a08-907f-3e57fa691cac`
+- 本机预览：`http://127.0.0.1:63535/motion-api/design/raw/1c8da8bd-0b54-4a08-907f-3e57fa691cac/index.html`
+- 本机编辑器：`http://127.0.0.1:63535/?page=design&scene=projects&designProject=1c8da8bd-0b54-4a08-907f-3e57fa691cac`
 - 这是设计工作站本机地址，不是公网交付链接；仓库 `prototype/index.html` 仍是唯一版本化源。
 
 ## 13. 文件清单
@@ -269,7 +281,7 @@ openspec/changes/keel-board-v1/ui/
    ├─ interact.log
    └─ shots/
       ├─ manifest.json
-      └─ 92 PNG
+      └─ 96 PNG
 ```
 
 - 未改 `web/src/**`、`internal/**`、`cmd/**` 或任何生产文件。

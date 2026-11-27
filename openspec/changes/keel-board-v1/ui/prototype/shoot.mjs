@@ -27,7 +27,10 @@ const shots = [
   ["queue-1440-empty", "scene=queue&state=empty", 1440, 1000],
   ["queue-1440-filtered-empty", "scene=queue&state=filtered", 1440, 1000],
   ["queue-1440-error", "scene=queue&state=error", 1440, 1000],
-  ["queue-1440-noread-404", "scene=queue&state=permission&me=reader", 1440, 1000],
+  ["queue-1440-noread-deeplink", "scene=queue&state=success&me=none", 1440, 1000],
+  ["task-1440-noread-deeplink", "scene=task&id=812&state=success&me=none", 1440, 1000],
+  ["sync-1440-noread-deeplink", "scene=sync&state=success&me=none", 1440, 1000],
+  ["automation-1440-noread-deeplink", "scene=automation&state=success&me=none", 1440, 1000],
   ["queue-1440-disabled", "scene=queue&state=disabled", 1440, 1000],
   ["queue-1440-stale", "scene=queue&state=stale", 1440, 1000],
   ["queue-1440-migrate", "scene=queue&state=migrate", 1440, 1000],
@@ -58,7 +61,6 @@ const shots = [
   ["task-1440-composer-error", "scene=task&id=812&state=success&composer=error", 1440, 1000],
   ["task-1440-loading", "scene=task&id=812&state=loading", 1440, 1000],
   ["task-1440-error", "scene=task&id=812&state=error", 1440, 1000],
-  ["task-1440-permission", "scene=task&id=812&state=permission&me=reader", 1440, 1000],
   // 1440 — action dialogs
   ["task-1440-dialog-complete", "scene=task&id=812&state=success&dialog=complete", 1440, 1000],
   ["task-1440-dialog-fail", "scene=task&id=812&state=success&dialog=fail", 1440, 1000],
@@ -106,14 +108,16 @@ const shots = [
   ["queue-390-loading", "scene=queue&state=loading", 390, 844],
   ["queue-390-empty", "scene=queue&state=empty", 390, 844],
   ["queue-390-error", "scene=queue&state=error", 390, 844],
-  ["queue-390-noread-404", "scene=queue&state=permission&me=reader", 390, 844],
+  ["queue-390-noread-deeplink", "scene=queue&state=success&me=none", 390, 844],
   ["queue-390-filters", "scene=queue&state=success&dialog=filters", 390, 844],
   ["queue-390-migrate", "scene=queue&state=migrate", 390, 844],
   ["queue-390-archive", "scene=queue&state=success&archive=1", 390, 844],
   ["task-390-claimed", "scene=task&id=812&state=success", 390, 844],
+  ["task-390-max-scroll", "scene=task&id=812&state=success&scroll=bottom", 390, 844],
+  ["task-390-reply-focus", "scene=task&id=812&state=success&focus=reply", 390, 844],
+  ["task-390-more", "scene=task&id=812&state=success&dialog=more", 390, 844],
   ["task-390-facts", "scene=task&id=812&state=success&facts=1", 390, 844],
   ["task-390-thread", "scene=task&id=812&state=success&scroll=thread", 390, 844],
-  ["task-390-composer", "scene=task&id=812&state=success&scroll=composer", 390, 844],
   ["task-390-dialog-complete", "scene=task&id=812&state=success&dialog=complete", 390, 844],
   ["task-390-dialog-answer", "scene=task&id=814&state=success&dialog=answer", 390, 844],
   ["task-390-dialog-new", "scene=queue&state=success&dialog=new", 390, 844],
@@ -129,29 +133,38 @@ for (const file of await readdir(shotsDir)) {
   if (file.endsWith(".png") && !wanted.has(file)) await unlink(join(shotsDir, file));
 }
 const browser = await chromium.launch({ headless: true, channel: "chrome" });
+const page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, deviceScaleFactor: 1 });
+let currentErrors = [];
+page.on("pageerror", (error) => currentErrors.push(`pageerror: ${error.message}`));
+page.on("console", (message) => { if (message.type() === "error") currentErrors.push(`console: ${message.text()}`); });
 const results = [];
 let failed = 0;
 for (const [name, query, width, height] of shots) {
   if (only && name !== only) continue;
-  const page = await browser.newPage({ viewport: { width, height }, deviceScaleFactor: 1 });
-  const errors = [];
-  page.on("pageerror", (error) => errors.push(`pageerror: ${error.message}`));
-  page.on("console", (message) => { if (message.type() === "error") errors.push(`console: ${message.text()}`); });
-  await page.goto(`${base}?chrome=0&${query}`, { waitUntil: "load" });
-  await page.waitForTimeout(350);
-  const metrics = await page.evaluate(() => ({
-    scrollWidth: document.documentElement.scrollWidth,
-    clientWidth: document.documentElement.clientWidth,
-    scrollHeight: document.documentElement.scrollHeight
-  }));
+  currentErrors = [];
+  await page.setViewportSize({ width, height });
+  await page.goto(`${base}?chrome=0&${query}`, { waitUntil: "domcontentloaded" });
+  await page.waitForTimeout(300);
+  const metrics = await page.evaluate(() => {
+    const paper = document.getElementById("paper");
+    return {
+      scrollWidth: document.documentElement.scrollWidth,
+      clientWidth: document.documentElement.clientWidth,
+      scrollHeight: document.documentElement.scrollHeight,
+      paperScrollWidth: paper ? paper.scrollWidth : 0,
+      paperClientWidth: paper ? paper.clientWidth : 0
+    };
+  });
   const path = join(shotsDir, `${name}.png`);
   await page.screenshot({ path, fullPage: false });
   const bytes = await readFile(path);
   const hash = createHash("sha1").update(bytes).digest("hex");
-  results.push({ name, query, width, height, bytes: bytes.length, sha1: hash, overflow: metrics.scrollWidth > metrics.clientWidth, errors });
+  const errors = [...currentErrors];
+  const paperOverflow = metrics.paperScrollWidth > metrics.paperClientWidth;
+  results.push({ name, query, width, height, bytes: bytes.length, sha1: hash, overflow: metrics.scrollWidth > metrics.clientWidth, paperOverflow, errors });
   if (metrics.scrollWidth > metrics.clientWidth) { console.error(`OVERFLOW ${name}: ${metrics.scrollWidth} > ${metrics.clientWidth}`); failed += 1; }
+  if (paperOverflow) { console.error(`PAPER OVERFLOW ${name}: ${metrics.paperScrollWidth} > ${metrics.paperClientWidth}`); failed += 1; }
   if (errors.length) { console.error(`CONSOLE ${name}: ${errors.join(" | ")}`); failed += 1; }
-  await page.close();
 }
 await browser.close();
 const manifest = {

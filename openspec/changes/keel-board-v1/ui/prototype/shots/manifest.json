@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-11-27T00:30:38.049Z",
+  "generatedAt": "2026-11-27T02:26:21.860Z",
   "playwright": "/Users/kzf/Development/GitHub/jixoai/fde2e/thehorizonhotel/node_modules/playwright/index.mjs",
   "base": "file:///Users/kzf/Dev/GitHub/jixoai/fde2e/.worktrees/keel-board-ui-design/openspec/changes/keel-board-v1/ui/prototype/index.html",
   "shots": [
@@ -11,6 +11,7 @@
       "bytes": 137109,
       "sha1": "e0788df82dcd91066a7078a6c1207c7feea59088",
       "overflow": false,
+      "paperOverflow": false,
       "errors": []
     },
     {
@@ -18,9 +19,10 @@
       "query": "scene=queue&state=loading",
       "width": 1440,
       "height": 1000,
-      "bytes": 56015,
-      "sha1": "07fa14810fac5143f7d3e1e5a0d52881c9da86b0",
+      "bytes": 56250,
+      "sha1": "ce83b527592cc76f59cdb50b79e1e0675fb900b9",
       "overflow": false,
+      "paperOverflow": false,
       "errors": []
     },
     {
@@ -31,6 +33,7 @@
       "bytes": 61189,
       "sha1": "0723c931606c986d20e87a1d9d7420edf34b0518",
       "overflow": false,
+      "paperOverflow": false,
       "errors": []
     },
     {
@@ -41,6 +44,7 @@
       "bytes": 77924,
       "sha1": "73fbd21a182919a731d61c76a4fd503c21cc2587",
       "overflow": false,
+      "paperOverflow": false,
       "errors": []
     },
     {
@@ -51,16 +55,51 @@
       "bytes": 142302,
       "sha1": "30f07273c1e31d3ecc714a65090bebb98920e9ff",
       "overflow": false,
+      "paperOverflow": false,
       "errors": []
     },
     {
-      "name": "queue-1440-noread-404",
-      "query": "scene=queue&state=permission&me=reader",
+      "name": "queue-1440-noread-deeplink",
+      "query": "scene=queue&state=success&me=none",
       "width": 1440,
       "height": 1000,
-      "bytes": 42526,
-      "sha1": "e6b68e4219b338f73eea036cb0ec5812fbb3f8f5",
+      "bytes": 43117,
+      "sha1": "7ee87b8a87d23fa8a9dc414cb98bb9b859fa4d88",
       "overflow": false,
+      "paperOverflow": false,
+      "errors": []
+    },
+    {
+      "name": "task-1440-noread-deeplink",
+      "query": "scene=task&id=812&state=success&me=none",
+      "width": 1440,
+      "height": 1000,
+      "bytes": 48239,
+      "sha1": "7658f3c2ec1eef5d819605302b023de30645b89e",
+      "overflow": false,
+      "paperOverflow": false,
+      "errors": []
+    },
+    {
+      "name": "sync-1440-noread-deeplink",
+      "query": "scene=sync&state=success&me=none",
+      "width": 1440,
+      "height": 1000,
+      "bytes": 42185,
+      "sha1": "da5465178057d86de1988bbc38ebaa23b39904bc",
+      "overflow": false,
+      "paperOverflow": false,
+      "errors": []
+    },
+    {
+      "name": "automation-1440-noread-deeplink",
+      "query": "scene=automation&state=success&me=none",
+      "width": 1440,
+      "height": 1000,
+      "bytes": 43603,
+      "sha1": "264fd42f132ceaf7346095275a475d9e733f1aec",
+      "overflow": false,
+      "paperOverflow": false,
       "errors": []
     },
     {
@@ -71,6 +110,7 @@
       "bytes": 41617,
       "sha1": "99ece807a4c3f49f77b937e5eeeff8019c13d47f",
       "overflow": false,
+      "paperOverflow": false,
       "errors": []
     },
     {
@@ -81,6 +121,7 @@
       "bytes": 142710,
       "sha1": "0a53f6c2e1b5f94b6e4ff4622fffd5f0f2aaf790",
       "overflow": false,
+      "paperOverflow": false,
       "errors": []
     },
     {
@@ -91,6 +132,7 @@
       "bytes": 53048,
       "sha1": "1778d4c24dfedc690271e395d11af6e57c66357b",
       "overflow": false,
+      "paperOverflow": false,
       "errors": []
     },
     {
@@ -101,6 +143,7 @@
       "bytes": 65596,
       "sha1": "0a0ca630df0b9397f332752860f3a5e5afa239da",
       "overflow": false,
+      "paperOverflow": false,
       "errors": []
     },
     {
@@ -111,6 +154,7 @@
       "bytes": 133357,
       "sha1": "ded1ce5adf7588a0c7a9c573e9d2626e93fa5b92",
       "overflow": false,
+      "paperOverflow": false,
       "errors": []
     },
     {
@@ -121,6 +165,7 @@
       "bytes": 137573,
       "sha1": "7aa234ad3437e1ee9773e9ca50ccb0ccea3bf0fd",
       "overflow": false,
+      "paperOverflow": false,
       "errors": []
     },
     {
@@ -128,9 +173,10 @@
       "query": "scene=queue&state=loading&theme=light",
       "width": 1440,
       "height": 1000,
-      "bytes": 57013,
-      "sha1": "4dcd0f1234be0253c9bd00f71fae3673f78c8106",
+      "bytes": 57358,
+      "sha1": "8683bb4e2f8553411b8358ffc0528bacc80d6c03",
       "overflow": false,
+      "paperOverflow": false,
       "errors": []
     },
     {
@@ -141,6 +187,7 @@
       "bytes": 61338,
       "sha1": "1e67e3ee63efea78283b85f21f6635d924e80f95",
       "overflow": false,
+      "paperOverflow": false,
       "errors": []
     },
     {
@@ -151,6 +198,7 @@
       "bytes": 142536,
       "sha1": "09d64ee2aa7e116c09a518ee4462ba8ed10a2d7b",
       "overflow": false,
+      "paperOverflow": false,
       "errors": []
     },
     {
@@ -158,9 +206,10 @@
       "query": "scene=queue&state=permission&me=reader&theme=light",
       "width": 1440,
       "height": 1000,
-      "bytes": 41941,
-      "sha1": "79ff81001ce46b2c50aafcd6d710babe7e21adc2",
+      "bytes": 42459,
+      "sha1": "d2b212d608895bf240af501094e4e761112db47b",
       "overflow": false,
+      "paperOverflow": false,
       "errors": []
     },
     {
@@ -171,6 +220,7 @@
       "bytes": 167720,
       "sha1": "3d34a80df69a0560a1f54db9b4e8f2eb48c4c8d8",
       "overflow": false,
+      "paperOverflow": false,
       "errors": []
     },
     {
@@ -181,6 +231,7 @@
       "bytes": 96523,
       "sha1": "bf34eda92597473c4dd94c3ce55fe47853fa98f8",
       "overflow": false,
+      "paperOverflow": false,
       "errors": []
     },
     {
@@ -191,6 +242,7 @@
       "bytes": 100386,
       "sha1": "78b33f23353b5c6c811a1a4843c9151e9b467f27",
       "overflow": false,
+      "paperOverflow": false,
       "errors": []
     },
     {
@@ -201,6 +253,7 @@
       "bytes": 141509,
       "sha1": "b8e561b57ad797a426eaf8e55e02cfd3671f03bd",
       "overflow": false,
+      "paperOverflow": false,
       "errors": []
     },
     {
@@ -211,6 +264,7 @@
       "bytes": 108393,
       "sha1": "3c9d27e19e85be200ec35f1996ad01df50bbaf0a",
       "overflow": false,
+      "paperOverflow": false,
       "errors": []
     },
     {
@@ -221,6 +275,7 @@
       "bytes": 104078,
       "sha1": "0e57d939b45c630af6ec7e67e012214fa0491612",
       "overflow": false,
+      "paperOverflow": false,
       "errors": []
     },
     {
@@ -231,6 +286,7 @@
       "bytes": 100919,
       "sha1": "058e5f71cafa42219ea6c8050d22dda82205f0da",
       "overflow": false,
+      "paperOverflow": false,
       "errors": []
     },
     {
@@ -241,6 +297,7 @@
       "bytes": 104548,
       "sha1": "0f8daa5ebf1a7e31f20213c00c4742e21acd5299",
       "overflow": false,
+      "paperOverflow": false,
       "errors": []
     },
     {
@@ -251,6 +308,7 @@
       "bytes": 90496,
       "sha1": "468aa830b2a3489ca8328ff4b1ea7b57e87adcaa",
       "overflow": false,
+      "paperOverflow": false,
       "errors": []
     },
     {
@@ -261,6 +319,7 @@
       "bytes": 181768,
       "sha1": "383ccb36d8ac7af8fad146f55d685acd60178df9",
       "overflow": false,
+      "paperOverflow": false,
       "errors": []
     },
     {
@@ -271,6 +330,7 @@
       "bytes": 95497,
       "sha1": "bd2c766fd95827a00b273da99b74dd796beccf6f",
       "overflow": false,
+      "paperOverflow": false,
       "errors": []
     },
     {
@@ -281,6 +341,7 @@
       "bytes": 142277,
       "sha1": "9d417ed44ad72c2749be05a2d5b507c2ae5089f3",
       "overflow": false,
+      "paperOverflow": false,
       "errors": []
     },
     {
@@ -291,6 +352,7 @@
       "bytes": 97769,
       "sha1": "d1e43cc8dba9440638217cd3ac3c8c955c9f1b5a",
       "overflow": false,
+      "paperOverflow": false,
       "errors": []
     },
     {
@@ -298,9 +360,10 @@
       "query": "scene=task&id=852&state=success",
       "width": 390,
       "height": 844,
-      "bytes": 52674,
-      "sha1": "50afad7cd957f6f50f9ab6dd526bb8172aa00bf9",
+      "bytes": 50371,
+      "sha1": "ee54ebc1b0d0977b581faf0fe5d63fbc1937a1cb",
       "overflow": false,
+      "paperOverflow": false,
       "errors": []
     },
     {
@@ -311,6 +374,7 @@
       "bytes": 169270,
       "sha1": "cb62fda3cbfdfaea6c87b1eb1d89d304c07c3656",
       "overflow": false,
+      "paperOverflow": false,
       "errors": []
     },
     {
@@ -321,6 +385,7 @@
       "bytes": 93118,
       "sha1": "b3618e3b19e1d95af83954f9dde8668e5a1158d4",
       "overflow": false,
+      "paperOverflow": false,
       "errors": []
     },
     {
@@ -331,6 +396,7 @@
       "bytes": 175888,
       "sha1": "fda987e568f370c6383ee0b19270782db0c32a8c",
       "overflow": false,
+      "paperOverflow": false,
       "errors": []
     },
     {
@@ -338,9 +404,10 @@
       "query": "scene=task&id=812&state=loading",
       "width": 1440,
       "height": 1000,
-      "bytes": 37984,
-      "sha1": "f7a6b9a069163fbcc6542d323d6f9b2d9736a8af",
+      "bytes": 38191,
+      "sha1": "83905aa1687c94cb0a6eea88a4cf508f91129ac5",
       "overflow": false,
+      "paperOverflow": false,
       "errors": []
     },
     {
@@ -348,19 +415,10 @@
       "query": "scene=task&id=812&state=error",
       "width": 1440,
       "height": 1000,
-      "bytes": 171776,
-      "sha1": "5c817908f696ede451a8cc8adf263a643de2dbd3",
+      "bytes": 178703,
+      "sha1": "08796f10c162df8a395aff9210e0a934bcc8b377",
       "overflow": false,
-      "errors": []
-    },
-    {
-      "name": "task-1440-permission",
-      "query": "scene=task&id=812&state=permission&me=reader",
-      "width": 1440,
-      "height": 1000,
-      "bytes": 47797,
-      "sha1": "21cb7fd78219f7655056e1a969be0f0914bec885",
-      "overflow": false,
+      "paperOverflow": false,
       "errors": []
     },
     {
@@ -371,6 +429,7 @@
       "bytes": 135732,
       "sha1": "6e412833eaa9c87b918341b227f48d1e3d03d8be",
       "overflow": false,
+      "paperOverflow": false,
       "errors": []
     },
     {
@@ -381,6 +440,7 @@
       "bytes": 138402,
       "sha1": "bc6d9ce2b208bd6844262740376af081f537ac39",
       "overflow": false,
+      "paperOverflow": false,
       "errors": []
     },
     {
@@ -388,9 +448,10 @@
       "query": "scene=task&id=812&state=success&dialog=block",
       "width": 1440,
       "height": 1000,
-      "bytes": 137695,
-      "sha1": "7db625a9b2ead8264d96a6242c7b4ad466d631fe",
+      "bytes": 137690,
+      "sha1": "3f0c15397c7052f36468c6852cedea8259c89084",
       "overflow": false,
+      "paperOverflow": false,
       "errors": []
     },
     {
@@ -401,6 +462,7 @@
       "bytes": 138256,
       "sha1": "a39b23f6412d86e8f159f1f8d8d3ba8fd56d8606",
       "overflow": false,
+      "paperOverflow": false,
       "errors": []
     },
     {
@@ -408,9 +470,10 @@
       "query": "scene=task&id=830&state=success&dialog=needs",
       "width": 1440,
       "height": 1000,
-      "bytes": 115507,
-      "sha1": "8c37eef900eba184760caa6f84dbe1a03f5d4581",
+      "bytes": 117737,
+      "sha1": "ced81d0d3af31c34013a02c0cb0c08b15f918b8a",
       "overflow": false,
+      "paperOverflow": false,
       "errors": []
     },
     {
@@ -421,6 +484,7 @@
       "bytes": 134646,
       "sha1": "f4fb9f97a0b1c9ad2773c22c58a36460103448ba",
       "overflow": false,
+      "paperOverflow": false,
       "errors": []
     },
     {
@@ -431,6 +495,7 @@
       "bytes": 139411,
       "sha1": "0b1961117f6811896df6806a63b9f6ba10846e47",
       "overflow": false,
+      "paperOverflow": false,
       "errors": []
     },
     {
@@ -441,6 +506,7 @@
       "bytes": 92646,
       "sha1": "a460791d4890e4fa03dd56fcfd3c379e0a6df456",
       "overflow": false,
+      "paperOverflow": false,
       "errors": []
     },
     {
@@ -451,6 +517,7 @@
       "bytes": 123575,
       "sha1": "8e91e112ff95aa27a063033c24a98e34a254dfdc",
       "overflow": false,
+      "paperOverflow": false,
       "errors": []
     },
     {
@@ -461,6 +528,7 @@
       "bytes": 97909,
       "sha1": "dfe4385419d40861cbaf8029055948e39fecf170",
       "overflow": false,
+      "paperOverflow": false,
       "errors": []
     },
     {
@@ -471,6 +539,7 @@
       "bytes": 150873,
       "sha1": "cef60b446b830776853a5f11aaa1ef2572a57e4c",
       "overflow": false,
+      "paperOverflow": false,
       "errors": []
     },
     {
@@ -481,6 +550,7 @@
       "bytes": 127200,
       "sha1": "4f7fc3fe343cde973f99abee5f31a649a2d098e3",
       "overflow": false,
+      "paperOverflow": false,
       "errors": []
     },
     {
@@ -488,9 +558,10 @@
       "query": "scene=task&id=812&state=success&dialog=shortcuts",
       "width": 1440,
       "height": 1000,
-      "bytes": 147358,
-      "sha1": "436f9056f3d400233690674dd5721217496655de",
+      "bytes": 150919,
+      "sha1": "5d5ef2231a64a4046db5d24632d4ad98ad807510",
       "overflow": false,
+      "paperOverflow": false,
       "errors": []
     },
     {
@@ -501,6 +572,7 @@
       "bytes": 159821,
       "sha1": "ccc3f8e611818c437dde2fdd3333865d19c52d22",
       "overflow": false,
+      "paperOverflow": false,
       "errors": []
     },
     {
@@ -511,6 +583,7 @@
       "bytes": 100024,
       "sha1": "7c62f7fc3846d28fc3b3c073150b58a46aa1b7fe",
       "overflow": false,
+      "paperOverflow": false,
       "errors": []
     },
     {
@@ -518,9 +591,10 @@
       "query": "scene=sync&state=loading",
       "width": 1440,
       "height": 1000,
-      "bytes": 32957,
-      "sha1": "301c88a604af112b246d1ba26b695e5932a4d669",
+      "bytes": 33091,
+      "sha1": "e211b4f723a6ebc2afc507698951e518fd1f6620",
       "overflow": false,
+      "paperOverflow": false,
       "errors": []
     },
     {
@@ -531,6 +605,7 @@
       "bytes": 41231,
       "sha1": "370c16b23a4ab7c6ffaebcadaddfb67ad1e1213c",
       "overflow": false,
+      "paperOverflow": false,
       "errors": []
     },
     {
@@ -541,6 +616,7 @@
       "bytes": 107138,
       "sha1": "afb081c0e0420f6c4762a63a74eebc00f533e0ea",
       "overflow": false,
+      "paperOverflow": false,
       "errors": []
     },
     {
@@ -548,9 +624,10 @@
       "query": "scene=sync&state=permission&me=reader",
       "width": 1440,
       "height": 1000,
-      "bytes": 38076,
-      "sha1": "8e4319d93337f84e10d93406f2675a41dddf94bd",
+      "bytes": 39730,
+      "sha1": "56ed94f9b23de2523da0f29ea2da412d16d3fac2",
       "overflow": false,
+      "paperOverflow": false,
       "errors": []
     },
     {
@@ -561,6 +638,7 @@
       "bytes": 94058,
       "sha1": "deaeaf111f917e75b1dda30556bd88eb8872bbaa",
       "overflow": false,
+      "paperOverflow": false,
       "errors": []
     },
     {
@@ -571,6 +649,7 @@
       "bytes": 90198,
       "sha1": "c8cb9713690e89fa0a647df81b49b8c6ee73f057",
       "overflow": false,
+      "paperOverflow": false,
       "errors": []
     },
     {
@@ -581,6 +660,7 @@
       "bytes": 126961,
       "sha1": "0d8a0715f0f84b2f10c0778a055e23c3d09acecd",
       "overflow": false,
+      "paperOverflow": false,
       "errors": []
     },
     {
@@ -588,9 +668,10 @@
       "query": "scene=automation&state=loading",
       "width": 1440,
       "height": 1000,
-      "bytes": 35908,
-      "sha1": "9a1680925297eef7985aa0ac6c81790a79f23321",
+      "bytes": 35917,
+      "sha1": "f6be8cb6e61230d9c086fae0a417efcebb1887aa",
       "overflow": false,
+      "paperOverflow": false,
       "errors": []
     },
     {
@@ -601,6 +682,7 @@
       "bytes": 46607,
       "sha1": "8ce925bcf645e2060f7475314c0d9fa3eb3285cf",
       "overflow": false,
+      "paperOverflow": false,
       "errors": []
     },
     {
@@ -611,6 +693,7 @@
       "bytes": 132865,
       "sha1": "e57d881ae51e2e98505f04b58368ef56a576c032",
       "overflow": false,
+      "paperOverflow": false,
       "errors": []
     },
     {
@@ -618,9 +701,10 @@
       "query": "scene=automation&state=permission&me=reader",
       "width": 1440,
       "height": 1000,
-      "bytes": 40726,
-      "sha1": "678c469bfbe07fc9ec1dd2d66b4004dfd70f8ddd",
+      "bytes": 42364,
+      "sha1": "7841b4e15a040507235e0b6492a32007e942b0f8",
       "overflow": false,
+      "paperOverflow": false,
       "errors": []
     },
     {
@@ -631,6 +715,7 @@
       "bytes": 127633,
       "sha1": "9a44b9c82b2c7f5f07a914b8de152ffc1dc58ce7",
       "overflow": false,
+      "paperOverflow": false,
       "errors": []
     },
     {
@@ -641,6 +726,7 @@
       "bytes": 53318,
       "sha1": "f201add39192a10a6099072162b20d18b4427345",
       "overflow": false,
+      "paperOverflow": false,
       "errors": []
     },
     {
@@ -651,6 +737,7 @@
       "bytes": 125492,
       "sha1": "bf4e66e87b380b3464733604ec83f9c64190fa85",
       "overflow": false,
+      "paperOverflow": false,
       "errors": []
     },
     {
@@ -658,9 +745,10 @@
       "query": "scene=task&id=812&state=success",
       "width": 1024,
       "height": 1000,
-      "bytes": 106162,
-      "sha1": "81ae1297e5f70acb69ed90596388bf7fa98514a7",
+      "bytes": 105712,
+      "sha1": "4ab365f234c5465a505c0dc1d80d438ab574fca2",
       "overflow": false,
+      "paperOverflow": false,
       "errors": []
     },
     {
@@ -671,6 +759,7 @@
       "bytes": 126891,
       "sha1": "4c13b5bff1036f60d51ee1700f9f5df634b5c4ef",
       "overflow": false,
+      "paperOverflow": false,
       "errors": []
     },
     {
@@ -681,6 +770,7 @@
       "bytes": 158386,
       "sha1": "73822334fcc9b860006f75be84586d014e224f43",
       "overflow": false,
+      "paperOverflow": false,
       "errors": []
     },
     {
@@ -691,6 +781,7 @@
       "bytes": 114053,
       "sha1": "342811dbca53a1620ae3de621c81b6dad45f4278",
       "overflow": false,
+      "paperOverflow": false,
       "errors": []
     },
     {
@@ -698,9 +789,10 @@
       "query": "scene=queue&state=loading",
       "width": 768,
       "height": 1000,
-      "bytes": 46710,
-      "sha1": "7488d87b47b459b4655cee78d80860931c4465ef",
+      "bytes": 46841,
+      "sha1": "db3bd4e0b247c69d5686ea249030d929be07ba35",
       "overflow": false,
+      "paperOverflow": false,
       "errors": []
     },
     {
@@ -708,9 +800,10 @@
       "query": "scene=task&id=812&state=success",
       "width": 768,
       "height": 1000,
-      "bytes": 93940,
-      "sha1": "2dfb6d7df11309b7ca4fbdf6b3966f0f6abde039",
+      "bytes": 88871,
+      "sha1": "fa8d56a26d7c459bc152754ef0ddb939c7a3081e",
       "overflow": false,
+      "paperOverflow": false,
       "errors": []
     },
     {
@@ -718,9 +811,10 @@
       "query": "scene=task&id=812&state=success&dialog=block",
       "width": 768,
       "height": 1000,
-      "bytes": 87511,
-      "sha1": "d4bd8cdca78143f781e5f0d01c6553d5c6b30362",
+      "bytes": 84537,
+      "sha1": "08b1030f5db2d518574944d1f03d25ddbd860262",
       "overflow": false,
+      "paperOverflow": false,
       "errors": []
     },
     {
@@ -731,6 +825,7 @@
       "bytes": 81195,
       "sha1": "45247bc80d3129dc8cfbe1ebc3b24f7966582a36",
       "overflow": false,
+      "paperOverflow": false,
       "errors": []
     },
     {
@@ -741,6 +836,7 @@
       "bytes": 111304,
       "sha1": "ff2f1cf9ee0ec086ef1f62de943853cd05e06343",
       "overflow": false,
+      "paperOverflow": false,
       "errors": []
     },
     {
@@ -751,6 +847,7 @@
       "bytes": 61552,
       "sha1": "e28f5041c903c8292cbc049ae8d79c050e0686ef",
       "overflow": false,
+      "paperOverflow": false,
       "errors": []
     },
     {
@@ -758,9 +855,10 @@
       "query": "scene=queue&state=loading",
       "width": 390,
       "height": 844,
-      "bytes": 33696,
-      "sha1": "997ee219ca69b099f71e272aaf609cedd5d1595c",
+      "bytes": 33751,
+      "sha1": "465cb8048a6f439f37307c2ae781d5672f7d6517",
       "overflow": false,
+      "paperOverflow": false,
       "errors": []
     },
     {
@@ -771,6 +869,7 @@
       "bytes": 40359,
       "sha1": "b3b8b6b9e5180129c03413b4119111d38553f142",
       "overflow": false,
+      "paperOverflow": false,
       "errors": []
     },
     {
@@ -781,16 +880,18 @@
       "bytes": 62395,
       "sha1": "17b8556d28b00791aa40dd199e82ec5893c5589d",
       "overflow": false,
+      "paperOverflow": false,
       "errors": []
     },
     {
-      "name": "queue-390-noread-404",
-      "query": "scene=queue&state=permission&me=reader",
+      "name": "queue-390-noread-deeplink",
+      "query": "scene=queue&state=success&me=none",
       "width": 390,
       "height": 844,
-      "bytes": 28979,
-      "sha1": "ba374246505daee1929b68bc557b7b008b780601",
+      "bytes": 29218,
+      "sha1": "d8aec5cb809c6c847c52f53a51a5389d10899b55",
       "overflow": false,
+      "paperOverflow": false,
       "errors": []
     },
     {
@@ -801,6 +902,7 @@
       "bytes": 44662,
       "sha1": "009fa94ccd8fe762ff340618aafa43d48d02b40c",
       "overflow": false,
+      "paperOverflow": false,
       "errors": []
     },
     {
@@ -811,6 +913,7 @@
       "bytes": 35963,
       "sha1": "0552b89a6723ff2b259658f3033fc40be0e59247",
       "overflow": false,
+      "paperOverflow": false,
       "errors": []
     },
     {
@@ -821,6 +924,7 @@
       "bytes": 41271,
       "sha1": "1166b42a10cdbfebe0d232a7cb20ffd2f4f9f976",
       "overflow": false,
+      "paperOverflow": false,
       "errors": []
     },
     {
@@ -828,9 +932,43 @@
       "query": "scene=task&id=812&state=success",
       "width": 390,
       "height": 844,
-      "bytes": 49282,
-      "sha1": "9522f419e20e0137c4ad583247666a5c1d5264c0",
+      "bytes": 47591,
+      "sha1": "c356508966a5cb0a53af0e05398cfe5c56ee25e8",
       "overflow": false,
+      "paperOverflow": false,
+      "errors": []
+    },
+    {
+      "name": "task-390-max-scroll",
+      "query": "scene=task&id=812&state=success&scroll=bottom",
+      "width": 390,
+      "height": 844,
+      "bytes": 67233,
+      "sha1": "4a114633a5bebf4a570c504c1246e6073be1fb17",
+      "overflow": false,
+      "paperOverflow": false,
+      "errors": []
+    },
+    {
+      "name": "task-390-reply-focus",
+      "query": "scene=task&id=812&state=success&focus=reply",
+      "width": 390,
+      "height": 844,
+      "bytes": 47743,
+      "sha1": "727c13edd8abca784afb3741488c9ef98ed8db1e",
+      "overflow": false,
+      "paperOverflow": false,
+      "errors": []
+    },
+    {
+      "name": "task-390-more",
+      "query": "scene=task&id=812&state=success&dialog=more",
+      "width": 390,
+      "height": 844,
+      "bytes": 42131,
+      "sha1": "2cce848e46c7c6fba56c2127d31cba0f8a315493",
+      "overflow": false,
+      "paperOverflow": false,
       "errors": []
     },
     {
@@ -838,9 +976,10 @@
       "query": "scene=task&id=812&state=success&facts=1",
       "width": 390,
       "height": 844,
-      "bytes": 51169,
-      "sha1": "c2124872a73fe687abf819dbb001196492aa468b",
+      "bytes": 52104,
+      "sha1": "4700f71ff1e77e47763ec8ab11e7bed4fbb3df15",
       "overflow": false,
+      "paperOverflow": false,
       "errors": []
     },
     {
@@ -848,19 +987,10 @@
       "query": "scene=task&id=812&state=success&scroll=thread",
       "width": 390,
       "height": 844,
-      "bytes": 70103,
-      "sha1": "a444de11e52bd9e9088fd245d839b61486fbb898",
+      "bytes": 70086,
+      "sha1": "62fa7b206e72417104f791f2eee67256bc500793",
       "overflow": false,
-      "errors": []
-    },
-    {
-      "name": "task-390-composer",
-      "query": "scene=task&id=812&state=success&scroll=composer",
-      "width": 390,
-      "height": 844,
-      "bytes": 67804,
-      "sha1": "253dd1a7d87b1505db917b3a56200298b6f33bcc",
-      "overflow": false,
+      "paperOverflow": false,
       "errors": []
     },
     {
@@ -868,9 +998,10 @@
       "query": "scene=task&id=812&state=success&dialog=complete",
       "width": 390,
       "height": 844,
-      "bytes": 49259,
-      "sha1": "6e5565d6c375d8ff8b65a2286da23686406a6bfa",
+      "bytes": 45758,
+      "sha1": "bf693156d8e0b5ff31bc9e7ec1fe05287011c5fb",
       "overflow": false,
+      "paperOverflow": false,
       "errors": []
     },
     {
@@ -878,9 +1009,10 @@
       "query": "scene=task&id=814&state=success&dialog=answer",
       "width": 390,
       "height": 844,
-      "bytes": 49930,
-      "sha1": "dea18a91b96d7ca772921939e9ec1ce0c95e90e7",
+      "bytes": 48105,
+      "sha1": "2095c598dd838167af3ee7d69b223a973b673af4",
       "overflow": false,
+      "paperOverflow": false,
       "errors": []
     },
     {
@@ -891,6 +1023,7 @@
       "bytes": 54159,
       "sha1": "9567acc9b7c0c9afd54d3703fb23029924e932b0",
       "overflow": false,
+      "paperOverflow": false,
       "errors": []
     },
     {
@@ -901,6 +1034,7 @@
       "bytes": 54477,
       "sha1": "a64c585de086b28f1ef9b9cc438858900806a727",
       "overflow": false,
+      "paperOverflow": false,
       "errors": []
     },
     {
@@ -911,6 +1045,7 @@
       "bytes": 53102,
       "sha1": "620bfa0eb9f3b0fe50275737b319572aac80f810",
       "overflow": false,
+      "paperOverflow": false,
       "errors": []
     },
     {
@@ -921,6 +1056,7 @@
       "bytes": 37229,
       "sha1": "ceec3670331b715da1b4dd6c45b612922afff9ab",
       "overflow": false,
+      "paperOverflow": false,
       "errors": []
     }
   ]

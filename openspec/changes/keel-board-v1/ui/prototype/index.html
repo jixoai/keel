@@ -537,7 +537,11 @@ svg{display:block}
 @media (max-width:767px){
   .scrim{align-items:flex-end;padding:0}
   .dialog{width:100%;max-height:88vh;border-radius:16px 16px 0 0;padding:20px 16px calc(20px + env(safe-area-inset-bottom))}
-  .dialog.sheet{width:100%;max-width:100%;height:auto;max-height:88vh;border-radius:16px 16px 0 0;padding:20px 16px calc(20px + env(safe-area-inset-bottom))}
+  .scrim.sheet{align-items:flex-end}
+  .dialog.sheet{width:100%;max-width:100%;height:auto;max-height:88vh;border-radius:16px 16px 0 0;padding:20px 16px calc(20px + env(safe-area-inset-bottom));bottom:calc(56px + env(safe-area-inset-bottom))}
+  .dialog.sheet:not(.full){margin-bottom:calc(56px + env(safe-area-inset-bottom))}
+  .dialog.sheet:not(.full) .body{flex:none;overflow:auto;max-height:60vh}
+  .dialog.sheet.full{bottom:0;height:100vh;max-height:100vh}
   .dialog.full{height:100vh;max-height:100vh;border-radius:0;padding-top:calc(20px + env(safe-area-inset-top))}
   .dialog.full .body{overflow:auto;flex:1}
   .dialog.full .actions{padding-bottom:calc(12px + env(safe-area-inset-bottom))}
@@ -545,6 +549,7 @@ svg{display:block}
   .dialog .actions .btn{flex:1;height:44px}
   .dialog .field{height:44px}
   .dialog .check-row{min-height:44px}
+  .dialog .menu-item{min-height:44px;height:auto}
   .dialog .radio{min-height:44px}
 }
 
@@ -591,7 +596,7 @@ body.no-chrome .proto,body.no-chrome .proto-expand{display:none!important}
 @media (max-width:1179px){
   .task-grid{grid-template-columns:minmax(0,1fr)}
   .task-aside{position:static;order:-1;max-height:none;overflow:visible;padding-right:0}
-  .task-facts-toggle{display:inline-flex;margin-left:auto}
+  .task-facts-toggle{display:inline-flex;margin-left:auto;height:44px;min-height:44px;padding:0 12px}
   .task-card:not(.show-facts) .fact-secondary{display:none}
   .task-card:not(.show-facts) .task-labels-section{display:none}
   .task-card:not(.show-facts) .task-sync-section{display:none}
@@ -608,7 +613,7 @@ body.no-chrome .proto,body.no-chrome .proto-expand{display:none!important}
   .task-card .task-labels-section{grid-column:1/-1}
 }
 @media (max-width:1023px){
-  .task-facts-toggle{display:inline-flex;margin-left:auto}
+  .task-facts-toggle{display:inline-flex;margin-left:auto;height:44px;min-height:44px;padding:0 12px}
   .task-card:not(.show-facts) .fact-secondary{display:none}
   .task-card:not(.show-facts) .task-labels-section{display:none}
   .task-card:not(.show-facts) .task-sync-section{display:none}
@@ -674,16 +679,19 @@ body.no-chrome .proto,body.no-chrome .proto-expand{display:none!important}
   .task-card{display:flex;flex-direction:column;gap:12px;padding:14px}
   .task-card .lease-block{padding:10px}
   .task-card .facts{grid-template-columns:64px minmax(0,1fr)}
-  .task-facts-toggle{display:inline-flex;margin-left:auto}
+  .task-facts-toggle{display:inline-flex;margin-left:auto;height:44px;min-height:44px;padding:0 12px}
   .task-card:not(.show-facts) .fact-secondary{display:none}
+  .breadcrumb button{min-height:44px;min-width:44px}
+  .filter-tag{height:44px;padding:0 4px 0 10px}
+  .filter-tag button{width:44px;height:44px}
   .action-primary .btn{height:44px;font-size:14px}
   .action-secondary .btn{height:44px}
   .action-secondary{grid-template-columns:1fr 1fr}
   .task-actions .btn.ghost{height:44px}
   .msg-body{font-size:14px}
   .reply .msg-body{font-size:13px}
-  body[data-board-scene="task"] .paper-inner{padding-bottom:calc(56px + 128px + env(safe-area-inset-bottom) + 16px)}
-  .composer{position:sticky;bottom:calc(56px + env(safe-area-inset-bottom));z-index:30;margin:16px -16px 0;border-radius:12px 12px 0 0;background:color-mix(in srgb,var(--background) 92%,transparent);backdrop-filter:blur(24px);padding:10px 16px calc(10px + env(safe-area-inset-bottom));border-left:0;border-right:0;border-bottom:0}
+  body[data-board-scene="task"] .paper-inner{padding-bottom:calc(56px + var(--composer-h, 128px) + env(safe-area-inset-bottom) + 16px)}
+  .composer{position:fixed;left:0;right:0;bottom:calc(56px + env(safe-area-inset-bottom));z-index:35;margin:0;border-radius:12px 12px 0 0;background:color-mix(in srgb,var(--background) 92%,transparent);backdrop-filter:blur(24px);padding:10px 16px calc(10px + env(safe-area-inset-bottom));border-left:0;border-right:0;border-bottom:0}
   .composer-bar .btn{height:44px}
   .composer textarea{min-height:48px}
   .composer-bar .hint{display:none}
@@ -716,7 +724,7 @@ body.no-chrome .proto,body.no-chrome .proto-expand{display:none!important}
 }
 @media (max-width:767px){
   body .paper-inner{padding:16px 16px calc(56px + env(safe-area-inset-bottom) + 48px)}
-  body[data-board-scene="task"] .paper-inner{padding-bottom:calc(56px + 128px + env(safe-area-inset-bottom) + 16px)}
+  body[data-board-scene="task"] .paper-inner{padding-bottom:calc(56px + var(--composer-h, 128px) + env(safe-area-inset-bottom) + 16px)}
 }
 @media (prefers-reduced-motion:reduce){
   *,*::before,*::after{animation-duration:.001ms!important;animation-iteration-count:1!important;transition-duration:.001ms!important}
@@ -1187,6 +1195,12 @@ function applyFixtureMoves() {
     t.moves = fixtureMoves(t);
   });
 }
+function syncComposerHeight() {
+  const composer = document.querySelector(".composer");
+  if (!composer || window.innerWidth > 767 || document.body.dataset.boardScene !== "task") return;
+  const height = Math.ceil(composer.getBoundingClientRect().height);
+  document.documentElement.style.setProperty("--composer-h", `${Math.max(64, height)}px`);
+}
 function activeFilterCount() {
   return Object.values(S.filters).filter((v) => v !== "all").length;
 }
@@ -1385,6 +1399,13 @@ function migrationState() {
     actions: `<button class="btn outline" data-action="copy-request">复制申请说明</button><button class="btn ghost" data-action="nav" data-scene="workspace">返回工作区</button>`
   });
 }
+function notFoundState(surface) {
+  return emptyState({
+    icon: "lock", tone: "danger", title: `没有可访问的${surface}`,
+    description: "地址没有对应到可访问的页面。为避免泄露，这里不区分「不存在」与「无权限」；如果地址来自旧链接，请从工作区重新进入。",
+    actions: `<button class="btn outline" data-action="nav" data-scene="workspace">返回工作区</button><button class="btn ghost" data-action="copy-404">复制说明</button>`
+  });
+}
 function permissionState(kind) {
   if (kind === "permission" && (S.scene === "sync" || S.scene === "automation")) {
     return emptyState({
@@ -1424,6 +1445,12 @@ function errorBanner(text) {
    Queue page
    ========================================================================== */
 function renderQueue() {
+  if (S.me === "none" || S.me === "legacy" && S.state !== "migrate") {
+    if (S.me === "legacy") {
+      return `${header({ kicker: "迁移", title: "任务面迁移", icon: "layers", purpose: "旧任务权限仍可读，新任务面需要一次权限迁移。", quiet: true })}${migrationState()}`;
+    }
+    return `${header({ kicker: "不可用", title: "任务面不可用", icon: "lock", purpose: "地址没有对应到可访问的任务面。", quiet: true })}${notFoundState("任务面")}`;
+  }
   const rows = visibleTasks();
   const limit = S.page === 0 ? 8 : 14;
   const shown = rows.slice(0, limit);
@@ -1588,6 +1615,12 @@ function statusPrimary(t, moves) {
 function taskActions(t) {
   const moves = t.moves || [];
   const has = (move) => moves.includes(move);
+  if (S.state === "stale" || S.state === "error") {
+    return `<div class="task-actions">
+      <div class="action-note warn">${S.state === "stale" ? "实时连接已断开" : "最新状态读取失败"}；数据可能已过期，刷新后再操作。</div>
+      <div class="action-secondary"><button class="btn outline" data-action="refresh">${icon("refresh")}刷新</button><button class="btn outline" data-action="copy-link">${icon("link")}复制链接</button></div>
+    </div>`;
+  }
   if (t.archived || t.mirror?.readOnly || !moves.length) {
     const note = t.archived
       ? "归档任务只读：旧工单已关闭，只保留记录；不提供动作与回复。"
@@ -1625,7 +1658,7 @@ function taskActions(t) {
     if (move === "assign" || move === "needs" || move === "cancel" || move === "fail") overflow.push(actionButton(move, t, "menu"));
     else if (move === "unblock" || move === "answer" || move === "release.force") overflow.push(actionButton(move, t, "menu"));
   });
-  const moreBtn = overflow.length ? `<div class="filter-wrap"><button class="btn outline" data-action="menu" aria-haspopup="menu" aria-expanded="false">${icon("more")}更多</button><div class="menu glass-popover" role="menu">${overflow.join("")}</div></div>` : "";
+  const moreBtn = overflow.length ? `<div class="filter-wrap"><button class="btn outline" data-action="menu" data-mobile-sheet="1" aria-haspopup="menu" aria-expanded="false">${icon("more")}更多</button><div class="menu glass-popover" role="menu">${overflow.join("")}</div></div>` : "";
   let note = "";
   if (has("complete")) note = `完成后，${TASKS.filter((x) => (x.needs || []).includes(t.id)).length} 个依赖任务会变为可认领。`;
   else if (has("takeover")) note = "这是你认领的任务，但凭据不在本标签页；重新认领会结束旧认领并签发新凭据。";
@@ -1743,6 +1776,9 @@ function replyList(t) {
   </div>`;
 }
 function composer(t) {
+  if (S.state === "stale" || S.state === "error") {
+    return `<div class="composer" data-readonly="true"><div class="composer-readonly">${icon("alert", "sm")}<span>${S.state === "stale" ? "实时连接已断开" : "最新状态读取失败"}；数据可能已过期，<button class="btn link" data-action="refresh">刷新</button>后再回复。</span></div></div>`;
+  }
   const readOnly = !(t.moves || []).includes("reply");
   if (readOnly) {
     const note = t.archived
@@ -1765,6 +1801,9 @@ function composer(t) {
 }
 function renderTask() {
   const t = taskById(S.id) || TASKS.find((x) => x.id === "812");
+  if (S.me === "none" || S.me === "legacy") {
+    return `${header({ kicker: "不可用", title: "任务不存在，或你没有访问权限", icon: "lock", purpose: "地址没有对应到可访问的任务。", quiet: true })}${notFoundState("任务")}`;
+  }
   if (S.state === "loading") {
     return `${header({ kicker: "任务", title: t.title, icon: "inbox", purpose: "读取任务与线程…" })}${skeletonRows(window.innerWidth <= 767 ? 3 : 5)}`;
   }
@@ -1829,13 +1868,16 @@ function syncCard(e) {
   </article>`;
 }
 function renderSync() {
+  if (S.me === "none" || S.me === "legacy") {
+    return `${header({ kicker: "不可用", title: "同步不可用", icon: "lock", purpose: "地址没有对应到可访问的同步状态。", quiet: true })}${notFoundState("同步")}`;
+  }
   if (S.state === "loading") {
     return `${header({ kicker: "同步", title: "同步", icon: "refresh", purpose: "外部平台的线程与任务双向镜像。" })}
       ${viewTabs("sync")}
       ${skeletonRows(3)}`;
   }
   if (S.state === "permission" || !can("manage")) {
-    return `${header({ kicker: "同步", title: "同步", icon: "refresh", purpose: "外部平台的线程与任务双向镜像。" })}${permissionState("permission")}`;
+    return `${header({ kicker: "同步", title: "同步", icon: "refresh", purpose: "外部平台的线程与任务双向镜像。", quiet: true })}${permissionState("permission")}`;
   }
   const entries = (S.state === "empty" || S.sync === "none") ? [] : SYNC;
   if (!entries.length) {
@@ -1885,13 +1927,16 @@ function scheduleRow(s) {
   </div>`;
 }
 function renderAutomation() {
+  if (S.me === "none" || S.me === "legacy") {
+    return `${header({ kicker: "不可用", title: "自动化不可用", icon: "lock", purpose: "地址没有对应到可访问的自动化状态。", quiet: true })}${notFoundState("自动化")}`;
+  }
   if (S.state === "loading") {
     return `${header({ kicker: "自动化", title: "自动化", icon: "activity", purpose: "监视器按事件触发已声明的动作；定时任务按计划发消息。" })}
       ${viewTabs("automation")}
       ${skeletonRows(3)}`;
   }
   if (S.state === "permission" || !can("manage")) {
-    return `${header({ kicker: "自动化", title: "自动化", icon: "activity", purpose: "监视器按事件触发已声明的动作；定时任务按计划发消息。" })}${permissionState("permission")}`;
+    return `${header({ kicker: "自动化", title: "自动化", icon: "activity", purpose: "监视器按事件触发已声明的动作；定时任务按计划发消息。", quiet: true })}${permissionState("permission")}`;
   }
   if (S.automation === "none" || S.state === "empty") {
     return `${header({ kicker: "自动化", title: "自动化", icon: "activity", purpose: "监视器按事件触发已声明的动作；定时任务按计划发消息。" })}
@@ -1942,6 +1987,7 @@ function render() {
   else if (S.scene === "gone") html = renderGone();
   else html = emptyState({ icon: "layers", title: "这个页面不在本切片里", description: "原型只覆盖任务面：队列、任务、同步、自动化、旧地址。", actions: `<button class="btn outline" data-action="view" data-view="queue">返回队列</button>` });
   document.getElementById("main").innerHTML = html;
+  syncComposerHeight();
   document.querySelectorAll(".rail-item,.mobile-tab").forEach((el) => {
     const scene = el.dataset.scene;
     el.classList.toggle("active", (S.scene === "queue" && scene === "queue") || (S.scene === "sync" && scene === "queue") || (S.scene === "automation" && scene === "queue") || (S.scene === "task" && scene === "queue") || (S.scene === "gone" && scene === "queue") || scene === S.scene);
@@ -1975,6 +2021,11 @@ function dialogShell(title, desc, body, actions, opts = {}) {
 }
 function renderDialog() {
   const t = taskById(S.id) || TASKS[0];
+  const dialogMove = { complete: "complete", fail: "fail", block: "block", assign: "assign", needs: "needs", cancel: "cancel", release: "release", reopen: "reopen", answer: "answer", unblock: "unblock", "force-release": "release.force" }[S.dialog];
+  const moreMoves = ["fail", "assign", "needs", "cancel", "unblock", "answer", "release.force"];
+  if ((dialogMove && !(t.moves || []).includes(dialogMove)) || (S.dialog === "more" && !(t.moves || []).some((m) => moreMoves.includes(m)))) {
+    document.getElementById("dialog-root").innerHTML = ""; S.dialog = ""; return;
+  }
   let html = "";
   const close = `<button class="btn outline" data-action="dialog-close">取消</button>`;
   if (S.dialog === "complete") {
@@ -1998,10 +2049,11 @@ function renderDialog() {
       `<div class="form-row"><label for="d-assign">指派给</label><div class="field"><select id="d-assign"><option>池中（任何有编辑权限的人）</option><option>陈墨（账号）</option><option>发布员·小铖（陈墨的 Bot）</option></select>${icon("chevron-down", "sm")}</div></div>`,
       `${close}<button class="btn primary" data-action="confirm" data-kind="assign">保存指派</button>`);
   } else if (S.dialog === "needs") {
-    const candidates = TASKS.filter((x) => x.id !== t.id).slice(0, 8);
+    const candidates = TASKS.filter((x) => x.id !== t.id && !x.archived).slice(0, 20);
     html = dialogShell("前置依赖 #" + t.id, "最多 20 个前置；前置全部完成后任务才会回到可认领。已取消的前置不能选。",
-      `<div class="check-list">${candidates.map((x) => `<label class="check-row" style="${effective(x) === "canceled" ? "opacity:.55" : ""}"><input type="checkbox" name="d-needs" value="${x.id}" ${(t.needs || []).includes(x.id) ? "checked" : ""} ${effective(x) === "canceled" ? "disabled" : ""}><span class="id">#${x.id}</span><span class="title">${esc(x.title)}</span><span class="badge ${effective(x) === "completed" ? "success" : effective(x) === "failed" ? "destructive" : "outline"} small">${esc(STATES[effective(x)].label)}</span></label>`).join("")}</div>
-      <div class="hint">当前 ${(t.needs || []).length} 个。保存空选择表示无前置。</div>`,
+      `<div class="field" style="margin-bottom:6px"><input id="d-needs-search" placeholder="搜索 #id 或标题">${icon("search", "sm")}</div>
+      <div class="check-list">${candidates.map((x) => `<label class="check-row" data-search="${x.id} ${esc(x.title)}" style="${effective(x) === "canceled" ? "opacity:.55" : ""}"><input type="checkbox" name="d-needs" data-canceled="${effective(x) === "canceled" ? "1" : "0"}" value="${x.id}" ${(t.needs || []).includes(x.id) ? "checked" : ""} ${effective(x) === "canceled" ? "disabled" : ""}><span class="id">#${x.id}</span><span class="title">${esc(x.title)}</span><span class="badge ${effective(x) === "completed" ? "success" : effective(x) === "failed" ? "destructive" : "outline"} small">${esc(STATES[effective(x)].label)}</span></label>`).join("")}</div>
+      <div class="hint" id="d-needs-count">当前 ${(t.needs || []).length}/20 个。保存空选择表示无前置。</div>`,
       `${close}<button class="btn primary" data-action="confirm" data-kind="needs">保存依赖</button>`);
   } else if (S.dialog === "cancel") {
     html = dialogShell("取消 #" + t.id, "取消后不可恢复；依赖它的任务会一直等待，需要改依赖或取消。",
@@ -2049,13 +2101,19 @@ function renderDialog() {
       </div>
       <div class="alert info">${icon("info", "sm")}<div class="alert-body">这个部署还没有提供频道访问管理接口，不能在这里授权；请找频道所有者或任务面管理员。</div></div>`,
       `<button class="btn primary" data-action="dialog-close">关闭</button>`, { sheet: true });
+  } else if (S.dialog === "more") {
+    const menuMoves = ["fail", "assign", "needs", "cancel", "unblock", "answer", "release.force"];
+    const items = (t.moves || []).filter((m) => menuMoves.includes(m));
+    html = dialogShell("更多动作", "只显示当前 moves 中可用的动作；点击后进入对应确认。",
+      `<div class="more-list">${items.length ? items.map((m) => actionButton(m, t, "menu")).join("") : `<div class="need-empty">当前没有更多动作</div>`}</div>`,
+      `<button class="btn primary" data-action="dialog-close">关闭</button>`, { sheet: true });
   } else if (S.dialog === "shortcuts") {
     html = dialogShell("快捷键", "只列出已实现的键；单字母动作只在该任务 moves 中才触发，输入框聚焦时失效；Cmd/Ctrl+Enter 始终发送回复。",
       `<div class="facts" style="grid-template-columns:84px 1fr;gap:6px 12px">
-        <dt>j / k</dt><dd>下一行 / 上一行</dd><dt>Enter</dt><dd>打开任务 / 触发按钮</dd>
+        <dt>j / k</dt><dd>队列下一行 / 上一行（仅队列）</dd><dt>Home / End</dt><dd>队列首 / 末行</dd><dt>Enter</dt><dd>打开任务 / 触发按钮</dd>
         <dt>c</dt><dd>认领</dd><dt>r</dt><dd>续租</dd><dt>e</dt><dd>完成</dd><dt>f</dt><dd>失败</dd>
         <dt>b / u</dt><dd>阻塞 / 解除阻塞</dd><dt>o</dt><dd>重新打开</dd><dt>a / n / x</dt><dd>指派 / 改依赖 / 取消</dd>
-        <dt>[ / ]</dt><dd>切换状态 tabs</dd><dt>1–5</dt><dd>子筛选</dd><dt>/</dt><dd>聚焦筛选</dd>
+        <dt>[ / ]</dt><dd>切换状态 tabs</dd><dt>1–5</dt><dd>子筛选</dd><dt>/</dt><dd>打开队列筛选</dd>
         <dt>Esc</dt><dd>关闭 / 返回队列</dd><dt>?</dt><dd>本帮助</dd>
       </div>`,
       `<button class="btn primary" data-action="dialog-close">知道了</button>`);
@@ -2133,6 +2191,9 @@ function rerender() { render(); saveHistory(); }
 
 function confirmAction(kind) {
   const t = taskById(S.id) || TASKS[0];
+  if ((S.state === "stale" || S.state === "error") && !["disable-sync", "cancel-schedule", "new", "filters"].includes(kind)) {
+    closeDialog(); toast("数据可能已过期，刷新后再操作", "error"); return;
+  }
   const move = kind === "force-release" ? "release.force" : kind;
   const taskKinds = ["complete", "fail", "block", "unblock", "reopen", "assign", "needs", "cancel", "answer", "release", "release.force"];
   if (taskKinds.includes(move) && !(t.moves || []).includes(move)) {
@@ -2201,7 +2262,10 @@ function confirmAction(kind) {
     if (!text) { toast("请填写任务说明", "error"); return; }
     const id = String(900 + TASKS.length);
     const channel = document.getElementById("d-channel")?.value || "work";
-    const labels = parseLabels(document.getElementById("d-label")?.value || "");
+    const rawLabels = (document.getElementById("d-label")?.value || "").trim();
+    const reserved = rawLabels.split(/\s+/).filter(Boolean).find((part) => part.split("=")[0].startsWith("board."));
+    if (reserved) { toast("board.* 是系统标签，不能手动设置", "error"); return; }
+    const labels = parseLabels(rawLabels);
     const needs = Array.from(document.querySelectorAll('input[name="d-needs-new"]:checked')).map((x) => x.value);
     const assignValue = document.getElementById("d-assign-new")?.value || "池中（任何有编辑权限的人）";
     const forActor = assignValue.startsWith("池中") ? "池中" : assignValue.replace("（账号）", "（账号）");
@@ -2250,6 +2314,9 @@ document.addEventListener("click", (event) => {
   const action = el.dataset.action;
   if (action === "menu") {
     event.stopPropagation();
+    if (window.innerWidth <= 767 && el.dataset.mobileSheet === "1") {
+      S.dialog = "more"; render(); return;
+    }
     const menu = el.parentElement.querySelector(".menu");
     const open = menu.classList.contains("open");
     closeMenus();
@@ -2343,10 +2410,10 @@ document.addEventListener("click", (event) => {
   if (action === "reply") {
     const t = taskById(S.id);
     if (!(t?.moves || []).includes("reply")) { toast("当前不能回复", "error"); return; }
-    document.getElementById("composer-input")?.focus(); return;
+    focusComposer(); return;
   }
   if (action === "focus-composer") {
-    document.getElementById("composer-input")?.focus(); return;
+    focusComposer(); return;
   }
   if (action === "send-reply") {
     sendReply(); return;
@@ -2425,6 +2492,7 @@ document.addEventListener("click", (event) => {
 
 function sendReply() {
   const t = taskById(S.id);
+  if (S.state === "stale" || S.state === "error") { toast("数据可能已过期，刷新后再回复", "error"); return; }
   if (!(t.moves || []).includes("reply")) { toast("当前不能回复", "error"); return; }
   const input = document.getElementById("composer-input");
   if (input) S.draft = input.value;
@@ -2460,6 +2528,22 @@ document.addEventListener("input", (event) => {
   if (event.target.name === "d-kind") {
     document.querySelectorAll(".radio").forEach((r) => r.classList.toggle("selected", r.querySelector("input")?.checked));
   }
+  if (event.target.id === "d-needs-search") {
+    const query = event.target.value.trim().toLowerCase();
+    document.querySelectorAll(".check-row[data-search]").forEach((row) => {
+      row.style.display = !query || row.dataset.search.toLowerCase().includes(query) ? "" : "none";
+    });
+  }
+  if (event.target.name === "d-needs") {
+    const boxes = Array.from(document.querySelectorAll('input[name="d-needs"]'));
+    const checked = boxes.filter((box) => box.checked).length;
+    boxes.forEach((box) => {
+      if (box.dataset.canceled === "1") { box.disabled = true; return; }
+      box.disabled = checked >= 20 && !box.checked;
+    });
+    const count = document.getElementById("d-needs-count");
+    if (count) count.textContent = `当前 ${checked}/20 个。保存空选择表示无前置。`;
+  }
 });
 
 document.addEventListener("change", (event) => {
@@ -2467,7 +2551,7 @@ document.addEventListener("change", (event) => {
   if (event.target.id === "p-state") {
     S.state = event.target.value;
     if (S.state === "migrate" || S.me === "legacy") { S.state = "migrate"; S.me = "legacy"; }
-    else if (S.state === "permission") S.me = "none";
+    else if (S.state === "permission") S.me = (S.scene === "sync" || S.scene === "automation") ? "reader" : "none";
     rerender();
   }
   if (event.target.id === "p-me") {
@@ -2481,6 +2565,7 @@ document.addEventListener("change", (event) => {
   if (event.target.id === "p-dialog") { S.dialog = event.target.value; render(); }
 });
 
+window.addEventListener("resize", () => { syncComposerHeight(); });
 document.addEventListener("keydown", (event) => {
   const tag = (event.target.tagName || "").toLowerCase();
   const typing = tag === "input" || tag === "textarea" || tag === "select";
@@ -2496,6 +2581,7 @@ document.addEventListener("keydown", (event) => {
   }
   if (event.key === "?") { S.dialog = "shortcuts"; render(); return; }
   if (S.scene === "queue") {
+    if ((S.state === "stale" || S.state === "error") && event.key === "c") { toast("数据可能已过期，刷新后再操作", "error"); return; }
     const rows = visibleTasks();
     const tabIds = ["open", "completed", "failed", "canceled", "all"];
     const subIds = ["all", "waiting", "ready", "claimed", "blocked"];
@@ -2523,6 +2609,7 @@ document.addEventListener("keydown", (event) => {
   }
   if (S.scene === "task") {
     const t = taskById(S.id);
+    if (S.state === "stale" || S.state === "error") { toast("数据可能已过期，刷新后再操作", "error"); return; }
     const map = { e: "complete", f: "fail", b: "block", a: "assign", n: "needs", x: "cancel", o: "reopen", u: "unblock" };
     if (event.key === "r") {
       if ((t.moves || []).includes("renew")) document.querySelector('[data-action="renew"]')?.click();
@@ -2573,7 +2660,7 @@ function boot() {
     S.tab = "open";
   }
   document.getElementById("proto").classList.toggle("is-collapsed", window.innerWidth <= 767);
-  if (S.state === "permission") S.me = "none";
+  if (S.state === "permission") S.me = (S.scene === "sync" || S.scene === "automation") ? "reader" : "none";
   if (S.state === "migrate" || S.me === "legacy") { S.state = "migrate"; S.me = "legacy"; }
   if (p.get("facts") === "1") S.showFacts = true;
   if (p.get("archive") === "1") S.archive = true;
@@ -2582,11 +2669,17 @@ function boot() {
   const scrollTo = p.get("scroll");
   if (scrollTo) {
     setTimeout(() => {
+      if (scrollTo === "bottom") {
+        const paper = document.getElementById("paper");
+        if (paper) paper.scrollTop = paper.scrollHeight;
+        return;
+      }
       const map = { thread: "root-message", composer: "composer-input", dead: "dead-section", linear: "sync-linear", github: "sync-github", schedules: "schedules-section", watchers: "watchers-section" };
       const el = document.getElementById(map[scrollTo] || scrollTo);
       if (el) el.scrollIntoView({ block: scrollTo === "linear" ? "center" : "start" });
     }, 120);
   }
+  if (p.get("focus") === "reply") setTimeout(() => focusComposer(), 180);
 }
 let tickHandle = null;
 function startTick() {
@@ -2614,6 +2707,12 @@ function startTick() {
     });
     if (changed) render();
   }, 1000);
+}
+function focusComposer() {
+  const composer = document.querySelector(".composer");
+  if (composer) composer.scrollIntoView({ block: "nearest" });
+  const input = document.getElementById("composer-input");
+  if (input) input.focus();
 }
 function copyText(text) {
   if (navigator.clipboard) navigator.clipboard.writeText(text).catch(() => {});
