@@ -101,7 +101,8 @@ curl -sS "$KEEL_URL/v1/telemetry/status" -H "X-Tenant-ID: $TENANT" | jq .
 - `state=plugin_disabled`：插件未启用，配置是惰性的，零出网。
 - `state=inactive`：插件已启用但 adapter 为 none/memory，无 exporter（合法）。
 - `state=failed`：endpoint 非法、header 不是 `secret:` 引用或 secret 缺失；修复配置后重新
-  enable，无需重启进程。`reason` 是字段级原因（不含 header 值）。
+  enable，无需重启进程。`reason` 是字段级原因（不含 header 值/secret 名称）。明文 `http`
+  endpoint 只接受 `localhost`、回环或私网 IP 字面量（内网 DNS 名请用 https）；redirect 不跟随。
 - `state=degraded` + `lastErrorClass=http_5xx|http_429|timeout|network`：collector 不可用，
   队列满会丢最旧并在 `dropped` 计数；run/tool 不受影响。恢复后熔断半开自动探测。
 - `metricSeriesDropped`：指标名未注册或 series 超过每族 1,000 / 全局 5,000；不是进程故障。

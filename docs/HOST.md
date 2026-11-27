@@ -53,7 +53,7 @@ compaction:
   # manualCompact: true       # 是否允许 POST /v1/sessions/{id}/compact
 telemetry:
   adapter: "memory"         # memory | none | otlp（otlp 需 endpoint；插件启用后才出网）
-  # endpoint: "https://collector.example:4318"   # OTLP/HTTP；http 仅限 loopback/私网
+  # endpoint: "https://collector.example:4318"   # OTLP/HTTP；http 仅限 localhost/回环/私网 IP 字面量
   # headers: { "Authorization": "secret:OTLP_TOKEN" }  # 只接受 secret: 引用，禁止明文
   # serviceName: "keel"
   # signals: ["traces", "metrics"]   # 省略 = traces+metrics；logs 需显式
