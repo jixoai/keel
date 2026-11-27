@@ -25,7 +25,7 @@
 #   KEEL_TEST_DSN              required for a real run; used by go test -p 1 ./...
 #   KEEL_BOARD_BASE            default 4cbc3e50
 #   KEEL_BOARD_CONTRACT        default f00097e7
-#   EXPECTED_TUI_TESTS         default 536
+#   EXPECTED_TUI_TESTS         default 538
 #   EXPECTED_UI_SCREENSHOTS    default 53
 #   EXPECTED_UI_MATRIX_CELLS   default 26
 #
@@ -86,7 +86,7 @@ cd "$repo_root"
 
 base_ref=${KEEL_BOARD_BASE:-4cbc3e50}
 contract_ref=${KEEL_BOARD_CONTRACT:-f00097e7}
-expected_tui_tests=${EXPECTED_TUI_TESTS:-536}
+expected_tui_tests=${EXPECTED_TUI_TESTS:-538}
 expected_ui_screenshots=${EXPECTED_UI_SCREENSHOTS:-53}
 expected_ui_matrix=${EXPECTED_UI_MATRIX_CELLS:-26}
 
@@ -324,8 +324,8 @@ const rules = [
   { re: /^web\/src\/screens\/books\/superagent/, cov: "deleted old board; route tests + screenshot 36 + full TUI" },
   { re: /^web\/src\/screens\/books\//, cov: "books TUI + board TUI + full TUI" },
   { re: /^web\/src\/screens\/command-palette\.tsx$/, cov: "board TUI + full TUI" },
-  { re: /^web\/src\/screens\/commands-local-error\.test\.tsx$/, cov: "full TUI (536)" },
-  { re: /^web\/src\/screens\/settings-models\.test\.tsx$/, cov: "full TUI (536)" },
+  { re: /^web\/src\/screens\/commands-local-error\.test\.tsx$/, cov: "full TUI (538)" },
+  { re: /^web\/src\/screens\/settings-models\.test\.tsx$/, cov: "full TUI (538)" },
   { re: /^internal\//, cov: "`go test -p 1 ./...`" },
   { re: /^cmd\//, cov: "`go test -p 1 ./...` (compile)" },
 ];
