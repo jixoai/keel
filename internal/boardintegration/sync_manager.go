@@ -636,6 +636,14 @@ func (m *syncManager) Create(ctx context.Context, input SyncEntryInput) (SyncEnt
 	if err := m.validateProviderConfig(ctx, record); err != nil {
 		return SyncEntryView{}, false, err
 	}
+	// A disabled entry is safe staging: it never serves a webhook and its
+	// board sync row stays disabled, so its route may not exist yet. Enabling
+	// it (or a later routes change) re-checks the target.
+	if enabled {
+		if err := m.validateRouteACL(ctx, m.tenant, record.Routes); err != nil {
+			return SyncEntryView{}, false, err
+		}
+	}
 	created, err := m.store.CreateBoardSyncEntry(ctx, record)
 	if err != nil {
 		return SyncEntryView{}, false, syncEntryStoreError(err)
@@ -700,11 +708,17 @@ func (m *syncManager) Update(ctx context.Context, key string, patch SyncEntryPat
 	if err := validateSyncEntry(&next); err != nil {
 		return SyncEntryView{}, false, false, err
 	}
-	// Every update (routes, rotation, or a plain enable) re-checks the route
-	// target: a revoked channel relation must fail closed instead of reviving a
-	// connection whose imports nobody can read.
-	if err := m.validateRouteACL(ctx, m.tenant, next.Routes); err != nil {
-		return SyncEntryView{}, false, false, err
+	// Disabling must always work: an operator has to be able to stop a
+	// connection whose route channel was deleted or lost its relation. Enabling
+	// and a routes change re-check the target; a secret/settings/platform change
+	// may be saved while unhealthy because it keeps the entry pending/disabled
+	// until restart, and boot re-validates every route before a worker starts.
+	turningOn := patch.Enabled != nil && *patch.Enabled
+	routesChanged := patch.Routes != nil && !reflect.DeepEqual(current.Routes, next.Routes)
+	if turningOn || routesChanged {
+		if err := m.validateRouteACL(ctx, m.tenant, next.Routes); err != nil {
+			return SyncEntryView{}, false, false, err
+		}
 	}
 	if !sameEntryDocument(current, next) {
 		return m.structuralUpdate(ctx, current, next)
@@ -805,12 +819,6 @@ func (m *syncManager) structuralUpdate(ctx context.Context, current, next store.
 // be about to store it); a malformed platform setting is.
 func (m *syncManager) validateProviderConfig(ctx context.Context, record store.BoardSyncEntryRecord) error {
 	if err := validateProviderEndpoints(record, m.providerHosts); err != nil {
-		return err
-	}
-	// P0-1: the static route must name an existing, relation-bearing board
-	// channel before the entry is stored. A platform actor has no keel Account,
-	// so there is no repair path after the fact.
-	if err := m.validateRouteACL(ctx, m.tenant, record.Routes); err != nil {
 		return err
 	}
 	provider, report, err := buildSyncProvider(ctx, m.tenant, record, m.resolver)

@@ -300,7 +300,7 @@ func (c *ChannelOwners) ClaimOrphan(ctx context.Context, tenant string, channel 
 		SubjectType:  store.RelationSubjectAccount,
 		SubjectID:    accountID.String(),
 		CreatedBy:    accountID,
-	})
+	}, channelAncestors(channel))
 	if err != nil || !created {
 		return created, err
 	}
@@ -470,6 +470,22 @@ func scanChannelEvents(rows pgx.Rows, queryErr error) ([]channelCreatedRow, erro
 		return nil, err
 	}
 	return out, nil
+}
+
+// channelAncestors returns every parent path of a channel, most specific
+// first: "work/production" -> ["work"]. It is the same inheritance board's
+// authorizer walks, so an inherited relation counts as an existing ACL.
+func channelAncestors(channel string) []string {
+	channel = strings.Trim(strings.TrimSpace(channel), "/")
+	out := make([]string, 0, 4)
+	for {
+		index := strings.LastIndex(channel, "/")
+		if index < 0 {
+			return out
+		}
+		channel = channel[:index]
+		out = append(out, channel)
+	}
 }
 
 func accountFromPrincipal(principal string) (uuid.UUID, bool) {

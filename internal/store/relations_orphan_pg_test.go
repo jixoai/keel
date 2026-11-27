@@ -57,7 +57,7 @@ func TestPutResourceRelationIfOrphan(t *testing.T) {
 		wg.Add(1)
 		go func(account uuid.UUID) {
 			defer wg.Done()
-			created, err := st.PutResourceRelationIfOrphan(ctx, relation(account))
+			created, err := st.PutResourceRelationIfOrphan(ctx, relation(account), nil)
 			if err != nil {
 				t.Errorf("adopt: %v", err)
 				return
@@ -83,11 +83,33 @@ func TestPutResourceRelationIfOrphan(t *testing.T) {
 		t.Fatalf("relations = %+v", relations)
 	}
 	// A second adoption never changes an existing ACL.
-	created, err := st.PutResourceRelationIfOrphan(ctx, relation(accounts[0]))
+	created, err := st.PutResourceRelationIfOrphan(ctx, relation(accounts[0]), nil)
 	if err != nil {
 		t.Fatalf("second adopt: %v", err)
 	}
 	if created {
 		t.Fatal("a populated resource was adopted again")
+	}
+
+	// An inherited relation is an existing ACL: the descendant is not an
+	// orphan, so a tenant manager cannot bypass the ancestor.
+	if _, err := st.PutResourceRelation(ctx, ResourceRelation{
+		TenantID: tenant, ResourceType: "board_channel", ResourceID: "work",
+		Relation: RelationEditor, SubjectType: RelationSubjectAccount,
+		SubjectID: accounts[0].String(), CreatedBy: accounts[0],
+	}); err != nil {
+		t.Fatalf("ancestor relation: %v", err)
+	}
+	descendant := relation(accounts[1])
+	descendant.ResourceID = "work/production"
+	created, err = st.PutResourceRelationIfOrphan(ctx, descendant, []string{"work"})
+	if err != nil {
+		t.Fatalf("descendant adopt: %v", err)
+	}
+	if created {
+		t.Fatal("an inherited ACL did not block adoption")
+	}
+	if relations, err := st.ListResourceRelations(ctx, tenant, "board_channel", "work/production", 0); err != nil || len(relations) != 0 {
+		t.Fatalf("descendant relations = %+v/%v", relations, err)
 	}
 }

@@ -10,6 +10,7 @@ package store
 
 import (
 	"context"
+	"sort"
 	"strings"
 	"time"
 
@@ -114,17 +115,19 @@ func (s *Store) DeleteResourceRelation(ctx context.Context, tenantID uuid.UUID, 
 	return identityRowsResult("delete resource relation", tag.RowsAffected())
 }
 
-// PutResourceRelationIfOrphan writes one relation only when the resource has no
-// relation tuples at all. It is the explicit adoption path for a resource whose
-// ACL was never written (keel-board-v1 Phase 1 P0-1): a board.manage holder may
-// claim a relation-free board channel, but can never take over a channel that
-// already has any relation.
+// PutResourceRelationIfOrphan writes one relation only when the resource and
+// every ancestor in ancestorIDs have no relation tuples at all. It is the
+// explicit adoption path for a resource whose ACL was never written
+// (keel-board-v1 Phase 1 P0-1): a board.manage holder may claim a fully
+// relation-free board channel, but can never take over a channel whose own or
+// inherited ACL already authorizes somebody.
 //
-// The emptiness check and the insert share one transaction under a
-// transaction-scoped advisory lock keyed by (tenant, type, id), so two
-// concurrent adopters cannot both become owner. created=false means the
-// resource already had relations; the caller keeps whatever ACL it had.
-func (s *Store) PutResourceRelationIfOrphan(ctx context.Context, relation ResourceRelation) (bool, error) {
+// The emptiness check and the insert share one transaction. Every checked id
+// takes a transaction-scoped advisory lock (sorted), so two concurrent adopters
+// of the same channel or of an ancestor/descendant pair cannot both become
+// owner. created=false means an existing relation was found; the caller keeps
+// whatever ACL it had.
+func (s *Store) PutResourceRelationIfOrphan(ctx context.Context, relation ResourceRelation, ancestorIDs []string) (bool, error) {
 	relation.ResourceType = strings.TrimSpace(relation.ResourceType)
 	relation.ResourceID = strings.TrimSpace(relation.ResourceID)
 	relation.Relation = strings.TrimSpace(relation.Relation)
@@ -138,16 +141,21 @@ func (s *Store) PutResourceRelationIfOrphan(ctx context.Context, relation Resour
 		return false, identityWriteError("begin orphan relation", err)
 	}
 	defer func() { _ = tx.Rollback(context.Background()) }()
-	lockKey := relation.TenantID.String() + "|" + relation.ResourceType + "|" + relation.ResourceID
-	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, lockKey); err != nil {
-		return false, identityWriteError("lock orphan relation", err)
+	ids := normalizedIDs(append([]string{relation.ResourceID}, ancestorIDs...))
+	locked := append([]string(nil), ids...)
+	sort.Strings(locked)
+	for _, id := range locked {
+		lockKey := relation.TenantID.String() + "|" + relation.ResourceType + "|" + id
+		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, lockKey); err != nil {
+			return false, identityWriteError("lock orphan relation", err)
+		}
 	}
 	var exists bool
 	if err := tx.QueryRow(ctx,
 		`SELECT EXISTS (
 		   SELECT 1 FROM resource_relations
-		    WHERE tenant_id = $1 AND resource_type = $2 AND resource_id = $3)`,
-		relation.TenantID, relation.ResourceType, relation.ResourceID).Scan(&exists); err != nil {
+		    WHERE tenant_id = $1 AND resource_type = $2 AND resource_id = ANY($3))`,
+		relation.TenantID, relation.ResourceType, ids).Scan(&exists); err != nil {
 		return false, identityWriteError("check orphan relation", err)
 	}
 	if exists {

@@ -63,7 +63,7 @@ func (r routeACLReport) Error() string {
 	}
 	for _, channel := range r.Orphaned {
 		parts = append(parts, fmt.Sprintf(
-			"route target %q exists but has no ACL relation; POST /v1/board/channels {\"path\":%q} as a board.manage holder to adopt the orphan channel, or grant a board_channel viewer/editor relation",
+			"route target %q has no ACL relation on the channel or any ancestor; grant a board_channel viewer/editor relation there, or POST /v1/board/channels {\"path\":%q} as a board.manage holder to adopt a fully relation-free channel",
 			channel, channel))
 	}
 	if r.Unknown != "" {
@@ -113,11 +113,11 @@ func checkRouteACL(ctx context.Context, st *store.Store, board *boardlog.Board, 
 				report.Missing = append(report.Missing, channel)
 				continue
 			}
-			relations, err := st.ListResourceRelations(ctx, tenantID, BoardChannelResourceType, channel, 1)
+			hasRelation, err := channelOrAncestorHasRelation(ctx, st, tenantID, channel)
 			if err != nil {
 				return err
 			}
-			if len(relations) == 0 {
+			if !hasRelation {
 				report.Orphaned = append(report.Orphaned, channel)
 			}
 		}
@@ -127,6 +127,28 @@ func checkRouteACL(ctx context.Context, st *store.Store, board *boardlog.Board, 
 		return routeACLReport{Unknown: "the route ACL could not be read"}, readErr
 	}
 	return report, nil
+}
+
+// channelOrAncestorHasRelation applies board's most-specific-wins inheritance:
+// a relation on the exact channel or on any ancestor authorizes a reader, so a
+// route target is provisioned when any path component carries a relation.
+func channelOrAncestorHasRelation(ctx context.Context, st *store.Store, tenantID uuid.UUID, channel string) (bool, error) {
+	candidate := strings.Trim(strings.TrimSpace(channel), "/")
+	for candidate != "" {
+		relations, err := st.ListResourceRelations(ctx, tenantID, BoardChannelResourceType, candidate, 1)
+		if err != nil {
+			return false, err
+		}
+		if len(relations) > 0 {
+			return true, nil
+		}
+		index := strings.LastIndex(candidate, "/")
+		if index < 0 {
+			return false, nil
+		}
+		candidate = candidate[:index]
+	}
+	return false, nil
 }
 
 // validateRouteACL is the write-path check: a create/update must fail 400 with

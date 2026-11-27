@@ -69,6 +69,88 @@ func TestSyncEntryRouteRequiresProvisionedChannel(t *testing.T) {
 	if !result.RestartRequired {
 		t.Fatalf("enable of a pending entry = %+v", result)
 	}
+
+	// Disabling must work even when the route just lost its relation; enabling
+	// it again is the check that fails closed.
+	if err := env.st.DeleteResourceRelation(ctx, env.tenant, BoardChannelResourceType, "fresh",
+		keelstore.RelationOwner, keelstore.RelationSubjectAccount, env.alice.record.ID.String()); err != nil {
+		t.Fatalf("delete route relation: %v", err)
+	}
+	if resp := env.do(t, server, http.MethodPatch, "/v1/board/sync/entries/slack", "alice", map[string]any{"enabled": false}); resp.status != http.StatusOK {
+		t.Fatalf("disable with an unhealthy route = %d %s", resp.status, resp.body)
+	}
+	entry, found, err = env.surf.SyncStore().Entry(ctx, env.tenant.String(), "slack")
+	if err != nil || !found || entry.Enabled {
+		t.Fatalf("disabled entry row = %+v/%v/%v", entry, found, err)
+	}
+	if resp := env.do(t, server, http.MethodPatch, "/v1/board/sync/entries/slack", "alice", map[string]any{"enabled": true}); resp.status != http.StatusBadRequest {
+		t.Fatalf("enable with an unhealthy route = %d %s", resp.status, resp.body)
+	}
+}
+
+// TestSyncEntryRouteInheritsAncestorRelation covers board's most-specific-wins
+// inheritance on the write path: a route target with no exact relation is
+// provisioned when an ancestor carries one. A completely relation-free target
+// is still refused.
+func TestSyncEntryRouteInheritsAncestorRelation(t *testing.T) {
+	env := newTestEnv(t, nil)
+	env.grant(env.tenant, env.alice.record.ID, access.KeySecretWrite)
+	server := env.server()
+	ctx := context.Background()
+
+	for _, channel := range []string{"work", "work/production"} {
+		if resp := env.ensureChannel(t, server, channel); resp.status != http.StatusCreated {
+			t.Fatalf("create %s: %d %s", channel, resp.status, resp.body)
+		}
+	}
+	// Remove the exact relation, leaving only the inherited relation on work.
+	if err := env.st.DeleteResourceRelation(ctx, env.tenant, BoardChannelResourceType, "work/production",
+		keelstore.RelationOwner, keelstore.RelationSubjectAccount, env.alice.record.ID.String()); err != nil {
+		t.Fatalf("delete exact relation: %v", err)
+	}
+	body := map[string]any{
+		"key": "slack", "platform": "slack", "enabled": true,
+		"secretRef": map[string]string{"signingSecret": "SLACK_SIGNING", "botToken": "SLACK_BOT"},
+		"settings":  map[string]any{"botUserId": "U_APP", "apiBaseUrl": "http://127.0.0.1:1/api"},
+		"routes":    map[string]string{"C0WORK": "work/production"},
+	}
+	if resp := env.do(t, server, http.MethodPost, "/v1/board/sync/entries", "alice", body); resp.status != http.StatusCreated {
+		t.Fatalf("entry with an inherited relation = %d %s", resp.status, resp.body)
+	}
+
+	// A target whose whole path is relation-free remains refused.
+	if resp := env.ensureChannel(t, server, "isolated"); resp.status != http.StatusCreated {
+		t.Fatalf("create isolated: %d %s", resp.status, resp.body)
+	}
+	if err := env.st.DeleteResourceRelation(ctx, env.tenant, BoardChannelResourceType, "isolated",
+		keelstore.RelationOwner, keelstore.RelationSubjectAccount, env.alice.record.ID.String()); err != nil {
+		t.Fatalf("delete isolated relation: %v", err)
+	}
+	body["key"] = "isolated"
+	body["routes"] = map[string]string{"C0ISOLATED": "isolated"}
+	if resp := env.do(t, server, http.MethodPost, "/v1/board/sync/entries", "alice", body); resp.status != http.StatusBadRequest {
+		t.Fatalf("relation-free target = %d %s", resp.status, resp.body)
+	}
+}
+
+// TestSyncEntryDisabledStagingSkipsRouteCheck lets an operator stage a disabled
+// entry before its channel exists; enabling it is what requires provisioning.
+func TestSyncEntryDisabledStagingSkipsRouteCheck(t *testing.T) {
+	env := newTestEnv(t, nil)
+	env.grant(env.tenant, env.alice.record.ID, access.KeySecretWrite)
+	server := env.server()
+	body := map[string]any{
+		"key": "staged", "platform": "slack", "enabled": false,
+		"secretRef": map[string]string{"signingSecret": "SLACK_SIGNING", "botToken": "SLACK_BOT"},
+		"settings":  map[string]any{"botUserId": "U_APP", "apiBaseUrl": "http://127.0.0.1:1/api"},
+		"routes":    map[string]string{"C0STAGED": "not-created-yet"},
+	}
+	if resp := env.do(t, server, http.MethodPost, "/v1/board/sync/entries", "alice", body); resp.status != http.StatusCreated {
+		t.Fatalf("disabled staging = %d %s", resp.status, resp.body)
+	}
+	if resp := env.do(t, server, http.MethodPatch, "/v1/board/sync/entries/staged", "alice", map[string]any{"enabled": true}); resp.status != http.StatusBadRequest {
+		t.Fatalf("enabling a missing route = %d %s", resp.status, resp.body)
+	}
 }
 
 // TestSyncBootDisablesUnprovisionedRouteEntry covers the historical-entry half
@@ -203,5 +285,23 @@ func TestChannelCreateAdoptsOrphanForManager(t *testing.T) {
 	}
 	if resp := env.do(t, server, http.MethodGet, "/v1/board/messages?channel=support", "manager", nil); resp.status != http.StatusNotFound {
 		t.Fatalf("manager bypassed an existing ACL = %d %s", resp.status, resp.body)
+	}
+
+	// An inherited relation also blocks adoption: work/production is authorized
+	// through work, so the manager cannot become its owner.
+	for _, channel := range []string{"work", "work/production"} {
+		if resp := env.ensureChannel(t, server, channel); resp.status != http.StatusCreated {
+			t.Fatalf("create %s: %d %s", channel, resp.status, resp.body)
+		}
+	}
+	if err := env.st.DeleteResourceRelation(ctx, env.tenant, BoardChannelResourceType, "work/production",
+		keelstore.RelationOwner, keelstore.RelationSubjectAccount, env.alice.record.ID.String()); err != nil {
+		t.Fatalf("delete production owner: %v", err)
+	}
+	if resp := env.do(t, server, http.MethodPost, "/v1/board/channels", "manager", map[string]any{"path": "work/production"}); resp.status != http.StatusOK {
+		t.Fatalf("manager create on an inherited channel = %d %s", resp.status, resp.body)
+	}
+	if relations, err := env.st.ListResourceRelations(ctx, env.tenant, BoardChannelResourceType, "work/production", 0); err != nil || len(relations) != 0 {
+		t.Fatalf("inherited channel relations = %+v/%v", relations, err)
 	}
 }
