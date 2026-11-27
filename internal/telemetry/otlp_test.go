@@ -510,6 +510,37 @@ func TestDefaultMetricNamesCoverTheInstrumentVocabulary(t *testing.T) {
 	}
 }
 
+func TestOTLPExporterIdentityGrowthDoesNotGrowSeries(t *testing.T) {
+	collector := newFakeCollector(t)
+	options := testExporterOptions(collector.server.URL, []Signal{SignalMetrics})
+	options.Queue.MaxMetrics = 20000
+	options.Queue.MaxBytes = 64 << 20
+	exporter, err := NewOTLPExporter(options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for index := 0; index < 10000; index++ {
+		exporter.ExportMetric(RecordedMeasurement{
+			Kind: MetricKindCounter, Name: "keel.agent.runs", Value: 1,
+			Attributes: SpanAttributes{
+				"model": "m", "provider": "p", "outcome": "ok",
+				"tenant": fmt.Sprintf("tenant-%d", index), "session": fmt.Sprintf("session-%d", index),
+			},
+		})
+	}
+	status := exporter.Status()
+	if status.QueueDepth != 10000 || status.SeriesDropped != 0 {
+		t.Fatalf("status = %#v", status)
+	}
+	exporter.mu.Lock()
+	families := len(exporter.series["keel.agent.runs"])
+	exporter.mu.Unlock()
+	if families != 1 {
+		t.Fatalf("10k sessions produced %d metric series; identity must not become a label", families)
+	}
+	_ = exporter.Close(context.Background())
+}
+
 func TestOTLPExporterMetricCardinalityAndRegistration(t *testing.T) {
 	collector := newFakeCollector(t)
 	options := testExporterOptions(collector.server.URL, []Signal{SignalMetrics})
