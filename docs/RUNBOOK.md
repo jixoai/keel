@@ -124,7 +124,7 @@ KEEL_TEST_DSN='postgres://…' go test ./internal/boardintegration/ -v
 KEEL_TEST_DSN='postgres://…' go test -race ./internal/boardintegration/
 KEEL_TEST_DSN='postgres://…' go test ./internal/boardintegration/ -run TestBoardStoreRLSUsesTenantSetting -v
 go test ./internal/access/ ./internal/accessgate/ ./cmd/keel/
-scripts/binary-size.sh --budget-kb 2048 --base 6ee7fe3
+scripts/binary-size.sh --budget-kb 3072 --base 6ee7fe3
 ```
 
 - `GET /metrics` 同时输出 `board_*`（事件数、append 延迟、live claims、SSE 连接/滞后、
