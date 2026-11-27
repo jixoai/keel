@@ -44,6 +44,7 @@ test("TUI: 任务队列——状态 tabs、最早优先、行内状态/依赖/�
   // no open rows.
   await view.press("id:board-filter-archive");
   await view.waitFor("id:board-row-826", { timeout: 20_000 });
+  await view.waitUntil(() => !view.shows("id:board-row-812"), { timeout: 20_000 });
   expect(view.shows("id:board-row-812")).toBe(false);
   expect(view.accessibility("id:board-row-state-826")?.label).toBe("已完成");
   await view.press("id:board-filter-clear");
@@ -51,6 +52,7 @@ test("TUI: 任务队列——状态 tabs、最早优先、行内状态/依赖/�
   // Completed is one state tab away; the row shows its terminal badge.
   await view.press("id:board-state-tab-completed");
   await view.waitFor("id:board-row-818", { timeout: 20_000 });
+  await view.waitUntil(() => !view.shows("id:board-row-812"), { timeout: 20_000 });
   expect(view.shows("id:board-row-812")).toBe(false);
 }, 120_000);
 
