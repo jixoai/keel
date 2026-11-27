@@ -322,7 +322,7 @@ export E2E_EVIDENCE="$EVIDENCE"
 export E2E_RUN_DIR="$RUN_DIR"
 export E2E_WORKTREE="$ROOT"
 export E2E_HEAD_COMMIT="$(cd "$ROOT" && git rev-parse HEAD)"
-export E2E_COVERAGE_BASE="${E2E_COVERAGE_BASE:-8916393}"
+[[ -n "${E2E_COVERAGE_BASE:-}" ]] && export E2E_COVERAGE_BASE
 export E2E_ADMIN_USERNAME="e2e-admin"
 export E2E_ADMIN_PASSWORD_FILE="$SECRETS/admin.password"
 export E2E_READER_PASSWORD_FILE="$SECRETS/reader.password"

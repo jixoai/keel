@@ -40,7 +40,29 @@ const SHOTS_DIR = 'screenshots';
 const SHOTS = path.join(EVIDENCE, SHOTS_DIR);
 const WORKTREE = process.env.E2E_WORKTREE || process.cwd();
 const HEAD_COMMIT = process.env.E2E_HEAD_COMMIT || '';
-const COVERAGE_BASE = process.env.E2E_COVERAGE_BASE || '8916393';
+/** The branch baseline: the rebase point onto the mainline, not the old base
+ * commit a branch happened to fork from before rebasing. A hardcoded historical
+ * SHA makes every mainline file that landed since then look UNCOVERED. */
+const defaultCoverageBase = () => {
+  for (const ref of ['origin/main', 'main']) {
+    try {
+      const base = execFileSync('git', ['merge-base', 'HEAD', ref], {
+        cwd: WORKTREE,
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+      }).trim();
+      if (base) return base;
+    } catch {
+      /* try the next ref */
+    }
+  }
+  return '';
+};
+const COVERAGE_BASE = process.env.E2E_COVERAGE_BASE || defaultCoverageBase();
+if (!COVERAGE_BASE) {
+  console.error('E2E_COVERAGE_BASE is required: no origin/main or main merge-base was found');
+  process.exit(2);
+}
 const ADMIN_USER = process.env.E2E_ADMIN_USERNAME || 'e2e-admin';
 // Portability: an explicit path wins; otherwise resolve the installed package
 // and let Playwright pick its browser (or require E2E_CHROME on a machine
