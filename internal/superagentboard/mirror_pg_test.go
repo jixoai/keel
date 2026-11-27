@@ -138,6 +138,65 @@ func TestPGBoardMirrorSurvivesRestartAndAtoB(t *testing.T) {
 	}
 }
 
+func TestPGBoardMirrorImportsArchivedTicketReadOnly(t *testing.T) {
+	st, pg := newPGBoard(t)
+	ctx := context.Background()
+	tenantA, tenantB := uuid.New(), uuid.New()
+	for _, tenant := range []uuid.UUID{tenantA, tenantB} {
+		if err := st.CreateTenant(ctx, tenant, "mirror-archived-"+tenant.String()[:8]); err != nil {
+			t.Fatalf("create tenant: %v", err)
+		}
+	}
+	ticket := pgSeedTicket(t, st, tenantA, "evt-archived")
+	item, err := st.GetWorkItem(ctx, tenantA, ticket.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	item.Status = collab.WorkItemDone
+	if _, err := st.UpdateWorkItem(ctx, item); err != nil {
+		t.Fatal(err)
+	}
+
+	mirror := newMirrorForTest(t, tenantA, st, pg.log, st,
+		SuperagentConfig{Mirror: true, Bridge: true, Channel: "superagent"}, newTestClock())
+	report, err := mirror.SyncOnce(ctx)
+	if err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+	if report.Archived != 1 || report.Completed != 1 || report.TasksCreated != 1 {
+		t.Fatalf("report = %+v", report)
+	}
+	link := mustLink(t, st, tenantA, ticket.ID.String(), keelstore.BoardLinkTicket)
+	task := mustTask(t, pg.log, tenantA, link.BoardTaskID)
+	if task.State != StateCompleted {
+		t.Fatalf("state = %q, want completed", task.State)
+	}
+	view, err := pg.log.TaskView(ctx, tenantA, link.BoardTaskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if view.Labels[ArchivedLabel] != "true" {
+		t.Fatalf("labels = %#v, want %s=true", view.Labels, ArchivedLabel)
+	}
+	if _, found, err := st.GetBoardLink(ctx, tenantB, "superagent", ticket.ID.String(), keelstore.BoardLinkTicket); err != nil || found {
+		t.Fatalf("tenant B sees tenant A's link: found=%v err=%v", found, err)
+	}
+	if head := boardHead(t, pg.log, tenantB); head != 0 {
+		t.Fatalf("tenant B board head = %d", head)
+	}
+
+	// A restart sees the link and the terminal board state; it appends nothing.
+	head := boardHead(t, pg.log, tenantA)
+	restarted := newMirrorForTest(t, tenantA, st, pg.log, st,
+		SuperagentConfig{Mirror: true, Bridge: true, Channel: "superagent"}, newTestClock())
+	if _, err := restarted.SyncOnce(ctx); err != nil {
+		t.Fatalf("restart sync: %v", err)
+	}
+	if head != boardHead(t, pg.log, tenantA) {
+		t.Fatal("restart rewrote an archived import")
+	}
+}
+
 func TestPGBoardClaimEpochPersistsAndIsRecoverable(t *testing.T) {
 	st, pg := newPGBoard(t)
 	ctx := context.Background()

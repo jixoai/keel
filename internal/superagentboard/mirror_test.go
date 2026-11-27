@@ -317,49 +317,93 @@ func TestMirrorReportReplyAndTerminalState(t *testing.T) {
 	}
 }
 
-func TestMirrorSkipsArchivedTicketWithoutLinkAndNeverWritesCollab(t *testing.T) {
+func TestMirrorImportsArchivedTicketAsReadOnlyHistory(t *testing.T) {
+	cases := []struct {
+		name   string
+		status collab.WorkItemStatus
+		state  string
+		count  func(SyncReport) int
+	}{
+		{"done", collab.WorkItemDone, StateCompleted, func(report SyncReport) int { return report.Completed }},
+		{"failed", collab.WorkItemFailed, StateFailed, func(report SyncReport) int { return report.Failed }},
+		{"cancelled", collab.WorkItemCancelled, StateCanceled, func(report SyncReport) int { return report.Canceled }},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			mirror, store, board, links, _, tenantID := mirrorFixture(t)
+			ticket := seedTicket(t, store, tenantID, "Archived", "Body", "manual", "t-5", "evt-5")
+			updateTicketStatus(t, store, tenantID, ticket.ID, test.status)
+			before := ticketSnapshot(t, store, tenantID)
+			report, err := mirror.SyncOnce(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if report.Archived != 1 || report.TasksCreated != 1 || report.Skipped != 0 {
+				t.Fatalf("report = %+v", report)
+			}
+			if got := test.count(report); got != 1 {
+				t.Fatalf("final state count = %d: %+v", got, report)
+			}
+			if links.count() != 1 {
+				t.Fatalf("links = %d, want 1", links.count())
+			}
+			link := mustLink(t, links, tenantID, ticket.ID.String(), keelstore.BoardLinkTicket)
+			task := mustTask(t, board, tenantID, link.BoardTaskID)
+			if task.State != test.state {
+				t.Fatalf("state = %q, want %q", task.State, test.state)
+			}
+			view, err := board.TaskView(context.Background(), tenantID, link.BoardTaskID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if view.Labels[ArchivedLabel] != "true" {
+				t.Fatalf("labels = %#v, want %s=true", view.Labels, ArchivedLabel)
+			}
+			if !view.NoSync {
+				t.Fatal("an archived import is not marked noSync")
+			}
+			if after := ticketSnapshot(t, store, tenantID); after != before {
+				t.Fatal("the mirror changed a collab record")
+			}
+			head := boardHead(t, board, tenantID)
+			if _, err := mirror.SyncOnce(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			if head != boardHead(t, board, tenantID) {
+				t.Fatal("an archived import was rewritten on the next pass")
+			}
+		})
+	}
+}
+
+func TestMirrorSettlesTerminalTicketWithoutAssignment(t *testing.T) {
 	mirror, store, board, links, _, tenantID := mirrorFixture(t)
-	ticket := seedTicket(t, store, tenantID, "Archived", "Body", "manual", "t-5", "evt-5")
+	ticket := seedTicket(t, store, tenantID, "Handled outside", "Body", "manual", "t-7", "evt-7")
+	if _, err := mirror.SyncOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	link := mustLink(t, links, tenantID, ticket.ID.String(), keelstore.BoardLinkTicket)
+	if task := mustTask(t, board, tenantID, link.BoardTaskID); task.State != StateReady {
+		t.Fatalf("initial state = %q", task.State)
+	}
 	updateTicketStatus(t, store, tenantID, ticket.ID, collab.WorkItemDone)
-	before := ticketSnapshot(t, store, tenantID)
 	report, err := mirror.SyncOnce(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if report.Skipped != 1 || report.TasksCreated != 0 {
+	if report.Completed != 1 || report.Archived != 0 {
 		t.Fatalf("report = %+v", report)
 	}
-	if links.count() != 0 {
-		t.Fatalf("links = %d, want 0", links.count())
+	task := mustTask(t, board, tenantID, link.BoardTaskID)
+	if task.State != StateCompleted {
+		t.Fatalf("state = %q, want completed", task.State)
 	}
-	if head := boardHead(t, board, tenantID); head != 0 {
-		t.Fatalf("board head = %d, want 0", head)
-	}
-	if after := ticketSnapshot(t, store, tenantID); after != before {
-		t.Fatal("the mirror changed a collab record")
-	}
-
-	// A terminal ticket that was mirrored before stays mapped and receives its
-	// final state once.
-	live := seedTicket(t, store, tenantID, "Live", "Body", "manual", "t-6", "evt-6")
-	if _, err := mirror.SyncOnce(context.Background()); err != nil {
+	view, err := board.TaskView(context.Background(), tenantID, link.BoardTaskID)
+	if err != nil {
 		t.Fatal(err)
 	}
-	link := mustLink(t, links, tenantID, live.ID.String(), keelstore.BoardLinkTicket)
-	updateTicketStatus(t, store, tenantID, live.ID, collab.WorkItemCancelled)
-	if _, err := mirror.SyncOnce(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	canceled := mustTask(t, board, tenantID, link.BoardTaskID)
-	if canceled.State != StateCanceled {
-		t.Fatalf("state = %q", canceled.State)
-	}
-	head := boardHead(t, board, tenantID)
-	if _, err := mirror.SyncOnce(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	if head != boardHead(t, board, tenantID) {
-		t.Fatal("a terminal ticket was rewritten")
+	if view.Labels[ArchivedLabel] == "true" {
+		t.Fatal("a ticket mirrored while live was labelled archived")
 	}
 }
 

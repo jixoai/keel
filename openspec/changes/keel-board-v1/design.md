@@ -718,7 +718,9 @@ Base：`/v1/board`。认证沿用 keel；tenant 来自凭据，不出现在路�
 | POST | `/tasks/{id}/cancel` | `{reason}` | `{task}` | owner/manage |
 | GET | `/events` | `channel?`, `label?`, `state?`, `owner?`, `for?`, `after?`, `Last-Event-ID` | SSE | board.read + viewer |
 
-v0.1.x 未提供 `GET /me`（用 `/actors` 或消息/任务的 author 投影）；`claim` 与 SSE 的实际路径
+v0.1.x 未提供 `GET /me`（用 `/actors` 或消息/任务的 author 投影）；Phase 2 契约由 keel 挂载层
+补 `GET /v1/board/me`（actor/account/bot/tenant/can/频道 can）与 `TaskView.moves[]`/
+`archived`/`mirror`，board 模块不改；`claim` 与 SSE 的实际路径
 以上表为准，`claim-ready`/`events/stream` 是早期设计名。
 
 Phase 0 追加（独立仓库）：`POST /tasks/batch`、`GET /tasks/batch/{id}`、`GET /threads`、
@@ -1241,7 +1243,7 @@ sync:
 | Attention answered | `unblocked` + 一条回复（答案摘要，不含敏感正文） |
 | Attention timed_out/cancelled | `unblocked` + 回复说明关闭；Ticket 状态由 supervisor 决定 |
 | worker report | 线程回复：state + summary；幂等键 `superagent:report:<report_id>` |
-| 已归档 Ticket | 只读映射或跳过；不重写历史 |
+| 已归档 Ticket | 只读映射（不跳过）：导入为 `board.archived=true` 的历史任务，最终状态 completed/failed/canceled，`moves=[]`；不重写历史 |
 
 - 频道：默认 `superagent`（tenant config 可改）；标签：`source=superagent`、
   `ticket=<uuid>`、`mandate=<strength>`、`policy=<version>`。`board.*` 保留，不使用。

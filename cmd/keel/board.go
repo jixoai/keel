@@ -151,5 +151,5 @@ func newBoardWiringWithOptions(ctx context.Context, keelDSN string, tenantID uui
 	if err != nil {
 		return nil, fmt.Errorf("board surface: %w", err)
 	}
-	return &boardWiring{API: surface, Webhook: surface.Webhook(), Surface: surface}, nil
+	return &boardWiring{API: surface.API(), Webhook: surface.Webhook(), Surface: surface}, nil
 }

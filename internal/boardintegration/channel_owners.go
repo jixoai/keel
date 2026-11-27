@@ -30,9 +30,10 @@ type handler struct {
 	next       http.Handler
 	board      *boardlog.Board
 	owners     *ChannelOwners
-	authorizer *Authorizer
 	sse        *sseHandler
 	syncAdmin  *syncAdmin
+	identity   *Identity
+	authorizer *Authorizer
 	logger     *slog.Logger
 }
 
@@ -40,6 +41,14 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Path
 	if len(path) > 1 && path[len(path)-1] == '/' {
 		path = path[:len(path)-1]
+	}
+	// GET /v1/board/me is a keel-owned contract addition (Phase 2 UI DESIGN
+	// §15): board v0.1.1 has no caller identity route. It is handled here, after
+	// the surface's tenant-switch gate, so a disabled board still answers 404
+	// instead of leaking who would have been authenticated.
+	if r.Method == http.MethodGet && path == "/v1/board/me" {
+		h.me(w, r)
+		return
 	}
 	// keel-owned sync entry management (POST/PATCH) is not part of board
 	// v0.1.0; the mount layer implements it. It is checked before the board's

@@ -331,7 +331,9 @@ func (e *testEnv) server() *httptest.Server {
 		if principal, ok := e.principal(r.Header.Get("X-Test-Who")); ok {
 			r = r.WithContext(auth.WithPrincipal(r.Context(), principal))
 		}
-		e.surf.ServeHTTP(w, r)
+		// Resolve the surface per request: a restart test replaces env.surf and
+		// keeps using the same server, exactly as the production listener does.
+		e.surf.API().ServeHTTP(w, r)
 	})
 	server := httptest.NewServer(handler)
 	e.t.Cleanup(server.Close)

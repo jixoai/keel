@@ -32,6 +32,7 @@ type LinkStore interface {
 type SyncReport struct {
 	Tickets      int `json:"tickets"`
 	TasksCreated int `json:"tasksCreated"`
+	Archived     int `json:"archived"`
 	Claims       int `json:"claims"`
 	Renewed      int `json:"renewed"`
 	Released     int `json:"released"`
@@ -236,30 +237,33 @@ func (m *Mirror) syncTicket(ctx context.Context, config SuperagentConfig, ticket
 		return report, errors.New("superagentboard: ticket has no id")
 	}
 	terminal := isTerminalTicket(ticket)
+	archivedImport := terminal
 	link, linked, err := m.Links.GetBoardLink(ctx, m.TenantID, BoardSource, ticket.ID.String(), store.BoardLinkTicket)
 	if err != nil {
 		return report, err
 	}
-	if terminal && !linked {
-		// An archived ticket that predates the mirror is left alone: importing
-		// it would append history nobody asked for, and the Ticket's own audit
-		// stays the record.
-		report.Skipped++
-		return report, nil
-	}
 	var task TaskInfo
 	if linked {
+		archivedImport = false
 		task, err = m.Board.Task(ctx, m.TenantID, link.BoardTaskID)
 		if err != nil {
 			return report, err
 		}
 	} else {
+		labels := TicketLabels(ticket)
+		if archivedImport {
+			// An archived Ticket is board history, not a second task face:
+			// import it once, read-only, and keep its old audit in superagent.
+			// The label is written through the board log, so the reserved
+			// board.* namespace stays the mirror's own.
+			labels[ArchivedLabel] = "true"
+		}
 		task, err = m.Board.EnsureTicketThread(ctx, m.TenantID, TicketThread{
 			TicketID: ticket.ID.String(),
 			Channel:  config.Channel,
 			Title:    ticket.Title,
 			Request:  ticket.Request,
-			Labels:   TicketLabels(ticket),
+			Labels:   labels,
 			Actor:    ServiceActor(m.TenantID),
 		})
 		if err != nil {
@@ -272,6 +276,9 @@ func (m *Mirror) syncTicket(ctx context.Context, config SuperagentConfig, ticket
 			return report, err
 		}
 		report.TasksCreated++
+		if archivedImport {
+			report.Archived++
+		}
 	}
 	m.ensureACL(ctx, config.Channel)
 	stateReport, err := m.syncTicketState(ctx, ticket, task)
@@ -390,8 +397,8 @@ func (m *Mirror) syncTicketState(ctx context.Context, ticket superagent.Ticket, 
 			report.Blocked++
 		}
 		task, _ = m.Board.Task(ctx, m.TenantID, task.ID)
-	} else if openAttention == nil && task.State == StateBlocked && !ticketTerminal &&
-		(ticket.Status != collab.WorkItemBlocked || hasClosedAttention) {
+	} else if task.State == StateBlocked && (ticketTerminal || (openAttention == nil &&
+		(ticket.Status != collab.WorkItemBlocked || hasClosedAttention))) {
 		if err := m.Board.Unblock(ctx, m.TenantID, UnblockRequest{
 			TaskID: task.ID, Actor: ServiceActor(m.TenantID),
 		}); err != nil {
@@ -478,23 +485,34 @@ func (m *Mirror) syncTicketState(ctx context.Context, ticket superagent.Ticket, 
 	task, _ = m.Board.Task(ctx, m.TenantID, task.ID)
 
 	// 5. Final ticket state. Terminal board states are append-only: a
-	// completed/canceled task is never reopened by a later mirror pass.
+	// completed/canceled task is never reopened by a later mirror pass. A
+	// terminal Ticket with no claim (an archived import, or a ticket closed
+	// without a worker) takes a short service claim first so the board fold
+	// can accept the final event.
 	switch ticket.Status {
 	case collab.WorkItemDone:
 		if task.State != StateCompleted {
-			err := m.Board.Complete(ctx, m.TenantID, SettleRequest{
-				TaskID: task.ID, Epoch: task.Epoch, Result: finalSummary(ticket, reports),
-				Actor: claimActorOf(task),
-			})
-			m.accountSettle(err, "complete", ticket, task, &report, func() { report.Completed++ })
+			settled, claimed := m.ensureSettlementClaim(ctx, ticket, task, &report)
+			task = settled
+			if claimed {
+				err := m.Board.Complete(ctx, m.TenantID, SettleRequest{
+					TaskID: task.ID, Epoch: task.Epoch, Result: finalSummary(ticket, reports),
+					Actor: claimActorOf(task),
+				})
+				m.accountSettle(err, "complete", ticket, task, &report, func() { report.Completed++ })
+			}
 		}
 	case collab.WorkItemFailed:
 		if task.State != StateFailed {
-			err := m.Board.Fail(ctx, m.TenantID, SettleRequest{
-				TaskID: task.ID, Epoch: task.Epoch, Reason: failureReason(ticket, reports, assignments),
-				Actor: claimActorOf(task),
-			})
-			m.accountSettle(err, "fail", ticket, task, &report, func() { report.Failed++ })
+			settled, claimed := m.ensureSettlementClaim(ctx, ticket, task, &report)
+			task = settled
+			if claimed {
+				err := m.Board.Fail(ctx, m.TenantID, SettleRequest{
+					TaskID: task.ID, Epoch: task.Epoch, Reason: failureReason(ticket, reports, assignments),
+					Actor: claimActorOf(task),
+				})
+				m.accountSettle(err, "fail", ticket, task, &report, func() { report.Failed++ })
+			}
 		}
 	case collab.WorkItemCancelling, collab.WorkItemCancelled:
 		if task.State != StateCanceled {
@@ -535,6 +553,42 @@ func (m *Mirror) accountSettle(err error, action string, ticket superagent.Ticke
 		return
 	}
 	ok()
+}
+
+// ensureSettlementClaim takes a short service claim when a terminal Ticket has
+// no live claim, so complete/fail can append the final board state. It returns
+// the task as the board now has it; claimed=false means this pass cannot settle
+// (blocked, claimed by a conflicting actor, secret missing) and the next pass
+// retries. The claim is service bookkeeping, not a supervisor assignment, so it
+// is not counted as report.Claims.
+func (m *Mirror) ensureSettlementClaim(ctx context.Context, ticket superagent.Ticket, task TaskInfo, report *SyncReport) (TaskInfo, bool) {
+	if task.State == StateClaimed {
+		return task, true
+	}
+	if task.State != StateReady || m.Secret == nil {
+		return task, false
+	}
+	token, err := m.Secret.SettlementToken(m.TenantID, ticket.ID)
+	if err != nil {
+		m.Logger.Warn("superagent board settlement token unavailable", "ticket", ticket.ID, "err", err)
+		return task, false
+	}
+	info, claimed, err := m.Board.Claim(ctx, m.TenantID, ClaimRequest{
+		TaskID: task.ID, Actor: ServiceActor(m.TenantID), Token: token, Lease: m.Lease,
+	})
+	if err != nil {
+		if errors.Is(err, ErrClaimConflict) || errors.Is(err, ErrNotClaimable) {
+			report.Conflicts++
+			m.logClaimConflict(ticket, task, err)
+		} else {
+			m.Logger.Warn("superagent board settlement claim failed", "ticket", ticket.ID, "err", err)
+		}
+		return task, false
+	}
+	if !claimed || info.State != StateClaimed {
+		return info, false
+	}
+	return info, true
 }
 
 // mirrorClaim returns true when the board task changed.
@@ -645,6 +699,7 @@ func (m *Mirror) logClaimConflict(ticket superagent.Ticket, task TaskInfo, err e
 
 func accumulate(into *SyncReport, add SyncReport) {
 	into.TasksCreated += add.TasksCreated
+	into.Archived += add.Archived
 	into.Claims += add.Claims
 	into.Renewed += add.Renewed
 	into.Released += add.Released

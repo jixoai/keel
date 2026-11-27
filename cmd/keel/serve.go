@@ -1076,11 +1076,13 @@ func runServe(parent context.Context, opts serveOptions) error {
 		// The bridge starts as a pass-through and is attached to the supervisor
 		// after the agent runtime exists. It routes a mirrored task's actions
 		// to the supervisor before the board handler sees them. The Surface gate
-		// wraps the bridge, so a disabled tenant answers 404 board_disabled
-		// before any bridge action (or reply/mutation guard) can reach the
-		// supervisor.
+		// wraps the augmented bridge, so a disabled tenant answers 404
+		// board_disabled before any bridge action (or reply/mutation guard) can
+		// reach the supervisor, and every successful bridge/board response still
+		// carries the Phase 2 moves/archived/mirror fields.
 		boardBridge = newSuperagentBoardBridge(boardSurface, log)
-		boardHandler = boardSurface.Gate(boardBridge)
+		boardSurface.SetMirrorFacts(boardBridge)
+		boardHandler = boardSurface.Gate(boardSurface.Augment(boardBridge))
 		defer boardSurface.Close()
 		if bypass, err := boardintegration.RoleBypassesRLS(ctx, boardDSN(opts.DSN)); err != nil {
 			log.Warn("board role privilege check failed", "detail", "row-level security may not be enforced")

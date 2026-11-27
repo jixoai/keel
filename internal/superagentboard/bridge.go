@@ -88,6 +88,34 @@ func (b *Bridge) snapshot() (LinkStore, ConfigReader, *Mirror, *SupervisorComman
 	return b.links, b.config, b.mirror, b.commands, b.board
 }
 
+// TaskMirror reports the durable mirror fact of one board task to the keel
+// mount layer that renders TaskView.mirror/moves (boardintegration.MirrorFacts).
+// It returns mirrored=false for an ordinary board task; a mirrored task is
+// read-only unless the supervisor bridge is fully enabled (mirror + bridge +
+// the token secret), because every board action on it would otherwise be
+// refused with mirror_read_only.
+func (b *Bridge) TaskMirror(ctx context.Context, tenantID uuid.UUID, taskID uint64) (bool, string, bool, bool, error) {
+	links, configReader, mirror, commands, board := b.snapshot()
+	if links == nil || configReader == nil || mirror == nil || commands == nil || board == nil {
+		return false, "", true, false, nil
+	}
+	_, found, err := links.GetBoardLinkByTask(ctx, tenantID, BoardSource, store.BoardLinkTicket, taskID)
+	if err != nil {
+		// Fail closed: an unreadable link is not evidence that the task became
+		// board-writable.
+		return true, BoardSource, true, false, err
+	}
+	if !found {
+		return false, "", true, false, nil
+	}
+	config, err := configReader.SuperagentConfig(ctx, tenantID)
+	if err != nil {
+		return true, BoardSource, true, false, err
+	}
+	enabled := config.Mirror && config.Bridge && mirror.Secret != nil
+	return true, BoardSource, !enabled, enabled, nil
+}
+
 // ServeHTTP implements the board surface wrapper.
 func (b *Bridge) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if b.Next == nil {

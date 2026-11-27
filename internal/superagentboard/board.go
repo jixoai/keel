@@ -39,6 +39,12 @@ const (
 	HoldAwaitingApproval = "awaiting_approval"
 )
 
+// ArchivedLabel marks a board task imported from an already terminal Ticket.
+// The mirror writes it through the board log (never through a client label
+// change), so the board's reserved board.* namespace still belongs to the
+// board. The mount layer maps it to TaskView.archived.
+const ArchivedLabel = "board.archived"
+
 // Mirror lease defaults. Design §15.2: claim lease 900s; renew from the
 // assignment heartbeat. The adapter renews only when the remaining lease is
 // below renewBefore, so an idle sync does not append a renewal every tick.

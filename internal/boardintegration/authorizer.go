@@ -275,6 +275,136 @@ func (a *Authorizer) tenantManager(ctx context.Context, principal auth.Principal
 	return held && (scope == access.ScopeTenant || scope == access.ScopeAll)
 }
 
+// ChannelAbilities is the advisory permission probe the Phase 2 JSON contract
+// uses to derive a task's `moves`. It answers the same rules as Authorize but
+// records no denial: probing a viewer's write ability must not append a
+// permission.denied fact on every list read. Enforcement always goes through
+// Authorize; a caller must never treat this as a grant.
+type ChannelAbilities struct {
+	Read   bool
+	Post   bool
+	Label  bool
+	Manage bool
+}
+
+// ChannelAbilities reports what the caller may do in one channel, without
+// record-keeping. A tenant without a relation, an unresolvable subject or an
+// authorization failure yields the zero value (no abilities).
+func (a *Authorizer) ChannelAbilities(ctx context.Context, tenant string, actor protocol.Actor, channel string) ChannelAbilities {
+	if a == nil || a.Bridge == nil || a.Relations == nil {
+		return ChannelAbilities{}
+	}
+	tenantID, err := ValidateTenantUUID(tenant)
+	if err != nil {
+		return ChannelAbilities{}
+	}
+	principal, err := a.Bridge.Principal(ctx, tenantID)
+	if err != nil {
+		return ChannelAbilities{}
+	}
+	if actor.Principal != AccountActorID(principal.AccountID) {
+		return ChannelAbilities{}
+	}
+	if principal.BotID != "" {
+		if actor.Profile == nil || actor.ID != BotActorID(principal.AccountID, principal.BotID) {
+			return ChannelAbilities{}
+		}
+	} else if actor.Profile != nil {
+		return ChannelAbilities{}
+	}
+	return a.channelAbilities(ctx, tenantID, principal, channel)
+}
+
+// channelAbilities is the shared probe. It resolves the effective relation once
+// and applies the same key/scope/relation lattice as authorizePrincipal.
+func (a *Authorizer) channelAbilities(ctx context.Context, tenantID uuid.UUID, principal access.Principal, channel string) ChannelAbilities {
+	if a == nil || a.Bridge == nil || a.Relations == nil {
+		return ChannelAbilities{}
+	}
+	effective, err := a.Bridge.Effective(ctx, principal)
+	if err != nil {
+		return ChannelAbilities{}
+	}
+	if channel == adminChannel {
+		// Channel "*" is administration, not content: only board.manage at
+		// tenant (or all) scope. The task surface never asks this.
+		scope, held := effective.ScopeOf(access.KeyBoardManage)
+		manage := held && (scope == access.ScopeTenant || scope == access.ScopeAll)
+		return ChannelAbilities{Read: manage, Post: manage, Label: manage, Manage: manage}
+	}
+	path := normalizeChannel(channel)
+	if path == "" {
+		return ChannelAbilities{}
+	}
+	evaluation, chosen, err := a.channelRelation(ctx, principal, tenantID, path)
+	if err != nil || chosen == "" {
+		return ChannelAbilities{}
+	}
+	allow := func(permission protocol.Permission) bool {
+		_, scope, _, held := boardKey(effective, permission)
+		if !held {
+			return false
+		}
+		required := relationForPermission(permission)
+		if required == access.RelationNone {
+			return false
+		}
+		return relationHeld(evaluation, required, scope)
+	}
+	return ChannelAbilities{
+		Read:   allow(protocol.PermissionRead),
+		Post:   allow(protocol.PermissionPost),
+		Label:  allow(protocol.PermissionLabel),
+		Manage: allow(protocol.PermissionManage),
+	}
+}
+
+// BoardAbilities is the tenant-scoped board switch a session sees: the three
+// permission keys, with board.manage implying read and write on this surface.
+type BoardAbilities struct {
+	Read   bool
+	Write  bool
+	Manage bool
+}
+
+// BoardAbilities reports the caller's board keys without recording a denial.
+// Manage requires tenant (or all) scope, exactly as the channel "*" rule does.
+func (a *Authorizer) BoardAbilities(ctx context.Context, tenant string, actor protocol.Actor) (BoardAbilities, error) {
+	if a == nil || a.Bridge == nil {
+		return BoardAbilities{}, unavailable("the board authorizer is not wired")
+	}
+	tenantID, err := ValidateTenantUUID(tenant)
+	if err != nil {
+		return BoardAbilities{}, notFound()
+	}
+	principal, err := a.Bridge.Principal(ctx, tenantID)
+	if err != nil {
+		if errors.Is(err, accesswire.ErrNoPrincipal) {
+			return BoardAbilities{}, unauthorized()
+		}
+		return BoardAbilities{}, unavailable("authorization is unavailable")
+	}
+	if actor.Principal != AccountActorID(principal.AccountID) {
+		return BoardAbilities{}, unauthorized()
+	}
+	if principal.BotID != "" {
+		if actor.Profile == nil || actor.ID != BotActorID(principal.AccountID, principal.BotID) {
+			return BoardAbilities{}, unauthorized()
+		}
+	} else if actor.Profile != nil {
+		return BoardAbilities{}, unauthorized()
+	}
+	effective, err := a.Bridge.Effective(ctx, principal)
+	if err != nil {
+		return BoardAbilities{}, unavailable("authorization is unavailable")
+	}
+	manageScope, manageHeld := effective.ScopeOf(access.KeyBoardManage)
+	manage := manageHeld && (manageScope == access.ScopeTenant || manageScope == access.ScopeAll)
+	_, _, _, readHeld := boardKey(effective, protocol.PermissionRead)
+	_, _, _, writeHeld := boardKey(effective, protocol.PermissionPost)
+	return BoardAbilities{Read: readHeld, Write: writeHeld, Manage: manage}, nil
+}
+
 // AuthorizeAnywhere implements server.AnywhereAuthorizer: a board write action
 // that names no channel yet (an attachment upload) is allowed when the caller
 // may write somewhere. The channel relation is checked when the message names

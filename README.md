@@ -206,10 +206,17 @@ env 文件路径：`FDE2E_ENV_PERSONAL`，默认取主仓根目录的 `.env.pers
   每 5s 跟随 tenant flags、durable entry 与凭据指纹，关闭/停用/轮换即暂停，多副本由同一
   durable row 收敛。board 附件的字节走 keel blob store（真实读写，不再 501）。
 - **部署入口**：Dockerfile/`cmd/runtime` 不含 board；board 只在 `keel serve` 中启用。
+- **Phase 2 契约（keel 挂载层，board 模块未改）**：`GET /v1/board/me` 返回当前 actor /
+  account / bot、tenant、`can.board.*` 与可读频道的 can 映射（未认证 401，跨租户只看到本租户）。
+  所有含 task 的 JSON 响应（`/tasks`、`/messages*`、`/threads*`、任务动作、batch）补
+  `moves[]`（唯一动作来源）、`archived`、`mirror{source,readOnly,bridge}`、`origin`；
+  `/sync/entries|status` 合并 keel 的凭据状态，无法测量的 lag 明确为 `null`。SSE 事件、
+  状态码、内容类型与错误体保持原样；`moves` 由频道关系与 board 状态推导，不伪造权限。
 - **superagent 镜像/命令桥**：tenant 文档 `board.superagent.{mirror,bridge,channel}`（默认
   `false/false/"superagent"`）。`mirror=true` 把 Ticket/Assignment/Attention/report 单向投影为
   board 任务/claim/blocked/回复（`board_links` 幂等、`KEEL_SECRET_KEY` 派生确定性 claim token，
-  缺失即 fail closed）；`bridge=true` 让 board 上的 claim/complete/fail/block/unblock/assign/
+  缺失即 fail closed）；归档 Ticket 也导入为只读历史任务（`board.archived=true`，`moves=[]`）；
+  `bridge=true` 让 board 上的 claim/complete/fail/block/unblock/assign/
   cancel 先调 supervisor 既有 API，成功后才写 board。superagent 的 `collab_*` 仍是真值，
   board 不反写；旧 `/superagent` 看板已冻结，Phase 2 15.7 删除。
 

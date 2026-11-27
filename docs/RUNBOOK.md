@@ -103,6 +103,37 @@ export KEEL_BOARD_FILE_TIMEOUT=10s   # 可选；单个入站文件下载超时
 - 跨租户：HTTP 侧 tenant 只来自登录 principal（不读 header/path），A 租户读不到 B 的行；
   数据库侧见 `internal/boardintegration` 的 RLS 测试（restricted role + unset tenant）。
 
+**Phase 2 契约（keel 挂载层，board 模块未改）**
+
+- `GET /v1/board/me`：当前 actor / account / bot、`tenant`、`can.board.{read,write,manage}`、
+  可读频道的 `channels{path:{read,write,manage}}`。未认证 401；跨租户只看到本租户（tenant
+  来自登录 principal，不读 header/path）；board 关闭时和其他路由一样 404 `board_disabled`。
+- `TaskView.moves[]` 是 UI 的唯一动作来源。挂载层按 board 状态、owner/for/claim、当前 actor
+  和频道关系推导，不写 `permission.denied`：
+  - `ready`：`claim`（`for` 为空或匹配当前 actor，需 `board.write`+频道 editor）；owner/manage
+    另有 `block`/`assign`/`needs`/`cancel`。
+  - `claimed`（租约有效）：holder 有 `renew`/`release`/`complete`/`fail`/`block`；owner/manage
+    有 `assign`/`cancel`（board 的 claim 围栏拒绝 owner 在活 claim 上 `block`）。
+  - `blocked`：owner/manage 有 `unblock`/`assign`/`needs`/`cancel`；`failed`：owner/manage 有
+    `reopen`/`cancel`；`waiting`：owner/manage 有 `assign`/`needs`/`cancel`。
+  - 任何非归档、可写频道都有 `reply`（需频道 editor）。租约过期的 claim 按 `ready` 处理，
+    不再提供 token 动作。
+  - `archived=true`、`mirror.readOnly=true`：`moves=[]`。镜像任务在命令桥开启时只保留
+    bridge 真正支持的 `claim`/`complete`/`fail`/`block`/`unblock`/`assign`/`cancel`。
+  - `takeover`、`release.force`、`answer` 在当前 board v0.1.1/keel 没有后端端点，**不**谎报。
+- `archived` 来自镜像写入的 `board.archived=true` 标签（客户端不能写 `board.*`）；归档 Ticket
+  导入为只读历史任务。`mirror{source,readOnly,bridge}` 来自 `source=superagent` +
+  `ticket` + `noSync` 标签与 `board_links`；命令桥未开启/未装配时 `readOnly=true`。
+  `origin{platform,ref}` 对镜像任务指向 superagent ticket。`copies` 暂不提供：board v0.1.1
+  的 message view 只有 `undelivered`，没有 task-level 成功副本列表，mount 层不伪造空数组。
+- `/v1/board/sync/entries|status` 保留 board 形状，合并 keel 的凭据状态
+  （`configured`→`valid`，`missing`/`invalid`→`invalid`，keel 无该 entry→`unknown`）；
+  board v0.1.1 没有可测量的 lag 时间戳，因此 `lag: null`（明确未知），不伪造 `targets`
+  或 0 值。
+- 改写只作用于上述路由的 2xx JSON 响应；SSE、错误状态/错误体、内容类型保持不变。
+  SSE 帧按 board 事件契约**不带** `moves`；客户端合并任务事件时需保留已有 `moves` 或重新读取
+  任务，否则事件后的卡片会退回只读。
+
 **tenant 开关与 sync entries**
 
 ```json
@@ -236,6 +267,9 @@ export KEEL_SECRET_KEY='…'     # 必填；缺失时 mirror/bridge 均 fail clo
 KEEL_TEST_DSN='postgres://…' go test ./internal/boardintegration/ -v
 KEEL_TEST_DSN='postgres://…' go test -race ./internal/boardintegration/
 KEEL_TEST_DSN='postgres://…' go test ./internal/boardintegration/ -run TestBoardStoreRLSUsesTenantSetting -v
+# Phase 2 契约：/me、moves 矩阵、归档导入、sync 凭据合并
+KEEL_TEST_DSN='postgres://…' go test ./internal/boardintegration/ -run 'TestBoardMe|TestTaskMoves|TestBoardJSON|TestSyncEntriesMerge' -v
+KEEL_TEST_DSN='postgres://…' go test ./internal/superagentboard/ -run 'TestMirrorImportsArchived|TestPGBoardMirrorImportsArchived' -v
 go test ./internal/access/ ./internal/accessgate/ ./cmd/keel/
 scripts/binary-size.sh --budget-kb 4096 --base 6ee7fe3
 

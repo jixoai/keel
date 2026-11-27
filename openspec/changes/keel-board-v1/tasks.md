@@ -128,11 +128,24 @@
 
 ## 14. Phase 2：客户端数据与投影
 
+> **服务端契约已交付（keel 挂载层，board v0.1.1 未改）**：`GET /v1/board/me`（actor/account/
+> bot/tenant/can/频道 can）；所有含 task 的 2xx JSON 响应补 `TaskView.moves[]`、`archived`、
+> `mirror{source,readOnly,bridge}`、`origin`；归档 Ticket 导入为只读历史任务；`/sync/entries|
+> status` 合并凭据状态并把不可测的 lag 标为 `null`。SSE 与 board 事件保持原样。
+> 14.1–14.3 的客户端数据层实现仍由 UI lane 完成，本 lane 不勾选。
+
 - [ ] 14.1 实现 `web/src/data/board.ts`：归一化缓存、SSE 增量合并、游标重连、按 cursor 去重、乐观覆盖；fixture 测试。
 - [ ] 14.2 实现 sync 状态数据源：entries/targets/lag/failures/dead letters/credential 状态；fixture 测试权限过滤。
 - [ ] 14.3 实现 watcher/schedule 状态数据源与启停动作；fixture 测试失败/权限。
 
 ## 15. Phase 2：nsh UI
+
+> **依赖状态**：`moves`/`archived`/`mirror`/`origin`、`/v1/board/me` 与 sync 凭据合并已在
+> keel 挂载层实现并有真实 PG 测试（见 §14 注与 `internal/boardintegration/moves_pg_test.go`）；
+> UI 仅渲染服务端 `moves`，不按 `source=`/标签推断。`takeover`/`release.force`/`answer`
+> 没有后端端点，UI 不应提供。**SSE 事件按契约不改写，不带 `moves`**；UI 合并任务事件时
+> 必须保留已缓存的 `moves`（或按任务事件重新读取），否则事件后的卡片会退回只读。
+> 15.1–15.7 仍由 UI lane 实现，本 lane 不勾选。
 
 - [ ] 15.1 实现 BoardQueue：状态 tabs、channel/label/owner/for 过滤、oldest first、分页、行内状态/needs/租约/结果；组件测试。
 - [ ] 15.2 实现 BoardTaskCard：全部动作与二次确认，按 moves 显示；测试每个动作的可见性与参数。
