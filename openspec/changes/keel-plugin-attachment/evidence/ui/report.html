@@ -1,0 +1,844 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<meta name="color-scheme" content="light"/>
+<title>keel-plugin-attachment · 真实浏览器 E2E</title>
+<style>
+  :root{--ink:#1A1C22;--dim:rgba(26,28,34,.72);--faint:rgba(26,28,34,.45);--hair:rgba(26,28,34,.14);
+    --gold:#E9B44C;--goldDeep:#B07E24;--goldSoft:rgba(233,180,76,.12);
+    --ok:#1D7A3E;--okSoft:rgba(29,122,62,.12);--fail:#B3261E;--failSoft:rgba(179,38,30,.12);
+    --bg:#FFFDF7;--card:#FFFFFF;--chrome:#17181D;
+    --ease:cubic-bezier(.22,.61,.36,1);--easeOut:cubic-bezier(.16,1,.3,1);--barH:64px}
+  *{box-sizing:border-box}
+  html.locked{overflow:hidden}
+  body{margin:0;font:15px/1.65 "Space Grotesk","PingFang SC","Hiragino Sans GB",sans-serif;color:var(--ink);background:var(--bg)}
+  main{max-width:960px;margin:0 auto;padding:44px 24px calc(var(--barH) + 56px)}
+  .overline{letter-spacing:.22em;font-size:11px;font-weight:600;color:var(--goldDeep);text-transform:uppercase;margin:0 0 10px}
+  h1{font-size:27px;line-height:1.3;margin:0 0 6px}
+  h3{margin:0;font-size:16px}
+  .meta{color:var(--dim);font-size:13px;margin:0 0 18px}
+  .meta code{background:rgba(26,28,34,.06);padding:1px 6px;border-radius:4px;font-family:"JetBrains Mono",ui-monospace,monospace}
+  .concl{border-left:3px solid var(--gold);padding:12px 16px;background:var(--goldSoft);margin:0 0 20px;border-radius:0 10px 10px 0;font-size:14.5px}
+  .publish{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap;margin:0 0 14px;padding:8px 12px;border-radius:9px;font-size:13px;border:1px solid var(--hair);background:rgba(26,28,34,.025);color:var(--dim)}
+  .publish b{color:var(--ink);font-size:12px;letter-spacing:.06em}
+  .publish a{color:var(--goldDeep);word-break:break-all}
+  .publish.pending{border-color:rgba(179,38,30,.28);background:var(--failSoft)}
+  .dashboard{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px}
+  .stat{border:1px solid var(--hair);border-radius:12px;padding:14px 16px 12px;background:var(--card);transition:border-color .3s var(--ease),transform .3s var(--ease)}
+  .stat:hover{transform:translateY(-1px);border-color:rgba(233,180,76,.55)}
+  .stat b{display:block;font-size:26px;line-height:1.15;color:var(--goldDeep);font-variant-numeric:tabular-nums}
+  .stat b i{font-style:normal;font-size:13px;color:var(--faint);font-weight:600}
+  .stat span{font-size:12px;color:var(--faint)}
+  .stat.ok b{color:var(--ok)}
+  /* 章节时间线 */
+  .timeline{position:relative;padding-left:52px;margin-top:30px}
+  .tl-line{position:absolute;left:17px;top:10px;bottom:10px;width:2px;background:var(--hair);border-radius:1px}
+  .tl-fill{position:absolute;left:17px;top:10px;width:2px;height:0;background:var(--gold);border-radius:1px}
+  .step{position:relative;border:1px solid var(--hair);border-radius:14px;padding:18px 20px;margin:0 0 24px;background:var(--card);transition:border-color .35s var(--ease),box-shadow .35s var(--ease)}
+  .step.current{border-color:rgba(233,180,76,.7);box-shadow:0 6px 24px rgba(233,180,76,.14)}
+  .node{position:absolute;left:-43px;top:20px;width:32px;height:32px;border-radius:50%;background:var(--card);border:2px solid var(--hair);display:flex;align-items:center;justify-content:center;font-size:12.5px;font-weight:700;color:var(--faint);font-variant-numeric:tabular-nums;transition:background .35s var(--ease),border-color .35s var(--ease),color .35s var(--ease),transform .35s var(--ease)}
+  .step.past .node{border-color:var(--gold);color:var(--goldDeep)}
+  .step.current .node{background:var(--gold);border-color:var(--gold);color:#17181D;transform:scale(1.08)}
+  .step header{display:flex;align-items:center;gap:10px;margin-bottom:12px}
+  .badge{margin-left:auto;flex:none;font-size:12px;font-weight:700;padding:2px 11px;border-radius:999px;letter-spacing:.04em}
+  .badge.ok{background:var(--okSoft);color:var(--ok)}
+  .badge.fail{background:var(--failSoft);color:var(--fail)}
+  .badge.mini{font-size:10px;padding:1px 8px}
+  .achips{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:0 0 10px}
+  .achips-label{font-size:10px;font-weight:700;letter-spacing:.12em;color:var(--goldDeep)}
+  .achip{font-size:11px;font-weight:700;font-variant-numeric:tabular-nums;padding:1px 8px;border-radius:999px;background:var(--okSoft);color:var(--ok);cursor:help}
+  .achip.fail{background:var(--failSoft);color:var(--fail)}
+  .anote{margin:0 0 10px;font-size:12.5px;color:var(--dim);border-left:2px solid var(--gold);padding:2px 0 2px 10px}
+  .fields{display:grid;gap:9px;margin:0}
+  .field{display:grid;grid-template-columns:58px 1fr;gap:12px;align-items:start}
+  .field dt{font-size:11px;font-weight:700;letter-spacing:.12em;color:var(--goldDeep);background:var(--goldSoft);border-radius:5px;padding:3px 0;text-align:center;margin-top:2px}
+  .field dd{margin:0;font-size:14px}
+  details.log{margin-top:12px;border:1px solid var(--hair);border-radius:9px;background:rgba(26,28,34,.025)}
+  details.log summary{cursor:pointer;padding:7px 12px;font-size:12px;font-weight:600;color:var(--dim);list-style:none;display:flex;align-items:center;gap:8px;user-select:none}
+  details.log summary::-webkit-details-marker{display:none}
+  details.log summary::before{content:'▸';color:var(--goldDeep);transition:transform .25s var(--ease);display:inline-block}
+  details.log[open] summary::before{transform:rotate(90deg)}
+  pre.logcode{margin:0;padding:2px 12px 10px;font:12px/1.6 "JetBrains Mono",ui-monospace,monospace;color:var(--dim);overflow-x:auto;white-space:pre}
+  pre.logcode::-webkit-scrollbar{height:8px}
+  pre.logcode::-webkit-scrollbar-thumb{background:rgba(26,28,34,.18);border-radius:4px}
+  /* 截图 */
+  .shots{display:grid;gap:12px;margin-top:14px}
+  .shots.multi{grid-template-columns:repeat(auto-fit,minmax(280px,1fr))}
+  figure{margin:0;cursor:zoom-in;border:1px solid var(--hair);border-radius:11px;overflow:hidden;background:var(--card);transition:border-color .3s var(--ease),box-shadow .3s var(--ease)}
+  figure:hover{border-color:rgba(233,180,76,.6);box-shadow:0 6px 20px rgba(26,28,34,.08)}
+  figure:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
+  .imgwrap{position:relative;overflow:hidden;background:#FAF8F0}
+  .imgwrap img{display:block;width:100%;max-height:380px;object-fit:contain;transition:transform .5s var(--ease)}
+  figure:hover .imgwrap img{transform:scale(1.012)}
+  .imgwrap::after{content:'⤢';position:absolute;right:8px;bottom:8px;width:24px;height:24px;border-radius:6px;background:rgba(23,24,29,.72);color:#FFFDF7;font-size:13px;display:flex;align-items:center;justify-content:center;opacity:0;transition:opacity .25s var(--ease);pointer-events:none}
+  figure:hover .imgwrap::after{opacity:1}
+  figcaption{padding:6px 10px;font-size:12px;color:var(--faint);text-align:center;border-top:1px solid var(--hair);background:rgba(26,28,34,.02);font-variant-numeric:tabular-nums}
+  .foot{margin-top:34px;color:var(--faint);font-size:12px;text-align:center;line-height:1.8}
+  .foot code{background:rgba(26,28,34,.05);padding:1px 5px;border-radius:4px}
+  /* 播放条（视频式） */
+  .player{position:fixed;left:0;right:0;bottom:0;z-index:60;height:var(--barH);background:var(--chrome);display:flex;align-items:center;gap:12px;padding:0 16px;box-shadow:0 -6px 24px rgba(26,28,34,.28)}
+  .pp{flex:none;width:40px;height:40px;border-radius:50%;border:0;background:var(--gold);color:#17181D;font-size:13px;cursor:pointer;display:flex;align-items:center;justify-content:center;font-family:inherit;transition:transform .2s var(--ease),background .2s var(--ease)}
+  .pp:hover{transform:scale(1.07);background:#F0C268}
+  .spd{flex:none;background:transparent;border:1px solid rgba(255,253,247,.35);color:rgba(255,253,247,.9);border-radius:7px;padding:4px 9px;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit;font-variant-numeric:tabular-nums;transition:border-color .2s var(--ease)}
+  .spd:hover{border-color:var(--gold)}
+  .cur{flex:none;max-width:264px;min-width:0;display:flex;align-items:center;gap:8px;white-space:nowrap;overflow:hidden;font-size:13px;color:rgba(255,253,247,.92)}
+  .cur .cno{color:var(--gold);font-weight:700;flex:none}
+  .track{position:relative;flex:1;height:26px;cursor:pointer;touch-action:none}
+  .track::before{content:'';position:absolute;left:0;right:0;top:50%;height:4px;transform:translateY(-50%);background:rgba(255,253,247,.16);border-radius:2px}
+  .fill{position:absolute;left:0;top:50%;height:4px;transform:translateY(-50%);width:0;background:var(--gold);border-radius:2px;pointer-events:none}
+  .marker{position:absolute;top:50%;left:0;transform:translate(-50%,-50%);width:12px;height:12px;padding:0;border-radius:50%;background:#565A66;border:2px solid var(--chrome);cursor:pointer;display:none;transition:background .25s var(--ease),transform .2s var(--ease),box-shadow .25s var(--ease)}
+  .marker:hover{transform:translate(-50%,-50%) scale(1.35)}
+  .marker.past{background:var(--gold)}
+  .marker.current{background:var(--gold);box-shadow:0 0 0 3px rgba(233,180,76,.35)}
+  .marker::after{content:attr(data-tip);position:absolute;bottom:20px;left:50%;transform:translateX(-50%);background:var(--bg);color:var(--ink);border:1px solid var(--hair);padding:6px 11px;border-radius:8px;font-size:12px;font-weight:500;line-height:1.4;white-space:nowrap;max-width:58vw;overflow:hidden;text-overflow:ellipsis;opacity:0;pointer-events:none;transition:opacity .2s var(--ease)}
+  .marker:hover::after{opacity:1}
+  .count{flex:none;font-size:12px;color:rgba(255,253,247,.65);font-variant-numeric:tabular-nums;min-width:46px;text-align:right}
+  /* Lightbox 大图 */
+  #lightbox{position:fixed;inset:0;z-index:100;background:rgba(18,19,24,.97);display:none;flex-direction:column}
+  #lightbox.open{display:flex}
+  .lb-top{position:absolute;top:0;left:0;right:0;display:flex;align-items:flex-start;gap:14px;padding:14px 18px;background:linear-gradient(rgba(18,19,24,.85),rgba(18,19,24,0));color:rgba(255,253,247,.92);z-index:5}
+  .lb-meta{display:flex;flex-direction:column;gap:2px;min-width:0}
+  #lb-step{font-size:13px;font-weight:600;color:var(--gold)}
+  #lb-file{font:12px/1.4 "JetBrains Mono",ui-monospace,monospace;color:rgba(255,253,247,.6);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .lb-x{margin-left:auto;flex:none;width:34px;height:34px;border-radius:50%;border:1px solid rgba(255,253,247,.3);background:transparent;color:rgba(255,253,247,.9);font-size:17px;cursor:pointer;font-family:inherit;transition:transform .2s var(--ease),border-color .2s var(--ease)}
+  .lb-x:hover{transform:scale(1.08);border-color:var(--gold)}
+  #lb-stage{flex:1;display:flex;align-items:center;justify-content:center;min-width:0;min-height:0;padding:52px 64px 64px;overflow:hidden}
+  #lb-img{max-width:100%;max-height:100%;cursor:zoom-in;user-select:none;-webkit-user-drag:none;will-change:transform;transition:transform .18s var(--ease)}
+  #lb-img.zoomed{cursor:grab}
+  #lb-img.zoomed:active{cursor:grabbing}
+  .lb-nav{position:absolute;top:50%;transform:translateY(-50%);z-index:5;width:44px;height:44px;border-radius:50%;border:1px solid rgba(255,253,247,.28);background:rgba(18,19,24,.5);color:rgba(255,253,247,.9);font-size:22px;line-height:1;cursor:pointer;font-family:inherit;transition:background .2s var(--ease),color .2s var(--ease),border-color .2s var(--ease)}
+  .lb-nav:hover{background:rgba(233,180,76,.85);color:#17181D;border-color:transparent}
+  .lb-prev{left:16px}
+  .lb-next{right:16px}
+  .lb-bottom{position:absolute;bottom:0;left:0;right:0;display:flex;align-items:center;gap:14px;padding:14px 18px;background:linear-gradient(rgba(18,19,24,0),rgba(18,19,24,.85));color:rgba(255,253,247,.75);font-size:12px;z-index:5}
+  #lb-count{font-variant-numeric:tabular-nums;color:rgba(255,253,247,.9)}
+  .lb-hint{flex:1;text-align:center;color:rgba(255,253,247,.45)}
+  .lb-fit{background:transparent;border:1px solid rgba(255,253,247,.35);color:rgba(255,253,247,.9);border-radius:7px;padding:4px 12px;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit;transition:border-color .2s var(--ease)}
+  .lb-fit:hover{border-color:var(--gold)}
+  .lb-zoom{min-width:44px;text-align:right;font-variant-numeric:tabular-nums}
+
+  /* A6 extension: checks / findings / coverage */
+  details.checks{margin-top:12px;border:1px solid var(--hair);border-radius:9px;background:rgba(26,28,34,.025)}
+  details.checks summary{cursor:pointer;padding:7px 12px;font-size:12px;font-weight:600;color:var(--dim);list-style:none}
+  details.checks summary::-webkit-details-marker{display:none}
+  details.checks summary::before{content:'▸';color:var(--goldDeep);display:inline-block;margin-right:8px;transition:transform .25s var(--ease)}
+  details.checks[open] summary::before{transform:rotate(90deg)}
+  .checkwrap{overflow-x:auto;padding:0 10px 10px}
+  .checkwrap table{width:100%;border-collapse:collapse;font-size:12.5px}
+  .checkwrap th{text-align:left;font-size:10.5px;letter-spacing:.08em;color:var(--faint);padding:4px 6px;border-bottom:1px solid var(--hair)}
+  .checkwrap td{padding:4px 6px;border-bottom:1px solid rgba(26,28,34,.06);vertical-align:top;word-break:break-word}
+  .checkwrap tr.cok td:first-child{color:var(--ok);font-weight:700}
+  .checkwrap tr.cfail td:first-child{color:var(--fail);font-weight:700}
+  .checkwrap tr.cfail{background:var(--failSoft)}
+  .findings,.coverage{margin-top:36px}
+  .findings h2,.coverage h2{font-size:19px;margin:0 0 6px}
+  .finding{border:1px solid var(--hair);border-left:4px solid var(--faint);border-radius:10px;padding:12px 16px;margin:0 0 12px;background:var(--card)}
+  .finding.p0{border-left-color:var(--fail);background:var(--failSoft)}
+  .finding.p1{border-left-color:#C77C12;background:rgba(199,124,18,.07)}
+  .finding.p2{border-left-color:var(--gold)}
+  .finding header{display:flex;align-items:center;gap:10px;margin-bottom:6px}
+  .finding h3{margin:0;font-size:14.5px}
+  .finding p{margin:0 0 6px;font-size:13px;color:var(--dim)}
+  .finding ul{margin:4px 0 0;padding-left:18px;font-size:12px;color:var(--faint)}
+  .sev{flex:none;font-size:10.5px;font-weight:800;letter-spacing:.06em;padding:2px 8px;border-radius:999px;background:var(--fail);color:#fff}
+  .finding.p1 .sev{background:#C77C12}
+  .finding.p2 .sev{background:var(--goldDeep)}
+  .coverage details summary{cursor:pointer;font-size:12.5px;color:var(--dim);margin:8px 0}
+  .covwrap{overflow:auto;max-height:560px;border:1px solid var(--hair);border-radius:10px}
+  .covwrap table{width:100%;border-collapse:collapse;font-size:11.5px}
+  .covwrap th{position:sticky;top:0;background:var(--card);text-align:left;padding:6px 8px;border-bottom:1px solid var(--hair);letter-spacing:.05em;color:var(--faint)}
+  .covwrap td{padding:4px 8px;border-bottom:1px solid rgba(26,28,34,.06);vertical-align:top}
+  .covwrap td.mono{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:10.5px;word-break:break-all}
+  .cstat{font-size:10px;font-weight:700;padding:1px 7px;border-radius:999px;white-space:nowrap}
+  .cstat.covered{background:var(--okSoft);color:var(--ok)}
+  .cstat.exempt{background:rgba(26,28,34,.06);color:var(--dim)}
+  .cstat.uncovered{background:var(--failSoft);color:var(--fail)}
+  .good{color:var(--ok)} .bad{color:var(--fail)}
+
+  .visuals{margin-top:36px}
+  .visuals h2{font-size:19px;margin:0 0 6px}
+  .delta{border:1px solid var(--hair);border-radius:12px;padding:12px 14px;margin:0 0 14px;background:var(--card)}
+  .delta header{display:flex;flex-wrap:wrap;align-items:baseline;gap:10px;margin-bottom:10px}
+  .delta h3{margin:0;font-size:14.5px}
+  .delta code{font-size:10.5px;color:var(--faint);background:rgba(26,28,34,.05);padding:2px 6px;border-radius:4px;word-break:break-all}
+  .deltagrid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,2fr);gap:12px}
+  @media (max-width:720px){.deltagrid{grid-template-columns:1fr}}
+  .side{display:flex;flex-direction:column;gap:8px;min-width:0}
+  .sidetag{font-size:10px;font-weight:800;letter-spacing:.1em;color:var(--faint);text-transform:uppercase}
+  .sidetag.after{color:var(--ok)}
+  .delta figure{margin:0;cursor:zoom-in}
+  .delta .imgwrap img{max-height:260px}
+  .nobefore{border:1px dashed var(--hair);border-radius:9px;padding:18px 14px;font-size:12px;color:var(--faint);background:rgba(26,28,34,.02)}
+
+  .env{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 14px;font-size:11.5px;color:var(--dim)}
+  .env span{background:rgba(26,28,34,.045);border:1px solid var(--hair);border-radius:6px;padding:3px 8px;word-break:break-all}
+  .env b{font-weight:700;color:var(--goldDeep);margin-right:6px;font-size:10px;letter-spacing:.06em;text-transform:uppercase}
+
+  .gate{display:flex;flex-wrap:wrap;align-items:baseline;gap:10px;border-radius:10px;padding:10px 14px;margin:0 0 14px;font-size:13px}
+  .gate b{font-size:14px;letter-spacing:.02em}
+  .gate.fail{background:var(--failSoft);border:1px solid rgba(179,38,30,.35);color:var(--fail)}
+  .gate.pass{background:var(--okSoft);border:1px solid rgba(29,122,62,.35);color:var(--ok)}
+  .gate span{color:var(--dim);font-size:12px}
+  /* 响应式 */
+  @media (max-width:720px){
+    main{padding:32px 16px calc(var(--barH) + 48px)}
+    h1{font-size:22px}
+    .timeline{padding-left:40px}
+    .tl-line,.tl-fill{left:12px}
+    .node{left:-33px;width:28px;height:28px;font-size:11px}
+    .cur{display:none}
+    .player{gap:10px;padding:0 12px}
+    .lb-hint{display:none}
+    #lb-stage{padding:52px 12px 64px}
+  }
+  /* 打印态 */
+  @media print{
+    :root{--barH:0px}
+    .player,#lightbox{display:none!important}
+    body{background:#fff}
+    main{max-width:none;padding:0}
+    .step{break-inside:avoid;box-shadow:none}
+    .imgwrap img{max-height:300px}
+  }
+</style></head><body><main>
+<p class="overline">FDE2E · E2E Verification Report</p>
+<h1>keel-plugin-attachment · 真实浏览器 E2E</h1>
+<p class="meta">keel-plugin-attachment（tasks 3.6 / 5.4 / 5.5） · 2026-11-27 · 冻结基线 <code>/Users/kzf/Development/GitHub/jixoai/fde2e/.worktrees/keel-plugin-attachment-ui@05dad6b01</code></p>
+<p class="concl">9/9 步通过，116/116 条断言通过；P0/P1 = 0；UNCOVERED=0。</p>
+
+<div class="gate pass"><b>A6 判定：通过</b><span>P0/P1 = 0；P2 0 登记。</span></div>
+
+<div class="dashboard">
+    <div class="stat"><b>9</b><span>步骤</span></div>
+    <div class="stat ok"><b>9<i>/9</i></b><span>步骤通过</span></div>
+    <div class="stat ok"><b>116<i>/116</i></b><span>断言通过</span></div>
+    <div class="stat"><b>12</b><span>截图</span></div>
+</div>
+<div class="timeline" id="timeline">
+  <div class="tl-line" aria-hidden="true"></div><div class="tl-fill" id="tl-fill" aria-hidden="true"></div>
+  <section class="step" data-no="1" data-name="上传 → 输入 → canonical AttachmentPart 与模型投递" data-result="PASS" data-ok="1">
+    <div class="node" aria-hidden="true">1</div>
+    <header><h3>上传 → 输入 → canonical AttachmentPart 与模型投递</h3><span class="badge ok">PASS</span></header>
+
+
+    <dl class="fields">
+      <div class="field"><dt>操作</dt><dd>真实 HTTP 上传 PNG/PDF，提交带附件输入，读取 part 与模型请求</dd></div>
+      <div class="field"><dt>预期</dt><dd>原生 image_url + PDF 文本兜底，元数据无字节</dd></div>
+    </dl>
+    <details class="checks" open><summary>断言 21/21</summary><div class="checkwrap"><table><thead><tr><th></th><th>断言</th><th>预期</th><th>实际</th></tr></thead><tbody>
+      <tr class="cok"><td>✓</td><td>tenant A 服务健康</td><td>200</td><td>200</td></tr>
+      <tr class="cok"><td>✓</td><td>bot-operator 预设存在</td><td>present</td><td>5</td></tr>
+      <tr class="cok"><td>✓</td><td>管理员进入 bot-operator</td><td>200</td><td>200</td></tr>
+      <tr class="cok"><td>✓</td><td>创建附件会话 Bot</td><td>201</td><td>201</td></tr>
+      <tr class="cok"><td>✓</td><td>上传 PNG 返回 fileId</td><td>201 + fileId</td><td>201 a521dde5-02f3-4ab9-962c-ab1613f29cf9</td></tr>
+      <tr class="cok"><td>✓</td><td>上传 PDF 返回 fileId</td><td>201 + fileId</td><td>201 3a144c02-536c-4c1f-96cf-086d8a50f8e4</td></tr>
+      <tr class="cok"><td>✓</td><td>创建 Bot 所有的会话</td><td>201 + sessionId</td><td>201</td></tr>
+      <tr class="cok"><td>✓</td><td>提交带附件的输入</td><td>201/202</td><td>201</td></tr>
+      <tr class="cok"><td>✓</td><td>运行结束</td><td>done</td><td>done</td></tr>
+      <tr class="cok"><td>✓</td><td>事件流出现 user.message</td><td>user.message</td><td>user.message</td></tr>
+      <tr class="cok"><td>✓</td><td>事件只存 fileId 与展示元数据</td><td>2 refs, no bytes</td><td>2</td></tr>
+      <tr class="cok"><td>✓</td><td>canonical AttachmentPart 可读</td><td>200</td><td>200</td></tr>
+      <tr class="cok"><td>✓</td><td>part 字段完整</td><td>fileId/mime/kind/size/downloadUrl</td><td>{&quot;fileId&quot;:&quot;a521dde5-02f3-4ab9-962c-ab1613f29cf9&quot;,&quot;mime&quot;:&quot;image/png&quot;,&quot;kind&quot;:&quot;image&quot;,&quot;size&quot;:39037}</td></tr>
+      <tr class="cok"><td>✓</td><td>part 含 thumbStatus 与 delivery</td><td>thumbStatus + delivery(native=false, reason)</td><td>ready / false</td></tr>
+      <tr class="cok"><td>✓</td><td>part 不含字节/base64/CAS 路径</td><td>metadata only</td><td>fileId,name,mime,size,kind,thumbStatus,thumbnailUrl,downloadUrl,delivery</td></tr>
+      <tr class="cok"><td>✓</td><td>缩略图终态 ready</td><td>ready</td><td>ready</td></tr>
+      <tr class="cok"><td>✓</td><td>缩略图可读（owner）</td><td>200 + bytes</td><td>200 10667</td></tr>
+      <tr class="cok"><td>✓</td><td>附件字节可下载（owner）</td><td>200 + bytes</td><td>200 39037</td></tr>
+      <tr class="cok"><td>✓</td><td>模型请求带 PNG 原生 image_url</td><td>image_url data URI</td><td>1</td></tr>
+      <tr class="cok"><td>✓</td><td>PDF 走文本兜底（含 blobId 与 MIME）</td><td>blobId + application/pdf</td><td>1</td></tr>
+      <tr class="cok"><td>✓</td><td>PDF 兜底不带字节</td><td>no file bytes</td><td>no file_data</td></tr>
+    </tbody></table></div></details>
+    <details class="log"><summary>关键日志</summary><pre class="logcode">session=b0f2bae0-1b41-41fd-83af-6aa6b9ab8dc1 seq=1 png=a521dde5-02f3-4ab9-962c-ab1613f29cf9 pdf=3a144c02-536c-4c1f-96cf-086d8a50f8e4</pre></details>
+
+  </section>
+  <section class="step" data-no="2" data-name="浏览器默认附件行（无插件）" data-result="PASS" data-ok="1">
+    <div class="node" aria-hidden="true">2</div>
+    <header><h3>浏览器默认附件行（无插件）</h3><span class="badge ok">PASS</span></header>
+
+
+    <dl class="fields">
+      <div class="field"><dt>操作</dt><dd>登录 → 打开会话，检查默认行、缩略图与下载入口</dd></div>
+      <div class="field"><dt>预期</dt><dd>名称/大小/MIME/缩略图/下载可见，无插件预览</dd></div>
+    </dl>
+    <details class="checks" open><summary>断言 6/6</summary><div class="checkwrap"><table><thead><tr><th></th><th>断言</th><th>预期</th><th>实际</th></tr></thead><tbody>
+      <tr class="cok"><td>✓</td><td>默认行显示 PNG 名称与大小</td><td>name + size</td><td>true</td></tr>
+      <tr class="cok"><td>✓</td><td>默认行显示 PDF 名称与 MIME</td><td>name + mime</td><td>true</td></tr>
+      <tr class="cok"><td>✓</td><td>没有插件预览时只显示默认行</td><td>no plugin preview</td><td>false</td></tr>
+      <tr class="cok"><td>✓</td><td>投递形态如实标注未记录</td><td>delivery note</td><td>true</td></tr>
+      <tr class="cok"><td>✓</td><td>图片缩略图已绘制（naturalWidth &gt; 0，无空白占位）</td><td>complete + naturalWidth &gt; 0</td><td>{&quot;complete&quot;:true,&quot;naturalWidth&quot;:320,&quot;src&quot;:&quot;http://127.0.0.1:13600/v1/files/a521dde5-02f3-4ab9-962c-ab1613f29cf9/thumbnail&quot;}</td></tr>
+      <tr class="cok"><td>✓</td><td>1440 无横向溢出</td><td>doc &lt;= inner</td><td>{&quot;inner&quot;:1440,&quot;doc&quot;:1440,&quot;body&quot;:1440}</td></tr>
+    </tbody></table></div></details>
+
+  <div class="shots">
+    <figure tabindex="0" role="button" aria-label="放大查看 01-default-attachment-row.png"><div class="imgwrap"><img src="screenshots/01-default-attachment-row.png" data-file="01-default-attachment-row.png" alt="01-default-attachment-row.png" loading="lazy" draggable="false"/></div><figcaption>01-default-attachment-row.png</figcaption></figure>
+  </div>
+  </section>
+  <section class="step" data-no="3" data-name="安装预览插件并渲染" data-result="PASS" data-ok="1">
+    <div class="node" aria-hidden="true">3</div>
+    <header><h3>安装预览插件并渲染</h3><span class="badge ok">PASS</span></header>
+
+
+    <dl class="fields">
+      <div class="field"><dt>操作</dt><dd>安装 + durabile 审批 + 启用，重载页面打开会话</dd></div>
+      <div class="field"><dt>预期</dt><dd>审批展示认领；chunk 渲染且默认事实仍在</dd></div>
+    </dl>
+    <details class="checks" open><summary>断言 7/7</summary><div class="checkwrap"><table><thead><tr><th></th><th>断言</th><th>预期</th><th>实际</th></tr></thead><tbody>
+      <tr class="cok"><td>✓</td><td>安装返回 202 审批并获批</td><td>202 → 200 → 201</td><td>202/200/201</td></tr>
+      <tr class="cok"><td>✓</td><td>审批文本展示附件认领</td><td>slot + part + mime</td><td>Install the plugin package /Users/kzf/Development/GitHub/jixoai/fde2e/.worktrees/keel-plugin-attachment-ui/.agents/reports/keel/attachment-e2e-2026-11-27-150906/e2e-plugins/e2e.attachment-preview? Ins</td></tr>
+      <tr class="cok"><td>✓</td><td>启用返回 200</td><td>200</td><td>200</td></tr>
+      <tr class="cok"><td>✓</td><td>inventory 投影带 part/mime</td><td>part=attachment, mime=image/png</td><td>{&quot;slot&quot;:&quot;keel.ui.message-part&quot;,&quot;form&quot;:&quot;chunk&quot;,&quot;entry&quot;:&quot;ui/preview.js&quot;,&quot;part&quot;:&quot;attachment&quot;,&quot;mime&quot;:[&quot;image/png&quot;],&quot;plugin&quot;:&quot;e2e.attachment-preview&quot;}</td></tr>
+      <tr class="cok"><td>✓</td><td>插件预览在 PNG 行渲染</td><td>preview text</td><td>true</td></tr>
+      <tr class="cok"><td>✓</td><td>默认事实与下载入口仍可见</td><td>name + download</td><td>true</td></tr>
+      <tr class="cok"><td>✓</td><td>PDF 行不受 PNG 插件影响</td><td>no preview on PDF</td><td>false</td></tr>
+    </tbody></table></div></details>
+
+  <div class="shots">
+    <figure tabindex="0" role="button" aria-label="放大查看 02-plugin-preview.png"><div class="imgwrap"><img src="screenshots/02-plugin-preview.png" data-file="02-plugin-preview.png" alt="02-plugin-preview.png" loading="lazy" draggable="false"/></div><figcaption>02-plugin-preview.png</figcaption></figure>
+  </div>
+  </section>
+  <section class="step" data-no="4" data-name="停用插件 → 回退默认行" data-result="PASS" data-ok="1">
+    <div class="node" aria-hidden="true">4</div>
+    <header><h3>停用插件 → 回退默认行</h3><span class="badge ok">PASS</span></header>
+
+
+    <dl class="fields">
+      <div class="field"><dt>操作</dt><dd>停用 + 重载，检查预览撤销与默认行恢复</dd></div>
+      <div class="field"><dt>预期</dt><dd>无预览、无失败面，默认行可用</dd></div>
+    </dl>
+    <details class="checks" open><summary>断言 6/6</summary><div class="checkwrap"><table><thead><tr><th></th><th>断言</th><th>预期</th><th>实际</th></tr></thead><tbody>
+      <tr class="cok"><td>✓</td><td>停用返回 200</td><td>200</td><td>200</td></tr>
+      <tr class="cok"><td>✓</td><td>inventory 状态 disabled</td><td>disabled</td><td>disabled</td></tr>
+      <tr class="cok"><td>✓</td><td>预览随停用撤销</td><td>no preview</td><td>false</td></tr>
+      <tr class="cok"><td>✓</td><td>默认行恢复</td><td>name + download</td><td>true</td></tr>
+      <tr class="cok"><td>✓</td><td>没有残留插件失败面</td><td>0 failures</td><td>0</td></tr>
+      <tr class="cok"><td>✓</td><td>卸载返回 200</td><td>200</td><td>200</td></tr>
+    </tbody></table></div></details>
+
+  <div class="shots">
+    <figure tabindex="0" role="button" aria-label="放大查看 03-disabled-default-row.png"><div class="imgwrap"><img src="screenshots/03-disabled-default-row.png" data-file="03-disabled-default-row.png" alt="03-disabled-default-row.png" loading="lazy" draggable="false"/></div><figcaption>03-disabled-default-row.png</figcaption></figure>
+  </div>
+  </section>
+  <section class="step" data-no="5" data-name="预览抛错 → 回退且隔离" data-result="PASS" data-ok="1">
+    <div class="node" aria-hidden="true">5</div>
+    <header><h3>预览抛错 → 回退且隔离</h3><span class="badge ok">PASS</span></header>
+
+
+    <dl class="fields">
+      <div class="field"><dt>操作</dt><dd>安装抛错插件，重载检查失败提示与默认行</dd></div>
+      <div class="field"><dt>预期</dt><dd>可解释失败；PDF 行不受影响</dd></div>
+    </dl>
+    <details class="checks" open><summary>断言 6/6</summary><div class="checkwrap"><table><thead><tr><th></th><th>断言</th><th>预期</th><th>实际</th></tr></thead><tbody>
+      <tr class="cok"><td>✓</td><td>坏渲染器安装成功</td><td>201</td><td>201</td></tr>
+      <tr class="cok"><td>✓</td><td>坏渲染器启用成功</td><td>200</td><td>200</td></tr>
+      <tr class="cok"><td>✓</td><td>渲染抛错显示中文失败面</td><td>附件预览失败 + reason</td><td>true</td></tr>
+      <tr class="cok"><td>✓</td><td>不把技术码当主文案</td><td>no ERR_PLUGIN</td><td>false</td></tr>
+      <tr class="cok"><td>✓</td><td>默认行保留</td><td>name + download</td><td>true</td></tr>
+      <tr class="cok"><td>✓</td><td>单个失败不影响其他附件</td><td>PDF row clean</td><td>发布说明.pdf
+1 KB
+application/pdf
+下载
+本次投递形态未记录（attempt 结果不随消息存储）</td></tr>
+    </tbody></table></div></details>
+
+  <div class="shots">
+    <figure tabindex="0" role="button" aria-label="放大查看 04-preview-failure-fallback.png"><div class="imgwrap"><img src="screenshots/04-preview-failure-fallback.png" data-file="04-preview-failure-fallback.png" alt="04-preview-failure-fallback.png" loading="lazy" draggable="false"/></div><figcaption>04-preview-failure-fallback.png</figcaption></figure>
+  </div>
+  </section>
+  <section class="step" data-no="6" data-name="reader 无 file.read → 无权限态" data-result="PASS" data-ok="1">
+    <div class="node" aria-hidden="true">6</div>
+    <header><h3>reader 无 file.read → 无权限态</h3><span class="badge ok">PASS</span></header>
+
+
+    <dl class="fields">
+      <div class="field"><dt>操作</dt><dd>建组/账号/会话，reader 打开会话并请求附件</dd></div>
+      <div class="field"><dt>预期</dt><dd>元数据可见；缩略图/下载 403；UI 无权限态</dd></div>
+    </dl>
+    <details class="checks" open><summary>断言 26/26</summary><div class="checkwrap"><table><thead><tr><th></th><th>断言</th><th>预期</th><th>实际</th></tr></thead><tbody>
+      <tr class="cok"><td>✓</td><td>创建 reader 权限组</td><td>201 + groupId</td><td>201</td></tr>
+      <tr class="cok"><td>✓</td><td>授予 session.read@own</td><td>200</td><td>200</td></tr>
+      <tr class="cok"><td>✓</td><td>授予 session.write@own</td><td>200</td><td>200</td></tr>
+      <tr class="cok"><td>✓</td><td>授予 app.read@tenant</td><td>200</td><td>200</td></tr>
+      <tr class="cok"><td>✓</td><td>授予 model.read@tenant</td><td>200</td><td>200</td></tr>
+      <tr class="cok"><td>✓</td><td>授予 plugin.read@tenant</td><td>200</td><td>200</td></tr>
+      <tr class="cok"><td>✓</td><td>授予 bot.read@own</td><td>200</td><td>200</td></tr>
+      <tr class="cok"><td>✓</td><td>授予 bot.manage@own</td><td>200</td><td>200</td></tr>
+      <tr class="cok"><td>✓</td><td>授予 bot.invoke@own</td><td>200</td><td>200</td></tr>
+      <tr class="cok"><td>✓</td><td>创建 reader 账号</td><td>201 + accountId</td><td>201</td></tr>
+      <tr class="cok"><td>✓</td><td>reader 入组</td><td>200</td><td>200</td></tr>
+      <tr class="cok"><td>✓</td><td>创建 reader 的 Bot</td><td>201</td><td>201</td></tr>
+      <tr class="cok"><td>✓</td><td>reader 登录</td><td>200</td><td>200</td></tr>
+      <tr class="cok"><td>✓</td><td>reader 有 session.read、无 file.read</td><td>session.read=own, file.read absent</td><td>{&quot;session&quot;:&quot;own&quot;}</td></tr>
+      <tr class="cok"><td>✓</td><td>reader 创建自己的 Bot 会话</td><td>201</td><td>201</td></tr>
+      <tr class="cok"><td>✓</td><td>管理员向 reader 会话提交附件</td><td>201/202</td><td>201</td></tr>
+      <tr class="cok"><td>✓</td><td>reader 会话有 user.message</td><td>seq</td><td>1</td></tr>
+      <tr class="cok"><td>✓</td><td>reader 可读附件元数据（session.read）</td><td>200</td><td>200</td></tr>
+      <tr class="cok"><td>✓</td><td>元数据不含字节</td><td>metadata only</td><td>fileId,name,mime,size,kind,thumbStatus,thumbnailUrl,downloadUrl,delivery</td></tr>
+      <tr class="cok"><td>✓</td><td>reader 下载被拒（缺 file.read）</td><td>403</td><td>403</td></tr>
+      <tr class="cok"><td>✓</td><td>拒绝响应不含 PNG 字节</td><td>no bytes</td><td>application/json; charset=utf-8</td></tr>
+      <tr class="cok"><td>✓</td><td>reader 缩略图被拒</td><td>403</td><td>403</td></tr>
+      <tr class="cok"><td>✓</td><td>UI 显示附件无权限态</td><td>no-permission alert</td><td>true</td></tr>
+      <tr class="cok"><td>✓</td><td>无权限时仍可见名称与大小</td><td>name + size</td><td>true</td></tr>
+      <tr class="cok"><td>✓</td><td>下载入口显示无权限且禁用</td><td>disabled download</td><td>true</td></tr>
+      <tr class="cok"><td>✓</td><td>页面没有缩略图字节</td><td>no thumbnail img</td><td>0</td></tr>
+    </tbody></table></div></details>
+
+  <div class="shots">
+    <figure tabindex="0" role="button" aria-label="放大查看 05-reader-no-file-read.png"><div class="imgwrap"><img src="screenshots/05-reader-no-file-read.png" data-file="05-reader-no-file-read.png" alt="05-reader-no-file-read.png" loading="lazy" draggable="false"/></div><figcaption>05-reader-no-file-read.png</figcaption></figure>
+  </div>
+  </section>
+  <section class="step" data-no="7" data-name="outsider 无 session.read → 不泄露" data-result="PASS" data-ok="1">
+    <div class="node" aria-hidden="true">7</div>
+    <header><h3>outsider 无 session.read → 不泄露</h3><span class="badge ok">PASS</span></header>
+
+
+    <dl class="fields">
+      <div class="field"><dt>操作</dt><dd>登录无权限账号，请求会话/附件/字节</dd></div>
+      <div class="field"><dt>预期</dt><dd>403；UI 不展示会话或附件内容</dd></div>
+    </dl>
+    <details class="checks" open><summary>断言 10/10</summary><div class="checkwrap"><table><thead><tr><th></th><th>断言</th><th>预期</th><th>实际</th></tr></thead><tbody>
+      <tr class="cok"><td>✓</td><td>创建无权限账号</td><td>201</td><td>201</td></tr>
+      <tr class="cok"><td>✓</td><td>outsider 登录</td><td>200</td><td>200</td></tr>
+      <tr class="cok"><td>✓</td><td>无 session.read 不能列会话</td><td>403</td><td>403</td></tr>
+      <tr class="cok"><td>✓</td><td>拒绝原因说明 session.read</td><td>session.read</td><td>session.read</td></tr>
+      <tr class="cok"><td>✓</td><td>无 session.read 不能读事件</td><td>403</td><td>403</td></tr>
+      <tr class="cok"><td>✓</td><td>无 session.read 不能读附件投影</td><td>403</td><td>403</td></tr>
+      <tr class="cok"><td>✓</td><td>无 session.read 不能读字节</td><td>403</td><td>403</td></tr>
+      <tr class="cok"><td>✓</td><td>拒绝响应不含附件名/字节</td><td>no name/bytes</td><td>403</td></tr>
+      <tr class="cok"><td>✓</td><td>UI 不展示会话/附件内容</td><td>no attachment text</td><td>false</td></tr>
+      <tr class="cok"><td>✓</td><td>UI 显示真实权限态而非登录失败</td><td>permission face, no login gate</td><td>会话列表加载失败
+无权限读取会话（缺少
+session.read）。
+重试
+Keel
+下午好，我是 Keel
+发送一条消息，Keel 会在这里开始工作。
+运行中可以补充引导，需要时再处理审批。
+帮我总结一下这周的发布准备情况
+检查三个服务的健康状态
+把行动项按负责人分组
+​
+给 Keel 发消息，空闲时直接开始…
+队列
+引导
+空闲发送直接开始
+登录成功，但未能读取服务能力，交互界面暂以
+文本显示。</td></tr>
+    </tbody></table></div></details>
+
+  <div class="shots">
+    <figure tabindex="0" role="button" aria-label="放大查看 06-outsider-no-session-read.png"><div class="imgwrap"><img src="screenshots/06-outsider-no-session-read.png" data-file="06-outsider-no-session-read.png" alt="06-outsider-no-session-read.png" loading="lazy" draggable="false"/></div><figcaption>06-outsider-no-session-read.png</figcaption></figure>
+  </div>
+  </section>
+  <section class="step" data-no="8" data-name="跨租户：租户 B 读租户 A 附件" data-result="PASS" data-ok="1">
+    <div class="node" aria-hidden="true">8</div>
+    <header><h3>跨租户：租户 B 读租户 A 附件</h3><span class="badge ok">PASS</span></header>
+
+
+    <dl class="fields">
+      <div class="field"><dt>操作</dt><dd>租户 B 登录，读 A 的文件/缩略图/part，含伪造租户头</dd></div>
+      <div class="field"><dt>预期</dt><dd>全部 404；对称检查 A 读 B 也 404</dd></div>
+    </dl>
+    <details class="checks" open><summary>断言 13/13</summary><div class="checkwrap"><table><thead><tr><th></th><th>断言</th><th>预期</th><th>实际</th></tr></thead><tbody>
+      <tr class="cok"><td>✓</td><td>租户 B 登录</td><td>200 tenantId=cc9390c1-c5a9-4894-a870-7a0fd40422fa</td><td>200 cc9390c1-c5a9-4894-a870-7a0fd40422fa</td></tr>
+      <tr class="cok"><td>✓</td><td>租户 B 上传自己的文件</td><td>201</td><td>201</td></tr>
+      <tr class="cok"><td>✓</td><td>租户 B 读自己的文件</td><td>200 + bytes</td><td>200 39037</td></tr>
+      <tr class="cok"><td>✓</td><td>租户 B 读租户 A 附件 → 404</td><td>404</td><td>404</td></tr>
+      <tr class="cok"><td>✓</td><td>租户 B 读租户 A 缩略图 → 404</td><td>404</td><td>404</td></tr>
+      <tr class="cok"><td>✓</td><td>租户 B 读租户 A 附件 part → 404</td><td>404</td><td>404</td></tr>
+      <tr class="cok"><td>✓</td><td>伪造 X-Tenant-ID 仍 404</td><td>404</td><td>404</td></tr>
+      <tr class="cok"><td>✓</td><td>租户 A 读租户 B 文件 → 404（对称）</td><td>404</td><td>404</td></tr>
+      <tr class="cok"><td>✓</td><td>跨租户响应无字节</td><td>no bytes</td><td>application/json; charset=utf-8</td></tr>
+      <tr class="cok"><td>✓</td><td>浏览器（租户 B 会话）打开租户 A 附件 → 404</td><td>404</td><td>404</td></tr>
+      <tr class="cok"><td>✓</td><td>浏览器 404 页不泄露字节</td><td>error page</td><td>{&quot;error&quot;:&quot;store: blob not found&quot;}</td></tr>
+      <tr class="cok"><td>✓</td><td>浏览器租户 B 缩略图 → 404</td><td>404</td><td>404</td></tr>
+      <tr class="cok"><td>✓</td><td>浏览器租户 B 缩略图 404 页不泄露字节</td><td>no bytes</td><td>{&quot;error&quot;:&quot;store: blob not found&quot;}</td></tr>
+    </tbody></table></div></details>
+
+  <div class="shots multi">
+    <figure tabindex="0" role="button" aria-label="放大查看 07-tenant-b-file-404.png"><div class="imgwrap"><img src="screenshots/07-tenant-b-file-404.png" data-file="07-tenant-b-file-404.png" alt="07-tenant-b-file-404.png" loading="lazy" draggable="false"/></div><figcaption>07-tenant-b-file-404.png</figcaption></figure>
+    <figure tabindex="0" role="button" aria-label="放大查看 08-tenant-b-thumbnail-404.png"><div class="imgwrap"><img src="screenshots/08-tenant-b-thumbnail-404.png" data-file="08-tenant-b-thumbnail-404.png" alt="08-tenant-b-thumbnail-404.png" loading="lazy" draggable="false"/></div><figcaption>08-tenant-b-thumbnail-404.png</figcaption></figure>
+  </div>
+  </section>
+  <section class="step" data-no="9" data-name="390/768/1024/1440 布局走查" data-result="PASS" data-ok="1">
+    <div class="node" aria-hidden="true">9</div>
+    <header><h3>390/768/1024/1440 布局走查</h3><span class="badge ok">PASS</span></header>
+
+
+    <dl class="fields">
+      <div class="field"><dt>操作</dt><dd>四个视口打开附件会话，测量溢出与行框</dd></div>
+      <div class="field"><dt>预期</dt><dd>无横向溢出，附件行在视口内</dd></div>
+    </dl>
+    <details class="checks" open><summary>断言 21/21</summary><div class="checkwrap"><table><thead><tr><th></th><th>断言</th><th>预期</th><th>实际</th></tr></thead><tbody>
+      <tr class="cok"><td>✓</td><td>布局走查前重新安装预览插件</td><td>201</td><td>201</td></tr>
+      <tr class="cok"><td>✓</td><td>布局走查前重新启用预览插件</td><td>200</td><td>200</td></tr>
+      <tr class="cok"><td>✓</td><td>布局走查前 inventory 带附件贡献</td><td>part=attachment</td><td>{&quot;slot&quot;:&quot;keel.ui.message-part&quot;,&quot;form&quot;:&quot;chunk&quot;,&quot;entry&quot;:&quot;ui/preview.js&quot;,&quot;part&quot;:&quot;attachment&quot;,&quot;mime&quot;:[&quot;image/png&quot;],&quot;plugin&quot;:&quot;e2e.attachment-preview&quot;}</td></tr>
+      <tr class="cok"><td>✓</td><td>390: 插件预览在场</td><td>preview text</td><td>true</td></tr>
+      <tr class="cok"><td>✓</td><td>390: 无横向溢出</td><td>doc &lt;= inner</td><td>{&quot;inner&quot;:390,&quot;doc&quot;:390,&quot;body&quot;:390}</td></tr>
+      <tr class="cok"><td>✓</td><td>390: 附件行在视口内</td><td>inside viewport</td><td>{&quot;x&quot;:54,&quot;y&quot;:89,&quot;width&quot;:320,&quot;height&quot;:275}</td></tr>
+      <tr class="cok"><td>✓</td><td>390: 缩略图已绘制</td><td>complete + naturalWidth &gt; 0</td><td>{&quot;complete&quot;:true,&quot;naturalWidth&quot;:320}</td></tr>
+      <tr class="cok"><td>✓</td><td>768: 插件预览在场</td><td>preview text</td><td>true</td></tr>
+      <tr class="cok"><td>✓</td><td>768: 无横向溢出</td><td>doc &lt;= inner</td><td>{&quot;inner&quot;:768,&quot;doc&quot;:768,&quot;body&quot;:768}</td></tr>
+      <tr class="cok"><td>✓</td><td>768: 附件行在视口内</td><td>inside viewport</td><td>{&quot;x&quot;:432,&quot;y&quot;:325,&quot;width&quot;:320,&quot;height&quot;:275}</td></tr>
+      <tr class="cok"><td>✓</td><td>768: 缩略图已绘制</td><td>complete + naturalWidth &gt; 0</td><td>{&quot;complete&quot;:true,&quot;naturalWidth&quot;:320}</td></tr>
+      <tr class="cok"><td>✓</td><td>1024: 插件预览在场</td><td>preview text</td><td>true</td></tr>
+      <tr class="cok"><td>✓</td><td>1024: 无横向溢出</td><td>doc &lt;= inner</td><td>{&quot;inner&quot;:1024,&quot;doc&quot;:1024,&quot;body&quot;:1024}</td></tr>
+      <tr class="cok"><td>✓</td><td>1024: 附件行在视口内</td><td>inside viewport</td><td>{&quot;x&quot;:688,&quot;y&quot;:101,&quot;width&quot;:320,&quot;height&quot;:275}</td></tr>
+      <tr class="cok"><td>✓</td><td>1024: 缩略图已绘制</td><td>complete + naturalWidth &gt; 0</td><td>{&quot;complete&quot;:true,&quot;naturalWidth&quot;:320}</td></tr>
+      <tr class="cok"><td>✓</td><td>1440: 插件预览在场</td><td>preview text</td><td>true</td></tr>
+      <tr class="cok"><td>✓</td><td>1440: 无横向溢出</td><td>doc &lt;= inner</td><td>{&quot;inner&quot;:1440,&quot;doc&quot;:1440,&quot;body&quot;:1440}</td></tr>
+      <tr class="cok"><td>✓</td><td>1440: 附件行在视口内</td><td>inside viewport</td><td>{&quot;x&quot;:1056,&quot;y&quot;:201,&quot;width&quot;:320,&quot;height&quot;:275}</td></tr>
+      <tr class="cok"><td>✓</td><td>1440: 缩略图已绘制</td><td>complete + naturalWidth &gt; 0</td><td>{&quot;complete&quot;:true,&quot;naturalWidth&quot;:320}</td></tr>
+      <tr class="cok"><td>✓</td><td>布局走查后停用预览插件</td><td>200</td><td>200</td></tr>
+      <tr class="cok"><td>✓</td><td>布局走查后卸载预览插件</td><td>200</td><td>200</td></tr>
+    </tbody></table></div></details>
+
+  <div class="shots multi">
+    <figure tabindex="0" role="button" aria-label="放大查看 09-layout-390.png"><div class="imgwrap"><img src="screenshots/09-layout-390.png" data-file="09-layout-390.png" alt="09-layout-390.png" loading="lazy" draggable="false"/></div><figcaption>09-layout-390.png</figcaption></figure>
+    <figure tabindex="0" role="button" aria-label="放大查看 10-layout-768.png"><div class="imgwrap"><img src="screenshots/10-layout-768.png" data-file="10-layout-768.png" alt="10-layout-768.png" loading="lazy" draggable="false"/></div><figcaption>10-layout-768.png</figcaption></figure>
+    <figure tabindex="0" role="button" aria-label="放大查看 11-layout-1024.png"><div class="imgwrap"><img src="screenshots/11-layout-1024.png" data-file="11-layout-1024.png" alt="11-layout-1024.png" loading="lazy" draggable="false"/></div><figcaption>11-layout-1024.png</figcaption></figure>
+    <figure tabindex="0" role="button" aria-label="放大查看 12-layout-1440.png"><div class="imgwrap"><img src="screenshots/12-layout-1440.png" data-file="12-layout-1440.png" alt="12-layout-1440.png" loading="lazy" draggable="false"/></div><figcaption>12-layout-1440.png</figcaption></figure>
+  </div>
+  </section>
+</div>
+
+<section class="coverage"><p class="overline">Changed files</p><h2>改动文件覆盖表</h2><p class="meta">基线 <code>8916393</code> · 46 个文件 · COVERED 26 · EXEMPT 20 · <b class="good">UNCOVERED 0</b></p><details><summary>展开 46 行</summary><div class="covwrap"><table><thead><tr><th>文件</th><th>变更</th><th>状态</th><th>面</th><th>证据</th></tr></thead><tbody>
+      <tr><td class="mono">openspec/changes/keel-plugin-attachment/evidence/nsh-check.txt</td><td>changed</td><td><span class="cstat exempt">EXEMPT</span></td><td>change 文档/证据</td><td>EXEMPT：显式白名单</td></tr>
+      <tr><td class="mono">openspec/changes/keel-plugin-attachment/evidence/nsh-test-tui.txt</td><td>changed</td><td><span class="cstat exempt">EXEMPT</span></td><td>change 文档/证据</td><td>EXEMPT：显式白名单</td></tr>
+      <tr><td class="mono">openspec/changes/keel-plugin-attachment/evidence/ui/screenshots/01-default-attachment-row.png</td><td>changed</td><td><span class="cstat exempt">EXEMPT</span></td><td>change 文档/证据</td><td>EXEMPT：显式白名单</td></tr>
+      <tr><td class="mono">openspec/changes/keel-plugin-attachment/evidence/ui/screenshots/02-plugin-preview.png</td><td>changed</td><td><span class="cstat exempt">EXEMPT</span></td><td>change 文档/证据</td><td>EXEMPT：显式白名单</td></tr>
+      <tr><td class="mono">openspec/changes/keel-plugin-attachment/evidence/ui/screenshots/03-disabled-default-row.png</td><td>changed</td><td><span class="cstat exempt">EXEMPT</span></td><td>change 文档/证据</td><td>EXEMPT：显式白名单</td></tr>
+      <tr><td class="mono">openspec/changes/keel-plugin-attachment/evidence/ui/screenshots/04-preview-failure-fallback.png</td><td>changed</td><td><span class="cstat exempt">EXEMPT</span></td><td>change 文档/证据</td><td>EXEMPT：显式白名单</td></tr>
+      <tr><td class="mono">openspec/changes/keel-plugin-attachment/evidence/ui/screenshots/05-reader-no-file-read.png</td><td>changed</td><td><span class="cstat exempt">EXEMPT</span></td><td>change 文档/证据</td><td>EXEMPT：显式白名单</td></tr>
+      <tr><td class="mono">openspec/changes/keel-plugin-attachment/evidence/ui/screenshots/06-outsider-no-session-read.png</td><td>changed</td><td><span class="cstat exempt">EXEMPT</span></td><td>change 文档/证据</td><td>EXEMPT：显式白名单</td></tr>
+      <tr><td class="mono">openspec/changes/keel-plugin-attachment/evidence/ui/screenshots/07-tenant-b-file-404.png</td><td>changed</td><td><span class="cstat exempt">EXEMPT</span></td><td>change 文档/证据</td><td>EXEMPT：显式白名单</td></tr>
+      <tr><td class="mono">openspec/changes/keel-plugin-attachment/evidence/ui/screenshots/08-tenant-b-thumbnail-404.png</td><td>changed</td><td><span class="cstat exempt">EXEMPT</span></td><td>change 文档/证据</td><td>EXEMPT：显式白名单</td></tr>
+      <tr><td class="mono">openspec/changes/keel-plugin-attachment/evidence/ui/screenshots/09-layout-390.png</td><td>changed</td><td><span class="cstat exempt">EXEMPT</span></td><td>change 文档/证据</td><td>EXEMPT：显式白名单</td></tr>
+      <tr><td class="mono">openspec/changes/keel-plugin-attachment/evidence/ui/screenshots/10-layout-768.png</td><td>changed</td><td><span class="cstat exempt">EXEMPT</span></td><td>change 文档/证据</td><td>EXEMPT：显式白名单</td></tr>
+      <tr><td class="mono">openspec/changes/keel-plugin-attachment/evidence/ui/screenshots/11-layout-1024.png</td><td>changed</td><td><span class="cstat exempt">EXEMPT</span></td><td>change 文档/证据</td><td>EXEMPT：显式白名单</td></tr>
+      <tr><td class="mono">openspec/changes/keel-plugin-attachment/evidence/ui/screenshots/12-layout-1440.png</td><td>changed</td><td><span class="cstat exempt">EXEMPT</span></td><td>change 文档/证据</td><td>EXEMPT：显式白名单</td></tr>
+      <tr><td class="mono">openspec/changes/keel-plugin-attachment/evidence/web-build.txt</td><td>changed</td><td><span class="cstat exempt">EXEMPT</span></td><td>change 文档/证据</td><td>EXEMPT：显式白名单</td></tr>
+      <tr><td class="mono">openspec/changes/keel-plugin-attachment/tasks.md</td><td>changed</td><td><span class="cstat exempt">EXEMPT</span></td><td>change 文档/证据</td><td>EXEMPT：显式白名单</td></tr>
+      <tr><td class="mono">scripts/keel-attachment-e2e/e2e.mjs</td><td>changed</td><td><span class="cstat exempt">EXEMPT</span></td><td>E2E 运行器（证据生产者）</td><td>EXEMPT：显式白名单</td></tr>
+      <tr><td class="mono">scripts/keel-attachment-e2e/run.sh</td><td>changed</td><td><span class="cstat exempt">EXEMPT</span></td><td>E2E 运行器（证据生产者）</td><td>EXEMPT：显式白名单</td></tr>
+      <tr><td class="mono">scripts/keel-attachment-e2e/scripted-model.mjs</td><td>changed</td><td><span class="cstat exempt">EXEMPT</span></td><td>E2E 运行器（证据生产者）</td><td>EXEMPT：显式白名单</td></tr>
+      <tr><td class="mono">scripts/keel-attachment-e2e/seed-tenant/main.go</td><td>changed</td><td><span class="cstat exempt">EXEMPT</span></td><td>E2E 运行器（证据生产者）</td><td>EXEMPT：显式白名单</td></tr>
+      <tr><td class="mono">web/src/data/attachment-link.test.ts</td><td>changed</td><td><span class="cstat covered">COVERED</span></td><td>同源策略单测</td><td>nsh test --target tui</td></tr>
+      <tr><td class="mono">web/src/data/attachment-link.ts</td><td>changed</td><td><span class="cstat covered">COVERED</span></td><td>同源下载/打开入口</td><td>步骤 2、8</td></tr>
+      <tr><td class="mono">web/src/data/attachments.test.ts</td><td>changed</td><td><span class="cstat covered">COVERED</span></td><td>附件投影状态/刷新/去重单测</td><td>nsh test --target tui</td></tr>
+      <tr><td class="mono">web/src/data/attachments.ts</td><td>changed</td><td><span class="cstat covered">COVERED</span></td><td>AttachmentPart 读取/缓存/权限</td><td>步骤 1、6</td></tr>
+      <tr><td class="mono">web/src/data/contract.ts</td><td>changed</td><td><span class="cstat covered">COVERED</span></td><td>AttachmentPart 契约</td><td>步骤 1、2</td></tr>
+      <tr><td class="mono">web/src/data/fixture.ts</td><td>changed</td><td><span class="cstat covered">COVERED</span></td><td>演示数据（插件/附件）</td><td>TUI 测试</td></tr>
+      <tr><td class="mono">web/src/data/http.ts</td><td>changed</td><td><span class="cstat covered">COVERED</span></td><td>part 路由客户端</td><td>步骤 1、2</td></tr>
+      <tr><td class="mono">web/src/data/store.ts</td><td>changed</td><td><span class="cstat covered">COVERED</span></td><td>part 读取入口 / 403 权限面</td><td>步骤 2、6、7</td></tr>
+      <tr><td class="mono">web/src/plugins/bridge.test.ts</td><td>changed</td><td><span class="cstat covered">COVERED</span></td><td>订阅清理单测</td><td>nsh test --target tui</td></tr>
+      <tr><td class="mono">web/src/plugins/bridge.ts</td><td>changed</td><td><span class="cstat covered">COVERED</span></td><td>订阅/退订生命周期</td><td>TUI bridge tests</td></tr>
+      <tr><td class="mono">web/src/plugins/bundled.ts</td><td>changed</td><td><span class="cstat covered">COVERED</span></td><td>测试 chunk 入口</td><td>TUI harness</td></tr>
+      <tr><td class="mono">web/src/plugins/fixtures/hello-chunk.tsx</td><td>changed</td><td><span class="cstat covered">COVERED</span></td><td>测试 chunk</td><td>TUI harness</td></tr>
+      <tr><td class="mono">web/src/plugins/fixtures/throwing-chunk.tsx</td><td>changed</td><td><span class="cstat covered">COVERED</span></td><td>测试 chunk</td><td>TUI harness</td></tr>
+      <tr><td class="mono">web/src/plugins/mime.test.ts</td><td>changed</td><td><span class="cstat covered">COVERED</span></td><td>MIME 单测</td><td>nsh test --target tui</td></tr>
+      <tr><td class="mono">web/src/plugins/mime.ts</td><td>changed</td><td><span class="cstat covered">COVERED</span></td><td>MIME 语法与匹配</td><td>TUI registry tests</td></tr>
+      <tr><td class="mono">web/src/plugins/registry.test.ts</td><td>changed</td><td><span class="cstat covered">COVERED</span></td><td>MIME/顺序/iframe 契约单测</td><td>nsh test --target tui</td></tr>
+      <tr><td class="mono">web/src/plugins/registry.ts</td><td>changed</td><td><span class="cstat covered">COVERED</span></td><td>声明顺序 + MIME 选择 + bridge 生命周期</td><td>TUI registry/bridge tests</td></tr>
+      <tr><td class="mono">web/src/plugins/slots.tsx</td><td>changed</td><td><span class="cstat covered">COVERED</span></td><td>预览槽位与回退面</td><td>步骤 3、4、5</td></tr>
+      <tr><td class="mono">web/src/plugins/slots.tui.test.tsx</td><td>changed</td><td><span class="cstat covered">COVERED</span></td><td>TUI 附件测试</td><td>nsh test --target tui</td></tr>
+      <tr><td class="mono">web/src/plugins/sync.ts</td><td>changed</td><td><span class="cstat covered">COVERED</span></td><td>inventory 顺序同步</td><td>TUI registry tests</td></tr>
+      <tr><td class="mono">web/src/plugins/types.ts</td><td>changed</td><td><span class="cstat covered">COVERED</span></td><td>槽位契约</td><td>编译 + TUI 测试</td></tr>
+      <tr><td class="mono">web/src/plugins/validation.ts</td><td>changed</td><td><span class="cstat covered">COVERED</span></td><td>mime 声明 / iframe 契约校验</td><td>TUI registry tests</td></tr>
+      <tr><td class="mono">web/src/screens/attachment-row.harness.tsx</td><td>changed</td><td><span class="cstat covered">COVERED</span></td><td>附件行 harness</td><td>TUI harness</td></tr>
+      <tr><td class="mono">web/src/screens/attachment-row.tsx</td><td>changed</td><td><span class="cstat covered">COVERED</span></td><td>附件行五态 / 缩略图 / 无权限</td><td>步骤 2、6 + TUI harness</td></tr>
+      <tr><td class="mono">web/src/screens/attachment-row.tui.test.tsx</td><td>changed</td><td><span class="cstat covered">COVERED</span></td><td>五态与回退渲染单测</td><td>nsh test --target tui</td></tr>
+      <tr><td class="mono">web/src/screens/messages.tsx</td><td>changed</td><td><span class="cstat covered">COVERED</span></td><td>附件行 / 五态 / 插件槽位</td><td>步骤 2、3、4、6</td></tr>
+    </tbody></table></div></details></section>
+
+<footer class="foot">本报告由 <code>scripts/e2e-report-gen.mjs</code> 生成 · 纯静态零依赖单文件（离线可开）<br/>空格 播放/暂停 · ←/→ 上一步/下一步 · 点击截图看大图（滚轮缩放 / 拖动平移 / ESC 关闭）</footer>
+</main>
+<div class="player" id="player" role="toolbar" aria-label="报告播放控制">
+  <button type="button" class="pp" id="pp" aria-label="播放" title="播放（空格）">▶</button>
+  <button type="button" class="spd" id="spd" title="自动滚动速度">1x</button>
+  <div class="cur" id="cur" aria-live="polite"></div>
+  <div class="track" id="track">
+    <div class="fill" id="fill"></div>
+      <button type="button" class="marker" data-i="0" data-tip="#1 上传 → 输入 → canonical AttachmentPart 与模型投递" aria-label="跳转到步骤 1：上传 → 输入 → canonical AttachmentPart 与模型投递" style="left:0;display:none"></button>
+      <button type="button" class="marker" data-i="1" data-tip="#2 浏览器默认附件行（无插件）" aria-label="跳转到步骤 2：浏览器默认附件行（无插件）" style="left:0;display:none"></button>
+      <button type="button" class="marker" data-i="2" data-tip="#3 安装预览插件并渲染" aria-label="跳转到步骤 3：安装预览插件并渲染" style="left:0;display:none"></button>
+      <button type="button" class="marker" data-i="3" data-tip="#4 停用插件 → 回退默认行" aria-label="跳转到步骤 4：停用插件 → 回退默认行" style="left:0;display:none"></button>
+      <button type="button" class="marker" data-i="4" data-tip="#5 预览抛错 → 回退且隔离" aria-label="跳转到步骤 5：预览抛错 → 回退且隔离" style="left:0;display:none"></button>
+      <button type="button" class="marker" data-i="5" data-tip="#6 reader 无 file.read → 无权限态" aria-label="跳转到步骤 6：reader 无 file.read → 无权限态" style="left:0;display:none"></button>
+      <button type="button" class="marker" data-i="6" data-tip="#7 outsider 无 session.read → 不泄露" aria-label="跳转到步骤 7：outsider 无 session.read → 不泄露" style="left:0;display:none"></button>
+      <button type="button" class="marker" data-i="7" data-tip="#8 跨租户：租户 B 读租户 A 附件" aria-label="跳转到步骤 8：跨租户：租户 B 读租户 A 附件" style="left:0;display:none"></button>
+      <button type="button" class="marker" data-i="8" data-tip="#9 390/768/1024/1440 布局走查" aria-label="跳转到步骤 9：390/768/1024/1440 布局走查" style="left:0;display:none"></button>
+  </div>
+  <div class="count" id="count">--/09</div>
+</div>
+<div id="lightbox" role="dialog" aria-modal="true" aria-label="截图大图查看">
+  <div class="lb-top">
+    <div class="lb-meta"><span id="lb-step"></span><span id="lb-file"></span></div>
+    <button type="button" class="lb-x" id="lb-x" aria-label="关闭" title="关闭（ESC）">×</button>
+  </div>
+  <button type="button" class="lb-nav lb-prev" id="lb-prev" aria-label="上一张（←）">‹</button>
+  <div id="lb-stage"><img id="lb-img" alt="" draggable="false"/></div>
+  <button type="button" class="lb-nav lb-next" id="lb-next" aria-label="下一张（→）">›</button>
+  <div class="lb-bottom">
+    <span id="lb-count"></span>
+    <span class="lb-hint">滚轮缩放 · 拖动平移 · 点击放大 · ←/→ 切换 · ESC 关闭</span>
+    <button type="button" class="lb-fit" id="lb-fit" title="适屏 / 原始尺寸（1:1）">1:1</button>
+    <span class="lb-zoom" id="lb-zoom">100%</span>
+  </div>
+</div>
+<script>
+(function(){
+'use strict';
+var doc=document;
+var steps=[].slice.call(doc.querySelectorAll('.step'));
+var markers=[].slice.call(doc.querySelectorAll('.marker'));
+var track=doc.getElementById('track');
+var fill=doc.getElementById('fill');
+var tlEl=doc.getElementById('timeline');
+var tlFill=doc.getElementById('tl-fill');
+var curEl=doc.getElementById('cur');
+var countEl=doc.getElementById('count');
+var pp=doc.getElementById('pp');
+var spdBtn=doc.getElementById('spd');
+var total=steps.length;
+var geo=[];
+var tlRect=null;
+var speed=1;
+var BASE=90; /* 1x 自动滚动速度：px/s */
+var playing=false;
+var raf=0;
+var last=0;
+var reduced=window.matchMedia&&window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+var smooth=reduced?'auto':'smooth';
+
+function pageY(){return window.pageYOffset||doc.documentElement.scrollTop||0;}
+function maxScroll(){return Math.max(1,doc.documentElement.scrollHeight-window.innerHeight);}
+function topOf(el){var r=el.getBoundingClientRect();return r.top+pageY();}
+function pad(n){return (n<10?'0':'')+n;}
+
+function measure(){
+  geo=steps.map(function(el,i){return{el:el,top:topOf(el),marker:markers[i]};});
+  if(tlEl){var r=tlEl.getBoundingClientRect();tlRect={top:r.top+pageY(),height:r.height};}
+  placeMarkers();
+  paint();
+}
+/* markers 按内容高度占比布点；尾带（最后一屏内多章）按最小间距 nudging 防重叠——tooltip 仍指向真实步骤 */
+function placeMarkers(){
+  var m=maxScroll();
+  var w=track.clientWidth||1;
+  var GAP=14,EDGE=8;
+  var xs=geo.map(function(g){return Math.min(1,Math.max(0,g.top/m))*w;});
+  if(xs.length)xs[0]=Math.max(xs[0],EDGE);
+  for(var i=1;i<xs.length;i++){if(xs[i]<xs[i-1]+GAP)xs[i]=xs[i-1]+GAP;}
+  if(xs.length&&xs[xs.length-1]>w-EDGE){
+    xs[xs.length-1]=w-EDGE;
+    for(var j=xs.length-2;j>=0;j--){if(xs[j]>xs[j+1]-GAP)xs[j]=xs[j+1]-GAP;}
+  }
+  geo.forEach(function(g,i){
+    g.marker.style.left=(xs[i]/w*100)+'%';
+    g.marker.style.display='block';
+  });
+}
+function currentIdx(){
+  var y=pageY(),m=maxScroll();
+  if(y>=m-4)return geo.length-1; /* 到底＝最后一章 */
+  var anchor=y+120; /* 卡片顶越入视口 120px 即成为当前章（跳转定位 76px 后即命中本卡） */
+  var idx=0;
+  for(var i=0;i<geo.length;i++){if(geo[i].top<=anchor)idx=i;else break;}
+  return idx;
+}
+function setCur(g){
+  curEl.textContent='';
+  var cno=doc.createElement('span');cno.className='cno';cno.textContent='#'+g.el.getAttribute('data-no');
+  var txt=doc.createTextNode(' '+g.el.getAttribute('data-name')+' ');
+  var b=doc.createElement('span');b.className='badge mini '+(g.el.getAttribute('data-ok')==='1'?'ok':'fail');b.textContent=g.el.getAttribute('data-result');
+  curEl.appendChild(cno);curEl.appendChild(txt);curEl.appendChild(b);
+  curEl.title=g.el.getAttribute('data-name');
+}
+function paint(){
+  var y=pageY(),m=maxScroll(),p=Math.min(1,y/m);
+  fill.style.width=(p*100)+'%';
+  if(tlRect)tlFill.style.height=(p*tlRect.height)+'px'; /* 时间线金线与播放进度同相：到底即满 */
+  var idx=currentIdx(),g=geo[idx]||null;
+  for(var i=0;i<geo.length;i++){
+    geo[i].el.classList.toggle('current',i===idx);
+    geo[i].el.classList.toggle('past',i<idx);
+    geo[i].marker.classList.toggle('current',i===idx);
+    geo[i].marker.classList.toggle('past',i<idx);
+  }
+  if(g)setCur(g);
+  countEl.textContent=pad(idx+1)+'/'+pad(total);
+}
+window.addEventListener('scroll',paint,{passive:true});
+window.addEventListener('resize',measure);
+window.addEventListener('load',measure);
+if(window.ResizeObserver){new ResizeObserver(function(){measure();}).observe(doc.body);}
+measure();
+
+/* ---------- 自动滚动播放 ---------- */
+function tick(ts){
+  if(!playing)return;
+  if(!last)last=ts;
+  var dy=BASE*speed*(ts-last)/1000;
+  last=ts;
+  var y=pageY(),m=maxScroll();
+  if(y>=m-1){stopPlay();return;}
+  window.scrollTo(0,Math.min(m,y+dy));
+  raf=window.requestAnimationFrame(tick);
+}
+function startPlay(){playing=true;last=0;pp.textContent='❚❚';pp.title='暂停（空格）';raf=window.requestAnimationFrame(tick);}
+function stopPlay(){playing=false;pp.textContent='▶';pp.title='播放（空格）';if(raf)window.cancelAnimationFrame(raf);raf=0;}
+pp.addEventListener('click',function(){if(playing)stopPlay();else startPlay();});
+spdBtn.addEventListener('click',function(){speed=speed===1?2:1;spdBtn.textContent=speed+'x';});
+['wheel','touchstart'].forEach(function(ev){
+  window.addEventListener(ev,function(e){
+    if(playing&&!(e.target&&e.target.closest&&e.target.closest('.player')))stopPlay();
+  },{passive:true});
+});
+function jump(i){
+  var g=geo[i];if(!g)return;
+  window.scrollTo({top:Math.max(0,g.top-76),behavior:smooth});
+}
+markers.forEach(function(mk,i){
+  mk.addEventListener('pointerdown',function(e){e.stopPropagation();});
+  mk.addEventListener('click',function(e){e.stopPropagation();jump(i);});
+});
+var dragging=false;
+function scrub(x){
+  var r=track.getBoundingClientRect();
+  var p=Math.min(1,Math.max(0,(x-r.left)/r.width));
+  window.scrollTo(0,p*maxScroll());
+}
+track.addEventListener('pointerdown',function(e){dragging=true;try{track.setPointerCapture(e.pointerId);}catch(err){}scrub(e.clientX);});
+track.addEventListener('pointermove',function(e){if(dragging)scrub(e.clientX);});
+['pointerup','pointercancel'].forEach(function(ev){track.addEventListener(ev,function(){dragging=false;});});
+window.addEventListener('keydown',function(e){
+  if(lbOpen()){e.preventDefault();lbKey(e);return;}
+  if(!(e.target===doc.body||e.target===doc.documentElement))return;
+  if(e.code==='Space'){e.preventDefault();if(playing)stopPlay();else startPlay();}
+  else if(e.key==='ArrowRight'){e.preventDefault();jump(Math.min(total-1,currentIdx()+1));}
+  else if(e.key==='ArrowLeft'){e.preventDefault();jump(Math.max(0,currentIdx()-1));}
+});
+
+/* ---------- Lightbox ---------- */
+var lb=doc.getElementById('lightbox');
+var lbImg=doc.getElementById('lb-img');
+var lbStage=doc.getElementById('lb-stage');
+var lbFile=doc.getElementById('lb-file');
+var lbStep=doc.getElementById('lb-step');
+var lbCount=doc.getElementById('lb-count');
+var lbZoom=doc.getElementById('lb-zoom');
+var lbFit=doc.getElementById('lb-fit');
+var lbPrev=doc.getElementById('lb-prev');
+var lbNext=doc.getElementById('lb-next');
+var imgs=[].slice.call(doc.querySelectorAll('figure img'));
+var items=imgs.map(function(img){
+  var fig=img.closest('figure');var st=fig.closest('.step');
+  return{src:img.getAttribute('src'),file:img.getAttribute('data-file')||img.getAttribute('src'),no:st.getAttribute('data-no'),name:st.getAttribute('data-name')};
+});
+var li=-1,z=1,tx=0,ty=0;
+function lbOpen(){return lb.classList.contains('open');}
+function layoutCenter(){var r=lbStage.getBoundingClientRect();return{x:r.left+r.width/2,y:r.top+r.height/2};}
+function clampPan(){
+  var w=lbImg.clientWidth||1,h=lbImg.clientHeight||1;
+  var lx=Math.max(0,(z-1)*w/2),ly=Math.max(0,(z-1)*h/2);
+  tx=Math.min(lx,Math.max(-lx,tx));ty=Math.min(ly,Math.max(-ly,ty));
+}
+function applyT(){
+  lbImg.style.transform='translate('+tx+'px,'+ty+'px) scale('+z+')';
+  lbZoom.textContent=Math.round(z*100)+'%';
+  lbFit.textContent=z===1?'1:1':'适屏';
+  lbImg.classList.toggle('zoomed',z>1);
+}
+function naturalZ(){var w=lbImg.clientWidth||1;return Math.max(1,lbImg.naturalWidth/w);}
+function setZoom(z2,cx,cy){
+  z2=Math.min(8,Math.max(1,z2));
+  if(cx!=null){
+    var L=layoutCenter(),k=z2/z;
+    var mx=cx-L.x,my=cy-L.y;
+    tx=mx*(1-k)+k*tx;ty=my*(1-k)+k*ty;
+  }
+  z=z2;clampPan();applyT();
+}
+function show(i){
+  if(!items.length)return;
+  li=(i+items.length)%items.length;
+  var it=items[li];
+  z=1;tx=0;ty=0;
+  lbImg.style.transform='translate(0px,0px) scale(1)';
+  lbImg.onload=function(){applyT();};
+  lbImg.src=it.src;
+  lbFile.textContent=it.file;
+  lbStep.textContent='#'+it.no+' '+it.name;
+  lbCount.textContent=(li+1)+' / '+items.length;
+  applyT();
+  var one=items.length<2;
+  lbPrev.style.display=one?'none':'';
+  lbNext.style.display=one?'none':'';
+}
+function openLb(i){
+  if(!items.length)return;
+  lb.classList.add('open');
+  doc.documentElement.classList.add('locked');
+  show(i);
+}
+function closeLb(){
+  lb.classList.remove('open');
+  doc.documentElement.classList.remove('locked');
+}
+imgs.forEach(function(img,i){
+  var fig=img.closest('figure');
+  fig.addEventListener('click',function(){openLb(i);});
+  fig.addEventListener('keydown',function(e){if(e.key==='Enter'||e.key===' '){e.preventDefault();openLb(i);}});
+});
+doc.getElementById('lb-x').addEventListener('click',closeLb);
+lbPrev.addEventListener('click',function(){show(li-1);});
+lbNext.addEventListener('click',function(){show(li+1);});
+lbFit.addEventListener('click',function(){if(z===1)setZoom(naturalZ());else setZoom(1);});
+lb.addEventListener('wheel',function(e){
+  e.preventDefault();
+  setZoom(z*(e.deltaY<0?1.15:1/1.15),e.clientX,e.clientY);
+},{passive:false});
+var drag=null,moved=0;
+lbImg.addEventListener('pointerdown',function(e){
+  drag={x:e.clientX-tx,y:e.clientY-ty};moved=0;
+  try{lbImg.setPointerCapture(e.pointerId);}catch(err){}
+  e.preventDefault();
+});
+lbImg.addEventListener('pointermove',function(e){
+  if(!drag)return;
+  var dx=e.clientX-drag.x,dy=e.clientY-drag.y;
+  moved=Math.max(moved,Math.abs(dx-tx)+Math.abs(dy-ty));
+  tx=dx;ty=dy;clampPan();applyT();
+});
+lbImg.addEventListener('pointerup',function(e){
+  if(drag&&moved<4){
+    if(z===1)setZoom(2.5,e.clientX,e.clientY);
+    else setZoom(1);
+  }
+  drag=null;
+});
+['pointerup','pointercancel'].forEach(function(ev){lbImg.addEventListener(ev,function(){drag=null;});});
+lb.addEventListener('click',function(e){if(e.target===lb)closeLb();});
+lbStage.addEventListener('click',function(e){if(e.target===lbStage)closeLb();});
+function lbKey(e){
+  if(e.key==='Escape')closeLb();
+  else if(e.key==='ArrowLeft')show(li-1);
+  else if(e.key==='ArrowRight')show(li+1);
+  else if(e.key==='+'||e.key==='=')setZoom(z*1.2);
+  else if(e.key==='-')setZoom(z/1.2);
+  else if(e.key==='0')setZoom(1);
+  else if(e.code==='Space')e.preventDefault();
+}
+/* ---------- 打印态：自动展开日志 ---------- */
+var openedLogs=[];
+window.addEventListener('beforeprint',function(){
+  openedLogs=[].slice.call(doc.querySelectorAll('details.log:not([open])'));
+  openedLogs.forEach(function(d){d.setAttribute('open','');});
+});
+window.addEventListener('afterprint',function(){
+  openedLogs.forEach(function(d){d.removeAttribute('open');});
+  openedLogs=[];
+});
+})();
+</script>
+</body></html>

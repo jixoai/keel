@@ -40,24 +40,27 @@
 - [x] 3.2 在 `web/src/screens/messages.tsx` 的附件行接入 `PluginMessagePartSlot`：
   以 `partKind="attachment"` 与 MIME 选择贡献；保留默认文件名/大小/下载入口。
   > 前端：`PluginAttachmentPreview` 复用 `keel.ui.message-part`；registry
-  > `attachmentSelection` 按声明顺序取第一个 ready 且 MIME 匹配的贡献；无 `partKind`
-  > 的普通消息部件不再被当作附件渲染器。默认事实行始终保留。
+  > `attachmentSelection` 按 **inventory 插件顺序 + contributes 声明顺序** 取第一个 ready 且
+  > MIME 匹配的贡献（重注册不移动顺序，补跨插件重同步测试）；无 `partKind` 的普通消息部件
+  > 不再被当作附件渲染器。默认事实行始终保留。
 - [x] 3.3 宿主默认附件行五态：缩略图 pending/ready/failed/none、无权限、加载失败；
   去掉重复附件行或空白占位。
-  > 前端：`AttachmentRow`（`web/src/screens/messages.tsx`）实现加载/成功/错误/无权限/
-  > 空（无附件不渲染区域）；缩略图 pending 有界轮询，failed/none 显示占位；`file.read`
-  > 以 `/meta` 探测，403 显示无权限并禁用下载；`uniqueAttachments` 去掉重复行。
+  > 前端：`web/src/screens/attachment-row.tsx` 实现加载/成功/错误/无权限/空（无附件不渲染
+  > 区域）；pending 用非破坏性刷新并有终态；failed/none 一律占位，绝不把原图当缩略图；
+  > `file.read` 以 `/meta` 探测（web 与 TUI 同源），403 显示无权限并禁用下载；
+  > `uniqueAttachments` 去掉重复行。
 - [x] 3.4 预览失败回退：贡献抛错/加载失败/超时 → 默认行 + 可解释提示；单个失败不影响
   其他附件与整轮对话；补渲染单测。
-  > 前端：`PluginAttachmentPreview` 捕获抛错、装载失败与 4s 超时；默认行不受影响。
-  > TUI harness 单测覆盖 6 个场景（`web/src/screens/attachment-row.tui.test.tsx`）。
+  > 前端：`PluginAttachmentPreview` 捕获抛错、装载失败与 4s 超时，失败面为中文
+  > “附件预览失败”+原因+重试；默认行不受影响。TUI harness 13 个场景
+  > （`web/src/screens/attachment-row.tui.test.tsx`）。
 - [x] 3.5 TUI：`chunk` 附件贡献按 TUI 视图渲染；`iframe` 显示“终端不可用（需要图形
   界面）”与打开入口；不出现空白或假成功。
   > 前端：`slots.tui.test.tsx` 真实 App 覆盖 chunk 渲染与 iframe 降级；harness 覆盖
-  > iframe 的“在浏览器打开”入口与地址文本。
+  > iframe 的“在浏览器打开”入口；iframe 收到附件查询上下文（fileId/mime/size/…）。
 - [x] 3.6 主题与布局：预览只用宿主令牌（solid-glass/shadcn），390/768/1024/1440 无横向
   溢出；补 UI 走查截图。
-  > 真实浏览器 E2E 步骤 9：四档视口均无横向溢出，附件行在视口内；截图见
+  > 真实浏览器 E2E 步骤 9：插件预览在场，四档视口均无横向溢出，附件行在视口内；截图见
   > `evidence/ui/screenshots/09..12-layout-*.png`。
 
 ## 4. 租户、权限、审计
@@ -78,18 +81,20 @@
   resolver 缺失；断言文本兜底含 blobId 与 reason。
 - [x] 5.3 插件生命周期：安装附件预览插件 → 渲染 → 停用 → 默认行恢复 → 卸载无残留；
   同一 generation 的槽位/订阅撤销。
-  > 后端覆盖：安装/启用/停用/卸载的 claims 投影、审计与 generation 撤销；实际渲染与
-  > 默认行恢复由 UI 切片（3.x/5.4）覆盖。
+  > 后端覆盖：安装/启用/停用/卸载的 claims 投影、审计与 generation 撤销；UI 覆盖预览
+  > 撤销与默认行恢复；`bridge.test.ts` 证明停用/卸载/重声明会退订并清空监听器
+  > （`keel.plugin.unsubscribe`）。
 - [x] 5.4 真实浏览器 E2E（7 步起）：上传 → 发送带附件消息 → 原生/兜底 → 安装预览插件 →
   渲染 → 停用 → 回退；每步截图，`UNCOVERED=0`，生成 HTML 报告并挂公网。
-  > `scripts/keel-attachment-e2e/` 真实 PG + 双租户服务 + Chrome：9 步 / 102 断言全绿，
-  > 12 张截图，`evidence/ui/steps.json` + `report.html`，覆盖表 UNCOVERED=0。
+  > `scripts/keel-attachment-e2e/` 真实 PG + 双租户服务 + Chrome：9 步 / 116 断言全绿，
+  > 12 张截图，`evidence/ui/steps.json` + `report.html`，覆盖表 UNCOVERED=0（EXEMPT 只允许
+  > openspec 证据与 E2E 运行器，其余未映射即 UNCOVERED 并失败）。
   > 公网挂载受本 worktree 禁止 push/merge 的约束，合并后按 `fde2e-ops` 发布。
 - [x] 5.5 跨租户与无权限 E2E：租户 B 打开租户 A 的附件 URL/缩略图 404；无 `session.read`
   账号看到无权限态，不泄露字节。
   > 步骤 6-8：reader 无 `file.read` 显示无权限态且缩略图/下载 403；outsider 无
-  > `session.read` 全部 403 且 UI 不展示附件；租户 B 读 A 的 file/thumbnail/part 均 404，
-  > 伪造 `X-Tenant-ID` 仍 404。
+  > `session.read` 全部 403，UI 显示“无权限读取会话（缺少 session.read）”而不退回登录页；
+  > 租户 B 读 A 的 file/thumbnail/part 均 404，伪造 `X-Tenant-ID` 仍 404。
 
 ## 6. 验收与归档
 

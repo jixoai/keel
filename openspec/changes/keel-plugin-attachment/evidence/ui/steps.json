@@ -1,0 +1,1181 @@
+{
+  "title": "keel-plugin-attachment · 真实浏览器 E2E",
+  "change": "keel-plugin-attachment（tasks 3.6 / 5.4 / 5.5）",
+  "date": "2026-11-27",
+  "frozenBase": {
+    "repo": "/Users/kzf/Development/GitHub/jixoai/fde2e/.worktrees/keel-plugin-attachment-ui",
+    "commit": "05dad6b01e9a9637c4053ffec66210c812c27987"
+  },
+  "conclusion": "9/9 步通过，116/116 条断言通过；P0/P1 = 0；UNCOVERED=0。",
+  "assertions": {
+    "total": 116,
+    "passed": 116
+  },
+  "steps": [
+    {
+      "n": 1,
+      "name": "上传 → 输入 → canonical AttachmentPart 与模型投递",
+      "action": "真实 HTTP 上传 PNG/PDF，提交带附件输入，读取 part 与模型请求",
+      "expect": "原生 image_url + PDF 文本兜底，元数据无字节",
+      "result": "PASS",
+      "startedAt": "2026-11-27T07:09:52.519Z",
+      "shots": [],
+      "checks": [
+        {
+          "name": "tenant A 服务健康",
+          "ok": true,
+          "expected": "200",
+          "actual": "200"
+        },
+        {
+          "name": "bot-operator 预设存在",
+          "ok": true,
+          "expected": "present",
+          "actual": "5"
+        },
+        {
+          "name": "管理员进入 bot-operator",
+          "ok": true,
+          "expected": "200",
+          "actual": "200"
+        },
+        {
+          "name": "创建附件会话 Bot",
+          "ok": true,
+          "expected": "201",
+          "actual": "201"
+        },
+        {
+          "name": "上传 PNG 返回 fileId",
+          "ok": true,
+          "expected": "201 + fileId",
+          "actual": "201 a521dde5-02f3-4ab9-962c-ab1613f29cf9"
+        },
+        {
+          "name": "上传 PDF 返回 fileId",
+          "ok": true,
+          "expected": "201 + fileId",
+          "actual": "201 3a144c02-536c-4c1f-96cf-086d8a50f8e4"
+        },
+        {
+          "name": "创建 Bot 所有的会话",
+          "ok": true,
+          "expected": "201 + sessionId",
+          "actual": "201"
+        },
+        {
+          "name": "提交带附件的输入",
+          "ok": true,
+          "expected": "201/202",
+          "actual": "201"
+        },
+        {
+          "name": "运行结束",
+          "ok": true,
+          "expected": "done",
+          "actual": "done"
+        },
+        {
+          "name": "事件流出现 user.message",
+          "ok": true,
+          "expected": "user.message",
+          "actual": "user.message"
+        },
+        {
+          "name": "事件只存 fileId 与展示元数据",
+          "ok": true,
+          "expected": "2 refs, no bytes",
+          "actual": "2"
+        },
+        {
+          "name": "canonical AttachmentPart 可读",
+          "ok": true,
+          "expected": "200",
+          "actual": "200"
+        },
+        {
+          "name": "part 字段完整",
+          "ok": true,
+          "expected": "fileId/mime/kind/size/downloadUrl",
+          "actual": "{\"fileId\":\"a521dde5-02f3-4ab9-962c-ab1613f29cf9\",\"mime\":\"image/png\",\"kind\":\"image\",\"size\":39037}"
+        },
+        {
+          "name": "part 含 thumbStatus 与 delivery",
+          "ok": true,
+          "expected": "thumbStatus + delivery(native=false, reason)",
+          "actual": "ready / false"
+        },
+        {
+          "name": "part 不含字节/base64/CAS 路径",
+          "ok": true,
+          "expected": "metadata only",
+          "actual": "fileId,name,mime,size,kind,thumbStatus,thumbnailUrl,downloadUrl,delivery"
+        },
+        {
+          "name": "缩略图终态 ready",
+          "ok": true,
+          "expected": "ready",
+          "actual": "ready"
+        },
+        {
+          "name": "缩略图可读（owner）",
+          "ok": true,
+          "expected": "200 + bytes",
+          "actual": "200 10667"
+        },
+        {
+          "name": "附件字节可下载（owner）",
+          "ok": true,
+          "expected": "200 + bytes",
+          "actual": "200 39037"
+        },
+        {
+          "name": "模型请求带 PNG 原生 image_url",
+          "ok": true,
+          "expected": "image_url data URI",
+          "actual": "1"
+        },
+        {
+          "name": "PDF 走文本兜底（含 blobId 与 MIME）",
+          "ok": true,
+          "expected": "blobId + application/pdf",
+          "actual": "1"
+        },
+        {
+          "name": "PDF 兜底不带字节",
+          "ok": true,
+          "expected": "no file bytes",
+          "actual": "no file_data"
+        }
+      ],
+      "log": "session=b0f2bae0-1b41-41fd-83af-6aa6b9ab8dc1 seq=1 png=a521dde5-02f3-4ab9-962c-ab1613f29cf9 pdf=3a144c02-536c-4c1f-96cf-086d8a50f8e4",
+      "finishedAt": "2026-11-27T07:09:53.057Z"
+    },
+    {
+      "n": 2,
+      "name": "浏览器默认附件行（无插件）",
+      "action": "登录 → 打开会话，检查默认行、缩略图与下载入口",
+      "expect": "名称/大小/MIME/缩略图/下载可见，无插件预览",
+      "result": "PASS",
+      "startedAt": "2026-11-27T07:09:53.058Z",
+      "shots": [
+        "screenshots/01-default-attachment-row.png"
+      ],
+      "checks": [
+        {
+          "name": "默认行显示 PNG 名称与大小",
+          "ok": true,
+          "expected": "name + size",
+          "actual": "true"
+        },
+        {
+          "name": "默认行显示 PDF 名称与 MIME",
+          "ok": true,
+          "expected": "name + mime",
+          "actual": "true"
+        },
+        {
+          "name": "没有插件预览时只显示默认行",
+          "ok": true,
+          "expected": "no plugin preview",
+          "actual": "false"
+        },
+        {
+          "name": "投递形态如实标注未记录",
+          "ok": true,
+          "expected": "delivery note",
+          "actual": "true"
+        },
+        {
+          "name": "图片缩略图已绘制（naturalWidth > 0，无空白占位）",
+          "ok": true,
+          "expected": "complete + naturalWidth > 0",
+          "actual": "{\"complete\":true,\"naturalWidth\":320,\"src\":\"http://127.0.0.1:13600/v1/files/a521dde5-02f3-4ab9-962c-ab1613f29cf9/thumbnail\"}"
+        },
+        {
+          "name": "1440 无横向溢出",
+          "ok": true,
+          "expected": "doc <= inner",
+          "actual": "{\"inner\":1440,\"doc\":1440,\"body\":1440}"
+        }
+      ],
+      "log": "",
+      "finishedAt": "2026-11-27T07:09:54.823Z"
+    },
+    {
+      "n": 3,
+      "name": "安装预览插件并渲染",
+      "action": "安装 + durabile 审批 + 启用，重载页面打开会话",
+      "expect": "审批展示认领；chunk 渲染且默认事实仍在",
+      "result": "PASS",
+      "startedAt": "2026-11-27T07:09:54.823Z",
+      "shots": [
+        "screenshots/02-plugin-preview.png"
+      ],
+      "checks": [
+        {
+          "name": "安装返回 202 审批并获批",
+          "ok": true,
+          "expected": "202 → 200 → 201",
+          "actual": "202/200/201"
+        },
+        {
+          "name": "审批文本展示附件认领",
+          "ok": true,
+          "expected": "slot + part + mime",
+          "actual": "Install the plugin package /Users/kzf/Development/GitHub/jixoai/fde2e/.worktrees/keel-plugin-attachment-ui/.agents/reports/keel/attachment-e2e-2026-11-27-150906/e2e-plugins/e2e.attachment-preview? Ins"
+        },
+        {
+          "name": "启用返回 200",
+          "ok": true,
+          "expected": "200",
+          "actual": "200"
+        },
+        {
+          "name": "inventory 投影带 part/mime",
+          "ok": true,
+          "expected": "part=attachment, mime=image/png",
+          "actual": "{\"slot\":\"keel.ui.message-part\",\"form\":\"chunk\",\"entry\":\"ui/preview.js\",\"part\":\"attachment\",\"mime\":[\"image/png\"],\"plugin\":\"e2e.attachment-preview\"}"
+        },
+        {
+          "name": "插件预览在 PNG 行渲染",
+          "ok": true,
+          "expected": "preview text",
+          "actual": "true"
+        },
+        {
+          "name": "默认事实与下载入口仍可见",
+          "ok": true,
+          "expected": "name + download",
+          "actual": "true"
+        },
+        {
+          "name": "PDF 行不受 PNG 插件影响",
+          "ok": true,
+          "expected": "no preview on PDF",
+          "actual": "false"
+        }
+      ],
+      "log": "",
+      "finishedAt": "2026-11-27T07:09:55.960Z"
+    },
+    {
+      "n": 4,
+      "name": "停用插件 → 回退默认行",
+      "action": "停用 + 重载，检查预览撤销与默认行恢复",
+      "expect": "无预览、无失败面，默认行可用",
+      "result": "PASS",
+      "startedAt": "2026-11-27T07:09:55.960Z",
+      "shots": [
+        "screenshots/03-disabled-default-row.png"
+      ],
+      "checks": [
+        {
+          "name": "停用返回 200",
+          "ok": true,
+          "expected": "200",
+          "actual": "200"
+        },
+        {
+          "name": "inventory 状态 disabled",
+          "ok": true,
+          "expected": "disabled",
+          "actual": "disabled"
+        },
+        {
+          "name": "预览随停用撤销",
+          "ok": true,
+          "expected": "no preview",
+          "actual": "false"
+        },
+        {
+          "name": "默认行恢复",
+          "ok": true,
+          "expected": "name + download",
+          "actual": "true"
+        },
+        {
+          "name": "没有残留插件失败面",
+          "ok": true,
+          "expected": "0 failures",
+          "actual": "0"
+        },
+        {
+          "name": "卸载返回 200",
+          "ok": true,
+          "expected": "200",
+          "actual": "200"
+        }
+      ],
+      "log": "",
+      "finishedAt": "2026-11-27T07:09:56.869Z"
+    },
+    {
+      "n": 5,
+      "name": "预览抛错 → 回退且隔离",
+      "action": "安装抛错插件，重载检查失败提示与默认行",
+      "expect": "可解释失败；PDF 行不受影响",
+      "result": "PASS",
+      "startedAt": "2026-11-27T07:09:56.870Z",
+      "shots": [
+        "screenshots/04-preview-failure-fallback.png"
+      ],
+      "checks": [
+        {
+          "name": "坏渲染器安装成功",
+          "ok": true,
+          "expected": "201",
+          "actual": "201"
+        },
+        {
+          "name": "坏渲染器启用成功",
+          "ok": true,
+          "expected": "200",
+          "actual": "200"
+        },
+        {
+          "name": "渲染抛错显示中文失败面",
+          "ok": true,
+          "expected": "附件预览失败 + reason",
+          "actual": "true"
+        },
+        {
+          "name": "不把技术码当主文案",
+          "ok": true,
+          "expected": "no ERR_PLUGIN",
+          "actual": "false"
+        },
+        {
+          "name": "默认行保留",
+          "ok": true,
+          "expected": "name + download",
+          "actual": "true"
+        },
+        {
+          "name": "单个失败不影响其他附件",
+          "ok": true,
+          "expected": "PDF row clean",
+          "actual": "发布说明.pdf\n1 KB\napplication/pdf\n下载\n本次投递形态未记录（attempt 结果不随消息存储）"
+        }
+      ],
+      "log": "",
+      "finishedAt": "2026-11-27T07:09:58.024Z"
+    },
+    {
+      "n": 6,
+      "name": "reader 无 file.read → 无权限态",
+      "action": "建组/账号/会话，reader 打开会话并请求附件",
+      "expect": "元数据可见；缩略图/下载 403；UI 无权限态",
+      "result": "PASS",
+      "startedAt": "2026-11-27T07:09:58.024Z",
+      "shots": [
+        "screenshots/05-reader-no-file-read.png"
+      ],
+      "checks": [
+        {
+          "name": "创建 reader 权限组",
+          "ok": true,
+          "expected": "201 + groupId",
+          "actual": "201"
+        },
+        {
+          "name": "授予 session.read@own",
+          "ok": true,
+          "expected": "200",
+          "actual": "200"
+        },
+        {
+          "name": "授予 session.write@own",
+          "ok": true,
+          "expected": "200",
+          "actual": "200"
+        },
+        {
+          "name": "授予 app.read@tenant",
+          "ok": true,
+          "expected": "200",
+          "actual": "200"
+        },
+        {
+          "name": "授予 model.read@tenant",
+          "ok": true,
+          "expected": "200",
+          "actual": "200"
+        },
+        {
+          "name": "授予 plugin.read@tenant",
+          "ok": true,
+          "expected": "200",
+          "actual": "200"
+        },
+        {
+          "name": "授予 bot.read@own",
+          "ok": true,
+          "expected": "200",
+          "actual": "200"
+        },
+        {
+          "name": "授予 bot.manage@own",
+          "ok": true,
+          "expected": "200",
+          "actual": "200"
+        },
+        {
+          "name": "授予 bot.invoke@own",
+          "ok": true,
+          "expected": "200",
+          "actual": "200"
+        },
+        {
+          "name": "创建 reader 账号",
+          "ok": true,
+          "expected": "201 + accountId",
+          "actual": "201"
+        },
+        {
+          "name": "reader 入组",
+          "ok": true,
+          "expected": "200",
+          "actual": "200"
+        },
+        {
+          "name": "创建 reader 的 Bot",
+          "ok": true,
+          "expected": "201",
+          "actual": "201"
+        },
+        {
+          "name": "reader 登录",
+          "ok": true,
+          "expected": "200",
+          "actual": "200"
+        },
+        {
+          "name": "reader 有 session.read、无 file.read",
+          "ok": true,
+          "expected": "session.read=own, file.read absent",
+          "actual": "{\"session\":\"own\"}"
+        },
+        {
+          "name": "reader 创建自己的 Bot 会话",
+          "ok": true,
+          "expected": "201",
+          "actual": "201"
+        },
+        {
+          "name": "管理员向 reader 会话提交附件",
+          "ok": true,
+          "expected": "201/202",
+          "actual": "201"
+        },
+        {
+          "name": "reader 会话有 user.message",
+          "ok": true,
+          "expected": "seq",
+          "actual": "1"
+        },
+        {
+          "name": "reader 可读附件元数据（session.read）",
+          "ok": true,
+          "expected": "200",
+          "actual": "200"
+        },
+        {
+          "name": "元数据不含字节",
+          "ok": true,
+          "expected": "metadata only",
+          "actual": "fileId,name,mime,size,kind,thumbStatus,thumbnailUrl,downloadUrl,delivery"
+        },
+        {
+          "name": "reader 下载被拒（缺 file.read）",
+          "ok": true,
+          "expected": "403",
+          "actual": "403"
+        },
+        {
+          "name": "拒绝响应不含 PNG 字节",
+          "ok": true,
+          "expected": "no bytes",
+          "actual": "application/json; charset=utf-8"
+        },
+        {
+          "name": "reader 缩略图被拒",
+          "ok": true,
+          "expected": "403",
+          "actual": "403"
+        },
+        {
+          "name": "UI 显示附件无权限态",
+          "ok": true,
+          "expected": "no-permission alert",
+          "actual": "true"
+        },
+        {
+          "name": "无权限时仍可见名称与大小",
+          "ok": true,
+          "expected": "name + size",
+          "actual": "true"
+        },
+        {
+          "name": "下载入口显示无权限且禁用",
+          "ok": true,
+          "expected": "disabled download",
+          "actual": "true"
+        },
+        {
+          "name": "页面没有缩略图字节",
+          "ok": true,
+          "expected": "no thumbnail img",
+          "actual": "0"
+        }
+      ],
+      "log": "",
+      "finishedAt": "2026-11-27T07:10:00.227Z"
+    },
+    {
+      "n": 7,
+      "name": "outsider 无 session.read → 不泄露",
+      "action": "登录无权限账号，请求会话/附件/字节",
+      "expect": "403；UI 不展示会话或附件内容",
+      "result": "PASS",
+      "startedAt": "2026-11-27T07:10:00.227Z",
+      "shots": [
+        "screenshots/06-outsider-no-session-read.png"
+      ],
+      "checks": [
+        {
+          "name": "创建无权限账号",
+          "ok": true,
+          "expected": "201",
+          "actual": "201"
+        },
+        {
+          "name": "outsider 登录",
+          "ok": true,
+          "expected": "200",
+          "actual": "200"
+        },
+        {
+          "name": "无 session.read 不能列会话",
+          "ok": true,
+          "expected": "403",
+          "actual": "403"
+        },
+        {
+          "name": "拒绝原因说明 session.read",
+          "ok": true,
+          "expected": "session.read",
+          "actual": "session.read"
+        },
+        {
+          "name": "无 session.read 不能读事件",
+          "ok": true,
+          "expected": "403",
+          "actual": "403"
+        },
+        {
+          "name": "无 session.read 不能读附件投影",
+          "ok": true,
+          "expected": "403",
+          "actual": "403"
+        },
+        {
+          "name": "无 session.read 不能读字节",
+          "ok": true,
+          "expected": "403",
+          "actual": "403"
+        },
+        {
+          "name": "拒绝响应不含附件名/字节",
+          "ok": true,
+          "expected": "no name/bytes",
+          "actual": "403"
+        },
+        {
+          "name": "UI 不展示会话/附件内容",
+          "ok": true,
+          "expected": "no attachment text",
+          "actual": "false"
+        },
+        {
+          "name": "UI 显示真实权限态而非登录失败",
+          "ok": true,
+          "expected": "permission face, no login gate",
+          "actual": "会话列表加载失败\n无权限读取会话（缺少\nsession.read）。\n重试\nKeel\n下午好，我是 Keel\n发送一条消息，Keel 会在这里开始工作。\n运行中可以补充引导，需要时再处理审批。\n帮我总结一下这周的发布准备情况\n检查三个服务的健康状态\n把行动项按负责人分组\n​\n给 Keel 发消息，空闲时直接开始…\n队列\n引导\n空闲发送直接开始\n登录成功，但未能读取服务能力，交互界面暂以\n文本显示。"
+        }
+      ],
+      "log": "",
+      "finishedAt": "2026-11-27T07:10:04.560Z"
+    },
+    {
+      "n": 8,
+      "name": "跨租户：租户 B 读租户 A 附件",
+      "action": "租户 B 登录，读 A 的文件/缩略图/part，含伪造租户头",
+      "expect": "全部 404；对称检查 A 读 B 也 404",
+      "result": "PASS",
+      "startedAt": "2026-11-27T07:10:04.560Z",
+      "shots": [
+        "screenshots/07-tenant-b-file-404.png",
+        "screenshots/08-tenant-b-thumbnail-404.png"
+      ],
+      "checks": [
+        {
+          "name": "租户 B 登录",
+          "ok": true,
+          "expected": "200 tenantId=cc9390c1-c5a9-4894-a870-7a0fd40422fa",
+          "actual": "200 cc9390c1-c5a9-4894-a870-7a0fd40422fa"
+        },
+        {
+          "name": "租户 B 上传自己的文件",
+          "ok": true,
+          "expected": "201",
+          "actual": "201"
+        },
+        {
+          "name": "租户 B 读自己的文件",
+          "ok": true,
+          "expected": "200 + bytes",
+          "actual": "200 39037"
+        },
+        {
+          "name": "租户 B 读租户 A 附件 → 404",
+          "ok": true,
+          "expected": "404",
+          "actual": "404"
+        },
+        {
+          "name": "租户 B 读租户 A 缩略图 → 404",
+          "ok": true,
+          "expected": "404",
+          "actual": "404"
+        },
+        {
+          "name": "租户 B 读租户 A 附件 part → 404",
+          "ok": true,
+          "expected": "404",
+          "actual": "404"
+        },
+        {
+          "name": "伪造 X-Tenant-ID 仍 404",
+          "ok": true,
+          "expected": "404",
+          "actual": "404"
+        },
+        {
+          "name": "租户 A 读租户 B 文件 → 404（对称）",
+          "ok": true,
+          "expected": "404",
+          "actual": "404"
+        },
+        {
+          "name": "跨租户响应无字节",
+          "ok": true,
+          "expected": "no bytes",
+          "actual": "application/json; charset=utf-8"
+        },
+        {
+          "name": "浏览器（租户 B 会话）打开租户 A 附件 → 404",
+          "ok": true,
+          "expected": "404",
+          "actual": "404"
+        },
+        {
+          "name": "浏览器 404 页不泄露字节",
+          "ok": true,
+          "expected": "error page",
+          "actual": "{\"error\":\"store: blob not found\"}"
+        },
+        {
+          "name": "浏览器租户 B 缩略图 → 404",
+          "ok": true,
+          "expected": "404",
+          "actual": "404"
+        },
+        {
+          "name": "浏览器租户 B 缩略图 404 页不泄露字节",
+          "ok": true,
+          "expected": "no bytes",
+          "actual": "{\"error\":\"store: blob not found\"}"
+        }
+      ],
+      "log": "",
+      "finishedAt": "2026-11-27T07:10:06.203Z"
+    },
+    {
+      "n": 9,
+      "name": "390/768/1024/1440 布局走查",
+      "action": "四个视口打开附件会话，测量溢出与行框",
+      "expect": "无横向溢出，附件行在视口内",
+      "result": "PASS",
+      "startedAt": "2026-11-27T07:10:06.203Z",
+      "shots": [
+        "screenshots/09-layout-390.png",
+        "screenshots/10-layout-768.png",
+        "screenshots/11-layout-1024.png",
+        "screenshots/12-layout-1440.png"
+      ],
+      "checks": [
+        {
+          "name": "布局走查前重新安装预览插件",
+          "ok": true,
+          "expected": "201",
+          "actual": "201"
+        },
+        {
+          "name": "布局走查前重新启用预览插件",
+          "ok": true,
+          "expected": "200",
+          "actual": "200"
+        },
+        {
+          "name": "布局走查前 inventory 带附件贡献",
+          "ok": true,
+          "expected": "part=attachment",
+          "actual": "{\"slot\":\"keel.ui.message-part\",\"form\":\"chunk\",\"entry\":\"ui/preview.js\",\"part\":\"attachment\",\"mime\":[\"image/png\"],\"plugin\":\"e2e.attachment-preview\"}"
+        },
+        {
+          "name": "390: 插件预览在场",
+          "ok": true,
+          "expected": "preview text",
+          "actual": "true"
+        },
+        {
+          "name": "390: 无横向溢出",
+          "ok": true,
+          "expected": "doc <= inner",
+          "actual": "{\"inner\":390,\"doc\":390,\"body\":390}"
+        },
+        {
+          "name": "390: 附件行在视口内",
+          "ok": true,
+          "expected": "inside viewport",
+          "actual": "{\"x\":54,\"y\":89,\"width\":320,\"height\":275}"
+        },
+        {
+          "name": "390: 缩略图已绘制",
+          "ok": true,
+          "expected": "complete + naturalWidth > 0",
+          "actual": "{\"complete\":true,\"naturalWidth\":320}"
+        },
+        {
+          "name": "768: 插件预览在场",
+          "ok": true,
+          "expected": "preview text",
+          "actual": "true"
+        },
+        {
+          "name": "768: 无横向溢出",
+          "ok": true,
+          "expected": "doc <= inner",
+          "actual": "{\"inner\":768,\"doc\":768,\"body\":768}"
+        },
+        {
+          "name": "768: 附件行在视口内",
+          "ok": true,
+          "expected": "inside viewport",
+          "actual": "{\"x\":432,\"y\":325,\"width\":320,\"height\":275}"
+        },
+        {
+          "name": "768: 缩略图已绘制",
+          "ok": true,
+          "expected": "complete + naturalWidth > 0",
+          "actual": "{\"complete\":true,\"naturalWidth\":320}"
+        },
+        {
+          "name": "1024: 插件预览在场",
+          "ok": true,
+          "expected": "preview text",
+          "actual": "true"
+        },
+        {
+          "name": "1024: 无横向溢出",
+          "ok": true,
+          "expected": "doc <= inner",
+          "actual": "{\"inner\":1024,\"doc\":1024,\"body\":1024}"
+        },
+        {
+          "name": "1024: 附件行在视口内",
+          "ok": true,
+          "expected": "inside viewport",
+          "actual": "{\"x\":688,\"y\":101,\"width\":320,\"height\":275}"
+        },
+        {
+          "name": "1024: 缩略图已绘制",
+          "ok": true,
+          "expected": "complete + naturalWidth > 0",
+          "actual": "{\"complete\":true,\"naturalWidth\":320}"
+        },
+        {
+          "name": "1440: 插件预览在场",
+          "ok": true,
+          "expected": "preview text",
+          "actual": "true"
+        },
+        {
+          "name": "1440: 无横向溢出",
+          "ok": true,
+          "expected": "doc <= inner",
+          "actual": "{\"inner\":1440,\"doc\":1440,\"body\":1440}"
+        },
+        {
+          "name": "1440: 附件行在视口内",
+          "ok": true,
+          "expected": "inside viewport",
+          "actual": "{\"x\":1056,\"y\":201,\"width\":320,\"height\":275}"
+        },
+        {
+          "name": "1440: 缩略图已绘制",
+          "ok": true,
+          "expected": "complete + naturalWidth > 0",
+          "actual": "{\"complete\":true,\"naturalWidth\":320}"
+        },
+        {
+          "name": "布局走查后停用预览插件",
+          "ok": true,
+          "expected": "200",
+          "actual": "200"
+        },
+        {
+          "name": "布局走查后卸载预览插件",
+          "ok": true,
+          "expected": "200",
+          "actual": "200"
+        }
+      ],
+      "log": "",
+      "finishedAt": "2026-11-27T07:10:13.154Z"
+    }
+  ],
+  "findings": [],
+  "coverage": {
+    "baseline": "8916393",
+    "total": 46,
+    "covered": 26,
+    "exempt": 20,
+    "uncovered": 0,
+    "rows": [
+      {
+        "file": "openspec/changes/keel-plugin-attachment/evidence/nsh-check.txt",
+        "change": "changed",
+        "status": "EXEMPT",
+        "surface": "change 文档/证据",
+        "evidence": "EXEMPT：显式白名单"
+      },
+      {
+        "file": "openspec/changes/keel-plugin-attachment/evidence/nsh-test-tui.txt",
+        "change": "changed",
+        "status": "EXEMPT",
+        "surface": "change 文档/证据",
+        "evidence": "EXEMPT：显式白名单"
+      },
+      {
+        "file": "openspec/changes/keel-plugin-attachment/evidence/ui/screenshots/01-default-attachment-row.png",
+        "change": "changed",
+        "status": "EXEMPT",
+        "surface": "change 文档/证据",
+        "evidence": "EXEMPT：显式白名单"
+      },
+      {
+        "file": "openspec/changes/keel-plugin-attachment/evidence/ui/screenshots/02-plugin-preview.png",
+        "change": "changed",
+        "status": "EXEMPT",
+        "surface": "change 文档/证据",
+        "evidence": "EXEMPT：显式白名单"
+      },
+      {
+        "file": "openspec/changes/keel-plugin-attachment/evidence/ui/screenshots/03-disabled-default-row.png",
+        "change": "changed",
+        "status": "EXEMPT",
+        "surface": "change 文档/证据",
+        "evidence": "EXEMPT：显式白名单"
+      },
+      {
+        "file": "openspec/changes/keel-plugin-attachment/evidence/ui/screenshots/04-preview-failure-fallback.png",
+        "change": "changed",
+        "status": "EXEMPT",
+        "surface": "change 文档/证据",
+        "evidence": "EXEMPT：显式白名单"
+      },
+      {
+        "file": "openspec/changes/keel-plugin-attachment/evidence/ui/screenshots/05-reader-no-file-read.png",
+        "change": "changed",
+        "status": "EXEMPT",
+        "surface": "change 文档/证据",
+        "evidence": "EXEMPT：显式白名单"
+      },
+      {
+        "file": "openspec/changes/keel-plugin-attachment/evidence/ui/screenshots/06-outsider-no-session-read.png",
+        "change": "changed",
+        "status": "EXEMPT",
+        "surface": "change 文档/证据",
+        "evidence": "EXEMPT：显式白名单"
+      },
+      {
+        "file": "openspec/changes/keel-plugin-attachment/evidence/ui/screenshots/07-tenant-b-file-404.png",
+        "change": "changed",
+        "status": "EXEMPT",
+        "surface": "change 文档/证据",
+        "evidence": "EXEMPT：显式白名单"
+      },
+      {
+        "file": "openspec/changes/keel-plugin-attachment/evidence/ui/screenshots/08-tenant-b-thumbnail-404.png",
+        "change": "changed",
+        "status": "EXEMPT",
+        "surface": "change 文档/证据",
+        "evidence": "EXEMPT：显式白名单"
+      },
+      {
+        "file": "openspec/changes/keel-plugin-attachment/evidence/ui/screenshots/09-layout-390.png",
+        "change": "changed",
+        "status": "EXEMPT",
+        "surface": "change 文档/证据",
+        "evidence": "EXEMPT：显式白名单"
+      },
+      {
+        "file": "openspec/changes/keel-plugin-attachment/evidence/ui/screenshots/10-layout-768.png",
+        "change": "changed",
+        "status": "EXEMPT",
+        "surface": "change 文档/证据",
+        "evidence": "EXEMPT：显式白名单"
+      },
+      {
+        "file": "openspec/changes/keel-plugin-attachment/evidence/ui/screenshots/11-layout-1024.png",
+        "change": "changed",
+        "status": "EXEMPT",
+        "surface": "change 文档/证据",
+        "evidence": "EXEMPT：显式白名单"
+      },
+      {
+        "file": "openspec/changes/keel-plugin-attachment/evidence/ui/screenshots/12-layout-1440.png",
+        "change": "changed",
+        "status": "EXEMPT",
+        "surface": "change 文档/证据",
+        "evidence": "EXEMPT：显式白名单"
+      },
+      {
+        "file": "openspec/changes/keel-plugin-attachment/evidence/web-build.txt",
+        "change": "changed",
+        "status": "EXEMPT",
+        "surface": "change 文档/证据",
+        "evidence": "EXEMPT：显式白名单"
+      },
+      {
+        "file": "openspec/changes/keel-plugin-attachment/tasks.md",
+        "change": "changed",
+        "status": "EXEMPT",
+        "surface": "change 文档/证据",
+        "evidence": "EXEMPT：显式白名单"
+      },
+      {
+        "file": "scripts/keel-attachment-e2e/e2e.mjs",
+        "change": "changed",
+        "status": "EXEMPT",
+        "surface": "E2E 运行器（证据生产者）",
+        "evidence": "EXEMPT：显式白名单"
+      },
+      {
+        "file": "scripts/keel-attachment-e2e/run.sh",
+        "change": "changed",
+        "status": "EXEMPT",
+        "surface": "E2E 运行器（证据生产者）",
+        "evidence": "EXEMPT：显式白名单"
+      },
+      {
+        "file": "scripts/keel-attachment-e2e/scripted-model.mjs",
+        "change": "changed",
+        "status": "EXEMPT",
+        "surface": "E2E 运行器（证据生产者）",
+        "evidence": "EXEMPT：显式白名单"
+      },
+      {
+        "file": "scripts/keel-attachment-e2e/seed-tenant/main.go",
+        "change": "changed",
+        "status": "EXEMPT",
+        "surface": "E2E 运行器（证据生产者）",
+        "evidence": "EXEMPT：显式白名单"
+      },
+      {
+        "file": "web/src/data/attachment-link.test.ts",
+        "change": "changed",
+        "status": "COVERED",
+        "surface": "同源策略单测",
+        "evidence": "nsh test --target tui"
+      },
+      {
+        "file": "web/src/data/attachment-link.ts",
+        "change": "changed",
+        "status": "COVERED",
+        "surface": "同源下载/打开入口",
+        "evidence": "步骤 2、8"
+      },
+      {
+        "file": "web/src/data/attachments.test.ts",
+        "change": "changed",
+        "status": "COVERED",
+        "surface": "附件投影状态/刷新/去重单测",
+        "evidence": "nsh test --target tui"
+      },
+      {
+        "file": "web/src/data/attachments.ts",
+        "change": "changed",
+        "status": "COVERED",
+        "surface": "AttachmentPart 读取/缓存/权限",
+        "evidence": "步骤 1、6"
+      },
+      {
+        "file": "web/src/data/contract.ts",
+        "change": "changed",
+        "status": "COVERED",
+        "surface": "AttachmentPart 契约",
+        "evidence": "步骤 1、2"
+      },
+      {
+        "file": "web/src/data/fixture.ts",
+        "change": "changed",
+        "status": "COVERED",
+        "surface": "演示数据（插件/附件）",
+        "evidence": "TUI 测试"
+      },
+      {
+        "file": "web/src/data/http.ts",
+        "change": "changed",
+        "status": "COVERED",
+        "surface": "part 路由客户端",
+        "evidence": "步骤 1、2"
+      },
+      {
+        "file": "web/src/data/store.ts",
+        "change": "changed",
+        "status": "COVERED",
+        "surface": "part 读取入口 / 403 权限面",
+        "evidence": "步骤 2、6、7"
+      },
+      {
+        "file": "web/src/plugins/bridge.test.ts",
+        "change": "changed",
+        "status": "COVERED",
+        "surface": "订阅清理单测",
+        "evidence": "nsh test --target tui"
+      },
+      {
+        "file": "web/src/plugins/bridge.ts",
+        "change": "changed",
+        "status": "COVERED",
+        "surface": "订阅/退订生命周期",
+        "evidence": "TUI bridge tests"
+      },
+      {
+        "file": "web/src/plugins/bundled.ts",
+        "change": "changed",
+        "status": "COVERED",
+        "surface": "测试 chunk 入口",
+        "evidence": "TUI harness"
+      },
+      {
+        "file": "web/src/plugins/fixtures/hello-chunk.tsx",
+        "change": "changed",
+        "status": "COVERED",
+        "surface": "测试 chunk",
+        "evidence": "TUI harness"
+      },
+      {
+        "file": "web/src/plugins/fixtures/throwing-chunk.tsx",
+        "change": "changed",
+        "status": "COVERED",
+        "surface": "测试 chunk",
+        "evidence": "TUI harness"
+      },
+      {
+        "file": "web/src/plugins/mime.test.ts",
+        "change": "changed",
+        "status": "COVERED",
+        "surface": "MIME 单测",
+        "evidence": "nsh test --target tui"
+      },
+      {
+        "file": "web/src/plugins/mime.ts",
+        "change": "changed",
+        "status": "COVERED",
+        "surface": "MIME 语法与匹配",
+        "evidence": "TUI registry tests"
+      },
+      {
+        "file": "web/src/plugins/registry.test.ts",
+        "change": "changed",
+        "status": "COVERED",
+        "surface": "MIME/顺序/iframe 契约单测",
+        "evidence": "nsh test --target tui"
+      },
+      {
+        "file": "web/src/plugins/registry.ts",
+        "change": "changed",
+        "status": "COVERED",
+        "surface": "声明顺序 + MIME 选择 + bridge 生命周期",
+        "evidence": "TUI registry/bridge tests"
+      },
+      {
+        "file": "web/src/plugins/slots.tsx",
+        "change": "changed",
+        "status": "COVERED",
+        "surface": "预览槽位与回退面",
+        "evidence": "步骤 3、4、5"
+      },
+      {
+        "file": "web/src/plugins/slots.tui.test.tsx",
+        "change": "changed",
+        "status": "COVERED",
+        "surface": "TUI 附件测试",
+        "evidence": "nsh test --target tui"
+      },
+      {
+        "file": "web/src/plugins/sync.ts",
+        "change": "changed",
+        "status": "COVERED",
+        "surface": "inventory 顺序同步",
+        "evidence": "TUI registry tests"
+      },
+      {
+        "file": "web/src/plugins/types.ts",
+        "change": "changed",
+        "status": "COVERED",
+        "surface": "槽位契约",
+        "evidence": "编译 + TUI 测试"
+      },
+      {
+        "file": "web/src/plugins/validation.ts",
+        "change": "changed",
+        "status": "COVERED",
+        "surface": "mime 声明 / iframe 契约校验",
+        "evidence": "TUI registry tests"
+      },
+      {
+        "file": "web/src/screens/attachment-row.harness.tsx",
+        "change": "changed",
+        "status": "COVERED",
+        "surface": "附件行 harness",
+        "evidence": "TUI harness"
+      },
+      {
+        "file": "web/src/screens/attachment-row.tsx",
+        "change": "changed",
+        "status": "COVERED",
+        "surface": "附件行五态 / 缩略图 / 无权限",
+        "evidence": "步骤 2、6 + TUI harness"
+      },
+      {
+        "file": "web/src/screens/attachment-row.tui.test.tsx",
+        "change": "changed",
+        "status": "COVERED",
+        "surface": "五态与回退渲染单测",
+        "evidence": "nsh test --target tui"
+      },
+      {
+        "file": "web/src/screens/messages.tsx",
+        "change": "changed",
+        "status": "COVERED",
+        "surface": "附件行 / 五态 / 插件槽位",
+        "evidence": "步骤 2、3、4、6"
+      }
+    ]
+  }
+}
