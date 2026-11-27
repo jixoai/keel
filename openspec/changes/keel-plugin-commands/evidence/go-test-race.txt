@@ -1,10 +1,10 @@
 $ KEEL_TEST_DSN=<real PG> go test -race -p 1 ./internal/pluginpkg/ ./internal/harnessext/ ./internal/harnessapi/ ./internal/store/ ./internal/agent/ ./internal/accessgate/ ./internal/access/ ./internal/toolsurface/ ./cmd/keel/ -count=1
-ok  	github.com/jixoai/keel/internal/pluginpkg	1.530s
-ok  	github.com/jixoai/keel/internal/harnessext	29.319s
-ok  	github.com/jixoai/keel/internal/harnessapi	24.196s
-ok  	github.com/jixoai/keel/internal/store	9.994s
-ok  	github.com/jixoai/keel/internal/agent	27.116s
-ok  	github.com/jixoai/keel/internal/accessgate	1.376s
-ok  	github.com/jixoai/keel/internal/access	1.336s
-ok  	github.com/jixoai/keel/internal/toolsurface	1.564s
-ok  	github.com/jixoai/keel/cmd/keel	51.056s
+ok  	github.com/jixoai/keel/internal/pluginpkg	1.579s
+ok  	github.com/jixoai/keel/internal/harnessext	29.566s
+ok  	github.com/jixoai/keel/internal/harnessapi	25.515s
+ok  	github.com/jixoai/keel/internal/store	11.502s
+ok  	github.com/jixoai/keel/internal/agent	27.339s
+ok  	github.com/jixoai/keel/internal/accessgate	1.401s
+ok  	github.com/jixoai/keel/internal/access	1.370s
+ok  	github.com/jixoai/keel/internal/toolsurface	1.512s
+ok  	github.com/jixoai/keel/cmd/keel	57.305s

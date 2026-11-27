@@ -1,0 +1,8 @@
+$ mutation: delete Kind check from commandDecisionGrants (P1 guard deleted)
+$ go test ./internal/harnessapi/ -run TestCommandResumeDecisionIdentityMutationGuards -count=1
+--- FAIL: TestCommandResumeDecisionIdentityMutationGuards (0.00s)
+    --- FAIL: TestCommandResumeDecisionIdentityMutationGuards/forged_kind_on_the_derived_requestId (0.00s)
+        commands_test.go:1127: forged resume = 200 map[command:vendor.one:purge data:map[indexed:42] decisionId:e08becd6-83fa-5740-9439-34c382336479 durationMs:0 eventSeq:1 requestId:mutation-forged-kind-on-the-derived-requestId source:plugin status:ok]
+FAIL
+FAIL	github.com/jixoai/keel/internal/harnessapi	0.475s
+FAIL

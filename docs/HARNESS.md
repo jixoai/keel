@@ -74,6 +74,22 @@ keel version
 | GET | `/v1/superagent/tickets`、`/v1/superagent/attention` | super-agent 工单看板（`updated_at DESC`，limit 取最新头部）/ Attention 收件箱（需 `task.read`；未装配 503，`superagent.board=false`；写成功后经 `/v1/identity/events` 的 `superagent` invalidation 通知） |
 | POST | `/v1/superagent/tickets/{id}/report`、`…/ask`、`…/resume`、`…/stop`、`/v1/superagent/attention/{id}/answer` | worker report/ask（需 sessionId；report 可带幂等 `requestId`）与 operator answer/resume/stop（需 `task.write` + `OperatorAuthorizer`）；worker 模型侧另有 `report`/`ask` 工具（§3.5） |
 
+### 命令面（`internal/harnessapi/commands.go`，keel-plugin-commands）
+
+命令是**用户意图面**的命名动作，不是 prompt 模板、不是工具、不是 `keel <verb>` CLI。
+
+| 方法 | 路径 | 语义 |
+| --- | --- | --- |
+| GET | `/v1/sessions/{id}/commands?target=web\|native\|tui` | 会话命令目录：`session.read` + 会话归属；固定顺序 builtin → plugin（pluginId 字典序、声明序）→ `skill:<name>`；上限 256（skills ≤128），`truncated`；`available/reason/missingPermissions` 由会话关系 + `Authorize` 实时判定 |
+| POST | `/v1/sessions/{id}/commands/{name}` | 执行命令：`session.write` + 命令自身 key；body `{args, requestId}`；参数按 `args_schema` 字段级校验；session 忙 409 `session_busy`；同 requestId 幂等（含失败），并发按 key 串行化 |
+| POST | `/v1/sessions/{id}/compact` | 保留端点；与 `/compact` 命令共用 seam 与 `session.write + model.invoke` 权限 |
+
+- **插件声明**：`plugin.yaml` 的 `provides.commands[]`（name/summary/tool/danger，可选 description/args_schema/idempotent/targets）。`tool` MUST 属于同一 `provides.tools`；发布名 `<plugin-id>:<name>`；`skill` 插件 id 与 `compact`/`learn`/`skill:*` 裸名保留；安装/更新审批展示发布名、danger、targets。
+- **执行原语**：builtin `/compact` 走 `CompactSession` seam；`/skill:<name>` 走 skill library 并写 `skill.loaded`（name/hash/location + 限长 body），下一轮 system prompt 按引用加载；插件命令只走 `Manager.InvokePluginTool`（`plugin.invoke` + 工具 registry key + `permissions.tools`），不新增执行原语。`/learn` 仍是客户端模板，不在目录。
+- **destructive**：先开 durable decision（返回 202 + `decisionId`，prompt 含 bounded 参数预览）；审批通过后同 requestId 重放，`pending_decision → running` 用条件 CAS 保证只执行一次；拒绝 403、超时 408、取消 409；未批准不调用工具。
+- **durability 口径**：`command_invocations`（`tenant/session/requestId` 主键、running lease、条件终态）是幂等与审计真值；`command.invoked` 是会话投影行（UI 渲染），两者身份字段一致，均不含参数正文（只存 `argsHash/argsBytes`）。`command.invoked`/`skill.loaded` 不进模型上下文；`/compact` 只产生既有 `compaction` 事件。
+- **失败映射**：未知命令/技能缺失 404；参数 400；权限 403；忙 409；插件未装配 503；插件 PENDING/FAILED 503；工具/插件 `isError` 502；结果 >64 KiB 截断并标 `truncated`。
+
 ### 身份与 Bot API（`internal/harnessapi`，A2–A4）
 
 | 方法 | 路径 | 语义 |

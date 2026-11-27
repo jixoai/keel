@@ -1,0 +1,7 @@
+$ mutation: remove command_invocations from rlsTenantTables (P1 guard deleted)
+$ go test ./internal/store/ -run TestCommandInvocationsIsInRLS -count=1
+--- FAIL: TestCommandInvocationsIsInRLS (0.00s)
+    command_invocations_test.go:119: command_invocations is missing from rlsTenantTables
+FAIL
+FAIL	github.com/jixoai/keel/internal/store	0.385s
+FAIL

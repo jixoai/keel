@@ -1,0 +1,7 @@
+$ mutation: remove pending_decision-only CAS (P0 guard deleted)
+$ KEEL_TEST_DSN=<real PG> go test -race ./internal/harnessapi/ -run TestCommandPGDestructiveApprovedConcurrentReplay -count=1
+--- FAIL: TestCommandPGDestructiveApprovedConcurrentReplay (0.25s)
+    commands_pg_test.go:291: PG approved concurrent replays executed the tool 4 times, want 1
+FAIL
+FAIL	github.com/jixoai/keel/internal/harnessapi	0.785s
+FAIL

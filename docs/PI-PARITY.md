@@ -39,6 +39,21 @@ PI 的核心 `packages/agent/src` **没有任何 skill 引用**；skills 只在
 所以 skills 属于**宿主层**：它改变的是「模型看到什么」，不是「运行时能执行什么」。
 把它塞进内核会让内核绑定某一种内容格式，违背 PI 的小内核设计。
 
+### `/skill:name` 与命令宿主（keel-plugin-commands）
+
+PI 的 `/skill:name` 是宿主命令：按引用加载技能内容，不是客户端拼接文本。Keel 把这一
+语义扩展成统一的宿主动作目录：
+
+- `GET /v1/sessions/{id}/commands` 发布 builtin、已启用插件的 `provides.commands`、
+  已安装 skills；`POST …/commands/{name}` 执行，`session.write` + 命令自身权限；
+- `/compact` 与既有 `POST /v1/sessions/{id}/compact` 共用 seam 与
+  `session.write + model.invoke`；`/skill:<name>` 写 `skill.loaded`（name/hash/location +
+  限长 body），下一轮按引用进入 system prompt；`disable-model-invocation` 不阻止用户命令；
+- `/learn` 仍是 Composer 客户端模板，**不是**服务端命令；
+- 插件命令必须绑定本插件已声明工具，经 `plugin.invoke` 审批边界与工具 registry 权限执行；
+  destructive 命令必须 durable decision，未批准不执行。命令不是 prompt 模板：只产生提示词
+  文本的功能必须留在客户端模板、skill 或 tool。
+
 ### MCP = 协议边界，必须是独立客户端
 
 PI 的 MCP 是独立包 `@earendil-works/pi-mcp`，**不依赖官方 MCP SDK**：
