@@ -123,8 +123,8 @@
 
 - [x] 13.1 跑 keel 单测/集成/race + keel-board conformance；全绿并记录输出。（`evidence/phase-1-sync.md`：boardintegration + race + `go test -p 1 ./...` + v0.1.1 conformance；不修改 board 仓库）
 - [x] 13.2 E2E：keel API + fake 平台 + fake bridge，覆盖 sync 全链路、superagent 镜像/命令桥、跨租户；脚本生成 HTML 报告。`cmd/board-sync-e2e` 现在包含真实 PG + HTTP 的 superagent bridge 场景（auth principal → Surface.Gate → bridge → Surface → 真实 board log，fake supervisor）：频道级授权拒绝（supervisor calls=0、head 不变）、operator 组 claim/complete/block、`board_disabled` 404、supervisor timeout/5xx/retry。（evidence: `evidence/phase-1-sync-e2e.html`）
-- [ ] 13.3 独立子代理复核（禁 Codex）：身份/RBAC、sync 凭据/不可信输入、双真值、回滚；P0/P1 清零。
-- [ ] 13.4 写 phase 1 evidence；完成阶段归档检查点并签收；change 保持 active 进入 Phase 2。
+- [x] 13.3 独立子代理复核（禁 Codex）：身份/RBAC、sync 凭据/不可信输入、双真值、回滚；P0/P1 清零。（PASS：P0=0/P1=0，见 `evidence/phase-1-independent-review.md`；频道级授权、后代认领与变异验证均独立复核）
+- [x] 13.4 写 phase 1 evidence；完成阶段归档检查点并签收；change 保持 active 进入 Phase 2。（`evidence/phase-1-{infrastructure,sync,superagent}.md` + `phase-1-sync-e2e.html` + `phase-1-pin.txt`；三个 gate 在同一 code commit 上 exit 0）
 
 ## 14. Phase 2：客户端数据与投影
 
