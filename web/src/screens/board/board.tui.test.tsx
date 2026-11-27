@@ -163,6 +163,9 @@ test("TUI: 同步——入口、lag/凭据/死信、重试与收件箱", async (
   await view.press("id:board-sync-retry-all");
   await view.waitFor("id:board-notice", { timeout: 20_000 });
   await view.waitFor("text:/死信 · 0/", { timeout: 20_000 });
+  // Clearing dead letters must not turn credential failures into "all clear".
+  expect(view.texts().join("\n")).not.toContain("暂无已知故障");
+  expect(view.texts().join("\n")).toContain("凭据问题会让对应入口停止收发");
   await view.press("id:board-sync-inbox-open-slack");
   await view.waitFor("text:/收件箱 · Slack/", { timeout: 20_000 });
   expect(view.texts().join("\n")).toContain("不显示正文或凭据");
@@ -247,6 +250,7 @@ test("TUI: 五态——loading/empty/error/disabled/404/迁移/只读权限", as
   expect(reader.shows("id:board-new-task")).toBe(false);
   await openTask(reader, "812");
   expect(reader.texts().join("\n")).toContain("认领凭据不在本标签页");
+  expect(reader.texts().join("\n")).toContain("只有查看权限");
   expect(reader.shows("id:board-action-complete")).toBe(false);
 
   const noMoves = await harness(1440, "no-moves");

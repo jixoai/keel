@@ -50,6 +50,15 @@ them without a client rule.
    work. The old API routes return 404.
 7. `kit-imports.mjs` reports three pre-existing violations in untouched web
    files; `nsh check` itself passes.
+8. `/v1/board/watchers` carries no dead/lastError fields and the delivery DTO's
+   `depth.dead` is not surfaced by the mount layer, so a watcher dead-letter
+   retry stays hidden until board exposes that state; enable/disable and
+   schedule cancel/clear are fully backed.
+9. The 390 state-tab strip scrolls with a right-edge fade and trailing space;
+   auto-scrolling the selected tab and wrapping the filter-sheet footer on
+   very short screens remain incremental polish.
+10. Provider error detail is reduced to product categories in the UI; the raw
+    provider sentence remains in server logs for operators.
 
 ## Verification
 

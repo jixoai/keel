@@ -19,6 +19,7 @@ import {
   Skeleton,
   Tab,
   Tabs,
+  alpha,
   color,
   font,
   lineHeight,
@@ -95,24 +96,39 @@ function StateBadge(props: { state: string; testID?: string }) {
 
 function StateTabs(props: { query: BoardQuery }) {
   return (
-    <ScrollArea testID="board-state-tabs" horizontal style={{ width: "100%" }}>
-      <View style={{ flexDirection: "row", paddingBottom: space.xs }}>
-        <Tabs variant="line" accessibilityLabel="任务状态" testID="board-state-tablist">
-          <Each of={BOARD_STATE_TABS} key={(state) => state}>
-            {(state) => (
-              <Tab
-                testID={`board-state-tab-${state()}`}
-                label={BOARD_STATE_TAB_LABEL[state()]}
-                selected={props.query.state === state()}
-                onPress={() => applyBoardQuery({ state: state() })}
-                accessibilityLabel={`${BOARD_STATE_TAB_LABEL[state()]}${props.query.state === state() ? "，当前" : ""}`}
-                style={{ minHeight: isMobile() ? 44 : 36, paddingHorizontal: space.md }}
-              />
-            )}
-          </Each>
-        </Tabs>
-      </View>
-    </ScrollArea>
+    <View style={{ position: "relative", width: "100%" }}>
+      <ScrollArea testID="board-state-tabs" horizontal style={{ width: "100%" }}>
+        <View style={{ flexDirection: "row", paddingBottom: space.xs, paddingRight: isMobile() ? 40 : 0 }}>
+          <Tabs variant="line" accessibilityLabel="任务状态" testID="board-state-tablist">
+            <Each of={BOARD_STATE_TABS} key={(state) => state}>
+              {(state) => (
+                <Tab
+                  testID={`board-state-tab-${state()}`}
+                  label={BOARD_STATE_TAB_LABEL[state()]}
+                  selected={props.query.state === state()}
+                  onPress={() => applyBoardQuery({ state: state() })}
+                  accessibilityLabel={`${BOARD_STATE_TAB_LABEL[state()]}${props.query.state === state() ? "，当前" : ""}`}
+                  style={{ minHeight: isMobile() ? 44 : 36, paddingHorizontal: space.md }}
+                />
+              )}
+            </Each>
+          </Tabs>
+        </View>
+      </ScrollArea>
+      <If when={isMobile()}>
+        <View
+          style={{
+            position: "absolute",
+            right: 0,
+            top: 0,
+            bottom: 0,
+            width: 32,
+            pointerEvents: "none",
+            backgroundImage: `linear-gradient(to right, ${alpha(color.background, 0)}, ${alpha(color.background, 1)})`,
+          }}
+        />
+      </If>
+    </View>
   );
 }
 

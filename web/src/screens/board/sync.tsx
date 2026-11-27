@@ -67,6 +67,7 @@ function HealthSummary(props: { data: BoardSyncData }) {
     props.data.credentials[entry.key]?.credential ?? entry.credential;
   const invalid = () => entries().filter((entry) => credentialOf(entry) === "invalid").length;
   const missing = () => entries().filter((entry) => credentialOf(entry) === "missing").length;
+  const credentialIssues = () => invalid() + missing();
   const deadLetters = () => props.data.dead.length;
   const outboxFailures = () => props.data.failures.length;
   const last = () => {
@@ -74,6 +75,15 @@ function HealthSummary(props: { data: BoardSyncData }) {
       .map((entry) => Date.parse(entry.lastDeliveryAt ?? ""))
       .filter((value) => Number.isFinite(value));
     return times.length ? new Date(Math.max(...times)).toISOString() : undefined;
+  };
+  const summary = () => {
+    if (credentialIssues() > 0 && deadLetters() + outboxFailures() === 0) {
+      return "凭据问题会让对应入口停止收发；轮换后自动恢复。";
+    }
+    if (credentialIssues() + deadLetters() + outboxFailures() === 0) {
+      return `暂无已知故障${last() ? ` · 最后投递 ${boardClock(last())}` : ""}`;
+    }
+    return "故障只阻塞对应外部线程，任务主路径继续。";
   };
   return (
     <View testID="board-sync-health" style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: space.sm }}>
@@ -91,11 +101,7 @@ function HealthSummary(props: { data: BoardSyncData }) {
       <If when={outboxFailures() > 0}>
         <Badge variant="destructive" icon="alert" label={`${outboxFailures()} 个出站失败`} />
       </If>
-      <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>
-        {deadLetters() + outboxFailures() === 0
-          ? `暂无已知故障${last() ? ` · 最后投递 ${boardClock(last())}` : ""}`
-          : "故障只阻塞对应外部线程，任务主路径继续。"}
-      </Text>
+      <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>{summary()}</Text>
     </View>
   );
 }

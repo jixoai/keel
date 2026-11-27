@@ -20,6 +20,8 @@ import {
   boardSearchOf,
   boardStateLabel,
   boardStore,
+  boardThreadRefLabel,
+  boardWatcherActionLabel,
   defaultBoardQuery,
   effectiveTaskState,
   insertQueueId,
@@ -183,6 +185,17 @@ test("board：租约过期后 token 动作即使有 token 也不可用，claim �
   const live = boardAvailableMoves(claimed, { hasToken: true, mine: true, now: NOW - 1000 });
   expect(live).toContain("complete");
   expect(live).toContain("renew");
+  // A stale token from another actor never unlocks settlement moves once
+  // identity is known.
+  const stale = boardAvailableMoves(claimed, { hasToken: true, mine: false, identityKnown: true, now: NOW - 1000 });
+  expect(stale).not.toContain("complete");
+  expect(stale).not.toContain("renew");
+  expect(stale).not.toContain("release");
+  // If /me is unavailable, the token itself is the only fence; the server
+  // still rejects it if it is stale.
+  const unknown = boardAvailableMoves(claimed, { hasToken: true, mine: false, identityKnown: false, now: NOW - 1000 });
+  expect(unknown).toContain("complete");
+  expect(unknown).toContain("renew");
 });
 
 test("board：UI 动作去掉 takeover/force-release，丢失 token 只留可执行动作", () => {
@@ -205,11 +218,18 @@ test("board：标签与平台错误只出产品文案，不出 key=value/provide
   expect(boardLabelView("team", "payments")?.text).toBe("支付团队");
   expect(boardLabelView("foo", "bar")?.text).toBe("bar");
   expect(boardLabelFilterTitle("priority", "high")).toBe("优先级 · 高优先级");
+  expect(boardLabelFilterTitle("foo", "hotel")).toBe("hotel");
+  expect(boardLabelFilterTitle("foo", "")).toBe("标签");
+  expect(boardLabelFilterTitle("board.archived", "true")).toBe("系统标签");
   expect(boardEventRefLabel("slack:evt_9a1c")).toBe("Slack 事件 9a1c");
+  expect(boardEventRefLabel("reaction:slack:C_SUPPORT:1700009999.000100|thread")).toBe("Slack 事件 17000099");
+  expect(boardThreadRefLabel("slack:#work-production")).toBe("Slack 线程 · #work-production");
+  expect(boardThreadRefLabel("slack:C08:174.002")).toBe("Slack 线程");
+  expect(boardWatcherActionLabel("post")).toBe("发布消息");
   expect(boardPlatformLabel("slack")).toBe("Slack");
   expect(boardProviderErrorCopy("provider answered 429")).toBe("平台限流，稍后重试");
   expect(boardProviderErrorCopy("provider timeout")).toBe("平台响应超时");
-  expect(boardProviderErrorCopy("signature window expired")).toBe("平台签名已过期，等待重新投递");
+  expect(boardProviderErrorCopy("signature window expired")).toBe("平台签名已过期，需要重新投递");
 });
 
 test("board：moves 是唯一动作来源；缺失时只读，未知动作被忽略", () => {

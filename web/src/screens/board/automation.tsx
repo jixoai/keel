@@ -47,8 +47,20 @@ const scheduleStatusTone = (status: string): "success" | "secondary" | "outline"
  * Nothing is inferred from last_error text. */
 const permissionRevoked = (schedule: BoardScheduleView): boolean => schedule.cancelReason === "revoked";
 
-const deliveryStateLabel = (state: string): string =>
-  state === "done" ? "已投递" : state === "pending" ? "待投递" : state === "dead" ? "死信" : state || "未知";
+const deliveryStateLabel = (state: string): string => {
+  switch (state) {
+    case "done":
+      return "已投递";
+    case "pending":
+      return "待投递";
+    case "leased":
+      return "投递中";
+    case "dead":
+      return "死信";
+    default:
+      return state ? "处理中" : "未知";
+  }
+};
 
 const cadence = (schedule: BoardScheduleView): string => {
   if (!schedule.everySeconds) return schedule.untilAt ? `至 ${boardClock(schedule.untilAt)}` : "一次性";
@@ -67,7 +79,11 @@ function WatcherRow(props: { watcher: BoardWatcherView }) {
     const parts: string[] = [];
     if (props.watcher.lastDeliveryAt) parts.push(`最近 ${boardClock(props.watcher.lastDeliveryAt)}`);
     if (props.watcher.successes24h !== undefined) {
-      parts.push(`24h ${props.watcher.successes24h} 成功 · ${props.watcher.failures24h ?? 0} 失败`);
+      parts.push(
+        props.watcher.failures24h === undefined
+          ? `24h ${props.watcher.successes24h} 成功`
+          : `24h ${props.watcher.successes24h} 成功 · ${props.watcher.failures24h} 失败`,
+      );
     }
     return parts.join(" · ");
   };

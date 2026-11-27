@@ -477,7 +477,7 @@ export function boardDeadlineText(
   if (state === "waiting") {
     const created = message?.createdAt;
     const age = boardAgeText(created, now);
-    return age ? `${age}前` : "等待依赖";
+    return age ? (age === "刚刚" ? age : `${age}前`) : "等待依赖";
   }
   if (state === "blocked") {
     return task.blocked?.kind === "awaiting_approval" ? "等待审批" : "等待回复";
@@ -487,7 +487,7 @@ export function boardDeadlineText(
   if (state === "canceled") return "已取消";
   const created = message?.createdAt;
   const age = boardAgeText(created, now);
-  return age ? `${age}前` : "可认领";
+  return age ? (age === "刚刚" ? age : `${age}前`) : "可认领";
 }
 
 const two = (value: number): string => (value < 10 ? `0${value}` : String(value));
@@ -685,9 +685,13 @@ export function boardVisibleLabels(labels: Record<string, string> | undefined): 
 /** The filter facet's human title; the raw key=value stays in the form value
  * only, never in what the reader sees. */
 export function boardLabelFilterTitle(key: string, value: string): string {
+  if (!key) return "全部标签";
+  if (key.startsWith("board.")) return "系统标签";
   const view = boardLabelView(key, value);
   const keyName = BOARD_LABEL_KEY_NAMES[key] ?? "标签";
-  return view ? `${keyName} · ${view.text}` : `${keyName} · ${boardHumanize(value) || value}`;
+  if (view) return keyName === "标签" ? view.text : `${keyName} · ${view.text}`;
+  if (!value) return keyName;
+  return boardHumanize(value);
 }
 
 export function boardPlatformLabel(platform: string | undefined): string {
@@ -709,26 +713,40 @@ export function boardPlatformLabel(platform: string | undefined): string {
   }
 }
 
-/** An inbound event reference (`slack:evt_9a1c`) becomes a short product
- * reference; the provider's raw id never reaches the reader. */
+const BOARD_KNOWN_PLATFORMS = new Set(["slack", "github", "linear", "chatsdk", "superagent", "board"]);
+
+/** An inbound event reference (`slack:evt_9a1c`,
+ * `reaction:slack:C…:1700009999.000100|…`) becomes a short product reference;
+ * the provider's raw id never reaches the reader. */
 export function boardEventRefLabel(ref: string | undefined): string {
   const raw = (ref ?? "").trim();
   if (!raw) return "入站事件";
-  const cut = raw.indexOf(":");
-  const platform = cut > 0 ? raw.slice(0, cut) : "";
-  const rest = cut > 0 ? raw.slice(cut + 1) : raw;
-  const short = rest.replace(/^evt[_-]?/i, "").slice(0, 8);
-  if (!short) return "入站事件";
-  return platform ? `${boardPlatformLabel(platform)} 事件 ${short}` : `事件 ${short}`;
+  const parts = raw.split(/[:|]/).map((part) => part.trim()).filter(Boolean);
+  const platform = parts.find((part) => BOARD_KNOWN_PLATFORMS.has(part.toLowerCase()));
+  const rest = platform ? parts.slice(parts.indexOf(platform) + 1) : parts;
+  const candidate =
+    rest.find((part) => /^evt[_-]?/i.test(part)) ??
+    rest.find((part) => /\d{6,}/.test(part)) ??
+    rest[0] ??
+    "";
+  const short = candidate.replace(/^evt[_-]?/i, "").slice(0, 8);
+  const name = platform ? boardPlatformLabel(platform) : "";
+  return name ? `${name} 事件 ${short || "…"}` : `事件 ${short || "…"}`;
 }
 
-/** A platform thread target (`slack:C08:…`) becomes "Slack 线程"; the opaque
- * provider coordinates are not a product value. */
+/** A platform thread target (`slack:C08:…`, `slack:#work-production`) becomes
+ * "Slack 线程"; only human-readable channel names are kept, never provider
+ * coordinates. */
 export function boardThreadRefLabel(ref: string | undefined): string {
   const raw = (ref ?? "").trim();
   if (!raw) return "外部线程";
-  const cut = raw.indexOf(":");
-  return cut > 0 ? `${boardPlatformLabel(raw.slice(0, cut))} 线程` : raw;
+  const parts = raw.split(/[:|]/).map((part) => part.trim()).filter(Boolean);
+  const platform = parts.find((part) => BOARD_KNOWN_PLATFORMS.has(part.toLowerCase()));
+  const rest = platform ? parts.slice(parts.indexOf(platform) + 1) : parts;
+  const human = rest.find((part) => part.startsWith("#")) ?? rest.find((part) => /^[a-z][a-z0-9_-]*/.test(part) && !/^[a-z]$/.test(part));
+  const name = platform ? boardPlatformLabel(platform) : "";
+  if (name) return human ? `${name} 线程 · ${human}` : `${name} 线程`;
+  return human ? human : raw.startsWith("#") ? raw : "外部线程";
 }
 
 /** Provider errors are operator facts, not UI copy. Keep the category and
@@ -741,7 +759,7 @@ export function boardProviderErrorCopy(error: string | undefined | null): string
     return "平台限流，稍后重试";
   }
   if (lower.includes("timeout") || lower.includes("timed out")) return "平台响应超时";
-  if (lower.includes("signature") && lower.includes("expired")) return "平台签名已过期，等待重新投递";
+  if (lower.includes("signature") && lower.includes("expired")) return "平台签名已过期，需要重新投递";
   if (lower.includes("401") || lower.includes("403") || lower.includes("unauthorized") || lower.includes("forbidden")) {
     return "平台凭据被拒绝";
   }
@@ -762,6 +780,8 @@ export function boardProviderErrorCopy(error: string | undefined | null): string
 
 export function boardWatcherActionLabel(action: string | undefined): string {
   switch ((action ?? "").toLowerCase()) {
+    case "post":
+      return "发布消息";
     case "assign-by-label":
       return "按标签指派";
     case "notify-owner":
@@ -856,7 +876,7 @@ const UI_UNSUPPORTED_MOVES: BoardMove[] = ["takeover", "release.force"];
  * tab (a reload) or the lease has expired. */
 export function boardAvailableMoves(
   task: BoardTaskView | undefined,
-  opts: { hasToken: boolean; mine: boolean; now: number },
+  opts: { hasToken: boolean; mine: boolean; now: number; identityKnown?: boolean },
 ): BoardMove[] {
   const moves = taskMoves(task);
   if (!task || task.state !== "claimed" || !task.claim) return moves;
@@ -866,14 +886,18 @@ export function boardAvailableMoves(
   // if this tab still has a stale token. Claim becomes primary when the server
   // lists it (the queue presents the task as ready).
   if (expired) return moves.filter((move) => !TOKEN_BEARING_MOVES.includes(move));
-  if (!opts.mine || opts.hasToken) return moves;
+  // A token is the fence: when /me is unavailable we cannot prove the claim is
+  // ours, but this tab can still try the token-bearing action and let the
+  // server reject a stale token. Once identity is known, another actor's claim
+  // must not inherit this tab's token.
+  if (opts.hasToken && (opts.mine || opts.identityKnown === false)) return moves;
   return moves.filter((move) => !TOKEN_BEARING_MOVES.includes(move));
 }
 
 /** `boardAvailableMoves` filtered to what this board version can execute. */
 export function boardRenderableMoves(
   task: BoardTaskView | undefined,
-  opts: { hasToken: boolean; mine: boolean; now: number },
+  opts: { hasToken: boolean; mine: boolean; now: number; identityKnown?: boolean },
 ): BoardMove[] {
   return boardAvailableMoves(task, opts).filter((move) => !UI_UNSUPPORTED_MOVES.includes(move));
 }

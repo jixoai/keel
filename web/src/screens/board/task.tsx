@@ -266,7 +266,9 @@ function CopiesList(props: { task: BoardTaskView }) {
 function TaskActions(props: { taskId: string; task: BoardTaskView; onOpenTask: (id: string) => void }) {
   const now = () => boardStore.clock();
   const stale = () => boardStore.threadStale();
+  const canWrite = () => can("board.write");
   const claimLost = () =>
+    canWrite() &&
     effectiveTaskState(props.task, now()) === "claimed" &&
     boardStore.isMyActor(props.task.claim?.actor) &&
     !boardStore.heldByThisTab(props.taskId, now()) &&
@@ -278,6 +280,7 @@ function TaskActions(props: { taskId: string; task: BoardTaskView; onOpenTask: (
     boardRenderableMoves(props.task, {
       hasToken: boardStore.heldByThisTab(props.taskId, now()),
       mine: boardStore.isMyActor(props.task.claim?.actor),
+      identityKnown: boardStore.meLoaded(),
       now: now(),
     });
   const actionMoves = (): BoardMove[] => moves().filter((move) => move !== "reply");
@@ -355,7 +358,15 @@ function TaskActions(props: { taskId: string; task: BoardTaskView; onOpenTask: (
           effectiveTaskState(props.task, now()) !== "canceled"
         }
       >
-        <StateNote tone="info" icon="lock" text="当前没有可执行的动作；需要由创建者或管理员推进。" />
+        <StateNote
+          tone="info"
+          icon="lock"
+          text={
+            canWrite()
+              ? "当前没有可执行的动作；需要由创建者或管理员推进。"
+              : "只有查看权限：频道编辑者或任务创建者可以推进状态。"
+          }
+        />
       </If>
       <If when={stale()}>
         <StateNote
@@ -365,7 +376,15 @@ function TaskActions(props: { taskId: string; task: BoardTaskView; onOpenTask: (
           text="实时更新中断：写操作暂不可用，先刷新任务再继续。"
         />
       </If>
-      <If when={!stale() && props.task.archived !== true && props.task.mirror?.readOnly !== true && actionMoves().length > 0}>
+      <If
+        when={
+          !stale() &&
+          canWrite() &&
+          props.task.archived !== true &&
+          props.task.mirror?.readOnly !== true &&
+          actionMoves().length > 0
+        }
+      >
         <View style={{ flexDirection: "column", gap: space.sm }}>
           <View style={{ flexDirection: "row", flexWrap: "wrap", gap: space.sm }}>
             <If when={primary() !== undefined}>{buttonFor(primary()!, "primary")}</If>
@@ -392,6 +411,7 @@ function TaskActions(props: { taskId: string; task: BoardTaskView; onOpenTask: (
 
 export function BoardTaskCard(props: { taskId: string; task: BoardTaskView; message: BoardMessageView; onOpenTask: (id: string) => void }) {
   const now = () => boardStore.clock();
+  const canWrite = () => can("board.write");
   const state = () => effectiveTaskState(props.task, now());
   const lease = () => boardLeaseFacts(props.task, now(), {
     hasToken: boardStore.heldByThisTab(props.taskId, now()),
@@ -421,7 +441,11 @@ export function BoardTaskCard(props: { taskId: string; task: BoardTaskView; mess
           testID="board-identity-unknown"
           tone="warning"
           icon="alert"
-          text="身份未知：无法确认这个认领是否属于你。续租或结算前需要重新认领，或由创建者/管理员指派/取消。"
+          text={
+            canWrite()
+              ? "身份未知：无法确认这个认领是否属于你。续租或结算前需要重新认领，或由创建者/管理员指派/取消。"
+              : "身份未知：当前账号只有查看权限；如需推进，请联系创建者或管理员。"
+          }
         />
       </If>
       <If when={state() === "claimed" && !claimLost()}>
@@ -438,9 +462,13 @@ export function BoardTaskCard(props: { taskId: string; task: BoardTaskView; mess
       <If when={claimLost()}>
         <StateNote
           testID="board-claim-lost"
-          tone="warning"
+          tone={canWrite() ? "warning" : "info"}
           icon="alert"
-          text="认领凭据不在本标签页，无法续租或结算。等待租约到期后可重新认领，或由创建者/管理员指派/取消。"
+          text={
+            canWrite()
+              ? "认领凭据不在本标签页，无法续租或结算。等待租约到期后可重新认领，或由创建者/管理员指派/取消。"
+              : "认领凭据不在本标签页。当前账号只有查看权限；如需推进，请联系创建者或管理员。"
+          }
         />
       </If>
       <TaskFacts task={props.task} message={props.message} />
@@ -1294,6 +1322,7 @@ export function bindTaskKeys(
     return boardRenderableMoves(task(), {
       hasToken: boardStore.heldByThisTab(id, boardStore.clock()),
       mine: boardStore.isMyActor(task()?.claim?.actor),
+      identityKnown: boardStore.meLoaded(),
       now: boardStore.clock(),
     }).includes(move);
   };
