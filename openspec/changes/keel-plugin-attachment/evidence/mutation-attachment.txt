@@ -1,0 +1,37 @@
+=== mutation 1: attachmentSelection ignores inventory/declaration order (expect FAIL) ===
+✗ src/plugins/registry.test.ts › attachment selection: inventory order survives a re-registration (跨插件 MIME 顺序) (99ms)
+    expected "zzz.second" to be "aaa.first"
+    at <anonymous> (src/plugins/registry.test.ts:613:85)
+error 1 test: 0 passed, 1 failed (2.0s)
+exit=1
+
+=== mutation 2: none/failed thumbnail falls back to the original bytes (expect FAIL) ===
+✗ src/data/attachments.test.ts › thumbnail source: only a ready thumbnail; pending/failed/none never fall back to the original (0ms)
+    expected "/v1/files/11111111-1111-4111-8111-111111111111" to be ""
+    at <anonymous> (src/data/attachments.test.ts:125:86)
+error 1 test: 0 passed, 1 failed (1.8s)
+exit=1
+
+=== mutation 3: uninstall only deletes the bridge map entry, no unsubscribe (expect FAIL) ===
+✗ src/plugins/bridge.test.ts › registry: uninstalling a plugin withdraws its bridge subscription (180ms)
+    expected 1 to be 0
+    at <anonymous> (src/plugins/bridge.test.ts:110:57)
+error 1 test: 0 passed, 1 failed (2.0s)
+exit=1
+--- git status after mutation revert ---
+ M openspec/changes/keel-plugin-attachment/evidence/nsh-test-tui.txt
+ M openspec/changes/keel-plugin-attachment/evidence/openspec-validate.txt
+ M openspec/changes/keel-plugin-attachment/evidence/ui/report.html
+ M openspec/changes/keel-plugin-attachment/evidence/ui/screenshots/01-default-attachment-row.png
+ M openspec/changes/keel-plugin-attachment/evidence/ui/screenshots/02-plugin-preview.png
+ M openspec/changes/keel-plugin-attachment/evidence/ui/screenshots/03-disabled-default-row.png
+ M openspec/changes/keel-plugin-attachment/evidence/ui/screenshots/04-preview-failure-fallback.png
+ M openspec/changes/keel-plugin-attachment/evidence/ui/screenshots/05-reader-no-file-read.png
+ M openspec/changes/keel-plugin-attachment/evidence/ui/screenshots/09-layout-390.png
+ M openspec/changes/keel-plugin-attachment/evidence/ui/screenshots/10-layout-768.png
+ M openspec/changes/keel-plugin-attachment/evidence/ui/screenshots/11-layout-1024.png
+ M openspec/changes/keel-plugin-attachment/evidence/ui/screenshots/12-layout-1440.png
+ M openspec/changes/keel-plugin-attachment/evidence/ui/steps.json
+ M scripts/keel-attachment-e2e/run.sh
+?? openspec/changes/keel-plugin-attachment/evidence/go-test-attachment-httpapi-race.txt
+?? openspec/changes/keel-plugin-attachment/evidence/mutation-attachment.txt

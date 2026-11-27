@@ -100,9 +100,11 @@
 
 - [x] 6.1 `go test -race` 相关包（httpapi/harnessapi/harnessext/pluginpkg/agent/blob/
   provider）全绿；`nsh check` 与 `nsh test --target tui` 全绿。
-  > 后端 `go test -race` 见 `evidence/go-test-race.txt`；前端 `nsh check` 0 错
-  > （`evidence/nsh-check.txt`）；`nsh test --target tui` 全绿
-  > （`evidence/nsh-test-tui.txt`）；web 打包见 `evidence/web-build.txt`。
+  > 后端 `go test -race ./internal/attachment ./internal/httpapi` 全绿
+  > （`evidence/go-test-attachment-httpapi-race.txt`；相关包总表见 `go-test-race.txt`）；
+  > 前端 `nsh check` 0 错（`evidence/nsh-check.txt`）；`nsh test --target tui` 476/476
+  > 全绿（`evidence/nsh-test-tui.txt`）；web 打包见 `evidence/web-build.txt`；
+  > 反向变异证据（顺序/占位/退订各一条会变红）见 `evidence/mutation-attachment.txt`。
 - [x] 6.2 `openspec validate keel-plugin-attachment --strict` 通过；证据目录含校验输出。
 - [ ] 6.3 独立 reviewer（子代理）复核 P0/P1 清零；修复后复跑 6.1/6.4。
 - [ ] 6.4 归档：`openspec archive keel-plugin-attachment`，更新 `MAINLINE.md` 与

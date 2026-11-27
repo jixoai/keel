@@ -1,3 +1,2 @@
-$ openspec validate keel-plugin-attachment --strict
 Change 'keel-plugin-attachment' is valid
 exit=0

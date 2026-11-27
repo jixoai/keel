@@ -130,6 +130,12 @@ mkdir -p "$SECRETS"
 chmod 700 "$SECRETS"
 
 # ---- 1. free ports --------------------------------------------------------
+# Is the listening process on this port our pid? A shared machine can start
+# another agent's server after the free-port probe; readiness must not accept it.
+port_owned() {
+  lsof -nP -iTCP:"$1" -sTCP:LISTEN 2>/dev/null | awk 'NR > 1 { print $2 }' | grep -qx "$2"
+}
+
 pick_port() {
   local p
   for p in $(seq "$1" "$2"); do
@@ -250,6 +256,7 @@ for _ in $(seq 1 50); do
   sleep 0.1
 done
 curl -fsS --max-time 1 "http://127.0.0.1:$MODEL_PORT/health" >/dev/null 2>&1 || fail "scripted model is not healthy"
+port_owned "$MODEL_PORT" "$MODEL_PID" || fail "port $MODEL_PORT is not owned by the scripted model"
 
 # ---- 6. serve tenant A ----------------------------------------------------
 say "starting keel serve (tenant A) on 127.0.0.1:$PORT (evidence $EVIDENCE)"
@@ -269,6 +276,7 @@ for _ in $(seq 1 120); do
   sleep 0.2
 done
 curl -fsS --max-time 1 "http://127.0.0.1:$PORT/v1/health" >/dev/null 2>&1 || fail "server A is not healthy"
+port_owned "$PORT" "$SERVER_PID" || fail "port $PORT is not owned by server A (another process won the bind)"
 
 # ---- 7. first super admin (real login; secrets stay in 0600 files) -------
 # Before tenant B's account: the bootstrap token is refused once any super
@@ -305,6 +313,7 @@ for _ in $(seq 1 120); do
   sleep 0.2
 done
 curl -fsS --max-time 1 "http://127.0.0.1:$PORT_B/v1/health" >/dev/null 2>&1 || fail "server B is not healthy"
+port_owned "$PORT_B" "$SERVER_B_PID" || fail "port $PORT_B is not owned by server B (another process won the bind)"
 
 # ---- 9. browser lane ------------------------------------------------------
 export E2E_BASE="http://127.0.0.1:$PORT"

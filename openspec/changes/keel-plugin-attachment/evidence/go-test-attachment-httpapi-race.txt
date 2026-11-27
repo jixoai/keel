@@ -1,0 +1,3 @@
+ok  	github.com/jixoai/keel/internal/attachment	1.390s
+ok  	github.com/jixoai/keel/internal/httpapi	3.428s
+exit=0
