@@ -262,6 +262,10 @@ type Manager struct {
 	mu       sync.Mutex
 	entries  map[string]*managerEntry
 	revision int64
+	// auditMu serializes audit appends. Lifecycle actions call auditLocked
+	// while holding mu; RecordAudit (plugin Start/configure) appends without mu,
+	// so a dedicated lock keeps the seam safe without nesting manager state.
+	auditMu sync.Mutex
 	// changeSink, when set, is told that the tenant's inventory changed. It is
 	// the product's invalidation seam (GET /v1/identity/events kind=plugins); the
 	// manager never blocks on it and never sends rows.

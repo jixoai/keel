@@ -645,6 +645,9 @@ func TestOTLPExporterMetricShapeIsDeltaWithCorrectBuckets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if got := strings.Count(string(encoded), `"startTimeUnixNano"`); got != 2 {
+		t.Fatalf("startTimeUnixNano occurrences = %d, want one per data point: %s", got, encoded)
+	}
 	var decoded struct {
 		ResourceMetrics []struct {
 			ScopeMetrics []struct {

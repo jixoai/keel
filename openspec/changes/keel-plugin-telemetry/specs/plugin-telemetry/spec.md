@@ -145,8 +145,8 @@ headers MUST 从 secret store 解析，MUST NOT 出现在日志、状态或导�
 
 ### Requirement: 指标基数上限
 
-Telemetry metric MUST 使用固定标签白名单（model/provider/outcome/status/tool/kind/
-result）；MUST NOT 使用 tenant/session/run/request/trace/span 标签。每个指标族 MUST
+Telemetry metric MUST 使用固定标签白名单（model/provider/outcome/status/tool/kind/result/api/stop）；
+MUST NOT 使用 tenant/session/run/request/trace/span 标签。每个指标族 MUST
 有 series 上限（默认 1,000），全局 MUST 有上限（默认 5,000）；溢出 MUST 丢弃新 series
 并递增丢弃计数，warn 一次。metric 名称 MUST 在插件启动时注册；未注册名称 MUST 丢弃。
 

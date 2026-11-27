@@ -3,6 +3,7 @@ package harnessext
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -26,6 +27,7 @@ type telemetryCollector struct {
 	traces  []string
 	paths   []string
 	headers []http.Header
+	delay   time.Duration
 	status  int
 }
 
@@ -41,11 +43,25 @@ func newTelemetryCollector(t *testing.T) *telemetryCollector {
 			collector.traces = append(collector.traces, string(body))
 		}
 		status := collector.status
+		delay := collector.delay
 		collector.mu.Unlock()
+		if delay > 0 {
+			select {
+			case <-time.After(delay):
+			case <-r.Context().Done():
+				return
+			}
+		}
 		w.WriteHeader(status)
 	}))
 	t.Cleanup(collector.server.Close)
 	return collector
+}
+
+func (c *telemetryCollector) setDelay(delay time.Duration) {
+	c.mu.Lock()
+	c.delay = delay
+	c.mu.Unlock()
 }
 
 func (c *telemetryCollector) setStatus(status int) {
@@ -91,9 +107,10 @@ type telemetryHarness struct {
 }
 
 type telemetryFixture struct {
-	config  telemetry.Config
-	lookup  func(string) (string, bool)
-	enabled bool
+	config      telemetry.Config
+	lookup      func(string) (string, bool)
+	enabled     bool
+	stopTimeout time.Duration
 }
 
 func newTelemetryHarness(t *testing.T, fixture telemetryFixture) *telemetryHarness {
@@ -132,6 +149,7 @@ func newTelemetryHarness(t *testing.T, fixture telemetryFixture) *telemetryHarne
 					Config:       config,
 					LookupSecret: fixture.lookup,
 					Logger:       testLogger(),
+					StopTimeout:  fixture.stopTimeout,
 				})
 			},
 		}},
@@ -581,6 +599,55 @@ func TestTelemetryPluginDisableFlushesQueuedBatch(t *testing.T) {
 	}
 	if !strings.Contains(collector.traceBodies(), "queued-before-disable") {
 		t.Fatalf("flushed body = %s", collector.traceBodies())
+	}
+}
+
+func TestTelemetryPluginConfigLoaderFailureFailsClosed(t *testing.T) {
+	hub := telemetry.NewHub(telemetry.HubOptions{TenantID: "tenant-a", Logger: testLogger()})
+	plugin := NewTelemetryPlugin(TelemetryPluginOptions{
+		TenantID: "tenant-a",
+		ConfigLoader: func(context.Context) (telemetry.Config, error) {
+			return telemetry.Config{}, errors.New("stored tenant document unavailable")
+		},
+		Logger: testLogger(),
+	})
+	err := plugin.Start(context.Background(), &PluginEnv{Telemetry: hub})
+	if err == nil {
+		t.Fatal("a config loader failure was accepted")
+	}
+	if hub.ExporterCount() != 0 {
+		t.Fatalf("exporter registered: %d", hub.ExporterCount())
+	}
+	if status := hub.Status(); status.State != telemetry.PluginFailed {
+		t.Fatalf("state = %s", status.State)
+	}
+}
+
+func TestTelemetryPluginStopHonoursShortDeadline(t *testing.T) {
+	collector := newTelemetryCollector(t)
+	collector.setDelay(500 * time.Millisecond)
+	harness := newTelemetryHarness(t, telemetryFixture{
+		config: telemetry.Config{
+			Adapter:  "otlp",
+			Endpoint: collector.server.URL,
+		},
+		stopTimeout: 50 * time.Millisecond,
+	})
+	if _, err := harness.manager.Enable(context.Background(), TelemetryPluginID, AuditContext{TenantID: &harness.tenant, Actor: "test"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := harness.hub.StartSpan(telemetry.SpanOptions{Name: "slow-stop"}, func(telemetry.Span) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	started := time.Now()
+	if _, err := harness.manager.Disable(context.Background(), TelemetryPluginID, AuditContext{TenantID: &harness.tenant, Actor: "test"}); err != nil {
+		t.Fatal(err)
+	}
+	if elapsed := time.Since(started); elapsed > 300*time.Millisecond {
+		t.Fatalf("Disable took %s, want the 50ms stop bound", elapsed)
+	}
+	if harness.hub.ExporterCount() != 0 || harness.hub.Status().State != telemetry.PluginDisabled {
+		t.Fatalf("disable residue: %#v", harness.hub.Status())
 	}
 }
 

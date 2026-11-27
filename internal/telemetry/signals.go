@@ -131,6 +131,10 @@ var metricLabelKeys = map[string]struct{}{
 	"tool":     {},
 	"kind":     {},
 	"result":   {},
+	// Bounded provider labels: the wire API family and stop reason are closed
+	// vocabularies used by pi.ai.request.duration / pi.ai.tokens.
+	"api":  {},
+	"stop": {},
 }
 
 // forbiddenAttributePrefixes names the key families that MUST never reach an

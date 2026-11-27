@@ -73,7 +73,7 @@ func TestSanitizeSpanAttributes(t *testing.T) {
 func TestSanitizeMetricLabelsOnlyBoundedEnums(t *testing.T) {
 	clean, _ := SanitizeMetricLabels(SpanAttributes{
 		"model": "m", "provider": "p", "outcome": "ok", "status": "done",
-		"tool": "t", "kind": "k", "result": "r",
+		"tool": "t", "kind": "k", "result": "r", "api": "chat", "stop": "end_turn",
 		"tenant": "tenant-a", "session": "session-a", "run": "run-1", "trace": "trace-1",
 	})
 	for _, forbidden := range []string{"tenant", "session", "run", "trace"} {
@@ -81,7 +81,7 @@ func TestSanitizeMetricLabelsOnlyBoundedEnums(t *testing.T) {
 			t.Fatalf("metric label %q must be dropped", forbidden)
 		}
 	}
-	if len(clean) != 7 {
+	if len(clean) != 9 {
 		t.Fatalf("metric labels = %#v", clean)
 	}
 }
@@ -213,6 +213,18 @@ func TestParseConfigRefusesInvalidValues(t *testing.T) {
 				t.Fatalf("fields = %#v, want %q", fields, test.field)
 			}
 		})
+	}
+}
+
+func TestSummarizeConfigConfiguredFlag(t *testing.T) {
+	if summary := SummarizeConfig(Config{}); summary.Configured {
+		t.Fatalf("a tenant without telemetry rendered configured=true: %#v", summary)
+	}
+	if summary := SummarizeConfig(Config{Adapter: "none"}); !summary.Configured {
+		t.Fatalf("an explicit adapter rendered configured=false: %#v", summary)
+	}
+	if summary := SummarizeConfig(Config{Signals: []string{}}); !summary.Configured {
+		t.Fatalf("an explicit empty signal list rendered configured=false: %#v", summary)
 	}
 }
 

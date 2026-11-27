@@ -357,6 +357,7 @@ func (c EffectiveConfig) ResolveHeaders(lookup func(string) (string, bool)) (map
 // ConfigSummary is the sanitized status/approval projection of a config. It
 // never carries header values.
 type ConfigSummary struct {
+	// Configured is false for a tenant with no telemetry section at all.
 	Configured   bool     `json:"configured"`
 	Valid        bool     `json:"valid"`
 	Reason       string   `json:"reason,omitempty"`
@@ -369,10 +370,24 @@ type ConfigSummary struct {
 	ServiceName  string   `json:"serviceName,omitempty"`
 }
 
+// configDeclared reports whether the tenant actually wrote a telemetry section.
+// A zero config must not render configured=true just because the summary
+// normalizes defaults.
+func configDeclared(config Config) bool {
+	return strings.TrimSpace(config.Adapter) != "" ||
+		strings.TrimSpace(config.Endpoint) != "" ||
+		len(config.Headers) > 0 ||
+		strings.TrimSpace(config.ServiceName) != "" ||
+		config.Signals != nil ||
+		config.SampleRatio != nil ||
+		config.LogRatio != nil ||
+		strings.TrimSpace(config.LogMinLevel) != ""
+}
+
 // SummarizeConfig produces the status projection without resolving secrets.
 func SummarizeConfig(config Config) ConfigSummary {
 	summary := ConfigSummary{
-		Configured:  true,
+		Configured:  configDeclared(config),
 		Adapter:     strings.ToLower(strings.TrimSpace(config.Adapter)),
 		SampleRatio: 1,
 		LogRatio:    1,

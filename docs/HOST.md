@@ -52,7 +52,7 @@ compaction:
   # ttlHours: 168             # 旧 checkpoint 投影过期；0 = 不过期；最近一个始终保留
   # manualCompact: true       # 是否允许 POST /v1/sessions/{id}/compact
 telemetry:
-  adapter: "memory"         # memory | none | otlp（otlp 需 endpoint；插件启用后才出网）
+  adapter: "memory"         # memory | none | otlp（otlp 需 endpoint；插件启用后才出网；仅 tenant 文档，config.toml 不覆盖）
   # endpoint: "https://collector.example:4318"   # OTLP/HTTP；http 仅限 localhost/回环/私网 IP 字面量
   # headers: { "Authorization": "secret:OTLP_TOKEN" }  # 只接受 secret: 引用，禁止明文
   # serviceName: "keel"

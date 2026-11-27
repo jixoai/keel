@@ -1269,9 +1269,12 @@ func (e *OTLPExporter) metricPayload(measurements []RecordedMeasurement) map[str
 		timeUnixNano := fmt.Sprintf("%d", timestamp*1e6)
 		if measurement.Kind == MetricKindHistogram {
 			point := map[string]any{
-				"timeUnixNano": timeUnixNano,
-				"count":        "1",
-				"sum":          measurement.Value,
+				// A DELTA point still carries the interval start; this pipeline
+				// exports instant measurements, so start == end.
+				"startTimeUnixNano": timeUnixNano,
+				"timeUnixNano":      timeUnixNano,
+				"count":             "1",
+				"sum":               measurement.Value,
 			}
 			if len(measurement.Boundaries) > 0 {
 				point["bucketCounts"] = make([]string, len(measurement.Boundaries)+1)
@@ -1299,8 +1302,9 @@ func (e *OTLPExporter) metricPayload(measurements []RecordedMeasurement) map[str
 			continue
 		}
 		point := map[string]any{
-			"timeUnixNano": timeUnixNano,
-			"asDouble":     measurement.Value,
+			"startTimeUnixNano": timeUnixNano,
+			"timeUnixNano":      timeUnixNano,
+			"asDouble":          measurement.Value,
 		}
 		if attrs := otlpAttrs(measurement.Attributes); len(attrs) > 0 {
 			point["attributes"] = attrs

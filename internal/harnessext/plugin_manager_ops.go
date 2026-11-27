@@ -1393,6 +1393,8 @@ func (m *Manager) auditLocked(ctx context.Context, audit AuditContext, id, versi
 	if m.store == nil {
 		return
 	}
+	m.auditMu.Lock()
+	defer m.auditMu.Unlock()
 	if m.auditInfo != nil {
 		if extra := m.auditInfo(id); len(extra) > 0 {
 			merged := make(map[string]any, len(detail)+len(extra))

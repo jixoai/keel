@@ -50,6 +50,9 @@ type TelemetryPluginOptions struct {
 	LookupSecret func(name string) (string, bool)
 	Logger       *slog.Logger
 	Now          func() time.Time
+	// StopTimeout defaults to 5s; tests use a short bound to assert the real
+	// Stop path honours its deadline.
+	StopTimeout time.Duration
 }
 
 type telemetryPlugin struct {
@@ -206,7 +209,11 @@ func (p *telemetryPlugin) stop(ctx context.Context) error {
 	// The plugin's own registration is gone before the exporter closes: an
 	// in-flight span that captured the exporter may still enqueue, and the
 	// exporter contract says Close tolerates that.
-	stopCtx, cancel := telemetryStopContext(ctx, telemetryStopTimeout)
+	stopTimeout := p.options.StopTimeout
+	if stopTimeout <= 0 {
+		stopTimeout = telemetryStopTimeout
+	}
+	stopCtx, cancel := telemetryStopContext(ctx, stopTimeout)
 	defer cancel()
 	if err := exporter.Close(stopCtx); err != nil && p.options.Logger != nil {
 		p.options.Logger.Warn("telemetry exporter shutdown flush incomplete", "err", err)

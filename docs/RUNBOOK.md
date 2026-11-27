@@ -69,7 +69,7 @@ keel serve --addr 127.0.0.1:13750
 遥测是**默认关闭**的可选插件；配置 OTLP endpoint 不会自动出网。
 
 ```yaml
-# tenant 文档（或 config.toml 覆盖）
+# tenant 文档（stored admin document；config.toml 不覆盖 telemetry）
 telemetry:
   adapter: otlp                 # memory | none | otlp
   endpoint: https://collector.example:4318
@@ -112,6 +112,9 @@ curl -sS "$KEEL_URL/v1/telemetry/status" -H "X-Tenant-ID: $TENANT" | jq .
   时未确认/未发出的批次直接丢失，重启不会重放；同一存活 exporter 的“已发送但响应丢失”重试
   可能让 collector 收到同一批次两次，collector 侧应按 (traceId, spanId) 幂等。
   这不是跨重启的 at-least-once（重启不补发），文档按 at-most-once across restart 执行。
+- 配置变更审计：telemetry 配置从 tenant 文档读取，在下一次插件 Start（enable/重启）应用并写
+  `configure` 审计；`PUT /v1/tenants/{id}/config` 本身是管理员文档写入，不逐字段写 telemetry
+  审计。`configured=false` 表示租户完全没有 telemetry 段。
 - 旧 `KEEL_TELEMETRY=memory` 仍只启用内存 recorder；OTLP 是否出网只取决于插件是否启用。
 
 ## 租户 provisioning

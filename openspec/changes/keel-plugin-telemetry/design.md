@@ -24,7 +24,7 @@
 | 信号 | 形状 | 允许的标识 | 禁止 |
 |---|---|---|---|
 | Span | `keel.agent.run`（attempt 根）、turn/tool/compaction 子 span；事件只带名称与有界属性 | `tenant`、`session`、`run`、`turn`、`tool`、`model`、`provider`、`outcome`、`status`、`kind`、`error.kind`、`http.status_code`、`mcp.server`、`plugin`、`command` | prompt、消息正文、工具参数/结果、文件/附件名、路径、URL query、secret、Authorization、原始异常文本 |
-| Metric | 计数器/直方图/up-down；`keel.agent.runs`、`keel.agent.run.duration`、token 计量 | 标签只允许 `model`、`provider`、`outcome`、`status`、`tool`、`kind`、`result` | tenant/session/run/request/trace/span 标签；这些只可作为 resource 或 span/log 属性 |
+| Metric | 计数器/直方图/up-down；`keel.agent.runs`、`keel.agent.run.duration`、token 计量 | 标签只允许 `model`、`provider`、`outcome`、`status`、`tool`、`kind`、`result`、`api`、`stop` | tenant/session/run/request/trace/span 标签；这些只可作为 resource 或 span/log 属性 |
 | Log | 结构化记录（level、event code、有界属性） | 同 span 的标识 + `level`、`event`、`logger` | 自由文本 message、正文、参数、堆栈、密钥 |
 
 PI 的 span/metric 形状不因本 change 改变；`docs/PI-PARITY.md` §3 仍是唯一契约来源。
