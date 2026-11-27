@@ -127,11 +127,15 @@ func WorkerActor(botID string) ActorInfo {
 
 // TaskInfo is the adapter's read of one board task.
 type TaskInfo struct {
-	ID            uint64
-	Channel       string
-	Owner         string
-	State         string
-	Epoch         uint64
+	ID      uint64
+	Channel string
+	Owner   string
+	State   string
+	Epoch   uint64
+	// Version is the root message's version: the seq of the last event that
+	// changed the thread root. It advances on claim/block/unblock/assign, so it
+	// distinguishes a new block intent from a retry that changed nothing.
+	Version       uint64
 	ClaimActor    string
 	ClaimUntil    time.Time
 	BlockedKind   string
@@ -840,7 +844,7 @@ func taskInfoOf(message *boardlog.Message, snapshot *boardlog.Snapshot) TaskInfo
 	info := TaskInfo{
 		ID: message.ID, Channel: message.Channel, Owner: message.Task.Owner,
 		State: message.Task.State,
-		Epoch: message.Task.Epoch, Text: message.Text,
+		Epoch: message.Task.Epoch, Version: message.Version, Text: message.Text,
 		Labels:  effectiveLabels(message),
 		Replies: len(snapshot.Replies(message.ID)),
 	}

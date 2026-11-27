@@ -46,13 +46,15 @@ type SyncReport struct {
 	Conflicts    int `json:"conflicts"`
 }
 
-// ChannelACL grants the read-side relation a mirrored channel needs. The
+// ChannelACL grants the relation a mirrored channel's operators need. The
 // mirror writes through the board log (no request identity), so it must record
-// who may read the channel: a board channel with no relation is invisible even
-// to a tenant's board.read holders. A nil ACL leaves the channel relation-free
-// (a deployment that wires its own access policy).
+// who may operate the queue: a board channel with no relation is invisible even
+// to a tenant's board.read holders. The production implementation grants the
+// operator groups owner, which includes editor (bridge actions) and viewer
+// (reads). A nil ACL leaves the channel relation-free (a deployment that wires
+// its own access policy).
 type ChannelACL interface {
-	EnsureViewer(ctx context.Context, tenantID uuid.UUID, channel string) error
+	EnsureOperator(ctx context.Context, tenantID uuid.UUID, channel string) error
 }
 
 // Mirror projects one tenant's supervisor records into the board. It is a
@@ -67,8 +69,12 @@ type Mirror struct {
 	Config   ConfigReader
 	Secret   *TokenSource
 	ACL      ChannelACL
-	Logger   *slog.Logger
-	Now      func() time.Time
+	// Enabled is the tenant board switch. A nil value means "no gate" (an
+	// embedded test); production wires Surface.BoardEnabled. When it returns
+	// false, a pass appends no board event and does not read/sync a ticket.
+	Enabled func(ctx context.Context) bool
+	Logger  *slog.Logger
+	Now     func() time.Time
 
 	Lease       time.Duration
 	RenewBefore time.Duration
@@ -146,9 +152,18 @@ func (m *Mirror) Run(ctx context.Context) {
 	}
 }
 
+// boardEnabled applies the configuration gate. A nil gate is permissive (the
+// test/embedding seam); the production gate fails closed on a flag read error.
+func (m *Mirror) boardEnabled(ctx context.Context) bool {
+	return m.Enabled == nil || m.Enabled(ctx)
+}
+
 // SyncOnce mirrors every ticket. A disabled mirror is a no-op, not an error.
 func (m *Mirror) SyncOnce(ctx context.Context) (SyncReport, error) {
 	var report SyncReport
+	if !m.boardEnabled(ctx) {
+		return report, nil
+	}
 	config, err := m.Config.SuperagentConfig(ctx, m.TenantID)
 	if err != nil {
 		return report, err
@@ -192,6 +207,9 @@ func (m *Mirror) SyncOnce(ctx context.Context) (SyncReport, error) {
 // after the supervisor wrote it.
 func (m *Mirror) SyncTicket(ctx context.Context, ticketID uuid.UUID) (SyncReport, error) {
 	var report SyncReport
+	if !m.boardEnabled(ctx) {
+		return report, nil
+	}
 	config, err := m.Config.SuperagentConfig(ctx, m.TenantID)
 	if err != nil {
 		return report, err
@@ -256,7 +274,15 @@ func (m *Mirror) syncTicket(ctx context.Context, config SuperagentConfig, ticket
 		report.TasksCreated++
 	}
 	m.ensureACL(ctx, config.Channel)
-	accumulate(&report, m.syncTicketState(ctx, ticket, task))
+	stateReport, err := m.syncTicketState(ctx, ticket, task)
+	if err != nil {
+		// P2 (hardening): a failed supervisor read is not an empty set. Without
+		// the assignments/attentions/reports we cannot tell "no hold" from
+		// "hold unknown", and advancing could release or unblock a task.
+		report.Skipped++
+		return report, err
+	}
+	accumulate(&report, stateReport)
 	m.recordGitHubEvent(ctx, ticket, task.ID)
 	return report, nil
 }
@@ -276,8 +302,8 @@ func (m *Mirror) ensureACL(ctx context.Context, channel string) {
 		return
 	}
 	m.aclMu.Unlock()
-	if err := m.ACL.EnsureViewer(ctx, m.TenantID, channel); err != nil {
-		m.Logger.Warn("superagent board mirror channel relation failed", "channel", channel, "err", err)
+	if err := m.ACL.EnsureOperator(ctx, m.TenantID, channel); err != nil {
+		m.Logger.Warn("superagent board mirror channel operator relation failed", "channel", channel, "err", err)
 		return
 	}
 	m.aclMu.Lock()
@@ -285,22 +311,22 @@ func (m *Mirror) ensureACL(ctx context.Context, channel string) {
 	m.aclMu.Unlock()
 }
 
-func (m *Mirror) syncTicketState(ctx context.Context, ticket superagent.Ticket, task TaskInfo) SyncReport {
+func (m *Mirror) syncTicketState(ctx context.Context, ticket superagent.Ticket, task TaskInfo) (SyncReport, error) {
 	var report SyncReport
 	if task.ID == 0 {
-		return report
+		return report, nil
 	}
 	assignments, err := m.Store.ListAssignments(ctx, m.TenantID, ticket.ID)
 	if err != nil {
-		m.Logger.Warn("superagent board mirror could not read assignments", "ticket", ticket.ID, "err", err)
+		return report, fmt.Errorf("superagentboard: read assignments: %w", err)
 	}
 	attentions, err := m.Store.ListAttentions(ctx, m.TenantID, ticket.ID)
 	if err != nil {
-		m.Logger.Warn("superagent board mirror could not read attentions", "ticket", ticket.ID, "err", err)
+		return report, fmt.Errorf("superagentboard: read attentions: %w", err)
 	}
 	reports, err := m.Store.ListWorkerReports(ctx, m.TenantID, ticket.ID)
 	if err != nil {
-		m.Logger.Warn("superagent board mirror could not read reports", "ticket", ticket.ID, "err", err)
+		return report, fmt.Errorf("superagentboard: read reports: %w", err)
 	}
 
 	activeAssignment := activeAssignmentOf(assignments)
@@ -495,7 +521,7 @@ func (m *Mirror) syncTicketState(ctx context.Context, ticket superagent.Ticket, 
 			}
 		}
 	}
-	return report
+	return report, nil
 }
 
 func (m *Mirror) accountSettle(err error, action string, ticket superagent.Ticket, task TaskInfo, report *SyncReport, ok func()) {

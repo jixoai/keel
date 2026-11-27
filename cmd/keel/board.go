@@ -84,6 +84,26 @@ func boardProviderHosts() []string {
 	return out
 }
 
+// boardServeOptions is the configure hook `keel serve` installs. Every
+// environment-derived option lives here so the serve wiring itself is testable
+// (in particular KEEL_BOARD_PROVIDER_HOSTS, which otherwise silently leaves a
+// console-declared provider allowlist unused).
+func boardServeOptions(secretBox *store.SecretBox, casDir string) func(*boardintegration.Options) {
+	return func(options *boardintegration.Options) {
+		// 10.6/12.x: tenant entry documents and their secrets. A deployment
+		// without KEEL_SECRET_KEY keeps sync fail-closed (credential missing).
+		options.SecretBox = secretBox
+		options.BlobDir = casDir
+		options.FileHosts = boardFileHosts()
+		options.ProviderHosts = boardProviderHosts()
+		options.MaxFileBytes = envInt64("KEEL_BOARD_MAX_FILE_BYTES", 0)
+		options.MaxFiles = envInt("KEEL_BOARD_MAX_FILES", 0)
+		options.MaxLinks = envInt("KEEL_BOARD_MAX_LINKS", 0)
+		options.MaxWebhookBody = envInt64("KEEL_BOARD_MAX_WEBHOOK_BYTES", 0)
+		options.FileFetchTimeout = envDuration("KEEL_BOARD_FILE_TIMEOUT", 0)
+	}
+}
+
 // boardWiring is the board surface as the serve loop mounts it. A disabled
 // deployment still supplies handlers (404 board_disabled) so the route shape
 // does not change with the flag.

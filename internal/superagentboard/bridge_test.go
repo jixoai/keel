@@ -39,7 +39,17 @@ func (f fakeIdentity) Tenant(*http.Request) (string, error) {
 	return f.tenant.String(), nil
 }
 
-type fakeAuthorizer struct{ err error }
+type fakeAuthorizer struct {
+	err        error
+	channelErr error
+}
+
+func (f fakeAuthorizer) Authorize(context.Context, string, protocol.Actor, string, protocol.Permission) error {
+	if f.channelErr != nil {
+		return f.channelErr
+	}
+	return f.err
+}
 
 func (f fakeAuthorizer) AuthorizeAnywhere(context.Context, string, protocol.Actor, protocol.Permission) error {
 	return f.err
@@ -57,6 +67,7 @@ type fakeSupervisor struct {
 	err            error
 	behavior       func(action string) error
 	lastAsk        collab.AttentionRequest
+	lastAskAssign  uuid.UUID
 	lastReport     superagent.ReportRequest
 	lastAnswerOpt  string
 	lastAnswerText string
@@ -88,7 +99,7 @@ func (f *fakeSupervisor) Report(_ context.Context, request superagent.ReportRequ
 	return f.record("report")
 }
 
-func (f *fakeSupervisor) Ask(_ context.Context, _ uuid.UUID, _ uuid.UUID, request collab.AttentionRequest) (collab.Attention, error) {
+func (f *fakeSupervisor) Ask(_ context.Context, _ uuid.UUID, assignmentID uuid.UUID, request collab.AttentionRequest) (collab.Attention, error) {
 	// The real collab.Host refuses a question with no selectable answer. The
 	// fake keeps that contract so a bridge regression (dropping AllowFreeText)
 	// fails here instead of in production.
@@ -97,6 +108,7 @@ func (f *fakeSupervisor) Ask(_ context.Context, _ uuid.UUID, _ uuid.UUID, reques
 	}
 	f.mu.Lock()
 	f.lastAsk = request
+	f.lastAskAssign = assignmentID
 	f.mu.Unlock()
 	if err := f.record("ask"); err != nil {
 		return collab.Attention{}, err
@@ -510,14 +522,32 @@ func TestBridgeMessageEditRejected(t *testing.T) {
 }
 
 func TestBridgeAuthorizerDenialStopsBeforeSupervisor(t *testing.T) {
-	world := newBridgeWorld(t, SuperagentConfig{Mirror: true, Bridge: true, Channel: "superagent"}, nil)
-	world.surf.Authorizer = fakeAuthorizer{err: protocol.Forbidden("denied")}
-	recorder := world.post("claim", map[string]any{})
-	if recorder.Code != http.StatusForbidden {
-		t.Fatalf("status = %d body=%s", recorder.Code, recorder.Body.String())
-	}
-	if world.super.callCount() != 0 {
-		t.Fatal("a denied caller reached the supervisor")
+	for _, testCase := range []struct {
+		name       string
+		authorizer fakeAuthorizer
+	}{
+		{name: "anywhere", authorizer: fakeAuthorizer{err: protocol.Forbidden("denied")}},
+		{name: "channel", authorizer: fakeAuthorizer{channelErr: protocol.Forbidden("no channel relation")}},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			world := newBridgeWorld(t, SuperagentConfig{Mirror: true, Bridge: true, Channel: "superagent"}, nil)
+			world.surf.Authorizer = testCase.authorizer
+			before := mustTask(t, world.board, world.tenant, world.taskID)
+			head := boardHead(t, world.board, world.tenant)
+			recorder := world.post("claim", map[string]any{})
+			if recorder.Code != http.StatusForbidden {
+				t.Fatalf("status = %d body=%s", recorder.Code, recorder.Body.String())
+			}
+			if world.super.callCount() != 0 {
+				t.Fatal("a denied caller reached the supervisor")
+			}
+			if got := mustTask(t, world.board, world.tenant, world.taskID); got.State != before.State || got.Epoch != before.Epoch {
+				t.Fatalf("a denied caller changed the board: before=%+v after=%+v", before, got)
+			}
+			if head != boardHead(t, world.board, world.tenant) {
+				t.Fatal("a denied caller wrote board events")
+			}
+		})
 	}
 }
 
@@ -799,5 +829,224 @@ func TestBridgeMessageDeleteAndLabelsAreReadOnly(t *testing.T) {
 		if code := decodeCode(t, recorder); code != "mirror_read_only" {
 			t.Fatalf("%s code = %q", action, code)
 		}
+	}
+}
+
+// askCreatesAttention mimics the real supervisor's Ask: it opens one Attention
+// per RequestID (a repeated RequestID is idempotent) and blocks the ticket.
+func askCreatesAttention(t *testing.T, w *bridgeWorld) func(string) error {
+	t.Helper()
+	return func(action string) error {
+		if action != "ask" {
+			return nil
+		}
+		w.super.mu.Lock()
+		request := w.super.lastAsk
+		assignmentID := w.super.lastAskAssign
+		w.super.mu.Unlock()
+		assignment, err := w.store.GetAssignment(context.Background(), w.tenant, assignmentID)
+		if err != nil {
+			return err
+		}
+		now := time.Now().UTC()
+		if _, err := w.store.CreateAttention(context.Background(), collab.Attention{
+			ID: uuid.New(), TenantID: w.tenant, WorkItemID: w.ticket.ID,
+			AssignmentID: assignment.ID, ModeID: superagent.DefaultModeID,
+			SessionID: assignment.SessionID, RequestID: request.RequestID,
+			Kind: request.Kind, Prompt: request.Prompt, Route: request.Route,
+			Status: collab.AttentionOpen, CreatedAt: now, Deadline: now.Add(time.Hour),
+		}); err != nil {
+			return err
+		}
+		updateTicketStatus(t, w.store, w.tenant, w.ticket.ID, collab.WorkItemBlocked)
+		return nil
+	}
+}
+
+func attentionsOf(t *testing.T, w *bridgeWorld) []collab.Attention {
+	t.Helper()
+	attentions, err := w.store.ListAttentions(context.Background(), w.tenant, w.ticket.ID)
+	if err != nil {
+		t.Fatalf("list attentions: %v", err)
+	}
+	return attentions
+}
+
+// TestBridgeBlockRetryCreatesOneAttention covers the retry half of P1-2: the
+// same block POST retried after the board already advanced must not open a
+// second Attention.
+func TestBridgeBlockRetryCreatesOneAttention(t *testing.T) {
+	world := newBridgeWorld(t, SuperagentConfig{Mirror: true, Bridge: true, Channel: "superagent"},
+		func(w *bridgeWorld) { activeWorld(t, w) })
+	world.super.behavior = askCreatesAttention(t, world)
+	for attempt := 0; attempt < 2; attempt++ {
+		recorder := world.post("block", map[string]any{"reason": "Approve the write?", "kind": "awaiting_approval"})
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("attempt %d status = %d body=%s", attempt, recorder.Code, recorder.Body.String())
+		}
+	}
+	if got := len(attentionsOf(t, world)); got != 1 {
+		t.Fatalf("a retried block opened %d Attentions, want 1", got)
+	}
+	world.super.mu.Lock()
+	asks := 0
+	for _, call := range world.super.calls {
+		if call == "ask" {
+			asks++
+		}
+	}
+	world.super.mu.Unlock()
+	if asks != 1 {
+		t.Fatalf("supervisor Ask calls = %d, want 1", asks)
+	}
+}
+
+// TestBridgeBlockAfterAnswerCreatesSecondAttention covers the P1-2 regression:
+// block -> answer -> block(same reason) is a new intent and must create a new
+// Attention, not return the closed one.
+func TestBridgeBlockAfterAnswerCreatesSecondAttention(t *testing.T) {
+	world := newBridgeWorld(t, SuperagentConfig{Mirror: true, Bridge: true, Channel: "superagent"},
+		func(w *bridgeWorld) { activeWorld(t, w) })
+	world.super.behavior = askCreatesAttention(t, world)
+	if recorder := world.post("block", map[string]any{"reason": "Approve the write?", "kind": "awaiting_approval"}); recorder.Code != http.StatusOK {
+		t.Fatalf("first block = %d %s", recorder.Code, recorder.Body.String())
+	}
+	first := attentionsOf(t, world)
+	if len(first) != 1 {
+		t.Fatalf("first attentions = %+v", first)
+	}
+	answerAttention(t, world.store, first[0], "yes")
+	updateTicketStatus(t, world.store, world.tenant, world.ticket.ID, collab.WorkItemActive)
+
+	if recorder := world.post("block", map[string]any{"reason": "Approve the write?", "kind": "awaiting_approval"}); recorder.Code != http.StatusOK {
+		t.Fatalf("second block = %d %s", recorder.Code, recorder.Body.String())
+	}
+	second := attentionsOf(t, world)
+	if len(second) != 2 {
+		t.Fatalf("block -> answer -> block created %d Attentions, want 2", len(second))
+	}
+	if second[0].ID == second[1].ID {
+		t.Fatal("the second block reused the closed Attention")
+	}
+	if second[0].RequestID == second[1].RequestID {
+		t.Fatalf("the second block reused request id %q", second[0].RequestID)
+	}
+}
+
+// TestBridgeBlockNewAssignmentCreatesNewAttention covers the assignment half:
+// the same reason on a replacement assignment is a different question.
+func TestBridgeBlockNewAssignmentCreatesNewAttention(t *testing.T) {
+	world := newBridgeWorld(t, SuperagentConfig{Mirror: true, Bridge: true, Channel: "superagent"},
+		func(w *bridgeWorld) { activeWorld(t, w) })
+	world.super.behavior = askCreatesAttention(t, world)
+	if recorder := world.post("block", map[string]any{"reason": "Need a decision"}); recorder.Code != http.StatusOK {
+		t.Fatalf("first block = %d %s", recorder.Code, recorder.Body.String())
+	}
+	first := attentionsOf(t, world)
+	if len(first) != 1 {
+		t.Fatalf("first attentions = %+v", first)
+	}
+	answerAttention(t, world.store, first[0], "yes")
+	updateTicketStatus(t, world.store, world.tenant, world.ticket.ID, collab.WorkItemActive)
+
+	// End the old assignment and start a replacement one.
+	old, err := world.store.GetAssignment(context.Background(), world.tenant, first[0].AssignmentID)
+	if err != nil {
+		t.Fatalf("old assignment: %v", err)
+	}
+	old.Status = collab.AssignmentDone
+	if _, err := world.store.UpdateAssignment(context.Background(), old); err != nil {
+		t.Fatalf("release old assignment: %v", err)
+	}
+	replacement := addAssignment(t, world.store, world.ticket, collab.AssignmentActive, "researcher", uuid.New())
+
+	if recorder := world.post("block", map[string]any{"reason": "Need a decision"}); recorder.Code != http.StatusOK {
+		t.Fatalf("second block = %d %s", recorder.Code, recorder.Body.String())
+	}
+	second := attentionsOf(t, world)
+	if len(second) != 2 {
+		t.Fatalf("replacement assignment block created %d Attentions", len(second))
+	}
+	var newest collab.Attention
+	for _, attention := range second {
+		if attention.ID != first[0].ID {
+			newest = attention
+		}
+	}
+	if newest.ID == uuid.Nil {
+		t.Fatal("no second Attention")
+	}
+	if newest.AssignmentID != replacement.ID {
+		t.Fatalf("second Attention assignment = %s, want %s", newest.AssignmentID, replacement.ID)
+	}
+	if newest.RequestID == first[0].RequestID {
+		t.Fatalf("the replacement assignment reused request id %q", first[0].RequestID)
+	}
+}
+
+type failingAssignBoard struct {
+	BoardPort
+	err error
+}
+
+func (b failingAssignBoard) Assign(context.Context, uuid.UUID, AssignRequest) error { return b.err }
+
+type emptyOwnerBoard struct{ BoardPort }
+
+func (b emptyOwnerBoard) Task(ctx context.Context, tenantID uuid.UUID, taskID uint64) (TaskInfo, error) {
+	info, err := b.BoardPort.Task(ctx, tenantID, taskID)
+	info.Owner = ""
+	return info, err
+}
+
+// TestBridgeAssignBoardFailureIsNot200 covers P2: the supervisor accepted but
+// the board-only assign write failed. The response says supervisorAccepted and
+// boardSynced=false instead of pretending success.
+func TestBridgeAssignBoardFailureIsNot200(t *testing.T) {
+	world := newBridgeWorld(t, SuperagentConfig{Mirror: true, Bridge: true, Channel: "superagent"},
+		func(w *bridgeWorld) { activeWorld(t, w) })
+	commands, err := NewSupervisorCommands(world.tenant, world.store, world.super)
+	if err != nil {
+		t.Fatal(err)
+	}
+	world.surf.Attach(world.links, StaticConfigReader{Config: SuperagentConfig{Mirror: true, Bridge: true, Channel: "superagent"}},
+		world.mirror, commands, failingAssignBoard{BoardPort: world.board, err: errFake})
+	recorder := world.post("assign", map[string]any{"for": "researcher"})
+	if recorder.Code != http.StatusAccepted {
+		t.Fatalf("status = %d body=%s", recorder.Code, recorder.Body.String())
+	}
+	var body struct {
+		SupervisorAccepted bool `json:"supervisorAccepted"`
+		BoardSynced        bool `json:"boardSynced"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !body.SupervisorAccepted || body.BoardSynced {
+		t.Fatalf("body = %s", recorder.Body.String())
+	}
+	if world.super.callCount() != 1 {
+		t.Fatalf("supervisor calls = %d", world.super.callCount())
+	}
+}
+
+// TestBridgeAssignInvalidTargetSkipsSupervisor covers the other half: an
+// assign target the board cannot express is a 400 before any supervisor write.
+func TestBridgeAssignInvalidTargetSkipsSupervisor(t *testing.T) {
+	world := newBridgeWorld(t, SuperagentConfig{Mirror: true, Bridge: true, Channel: "superagent"},
+		func(w *bridgeWorld) { activeWorld(t, w) })
+	commands, err := NewSupervisorCommands(world.tenant, world.store, world.super)
+	if err != nil {
+		t.Fatal(err)
+	}
+	world.surf.Attach(world.links,
+		StaticConfigReader{Config: SuperagentConfig{Mirror: true, Bridge: true, Channel: "superagent"}},
+		world.mirror, commands, emptyOwnerBoard{BoardPort: world.board})
+	recorder := world.post("assign", map[string]any{"for": "researcher"})
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if world.super.callCount() != 0 {
+		t.Fatal("an invalid assign target reached the supervisor")
 	}
 }

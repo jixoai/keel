@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -118,7 +119,22 @@ func (c *SupervisorCommands) FailTicket(ctx context.Context, tenantID, ticketID 
 
 // BlockTicket asks one structured question. The board's block kind selects a
 // clarify question or an approval; the reason is the prompt.
-func (c *SupervisorCommands) BlockTicket(ctx context.Context, tenantID, ticketID uuid.UUID, kind, reason, actor string) error {
+//
+// Idempotency and intent identity (Phase 1 hardening P1-2):
+//   - the supervisor's Ask is idempotent per RequestID, but a RequestID built
+//     only from ticket+reason would return the *closed* Attention of an earlier
+//     block forever. board's task epoch does not change on block/unblock, while
+//     the root message's Version advances on every block/unblock/assign event.
+//     The RequestID therefore includes the board version and the active
+//     assignment: block -> answer -> block(same reason) is a new intent, and a
+//     new assignment is a new intent.
+//   - a retried HTTP request must not open a second Attention. An open
+//     Attention created by the same board block intent (same ticket,
+//     assignment and reason digest, any version) makes the retry a no-op. This
+//     is also correct for a deliberate second block while the first is open:
+//     the ticket is already waiting on that exact question. A different reason
+//     is a different question and is not swallowed.
+func (c *SupervisorCommands) BlockTicket(ctx context.Context, tenantID, ticketID uuid.UUID, kind, reason string, boardVersion uint64, actor string) error {
 	if err := c.checkTenant(tenantID); err != nil {
 		return err
 	}
@@ -130,7 +146,19 @@ func (c *SupervisorCommands) BlockTicket(ctx context.Context, tenantID, ticketID
 	if strings.TrimSpace(kind) == HoldAwaitingApproval {
 		attentionKind = collab.AttentionApproval
 	}
-	requestID := "board-block:" + ticketID.String() + ":" + digestOf(strings.TrimSpace(reason))[:16]
+	intentPrefix := "board-block:v2:" + ticketID.String() + ":" + assignment.ID.String() + ":" + digestOf(strings.TrimSpace(reason))[:16]
+	attentions, err := c.Store.ListAttentions(ctx, c.TenantID, ticketID)
+	if err != nil {
+		return err
+	}
+	for _, attention := range attentions {
+		if attention.Status == collab.AttentionOpen && strings.HasPrefix(attention.RequestID, intentPrefix) {
+			// The same intent is already open: this is a retry (or a duplicate
+			// block), not a new question.
+			return nil
+		}
+	}
+	requestID := intentPrefix + ":" + strconv.FormatUint(boardVersion, 10)
 	_, err = c.Supervisor.Ask(ctx, ticketID, assignment.ID, collab.AttentionRequest{
 		// A board block is an operator question, not a worker tool call: the
 		// supervisor contract refuses a question with no options and no free

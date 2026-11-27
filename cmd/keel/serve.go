@@ -1064,18 +1064,7 @@ func runServe(parent context.Context, opts serveOptions) error {
 	// disabled deployment does not reveal whether a channel exists. The
 	// The tenant-level board.enabled / board.sync.enabled flags narrow this
 	// deployment switch; they cannot enable a deployment that never opted in.
-	boardWiring, err := newBoardWiringWithOptions(ctx, opts.DSN, opts.TenantID, product.access, st, log, func(options *boardintegration.Options) {
-		// 10.6/12.x: tenant entry documents and their secrets. A deployment
-		// without KEEL_SECRET_KEY keeps sync fail-closed (credential missing).
-		options.SecretBox = secretBox
-		options.BlobDir = opts.CASDir
-		options.FileHosts = boardFileHosts()
-		options.MaxFileBytes = envInt64("KEEL_BOARD_MAX_FILE_BYTES", 0)
-		options.MaxFiles = envInt("KEEL_BOARD_MAX_FILES", 0)
-		options.MaxLinks = envInt("KEEL_BOARD_MAX_LINKS", 0)
-		options.MaxWebhookBody = envInt64("KEEL_BOARD_MAX_WEBHOOK_BYTES", 0)
-		options.FileFetchTimeout = envDuration("KEEL_BOARD_FILE_TIMEOUT", 0)
-	})
+	boardWiring, err := newBoardWiringWithOptions(ctx, opts.DSN, opts.TenantID, product.access, st, log, boardServeOptions(secretBox, opts.CASDir))
 	if err != nil {
 		return err
 	}
@@ -1086,9 +1075,12 @@ func runServe(parent context.Context, opts serveOptions) error {
 	if boardSurface != nil {
 		// The bridge starts as a pass-through and is attached to the supervisor
 		// after the agent runtime exists. It routes a mirrored task's actions
-		// to the supervisor before the board handler sees them.
+		// to the supervisor before the board handler sees them. The Surface gate
+		// wraps the bridge, so a disabled tenant answers 404 board_disabled
+		// before any bridge action (or reply/mutation guard) can reach the
+		// supervisor.
 		boardBridge = newSuperagentBoardBridge(boardSurface, log)
-		boardHandler = boardBridge
+		boardHandler = boardSurface.Gate(boardBridge)
 		defer boardSurface.Close()
 		if bypass, err := boardintegration.RoleBypassesRLS(ctx, boardDSN(opts.DSN)); err != nil {
 			log.Warn("board role privilege check failed", "detail", "row-level security may not be enforced")

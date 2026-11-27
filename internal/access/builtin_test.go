@@ -74,6 +74,32 @@ func TestBotOperatorTriggerGrantsReachTheRoute(t *testing.T) {
 	}
 }
 
+// TestBotOperatorCarriesBoardKeys pins the superagent operator preset: the
+// mirror grants this group a relation on the queue channel, and that relation
+// can only authorize an action when the group also holds board.read/write.
+func TestBotOperatorCarriesBoardKeys(t *testing.T) {
+	preset, ok := LookupBuiltinGroup("bot-operator")
+	if !ok {
+		t.Fatal("bot-operator preset missing")
+	}
+	held := make(map[string]Scope, len(preset.Grants))
+	for _, grant := range preset.Grants {
+		held[grant.Key] = grant.Scope
+	}
+	for _, key := range []string{KeyBoardRead, KeyBoardWrite} {
+		scope, ok := held[key]
+		if !ok {
+			t.Fatalf("bot-operator does not grant %q", key)
+		}
+		if !scope.Covers(ScopeTeam) {
+			t.Fatalf("bot-operator %q scope = %q, want team or wider", key, scope)
+		}
+	}
+	if _, held := held[KeyBoardManage]; held {
+		t.Fatal("bot-operator must not administer board settings or sync")
+	}
+}
+
 func TestBuiltinTenantAdminIsTenantScoped(t *testing.T) {
 	preset, ok := LookupBuiltinGroup("tenant-admin")
 	if !ok {

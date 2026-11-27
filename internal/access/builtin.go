@@ -44,7 +44,10 @@ func BuiltinGroupID(tenantID uuid.UUID, name string) uuid.UUID {
 //     still governed by the request's tenant boundary.
 //   - tenant-admin: every key at tenant scope — the tenant-wide administrator.
 //   - bot-operator: runs and operates bots and team bots (sessions, invocation,
-//     triggers, read-only model/role/profile/plugin/secret-metadata access).
+//     triggers, read-only model/role/profile/plugin/secret-metadata access). It
+//     also carries board.read/board.write at team scope: the superagent mirror
+//     grants its operator groups a relation on the queue channel, and without
+//     the board keys that relation would be inert.
 //   - viewer: read-only visibility of its own sessions/bots/team bots plus the
 //     tenant's roles, profiles, models and plugins.
 //   - auditor: the audit trail and the account/permission directories, without
@@ -100,6 +103,12 @@ var builtinGroups = []BuiltinGroup{
 		{Key: KeyShellExec, Scope: ScopeTeam},
 		{Key: KeyTaskRead, Scope: ScopeTeam},
 		{Key: KeyTaskWrite, Scope: ScopeTeam},
+		// The superagent board mirror makes this group an owner of the queue
+		// channel. The relation alone is inert without a board key, so the
+		// operator preset carries read/write (never board.manage: channel
+		// administration and sync entries stay with tenant-admin).
+		{Key: KeyBoardRead, Scope: ScopeTeam},
+		{Key: KeyBoardWrite, Scope: ScopeTeam},
 		{Key: KeyApprovalRead, Scope: ScopeTeam},
 		{Key: KeyApprovalWrite, Scope: ScopeTeam},
 		{Key: KeyDecisionAsk, Scope: ScopeTeam},

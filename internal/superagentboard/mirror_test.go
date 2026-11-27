@@ -552,7 +552,7 @@ type recordingACL struct {
 	err      error
 }
 
-func (a *recordingACL) EnsureViewer(_ context.Context, _ uuid.UUID, channel string) error {
+func (a *recordingACL) EnsureOperator(_ context.Context, _ uuid.UUID, channel string) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if a.err != nil {
@@ -568,7 +568,7 @@ func (a *recordingACL) count() int {
 	return len(a.channels)
 }
 
-func TestMirrorGrantsChannelViewerOnceAndRetriesFailure(t *testing.T) {
+func TestMirrorGrantsChannelOperatorOnceAndRetriesFailure(t *testing.T) {
 	tenantID := uuid.New()
 	clock := newTestClock()
 	board := newTestBoard(clock)
@@ -599,7 +599,7 @@ func TestMirrorGrantsChannelViewerOnceAndRetriesFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	if acl.count() != 1 {
-		t.Fatalf("viewer writes = %d, want 1", acl.count())
+		t.Fatalf("operator writes = %d, want 1", acl.count())
 	}
 }
 
@@ -803,5 +803,150 @@ func TestMirrorCountsReleaseOnce(t *testing.T) {
 	}
 	if second.Released != 0 {
 		t.Fatalf("release counted again: %+v", second)
+	}
+}
+
+// failingMirrorStore injects a read failure into one list call. The rest of
+// the supervisor store behaves normally.
+type failingMirrorStore struct {
+	*superagent.MemoryStore
+	failAssignments bool
+	failAttentions  bool
+}
+
+func (s *failingMirrorStore) ListAssignments(ctx context.Context, tenantID, workItemID uuid.UUID) ([]collab.Assignment, error) {
+	if s.failAssignments {
+		return nil, errFake
+	}
+	return s.MemoryStore.ListAssignments(ctx, tenantID, workItemID)
+}
+
+func (s *failingMirrorStore) ListAttentions(ctx context.Context, tenantID, workItemID uuid.UUID) ([]collab.Attention, error) {
+	if s.failAttentions {
+		return nil, errFake
+	}
+	return s.MemoryStore.ListAttentions(ctx, tenantID, workItemID)
+}
+
+// TestMirrorReadFailureSkipsTheTicketInsteadOfReleasing is the P2 hardening
+// regression: a failed assignment read is not "no assignments". The old code
+// continued with an empty set and released the mirrored claim.
+func TestMirrorReadFailureSkipsTheTicketInsteadOfReleasing(t *testing.T) {
+	tenantID := uuid.New()
+	clock := newTestClock()
+	board := newTestBoard(clock)
+	links := newMemoryLinks()
+	memory := superagent.NewMemoryStore(clock.Now)
+	store := &failingMirrorStore{MemoryStore: memory}
+	mirror := newMirrorForTest(t, tenantID, store, board, links,
+		SuperagentConfig{Mirror: true, Bridge: true, Channel: ChannelForTest()}, clock)
+	ticket := seedTicket(t, memory, tenantID, "Fix the build", "Body", "manual", "t-read", "evt-read")
+	assignment := addAssignment(t, memory, ticket, collab.AssignmentActive, "researcher", uuid.New())
+	updateTicketStatus(t, memory, tenantID, ticket.ID, collab.WorkItemActive)
+	if _, err := mirror.SyncOnce(context.Background()); err != nil {
+		t.Fatalf("seed sync: %v", err)
+	}
+	link := mustLink(t, links, tenantID, ticket.ID.String(), keelstore.BoardLinkTicket)
+	if state := mustTask(t, board, tenantID, link.BoardTaskID).State; state != StateClaimed {
+		t.Fatalf("seed state = %q", state)
+	}
+
+	store.failAssignments = true
+	report, err := mirror.SyncOnce(context.Background())
+	if err != nil {
+		t.Fatalf("sync with a failed read: %v", err)
+	}
+	if report.Skipped == 0 {
+		t.Fatalf("report = %+v, want the ticket skipped", report)
+	}
+	if state := mustTask(t, board, tenantID, link.BoardTaskID).State; state != StateClaimed {
+		t.Fatalf("a failed assignment read released the claim; state = %q", state)
+	}
+	_ = assignment
+}
+
+// TestMirrorAttentionReadFailureDoesNotUnblock mirrors the same rule for a
+// hold: without the attention list the mirror cannot know the hold is over.
+func TestMirrorAttentionReadFailureDoesNotUnblock(t *testing.T) {
+	tenantID := uuid.New()
+	clock := newTestClock()
+	board := newTestBoard(clock)
+	links := newMemoryLinks()
+	memory := superagent.NewMemoryStore(clock.Now)
+	store := &failingMirrorStore{MemoryStore: memory}
+	mirror := newMirrorForTest(t, tenantID, store, board, links,
+		SuperagentConfig{Mirror: true, Bridge: true, Channel: ChannelForTest()}, clock)
+	ticket := seedTicket(t, memory, tenantID, "Fix the build", "Body", "manual", "t-attn", "evt-attn")
+	assignment := addAssignment(t, memory, ticket, collab.AssignmentActive, "researcher", uuid.New())
+	attention := addAttention(t, memory, ticket, assignment, collab.AttentionClarify, collab.AttentionOpen)
+	updateTicketStatus(t, memory, tenantID, ticket.ID, collab.WorkItemActive)
+	if _, err := mirror.SyncOnce(context.Background()); err != nil {
+		t.Fatalf("seed sync: %v", err)
+	}
+	link := mustLink(t, links, tenantID, ticket.ID.String(), keelstore.BoardLinkTicket)
+	if state := mustTask(t, board, tenantID, link.BoardTaskID).State; state != StateBlocked {
+		t.Fatalf("seed state = %q, want blocked", state)
+	}
+
+	store.failAttentions = true
+	report, err := mirror.SyncOnce(context.Background())
+	if err != nil {
+		t.Fatalf("sync with a failed read: %v", err)
+	}
+	if report.Skipped == 0 {
+		t.Fatalf("report = %+v, want the ticket skipped", report)
+	}
+	if state := mustTask(t, board, tenantID, link.BoardTaskID).State; state != StateBlocked {
+		t.Fatalf("a failed attention read unblocked the task; state = %q", state)
+	}
+	_ = attention
+}
+
+// TestMirrorBoardGateStopsEveryWrite covers P1-1 for the background writer: a
+// closed board.enabled switch appends no board event and syncs no ticket; the
+// same mirror resumes once the switch is back.
+func TestMirrorBoardGateStopsEveryWrite(t *testing.T) {
+	mirror, store, board, links, clock, tenantID := mirrorFixture(t)
+	enabled := false
+	mirror.Enabled = func(context.Context) bool { return enabled }
+	ticket := seedTicket(t, store, tenantID, "Gate the mirror", "Body", "manual", "t-gate", "evt-gate")
+
+	if report, err := mirror.SyncOnce(context.Background()); err != nil || report.TasksCreated != 0 {
+		t.Fatalf("disabled SyncOnce = %+v/%v", report, err)
+	}
+	if report, err := mirror.SyncTicket(context.Background(), ticket.ID); err != nil || report.TasksCreated != 0 {
+		t.Fatalf("disabled SyncTicket = %+v/%v", report, err)
+	}
+	if head := boardHead(t, board, tenantID); head != 0 {
+		t.Fatalf("a disabled mirror wrote head %d", head)
+	}
+	if links.count() != 0 {
+		t.Fatalf("a disabled mirror wrote %d links", links.count())
+	}
+
+	enabled = true
+	if _, err := mirror.SyncOnce(context.Background()); err != nil {
+		t.Fatalf("enabled sync: %v", err)
+	}
+	link := mustLink(t, links, tenantID, ticket.ID.String(), keelstore.BoardLinkTicket)
+	head := boardHead(t, board, tenantID)
+	if head == 0 {
+		t.Fatal("the re-enabled mirror wrote nothing")
+	}
+
+	enabled = false
+	next := seedTicket(t, store, tenantID, "Must not import", "Body", "manual", "t-gate-2", "evt-gate-2")
+	clock.Advance(10 * time.Second)
+	if _, err := mirror.SyncOnce(context.Background()); err != nil {
+		t.Fatalf("second disabled sync: %v", err)
+	}
+	if head != boardHead(t, board, tenantID) {
+		t.Fatal("the mirror wrote while disabled")
+	}
+	if _, found, _ := links.GetBoardLink(context.Background(), tenantID, BoardSource, next.ID.String(), keelstore.BoardLinkTicket); found {
+		t.Fatal("a ticket imported while the board was disabled")
+	}
+	if state := mustTask(t, board, tenantID, link.BoardTaskID).State; state == "" {
+		t.Fatal("the existing task vanished")
 	}
 }

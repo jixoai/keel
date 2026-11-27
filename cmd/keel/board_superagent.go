@@ -72,6 +72,7 @@ func attachSuperagentBoard(
 		Config:   configReader,
 		Secret:   tokens,
 		ACL:      boardChannelACL{store: st},
+		Enabled:  surface.BoardEnabled,
 		Logger:   log,
 		Now:      func() time.Time { return time.Now().UTC() },
 	})
@@ -89,17 +90,19 @@ func attachSuperagentBoard(
 	return mirror
 }
 
-// boardChannelACL grants the mirrored channel's read relation. The mirror
+// boardChannelACL grants the mirrored channel's operator relation. The mirror
 // writes through the board log, not as a request principal, so the channel has
-// no creator relation; without this tuple a board.read holder cannot see the
+// no creator relation; without this tuple even an operator cannot see the
 // queue. tenant-admin and bot-operator are the builtin groups that operate the
-// super-agent queue; a deployment with its own groups can replace this seam.
+// super-agent queue; owner includes editor (claim/complete/block) and viewer
+// (reads), and is what the bridge's channel-level check requires. A deployment
+// with its own groups can replace this seam.
 type boardChannelACL struct {
 	store *store.Store
 }
 
-// EnsureViewer implements superagentboard.ChannelACL.
-func (a boardChannelACL) EnsureViewer(ctx context.Context, tenantID uuid.UUID, channel string) error {
+// EnsureOperator implements superagentboard.ChannelACL.
+func (a boardChannelACL) EnsureOperator(ctx context.Context, tenantID uuid.UUID, channel string) error {
 	if a.store == nil || tenantID == uuid.Nil || strings.TrimSpace(channel) == "" {
 		return nil
 	}
@@ -109,7 +112,7 @@ func (a boardChannelACL) EnsureViewer(ctx context.Context, tenantID uuid.UUID, c
 			TenantID:     tenantID,
 			ResourceType: boardintegration.BoardChannelResourceType,
 			ResourceID:   channel,
-			Relation:     store.RelationViewer,
+			Relation:     store.RelationOwner,
 			SubjectType:  store.RelationSubjectGroup,
 			SubjectID:    groupID.String(),
 			CreatedBy:    tenantID,

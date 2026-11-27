@@ -30,12 +30,13 @@ type PrincipalResolver interface {
 }
 
 // TaskAuthorizer is the board's authorization for a mirrored-task action. It is
-// *boardintegration.Authorizer in production. The bridge asks "may this caller
-// write boards at all" rather than a per-channel relation: the mirror channel
-// is the supervisor queue's projection and has no per-account relation tuples,
-// while the supervisor's own operator/assignment authorization decides the
-// actual ticket action.
+// *boardintegration.Authorizer in production. A mirrored task's channel is the
+// supervisor queue's projection and carries its own relation tuples; hiding an
+// action in the UI is not authorization, so the bridge asks the channel-level
+// decision before any supervisor command. AuthorizeAnywhere remains for callers
+// that name no channel; the bridge no longer relies on it.
 type TaskAuthorizer interface {
+	Authorize(ctx context.Context, tenant string, actor protocol.Actor, channel string, permission protocol.Permission) error
 	AuthorizeAnywhere(ctx context.Context, tenant string, actor protocol.Actor, permission protocol.Permission) error
 }
 
@@ -156,7 +157,11 @@ func (b *Bridge) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if b.Authorizer != nil {
-		if authErr := b.Authorizer.AuthorizeAnywhere(r.Context(), tenant, actor, protocol.PermissionLabel); authErr != nil {
+		// The channel relation is the authority. LogBoard.Task bypasses the
+		// board's HTTP authorizer, so a caller who may write elsewhere must not
+		// reach this ticket's supervisor command: the UI hiding a move is not
+		// authorization.
+		if authErr := b.Authorizer.Authorize(r.Context(), tenant, actor, task.Channel, protocol.PermissionLabel); authErr != nil {
 			writeAuthorizerError(w, authErr)
 			return
 		}
@@ -181,6 +186,17 @@ func (b *Bridge) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if operator == "" {
 		operator = strings.TrimSpace(actor.ID)
 	}
+	// Validate the board-only half before the supervisor writes: assign's `for`
+	// is board presentation, and a malformed value must be a 400 without a
+	// supervisor side effect.
+	var assignTarget string
+	if action == "assign" {
+		assignTarget, err = assignFor(task, body.For)
+		if err != nil {
+			writeBridgeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+			return
+		}
+	}
 
 	timeout := b.Timeout
 	if timeout <= 0 {
@@ -201,15 +217,18 @@ func (b *Bridge) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// presentation (the supervisor's assignment is durable already), and every
 	// other action is reflected by a mirror pass of the new truth.
 	if action == "assign" {
-		forValue, err := assignFor(task, body.For)
-		if err != nil {
-			writeBridgeError(w, http.StatusBadRequest, "invalid_request", err.Error())
-			return
-		}
 		if err := board.Assign(r.Context(), tenantID, AssignRequest{
-			TaskID: taskID, For: forValue, Actor: ServiceActor(tenantID),
+			TaskID: taskID, For: assignTarget, Actor: ServiceActor(tenantID),
 		}); err != nil {
+			// The supervisor accepted; only the board projection failed. Say so
+			// instead of returning 200 for a half-applied action.
 			b.logger().Warn("superagent board bridge assign mirror failed", "ticket", ticketID, "err", err)
+			writeJSON(w, http.StatusAccepted, map[string]any{
+				"supervisorAccepted": true,
+				"boardSynced":        false,
+				"boardError":         "assign_not_mirrored",
+			})
+			return
 		}
 	}
 	if _, err := mirror.SyncTicket(ctx, ticketID); err != nil {
@@ -242,7 +261,7 @@ func (b *Bridge) applyCommand(ctx context.Context, commands *SupervisorCommands,
 	case "fail":
 		return commands.FailTicket(ctx, commands.TenantID, ticketID, body.reasonValue(), operator)
 	case "block":
-		return commands.BlockTicket(ctx, commands.TenantID, ticketID, body.kindValue(), body.reasonValue(), operator)
+		return commands.BlockTicket(ctx, commands.TenantID, ticketID, body.kindValue(), body.reasonValue(), task.Version, operator)
 	case "unblock":
 		return commands.UnblockTicket(ctx, commands.TenantID, ticketID, body.optionValue(), body.reasonValue(), operator)
 	case "cancel":
