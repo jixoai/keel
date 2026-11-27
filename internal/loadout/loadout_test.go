@@ -418,6 +418,36 @@ func TestModelConfigurationVersionsTheLLMService(t *testing.T) {
 	}
 }
 
+// TestTelemetryServiceSelectedByProcessHub pins the serve wiring: a tenant
+// document with no telemetry section still gets the telemetry service when the
+// hosting process supplies a hub. The tenant adapter alone is not the switch.
+func TestTelemetryServiceSelectedByProcessHub(t *testing.T) {
+	cfg := host.TenantConfig{}
+	for _, name := range EnabledServices(cfg, Options{}) {
+		if name == ServiceTelemetry {
+			t.Fatal("telemetry enabled without an adapter or process hub")
+		}
+	}
+	services := EnabledServices(cfg, Options{Telemetry: true})
+	found := false
+	for _, name := range services {
+		if name == ServiceTelemetry {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("telemetry service not selected by Options.Telemetry: %v", services)
+	}
+	lo, err := FromTenantConfig(cfg, Options{Telemetry: true}, provideAll(allServiceNames()...))
+	if err != nil {
+		t.Fatalf("FromTenantConfig: %v", err)
+	}
+	snap := applyLoadout(t, lo)
+	if !snap.Active(ServiceTelemetry) {
+		t.Fatalf("telemetry should be ACTIVE: %s", snap)
+	}
+}
+
 // TestExternalServicesSelectedByDocument pins the document -> service mapping
 // for the external gateway: one enabled provider selects its service, an
 // explicitly disabled provider selects nothing, and the summary records the

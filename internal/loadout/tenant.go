@@ -43,6 +43,13 @@ type Options struct {
 	// RunConcurrency is the process-wide worker concurrency (0 = runtime
 	// default).
 	RunConcurrency int
+	// Telemetry enables the telemetry service because the hosting process has a
+	// telemetry hub (keel serve always does). The tenant document's adapter is
+	// not the switch: the hub must exist on the run path even while the
+	// keel.telemetry plugin is disabled, so run spans and the status surface see
+	// the same object. Kernel-only/runtime deployments leave it false and keep
+	// the adapter-driven behavior.
+	Telemetry bool
 }
 
 // EnabledServices resolves the tenant document to the default services it turns
@@ -54,7 +61,8 @@ type Options struct {
 //     irreducible run path and are always present;
 //   - mcp switches on when the document lists at least one MCP server;
 //   - compaction switches on only when compaction.enabled is explicitly true;
-//   - telemetry switches on when telemetry.adapter names an adapter;
+//   - telemetry switches on when the document names an adapter OR the hosting
+//     process supplies a telemetry hub (Options.Telemetry);
 //   - external-agent switches on when the document declares an enabled agent
 //     backend; external-tools switches on the same way for tool providers;
 //   - worker switches on from the hosting Options (a process capability).
@@ -77,7 +85,7 @@ func EnabledServices(cfg host.TenantConfig, opts Options) []string {
 	if compactionEnabled(cfg.Compaction) {
 		enabled[ServiceCompaction] = true
 	}
-	if telemetryEnabled(cfg.Telemetry.Adapter) {
+	if opts.Telemetry || telemetryEnabled(cfg.Telemetry.Adapter) {
 		enabled[ServiceTelemetry] = true
 	}
 	if enabledExternalProviders(cfg.External.Backends) > 0 {

@@ -846,6 +846,10 @@ func runServe(parent context.Context, opts serveOptions) error {
 			Revision:       opts.LoadoutRevision,
 			Worker:         !opts.NoWorker,
 			RunConcurrency: opts.Runs,
+			// The process owns a telemetry hub; the run path must bind it even
+			// when the tenant document carries no telemetry section, so plugin
+			// enable/disable and /v1/telemetry/status act on the same hub.
+			Telemetry: telemetryHub != nil,
 		},
 		RuntimeID:   runtimeID(),
 		Concurrency: opts.Runs,
@@ -1648,15 +1652,7 @@ func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, 
 		// what the next enable will actually apply.
 		Telemetry: rt.TelemetryHub(),
 		TelemetryApproval: func() []string {
-			config := opts.TelemetryConfig
-			if opts.TelemetryConfigLoader != nil {
-				ctx, cancel := context.WithTimeout(context.Background(), telemetryConfigLoadTimeout)
-				if loaded, err := opts.TelemetryConfigLoader(ctx); err == nil {
-					config = loaded
-				}
-				cancel()
-			}
-			return telemetryApprovalLines(config)
+			return telemetryApprovalLinesWithLoader(opts.TelemetryConfig, opts.TelemetryConfigLoader)
 		},
 		Theme: theme,
 		// Chat commands (change keel-plugin-commands): the durable invocation
@@ -2115,6 +2111,22 @@ func telemetrySignalStrings(signals []telemetry.Signal) []string {
 		out = append(out, string(signal))
 	}
 	return out
+}
+
+// telemetryApprovalLinesWithLoader renders the enable question from the latest
+// stored document. A loader failure is shown as unavailable instead of silently
+// rendering an outdated boot snapshot.
+func telemetryApprovalLinesWithLoader(boot telemetry.Config, loader func(context.Context) (telemetry.Config, error)) []string {
+	if loader == nil {
+		return telemetryApprovalLines(boot)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), telemetryConfigLoadTimeout)
+	defer cancel()
+	loaded, err := loader(ctx)
+	if err != nil {
+		return []string{"configUnavailable=the stored tenant document could not be read; check serve logs"}
+	}
+	return telemetryApprovalLines(loaded)
 }
 
 // telemetryApprovalLines renders the sanitized telemetry configuration for the

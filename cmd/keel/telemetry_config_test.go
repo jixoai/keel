@@ -8,6 +8,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -92,6 +93,22 @@ func TestTenantTelemetryLoaderSurfacesInvalidStoredDocument(t *testing.T) {
 	}
 }
 
+func TestTelemetryApprovalShowsUnavailableOnLoaderError(t *testing.T) {
+	lines := telemetryApprovalLinesWithLoader(telemetry.Config{
+		Adapter:  "otlp",
+		Endpoint: "https://boot.example:4318",
+	}, func(context.Context) (telemetry.Config, error) {
+		return telemetry.Config{}, errors.New("store unavailable")
+	})
+	joined := strings.Join(lines, ";")
+	if !strings.Contains(joined, "configUnavailable") {
+		t.Fatalf("approval lines = %s", joined)
+	}
+	if strings.Contains(joined, "boot.example") {
+		t.Fatalf("approval rendered a stale boot snapshot: %s", joined)
+	}
+}
+
 type wiringCollector struct {
 	server  *httptest.Server
 	mu      sync.Mutex
@@ -152,12 +169,21 @@ func telemetryServeRuntime(t *testing.T, tenant uuid.UUID, hub *telemetry.Hub) *
 			Committer: k, Reader: k, Leases: k, External: k,
 			Runs: promptMirrorForTelemetry{}, Logger: discardLogger(),
 		},
-		Tenant: host.TenantConfig{Agent: host.AgentConfig{
-			SystemPrompt: "telemetry serve wiring test",
-		}},
+		Tenant:    host.TenantConfig{Agent: host.AgentConfig{SystemPrompt: "telemetry serve wiring test"}},
 		TenantID:  tenant,
 		Telemetry: servicehost.TelemetryOptions{Hub: hub},
-		Options:   loadout.Options{Revision: 1},
+		Options: loadout.Options{
+			Revision: 1,
+			Worker:   true,
+			// keel serve sets this whenever it has a process hub; the tenant
+			// document here deliberately has no telemetry section.
+			Telemetry: true,
+		},
+		Product: servicehost.ProductOptions{
+			WrapTelemetry: func(base telemetry.Context) telemetry.Context {
+				return &harnessext.TurnTelemetry{Base: base}
+			},
+		},
 	})
 	if err != nil {
 		t.Fatalf("boot runtime: %v", err)
@@ -222,6 +248,24 @@ func TestServeTelemetryConfigReachesApprovalAndCollector(t *testing.T) {
 	}
 	t.Cleanup(func() { surface.runtime.Close(context.Background()) })
 
+	// The run path, not a hand-made hub span: the telemetry service must be
+	// active even though the tenant document has no telemetry section, and the
+	// worker's runner must carry a non-nil telemetry context.
+	if !rt.Snapshot().Active(loadout.ServiceTelemetry) {
+		t.Fatalf("telemetry service state = %s", rt.Snapshot().State(loadout.ServiceTelemetry))
+	}
+	bindCtx, bindCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer bindCancel()
+	bound, err := rt.Binding().Acquire(bindCtx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = bound.Release(context.Background()) })
+	runner := bound.Runner()
+	if runner.Telemetry == nil || runner.Telemetry.Context == nil || runner.Telemetry.Metrics == nil {
+		t.Fatalf("runner telemetry is not bound: %#v", runner.Telemetry)
+	}
+
 	// The approval question is the stored endpoint, never its secret name/value.
 	lines := strings.Join(telemetryApprovalLines(config), ";")
 	if !strings.Contains(lines, "endpointHost=") || !strings.Contains(lines, "headers=Authorization") {
@@ -243,7 +287,7 @@ func TestServeTelemetryConfigReachesApprovalAndCollector(t *testing.T) {
 	if status := hub.Status(); status.State != telemetry.PluginActive {
 		t.Fatalf("hub state = %s", status.State)
 	}
-	if err := hub.StartSpan(telemetry.SpanOptions{Name: "keel.agent.run", Attributes: telemetry.SpanAttributes{
+	if err := runner.Telemetry.Context.StartSpan(telemetry.SpanOptions{Name: "keel.agent.run", Attributes: telemetry.SpanAttributes{
 		"tenant": tenant.String(), "session": "session-a",
 	}}, func(telemetry.Span) error { return nil }); err != nil {
 		t.Fatal(err)

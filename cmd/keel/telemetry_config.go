@@ -6,9 +6,13 @@ package main
 // document, which never contains a `telemetry` section: the plugin would stay
 // inactive forever and OTLP would never leave the process. The admin API stores
 // the tenant document in `tenants.config`; this loader applies the documented
-// precedence:
+// telemetry precedence:
 //
-//	boot defaults (flags/env) < stored tenant document < config.toml
+//	boot defaults (flags/env) < stored tenant document
+//
+// config.toml does not define telemetry. OverlayTenant is still applied because
+// its other settings (capture/compaction) are part of the same merged document;
+// it never touches the telemetry section.
 //
 // It is used both for the boot status snapshot and again at plugin Start, so a
 // configuration written through PUT /v1/tenants/{id}/config is visible to the
@@ -68,7 +72,7 @@ func (l tenantTelemetryLoader) Load(ctx context.Context) (telemetry.Config, erro
 	if l.configFile != nil {
 		overlaid, applied, err := configfile.OverlayTenant(l.configFile.Pin(), tenant)
 		if err != nil {
-			return telemetry.Config{}, fmt.Errorf("config.toml telemetry: %w", err)
+			return telemetry.Config{}, fmt.Errorf("config.toml overlay: %w", err)
 		}
 		if applied {
 			tenant = overlaid

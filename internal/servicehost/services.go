@@ -632,12 +632,15 @@ func newTelemetryFactory(tenant host.TenantConfig, cfg Config) servicegraph.Fact
 				Base:     base,
 				Logger:   cfg.Seams.Logger,
 			})
+			// A locally-created hub needs a status projection from the tenant
+			// document. A process hub was configured by its owner (keel serve
+			// loads the stored tenant document); overwriting it here would
+			// replace the stored config with the flag/env document, which has no
+			// telemetry section.
+			hub.Configure(telemetry.SummarizeConfig(withTenantID(TelemetryPluginConfig(tenant), cfg.TenantID.String())))
 		} else {
 			hub.SetBase(base)
 		}
-		// The configured projection is status/approval data; it never starts an
-		// exporter. The plugin overwrites it (same values) when it activates.
-		hub.Configure(telemetry.SummarizeConfig(withTenantID(TelemetryPluginConfig(tenant), cfg.TenantID.String())))
 		runContext := telemetry.Context(hub)
 		if cfg.Product.WrapTelemetry != nil {
 			runContext = cfg.Product.WrapTelemetry(runContext)
