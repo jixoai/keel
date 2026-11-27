@@ -1,0 +1,13 @@
+keel.telemetry live E2E: PASS
+startedAt=2026-11-27T07:30:22.622Z
+finishedAt=2026-11-27T07:31:21.589Z
+commit=563d208cbcb6141780e2faf5fb7d34d56d7629ce
+steps=8/8
+checks=104/104
+collectorRequests=5
+collectorPaths={"/v1/traces":1,"/v1/metrics":2,"/v1/logs":2}
+spanNames=["keel.agent.run","keel.agent.turn"]
+metricNames=["keel.agent.run.duration","keel.agent.runs"]
+logEvents=["turn.finished"]
+artifacts=report.html, steps.json, collector-requests.jsonl, collector-summary.json, serve.log, run.log, residue.txt
+residue=clean

@@ -1,0 +1,22 @@
+{
+  "requests": 5,
+  "paths": {
+    "/v1/traces": 1,
+    "/v1/metrics": 2,
+    "/v1/logs": 2
+  },
+  "spanNames": [
+    "keel.agent.run",
+    "keel.agent.turn"
+  ],
+  "metricNames": [
+    "keel.agent.run.duration",
+    "keel.agent.runs"
+  ],
+  "logEvents": [
+    "turn.finished"
+  ],
+  "authorizationFingerprints": [
+    "4a3b39a6ac29a8d3abc01d4bb7e08da3f3b08575095c71e49e61bf90b1dd3780"
+  ]
+}

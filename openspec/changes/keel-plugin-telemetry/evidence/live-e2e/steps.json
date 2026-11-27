@@ -1,0 +1,1161 @@
+{
+  "lane": "keel-telemetry-e2e",
+  "task": "openspec/changes/keel-plugin-telemetry tasks 7.4",
+  "commit": "563d208cbcb6141780e2faf5fb7d34d56d7629ce",
+  "base": "http://127.0.0.1:13600",
+  "startedAt": "2026-11-27T07:30:22.622Z",
+  "finishedAt": "2026-11-27T07:31:21.589Z",
+  "environment": {
+    "tenant": "6f0004b4-1fe5-48a3-b53d-8a16ce917e05",
+    "collector": "http://127.0.0.1:13604",
+    "serviceName": "keel-telemetry-e2e",
+    "signals": "traces,metrics,logs",
+    "database": "throwaway PostgreSQL cluster (keel db start)",
+    "model": "e2e-model via scripts/keel-telemetry-e2e/fake-provider.mjs",
+    "lane": "HTTP/JSON only (no browser)"
+  },
+  "steps": [
+    {
+      "id": "stack",
+      "title": "真实栈：PostgreSQL + keel serve + 独立 collector，插件默认关闭",
+      "startedAt": "2026-11-27T07:30:22.625Z",
+      "status": "passed",
+      "checks": [
+        {
+          "label": "keel serve /v1/health 200",
+          "ok": true,
+          "actual": "200",
+          "expected": 200
+        },
+        {
+          "label": "local-only 超管会话",
+          "ok": true,
+          "actual": "{\"authenticated\":true,\"localAdmin\":true,\"isSuperAdmin\":true}",
+          "expected": true
+        },
+        {
+          "label": "会话租户 = E2E 租户",
+          "ok": true,
+          "actual": "6f0004b4-1fe5-48a3-b53d-8a16ce917e05",
+          "expected": "6f0004b4-1fe5-48a3-b53d-8a16ce917e05"
+        },
+        {
+          "label": "真实 PostgreSQL 可达",
+          "ok": true,
+          "actual": "PostgreSQL 18.7 (Homebrew) on aarch64-apple-darwin27.2.0",
+          "expected": "PostgreSQL"
+        },
+        {
+          "label": "keel.telemetry 随二进制提供",
+          "ok": true,
+          "actual": "keel.telemetry",
+          "expected": "keel.telemetry"
+        },
+        {
+          "label": "keel.telemetry 默认未启用",
+          "ok": true,
+          "actual": "installed",
+          "expected": "installed|disabled"
+        },
+        {
+          "label": "keel.telemetry 是 bundled 插件",
+          "ok": true,
+          "actual": "true",
+          "expected": true
+        },
+        {
+          "label": "清单 enabled 不含 keel.telemetry",
+          "ok": true,
+          "actual": "[\"keel.approval\",\"keel.bot\",\"keel.creation\",\"keel.example\",\"keel.file\",\"keel.model\",\"keel.notify\",\"keel.shell\",\"keel.spill\",\"keel.tasks\",\"keel.team-bot\"]",
+          "expected": "no keel.telemetry"
+        },
+        {
+          "label": "GET /v1/telemetry/status 200",
+          "ok": true,
+          "actual": "200",
+          "expected": 200
+        },
+        {
+          "label": "telemetry hub 默认 disabled",
+          "ok": true,
+          "actual": "{\"enabled\":false,\"state\":\"plugin_disabled\"}",
+          "expected": {
+            "enabled": false
+          }
+        },
+        {
+          "label": "collector 起步 0 请求",
+          "ok": true,
+          "actual": "0",
+          "expected": 0
+        }
+      ],
+      "details": {
+        "health": {
+          "bootId": "cede3566-b6c2-4aa5-a6ab-c40eb0d9f749",
+          "goroutine": 22,
+          "heapMB": 6.73324,
+          "ok": true,
+          "pid": 70248,
+          "rssMB": 19.630344
+        },
+        "account": "local-admin",
+        "postgres": "PostgreSQL 18.7 (Homebrew) on aarch64-apple-darwin27.2.0",
+        "bootPluginState": "installed",
+        "bootTelemetry": {
+          "pluginId": "keel.telemetry",
+          "state": "plugin_disabled",
+          "enabled": false,
+          "signals": [],
+          "headerCount": 0,
+          "sampleRatio": 1,
+          "logRatio": 1,
+          "queueDepth": 0,
+          "dropped": 0,
+          "exported": 0,
+          "metricSeriesDropped": 0,
+          "attributesDropped": 0,
+          "eventsDropped": 0,
+          "linksDropped": 0,
+          "configured": false,
+          "adapter": "none",
+          "serviceName": "keel"
+        }
+      },
+      "finishedAt": "2026-11-27T07:30:22.741Z",
+      "durationMs": 116
+    },
+    {
+      "id": "default-off",
+      "title": "默认关闭：未启用插件时一轮真实对话，collector 收到 0 请求",
+      "startedAt": "2026-11-27T07:30:22.741Z",
+      "status": "passed",
+      "checks": [
+        {
+          "label": "真实会话已创建",
+          "ok": true,
+          "actual": "3f3db5d3-dde9-47b6-84ab-34e574497e41",
+          "expected": "sessionId"
+        },
+        {
+          "label": "默认关闭轮次 run.finished=done",
+          "ok": true,
+          "actual": "done",
+          "expected": "done"
+        },
+        {
+          "label": "脚本化模型确实被调用",
+          "ok": true,
+          "actual": "0 -> 1",
+          "expected": "increases"
+        },
+        {
+          "label": "关闭状态一轮对话后 collector 仍为 0 请求",
+          "ok": true,
+          "actual": "0",
+          "expected": 0
+        },
+        {
+          "label": "关闭状态无 trace/metric/log 请求",
+          "ok": true,
+          "actual": "{}",
+          "expected": {}
+        }
+      ],
+      "details": {
+        "deployment": {
+          "accountId": "00000000-0000-0000-0000-00000000a002",
+          "roleId": "a3a9156f-d56f-46b2-9e1e-f77d9a2462bf",
+          "profileId": "6747c806-1653-4626-8f1b-1b7a4dd6c668",
+          "botId": "bot_1f85e9c6f0c74bf2ae8963abb1c8dfce",
+          "sessionId": "3f3db5d3-dde9-47b6-84ab-34e574497e41"
+        },
+        "turn": {
+          "startedAt": "2026-11-27T07:30:22.793Z",
+          "finishedAt": "2026-11-27T07:30:23.145Z",
+          "finishedCount": 1,
+          "lastStatus": "done"
+        },
+        "collectorRequests": 0
+      },
+      "finishedAt": "2026-11-27T07:30:30.152Z",
+      "durationMs": 7411
+    },
+    {
+      "id": "configured-disabled",
+      "title": "真实 admin API 写入 tenant telemetry 文档与 secret，插件未启用仍零请求",
+      "startedAt": "2026-11-27T07:30:30.152Z",
+      "status": "passed",
+      "checks": [
+        {
+          "label": "secret 写入 200",
+          "ok": true,
+          "actual": "200",
+          "expected": 200
+        },
+        {
+          "label": "secret 响应只回 masked preview",
+          "ok": true,
+          "actual": "masked non-empty preview",
+          "expected": "masked non-empty preview"
+        },
+        {
+          "label": "secret 响应不含明文值",
+          "ok": true,
+          "actual": "no raw token",
+          "expected": "no raw token"
+        },
+        {
+          "label": "PUT tenant config 200",
+          "ok": true,
+          "actual": "200",
+          "expected": 200
+        },
+        {
+          "label": "config revision >= 1",
+          "ok": true,
+          "actual": "2",
+          "expected": ">= 1"
+        },
+        {
+          "label": "GET tenant config 200",
+          "ok": true,
+          "actual": "200",
+          "expected": 200
+        },
+        {
+          "label": "stored adapter=otlp",
+          "ok": true,
+          "actual": "otlp",
+          "expected": "otlp"
+        },
+        {
+          "label": "stored endpoint 指向 collector",
+          "ok": true,
+          "actual": "http://127.0.0.1:13604",
+          "expected": "http://127.0.0.1:13604"
+        },
+        {
+          "label": "stored header 是 secret 引用",
+          "ok": true,
+          "actual": "secret:OTLP_TOKEN",
+          "expected": "secret:OTLP_TOKEN"
+        },
+        {
+          "label": "stored sampleRatio=1",
+          "ok": true,
+          "actual": "1",
+          "expected": 1
+        },
+        {
+          "label": "config 读回不含明文 secret",
+          "ok": true,
+          "actual": "no raw token",
+          "expected": "no raw token"
+        },
+        {
+          "label": "PostgreSQL tenants.config 已落盘",
+          "ok": true,
+          "actual": "otlp|http://127.0.0.1:13604|2",
+          "expected": "otlp|…endpoint…|revision"
+        },
+        {
+          "label": "写入配置但未启用：status enabled=false",
+          "ok": true,
+          "actual": "{\"enabled\":false,\"state\":\"plugin_disabled\"}",
+          "expected": {
+            "enabled": false
+          }
+        },
+        {
+          "label": "配置已写但插件未启用：轮次完成",
+          "ok": true,
+          "actual": "done",
+          "expected": "done"
+        },
+        {
+          "label": "配置已写但插件未启用：collector 仍 0 新请求",
+          "ok": true,
+          "actual": "0",
+          "expected": 0
+        }
+      ],
+      "details": {
+        "config": {
+          "mcp": {},
+          "agent": {
+            "sections": null
+          },
+          "hooks": {
+            "commands": null
+          },
+          "quota": {},
+          "tools": {
+            "allow": null
+          },
+          "skills": {
+            "roots": null
+          },
+          "external": {
+            "quota": {}
+          },
+          "telemetry": {
+            "adapter": "otlp",
+            "headers": {
+              "Authorization": "secret:OTLP_TOKEN"
+            },
+            "signals": [
+              "traces",
+              "metrics",
+              "logs"
+            ],
+            "endpoint": "http://127.0.0.1:13604",
+            "logMinLevel": "info",
+            "sampleRatio": 1,
+            "serviceName": "keel-telemetry-e2e"
+          },
+          "compaction": {},
+          "filesystem": {
+            "capture": {}
+          }
+        },
+        "storedRow": "otlp|http://127.0.0.1:13604|2",
+        "revision": 2,
+        "turn": {
+          "startedAt": "2026-11-27T07:30:30.255Z",
+          "finishedAt": "2026-11-27T07:30:30.571Z",
+          "finishedCount": 2,
+          "lastStatus": "done"
+        }
+      },
+      "finishedAt": "2026-11-27T07:30:37.573Z",
+      "durationMs": 7421
+    },
+    {
+      "id": "enable-approval",
+      "title": "两阶段审批启用 keel.telemetry：202 → allow → 200 enabled",
+      "startedAt": "2026-11-27T07:30:37.573Z",
+      "status": "passed",
+      "checks": [
+        {
+          "label": "首次 enable 返回 202 审批问题",
+          "ok": true,
+          "actual": "202",
+          "expected": 202
+        },
+        {
+          "label": "审批类型 plugin.enable",
+          "ok": true,
+          "actual": "plugin.enable",
+          "expected": "plugin.enable"
+        },
+        {
+          "label": "审批问题为 open",
+          "ok": true,
+          "actual": "open",
+          "expected": "open"
+        },
+        {
+          "label": "审批问题渲染 exporter=otlp",
+          "ok": true,
+          "actual": "Enable plugin keel.telemetry 1.0.0? Enabling runs what the plugin declares (tools, hooks, triggers, UI).\nTelemetry export: exporter=otlp; signals=traces,metrics,logs; sampleRatio=1; logRatio=1; endpointHost=127.0.0.1:13604; headers=Authorization.",
+          "expected": "exporter=otlp"
+        },
+        {
+          "label": "审批问题渲染 endpoint host",
+          "ok": true,
+          "actual": "Enable plugin keel.telemetry 1.0.0? Enabling runs what the plugin declares (tools, hooks, triggers, UI).\nTelemetry export: exporter=otlp; signals=traces,metrics,logs; sampleRatio=1; logRatio=1; endpointHost=127.0.0.1:13604; headers=Authorization.",
+          "expected": "endpointHost=127.0.0.1:13604"
+        },
+        {
+          "label": "审批问题渲染 sampleRatio=1",
+          "ok": true,
+          "actual": "Enable plugin keel.telemetry 1.0.0? Enabling runs what the plugin declares (tools, hooks, triggers, UI).\nTelemetry export: exporter=otlp; signals=traces,metrics,logs; sampleRatio=1; logRatio=1; endpointHost=127.0.0.1:13604; headers=Authorization.",
+          "expected": "sampleRatio=1"
+        },
+        {
+          "label": "审批问题只渲染 header 名",
+          "ok": true,
+          "actual": "Enable plugin keel.telemetry 1.0.0? Enabling runs what the plugin declares (tools, hooks, triggers, UI).\nTelemetry export: exporter=otlp; signals=traces,metrics,logs; sampleRatio=1; logRatio=1; endpointHost=127.0.0.1:13604; headers=Authorization.",
+          "expected": "headers=Authorization"
+        },
+        {
+          "label": "审批问题不含明文 secret",
+          "ok": true,
+          "actual": "no raw token",
+          "expected": "no raw token"
+        },
+        {
+          "label": "审批问题不含 secret 引用值",
+          "ok": true,
+          "actual": "no secret ref",
+          "expected": "no secret ref"
+        },
+        {
+          "label": "allow 回答 200",
+          "ok": true,
+          "actual": "200",
+          "expected": 200
+        },
+        {
+          "label": "审批已回答 allow",
+          "ok": true,
+          "actual": "answered",
+          "expected": "answered/allow"
+        },
+        {
+          "label": "重复 enable 200",
+          "ok": true,
+          "actual": "200",
+          "expected": 200
+        },
+        {
+          "label": "插件状态 enabled",
+          "ok": true,
+          "actual": "enabled",
+          "expected": "enabled"
+        },
+        {
+          "label": "清单显示 keel.telemetry enabled",
+          "ok": true,
+          "actual": "enabled",
+          "expected": "enabled"
+        },
+        {
+          "label": "telemetry status active+enabled",
+          "ok": true,
+          "actual": "{\"enabled\":true,\"state\":\"active\"}",
+          "expected": {
+            "enabled": true,
+            "state": "active"
+          }
+        },
+        {
+          "label": "status signals = traces/metrics/logs",
+          "ok": true,
+          "actual": "[\"logs\",\"metrics\",\"traces\"]",
+          "expected": [
+            "logs",
+            "metrics",
+            "traces"
+          ]
+        },
+        {
+          "label": "status endpointHost 来自配置",
+          "ok": true,
+          "actual": "127.0.0.1:13604",
+          "expected": "127.0.0.1:13604"
+        },
+        {
+          "label": "status sampleRatio=1",
+          "ok": true,
+          "actual": "1",
+          "expected": 1
+        },
+        {
+          "label": "status headerNames=[Authorization]",
+          "ok": true,
+          "actual": "[\"Authorization\"]",
+          "expected": [
+            "Authorization"
+          ]
+        },
+        {
+          "label": "status 不含明文 secret",
+          "ok": true,
+          "actual": "no raw token",
+          "expected": "no raw token"
+        },
+        {
+          "label": "环境审计可见 enable 成功",
+          "ok": true,
+          "actual": "[\"discover:ok\",\"configure:ok\",\"enable:ok\"]",
+          "expected": "enable:ok"
+        },
+        {
+          "label": "审计不含明文 secret",
+          "ok": true,
+          "actual": "no raw token",
+          "expected": "no raw token"
+        }
+      ],
+      "details": {
+        "decisionId": "5439bc4a-0e90-5908-aaeb-c773daa2f051",
+        "prompt": "Enable plugin keel.telemetry 1.0.0? Enabling runs what the plugin declares (tools, hooks, triggers, UI).\nTelemetry export: exporter=otlp; signals=traces,metrics,logs; sampleRatio=1; logRatio=1; endpointHost=127.0.0.1:13604; headers=Authorization.",
+        "status": {
+          "pluginId": "keel.telemetry",
+          "state": "active",
+          "enabled": true,
+          "signals": [
+            "traces",
+            "metrics",
+            "logs"
+          ],
+          "endpointHost": "127.0.0.1:13604",
+          "headerNames": [
+            "Authorization"
+          ],
+          "headerCount": 1,
+          "sampleRatio": 1,
+          "logRatio": 1,
+          "queueDepth": 0,
+          "dropped": 0,
+          "exported": 0,
+          "metricSeriesDropped": 0,
+          "attributesDropped": 0,
+          "eventsDropped": 0,
+          "linksDropped": 0,
+          "configured": true,
+          "adapter": "otlp",
+          "serviceName": "keel-telemetry-e2e",
+          "exporters": [
+            {
+              "name": "otlp-http",
+              "state": "active",
+              "signals": [
+                "traces",
+                "metrics",
+                "logs"
+              ],
+              "endpointHost": "127.0.0.1:13604",
+              "queueDepth": 0,
+              "dropped": 0,
+              "exported": 0,
+              "seriesDropped": 0
+            }
+          ]
+        },
+        "auditActions": [
+          {
+            "action": "discover",
+            "result": "ok",
+            "actor": "boot"
+          },
+          {
+            "action": "configure",
+            "result": "ok",
+            "actor": "system:plugin-start"
+          },
+          {
+            "action": "enable",
+            "result": "ok",
+            "actor": "approver:00000000-0000-0000-0000-00000000a002"
+          }
+        ],
+        "auditDetailSample": {
+          "adapter": "otlp",
+          "dropped": 0,
+          "signals": [
+            "traces",
+            "metrics",
+            "logs"
+          ],
+          "surface": "runtime",
+          "exported": 0,
+          "logRatio": 1,
+          "generation": 2,
+          "queueDepth": 0,
+          "headerCount": 1,
+          "headerNames": [
+            "Authorization"
+          ],
+          "sampleRatio": 1,
+          "endpointHost": "127.0.0.1:13604",
+          "lastErrorClass": "",
+          "telemetryState": "active",
+          "metricSeriesDrop": 0
+        }
+      },
+      "finishedAt": "2026-11-27T07:30:37.598Z",
+      "durationMs": 25
+    },
+    {
+      "id": "export-enabled",
+      "title": "启用后一轮真实对话：collector 收到 keel.agent.run span、metric 与 turn.finished log",
+      "startedAt": "2026-11-27T07:30:37.598Z",
+      "status": "passed",
+      "checks": [
+        {
+          "label": "enable 本身不产生 collector 请求",
+          "ok": true,
+          "actual": "0",
+          "expected": 0
+        },
+        {
+          "label": "启用轮次 run.finished=done",
+          "ok": true,
+          "actual": "done",
+          "expected": "done"
+        },
+        {
+          "label": "收到 /v1/traces 请求",
+          "ok": true,
+          "actual": "{\"/v1/traces\":1,\"/v1/metrics\":1,\"/v1/logs\":1}",
+          "expected": "traces>=1"
+        },
+        {
+          "label": "收到 /v1/metrics 请求",
+          "ok": true,
+          "actual": "{\"/v1/traces\":1,\"/v1/metrics\":1,\"/v1/logs\":1}",
+          "expected": "metrics>=1"
+        },
+        {
+          "label": "收到 /v1/logs 请求",
+          "ok": true,
+          "actual": "{\"/v1/traces\":1,\"/v1/metrics\":1,\"/v1/logs\":1}",
+          "expected": "logs>=1"
+        },
+        {
+          "label": "span 名 keel.agent.run",
+          "ok": true,
+          "actual": "keel.agent.run",
+          "expected": "keel.agent.run"
+        },
+        {
+          "label": "span tenant = E2E 租户",
+          "ok": true,
+          "actual": "6f0004b4-1fe5-48a3-b53d-8a16ce917e05",
+          "expected": "6f0004b4-1fe5-48a3-b53d-8a16ce917e05"
+        },
+        {
+          "label": "span session = 真实 sessionId",
+          "ok": true,
+          "actual": "3f3db5d3-dde9-47b6-84ab-34e574497e41",
+          "expected": "3f3db5d3-dde9-47b6-84ab-34e574497e41"
+        },
+        {
+          "label": "span model 来自本轮解析",
+          "ok": true,
+          "actual": "e2e-model",
+          "expected": "e2e-model"
+        },
+        {
+          "label": "span provider 非空",
+          "ok": true,
+          "actual": "e2e",
+          "expected": "non-empty"
+        },
+        {
+          "label": "span status OK",
+          "ok": true,
+          "actual": "1",
+          "expected": 1
+        },
+        {
+          "label": "metric keel.agent.runs 存在",
+          "ok": true,
+          "actual": "keel.agent.runs",
+          "expected": "keel.agent.runs"
+        },
+        {
+          "label": "metric outcome=ok",
+          "ok": true,
+          "actual": "{\"model\":\"e2e-model\",\"outcome\":\"ok\",\"provider\":\"e2e\"}",
+          "expected": {
+            "outcome": "ok"
+          }
+        },
+        {
+          "label": "metric model 标签存在",
+          "ok": true,
+          "actual": "e2e-model",
+          "expected": "e2e-model"
+        },
+        {
+          "label": "metric 不带 tenant/session 身份标签",
+          "ok": true,
+          "actual": "[]",
+          "expected": []
+        },
+        {
+          "label": "log event turn.finished",
+          "ok": true,
+          "actual": "turn.finished",
+          "expected": "turn.finished"
+        },
+        {
+          "label": "log 带 tenant/session",
+          "ok": true,
+          "actual": "{\"tenant\":\"6f0004b4-1fe5-48a3-b53d-8a16ce917e05\",\"session\":\"3f3db5d3-dde9-47b6-84ab-34e574497e41\"}",
+          "expected": {
+            "tenant": "6f0004b4-1fe5-48a3-b53d-8a16ce917e05",
+            "session": "3f3db5d3-dde9-47b6-84ab-34e574497e41"
+          }
+        },
+        {
+          "label": "log status=ok",
+          "ok": true,
+          "actual": "ok",
+          "expected": "ok"
+        },
+        {
+          "label": "resource service.name 来自配置",
+          "ok": true,
+          "actual": "keel-telemetry-e2e",
+          "expected": "keel-telemetry-e2e"
+        },
+        {
+          "label": "resource tenant.id = 租户",
+          "ok": true,
+          "actual": "6f0004b4-1fe5-48a3-b53d-8a16ce917e05",
+          "expected": "6f0004b4-1fe5-48a3-b53d-8a16ce917e05"
+        },
+        {
+          "label": "每个请求都带配置的 Authorization",
+          "ok": true,
+          "actual": "3/3",
+          "expected": "all"
+        },
+        {
+          "label": "Authorization 指纹来自 secret 值",
+          "ok": true,
+          "actual": "[\"4a3b39a6ac29\",\"4a3b39a6ac29\",\"4a3b39a6ac29\"]",
+          "expected": "4a3b39a6ac29"
+        },
+        {
+          "label": "collector 记录中无明文 secret",
+          "ok": true,
+          "actual": "no raw token",
+          "expected": "no raw token"
+        },
+        {
+          "label": "请求 Content-Type 为 JSON",
+          "ok": true,
+          "actual": "[\"application/json\",\"application/json\",\"application/json\"]",
+          "expected": "application/json"
+        },
+        {
+          "label": "只请求 OTLP 信号路径",
+          "ok": true,
+          "actual": "{\"/v1/traces\":1,\"/v1/metrics\":1,\"/v1/logs\":1}",
+          "expected": [
+            "/v1/traces",
+            "/v1/metrics",
+            "/v1/logs"
+          ]
+        }
+      ],
+      "details": {
+        "turn": {
+          "startedAt": "2026-11-27T07:30:37.600Z",
+          "finishedAt": "2026-11-27T07:30:37.919Z",
+          "finishedCount": 3,
+          "lastStatus": "done"
+        },
+        "runSpan": {
+          "name": "keel.agent.run",
+          "attributes": {
+            "model": "e2e-model",
+            "provider": "e2e",
+            "session": "3f3db5d3-dde9-47b6-84ab-34e574497e41",
+            "tenant": "6f0004b4-1fe5-48a3-b53d-8a16ce917e05"
+          },
+          "status": 1
+        },
+        "metric": {
+          "name": "keel.agent.runs",
+          "points": [
+            {
+              "attributes": {
+                "model": "e2e-model",
+                "outcome": "ok",
+                "provider": "e2e"
+              },
+              "value": 1,
+              "count": null
+            }
+          ]
+        },
+        "log": {
+          "body": "turn.finished",
+          "severityText": "INFO",
+          "severityNumber": 9,
+          "attributes": {
+            "event": "turn.finished",
+            "level": "info",
+            "logger": "harnessext.turn",
+            "model": "e2e-model",
+            "provider": "e2e",
+            "run": "3f3db5d3-dde9-47b6-84ab-34e574497e41-1795764637773",
+            "session": "3f3db5d3-dde9-47b6-84ab-34e574497e41",
+            "status": "ok",
+            "tenant": "6f0004b4-1fe5-48a3-b53d-8a16ce917e05"
+          }
+        },
+        "paths": {
+          "/v1/traces": 1,
+          "/v1/metrics": 1,
+          "/v1/logs": 1
+        },
+        "authorizationFingerprint": "4a3b39a6ac29a8d3abc01d4bb7e08da3f3b08575095c71e49e61bf90b1dd3780",
+        "resource": {
+          "service.name": "keel-telemetry-e2e",
+          "tenant.id": "6f0004b4-1fe5-48a3-b53d-8a16ce917e05"
+        },
+        "childSpans": [
+          "keel.agent.turn",
+          "keel.agent.run"
+        ]
+      },
+      "finishedAt": "2026-11-27T07:30:42.757Z",
+      "durationMs": 5159
+    },
+    {
+      "id": "sampling-zero",
+      "title": "采样率改为 0：重读配置后无 trace 请求，metric/log 仍到达",
+      "startedAt": "2026-11-27T07:30:42.757Z",
+      "status": "passed",
+      "checks": [
+        {
+          "label": "PUT sampleRatio=0 200",
+          "ok": true,
+          "actual": "200",
+          "expected": 200
+        },
+        {
+          "label": "改采样前停用插件 200",
+          "ok": true,
+          "actual": "{\"status\":200,\"state\":\"disabled\"}",
+          "expected": {
+            "status": 200,
+            "state": "disabled"
+          }
+        },
+        {
+          "label": "重新启用 202→allow→200",
+          "ok": true,
+          "actual": "{\"first\":202,\"answer\":200,\"repeat\":200}",
+          "expected": "202/200/200"
+        },
+        {
+          "label": "审批问题渲染 sampleRatio=0",
+          "ok": true,
+          "actual": "Enable plugin keel.telemetry 1.0.0? Enabling runs what the plugin declares (tools, hooks, triggers, UI).\nTelemetry export: exporter=otlp; signals=traces,metrics,logs; sampleRatio=0; logRatio=1; endpointHost=127.0.0.1:13604; headers=Authorization.",
+          "expected": "sampleRatio=0"
+        },
+        {
+          "label": "重新启用后插件 enabled",
+          "ok": true,
+          "actual": "enabled",
+          "expected": "enabled"
+        },
+        {
+          "label": "status sampleRatio=0",
+          "ok": true,
+          "actual": "0",
+          "expected": 0
+        },
+        {
+          "label": "status 仍 active",
+          "ok": true,
+          "actual": "{\"state\":\"active\",\"enabled\":true}",
+          "expected": {
+            "state": "active",
+            "enabled": true
+          }
+        },
+        {
+          "label": "采样 0 轮次 run.finished=done",
+          "ok": true,
+          "actual": "done",
+          "expected": "done"
+        },
+        {
+          "label": "采样 0：metric 仍到达",
+          "ok": true,
+          "actual": "keel.agent.runs",
+          "expected": "keel.agent.runs"
+        },
+        {
+          "label": "采样 0：log 仍到达",
+          "ok": true,
+          "actual": "turn.finished",
+          "expected": "turn.finished"
+        },
+        {
+          "label": "采样 0：没有新的 trace 请求",
+          "ok": true,
+          "actual": "{\"/v1/metrics\":1,\"/v1/logs\":1}",
+          "expected": {
+            "traces": 0
+          }
+        },
+        {
+          "label": "采样 0：没有 keel.agent.run span",
+          "ok": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "label": "采样 0：本轮只有 metric/log 请求",
+          "ok": true,
+          "actual": "{\"/v1/metrics\":1,\"/v1/logs\":1}",
+          "expected": "metrics+logs"
+        }
+      ],
+      "details": {
+        "turn": {
+          "startedAt": "2026-11-27T07:30:54.953Z",
+          "finishedAt": "2026-11-27T07:30:55.283Z",
+          "finishedCount": 4,
+          "lastStatus": "done"
+        },
+        "baseline": 3,
+        "newPaths": {
+          "/v1/metrics": 1,
+          "/v1/logs": 1
+        },
+        "metric": "keel.agent.runs",
+        "log": "turn.finished",
+        "status": {
+          "pluginId": "keel.telemetry",
+          "state": "active",
+          "enabled": true,
+          "signals": [
+            "traces",
+            "metrics",
+            "logs"
+          ],
+          "endpointHost": "127.0.0.1:13604",
+          "headerNames": [
+            "Authorization"
+          ],
+          "headerCount": 1,
+          "sampleRatio": 0,
+          "logRatio": 1,
+          "queueDepth": 0,
+          "dropped": 0,
+          "exported": 0,
+          "metricSeriesDropped": 0,
+          "attributesDropped": 5,
+          "eventsDropped": 0,
+          "linksDropped": 0,
+          "configured": true,
+          "adapter": "otlp",
+          "serviceName": "keel-telemetry-e2e",
+          "exporters": [
+            {
+              "name": "otlp-http",
+              "state": "active",
+              "signals": [
+                "traces",
+                "metrics",
+                "logs"
+              ],
+              "endpointHost": "127.0.0.1:13604",
+              "queueDepth": 0,
+              "dropped": 0,
+              "exported": 0,
+              "seriesDropped": 0
+            }
+          ]
+        }
+      },
+      "finishedAt": "2026-11-27T07:31:06.102Z",
+      "durationMs": 23345
+    },
+    {
+      "id": "disable",
+      "title": "停用插件：再发一轮真实对话，collector 不再收到新请求",
+      "startedAt": "2026-11-27T07:31:06.104Z",
+      "status": "passed",
+      "checks": [
+        {
+          "label": "disable 200",
+          "ok": true,
+          "actual": "200",
+          "expected": 200
+        },
+        {
+          "label": "插件状态 disabled",
+          "ok": true,
+          "actual": "disabled",
+          "expected": "disabled"
+        },
+        {
+          "label": "status enabled=false",
+          "ok": true,
+          "actual": "{\"enabled\":false,\"state\":\"plugin_disabled\"}",
+          "expected": {
+            "enabled": false
+          }
+        },
+        {
+          "label": "清单 keel.telemetry disabled",
+          "ok": true,
+          "actual": "disabled",
+          "expected": "disabled"
+        },
+        {
+          "label": "停用后轮次 run.finished=done",
+          "ok": true,
+          "actual": "done",
+          "expected": "done"
+        },
+        {
+          "label": "脚本化模型仍被调用",
+          "ok": true,
+          "actual": "4 -> 5",
+          "expected": "increases"
+        },
+        {
+          "label": "停用后无任何新 collector 请求",
+          "ok": true,
+          "actual": "5",
+          "expected": 5
+        },
+        {
+          "label": "停用后无新 span/metric/log",
+          "ok": true,
+          "actual": "{}",
+          "expected": {}
+        }
+      ],
+      "details": {
+        "turn": {
+          "startedAt": "2026-11-27T07:31:13.269Z",
+          "finishedAt": "2026-11-27T07:31:13.583Z",
+          "finishedCount": 5,
+          "lastStatus": "done"
+        },
+        "baseline": 5,
+        "status": {
+          "pluginId": "keel.telemetry",
+          "state": "plugin_disabled",
+          "enabled": false,
+          "signals": [
+            "traces",
+            "metrics",
+            "logs"
+          ],
+          "endpointHost": "127.0.0.1:13604",
+          "headerNames": [
+            "Authorization"
+          ],
+          "headerCount": 1,
+          "sampleRatio": 0,
+          "logRatio": 1,
+          "queueDepth": 0,
+          "dropped": 0,
+          "exported": 0,
+          "metricSeriesDropped": 0,
+          "attributesDropped": 5,
+          "eventsDropped": 0,
+          "linksDropped": 0,
+          "configured": true,
+          "adapter": "otlp",
+          "serviceName": "keel-telemetry-e2e"
+        },
+        "inventoryState": "disabled"
+      },
+      "finishedAt": "2026-11-27T07:31:21.587Z",
+      "durationMs": 15483
+    },
+    {
+      "id": "evidence-hygiene",
+      "title": "证据卫生：secret 值不进入 collector/模型/serve 日志",
+      "startedAt": "2026-11-27T07:31:21.587Z",
+      "status": "passed",
+      "checks": [
+        {
+          "label": "collector-requests.jsonl 不含明文 secret",
+          "ok": true,
+          "actual": "no raw token",
+          "expected": "no raw token"
+        },
+        {
+          "label": "model-requests.jsonl 不含明文 secret",
+          "ok": true,
+          "actual": "no raw token",
+          "expected": "no raw token"
+        },
+        {
+          "label": "serve.log 不含明文 secret",
+          "ok": true,
+          "actual": "no raw token",
+          "expected": "no raw token"
+        },
+        {
+          "label": "collector 只记录 Authorization 指纹",
+          "ok": true,
+          "actual": "fingerprint only",
+          "expected": "fingerprint only"
+        },
+        {
+          "label": "interaction 全程 secret 未泄漏",
+          "ok": true,
+          "actual": "no raw token",
+          "expected": "no raw token"
+        }
+      ],
+      "details": {
+        "collectorSummary": {
+          "requests": 5,
+          "paths": {
+            "/v1/traces": 1,
+            "/v1/metrics": 2,
+            "/v1/logs": 2
+          },
+          "spanNames": [
+            "keel.agent.run",
+            "keel.agent.turn"
+          ],
+          "metricNames": [
+            "keel.agent.run.duration",
+            "keel.agent.runs"
+          ],
+          "logEvents": [
+            "turn.finished"
+          ],
+          "authorizationFingerprints": [
+            "4a3b39a6ac29a8d3abc01d4bb7e08da3f3b08575095c71e49e61bf90b1dd3780"
+          ]
+        },
+        "modelSummary": {
+          "requests": 5,
+          "models": [
+            "e2e-model"
+          ],
+          "streams": [
+            true
+          ]
+        },
+        "collectorBytes": 10391,
+        "serveLogBytes": 20091
+      },
+      "finishedAt": "2026-11-27T07:31:21.589Z",
+      "durationMs": 2
+    }
+  ],
+  "collector": {
+    "requests": 5,
+    "paths": {
+      "/v1/traces": 1,
+      "/v1/metrics": 2,
+      "/v1/logs": 2
+    },
+    "spanNames": [
+      "keel.agent.run",
+      "keel.agent.turn"
+    ],
+    "metricNames": [
+      "keel.agent.run.duration",
+      "keel.agent.runs"
+    ],
+    "logEvents": [
+      "turn.finished"
+    ],
+    "authorizationFingerprints": [
+      "4a3b39a6ac29a8d3abc01d4bb7e08da3f3b08575095c71e49e61bf90b1dd3780"
+    ]
+  },
+  "model": {
+    "requests": 5,
+    "models": [
+      "e2e-model"
+    ]
+  },
+  "pass": true,
+  "failures": 0,
+  "error": ""
+}

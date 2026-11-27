@@ -1,0 +1,5 @@
+{"seq":1,"receivedAt":"2026-11-27T07:30:22.982Z","method":"POST","path":"/v1/chat/completions","model":"e2e-model","stream":true,"messageCount":2,"toolCount":0,"authorization":true}
+{"seq":2,"receivedAt":"2026-11-27T07:30:30.373Z","method":"POST","path":"/v1/chat/completions","model":"e2e-model","stream":true,"messageCount":4,"toolCount":0,"authorization":true}
+{"seq":3,"receivedAt":"2026-11-27T07:30:37.782Z","method":"POST","path":"/v1/chat/completions","model":"e2e-model","stream":true,"messageCount":6,"toolCount":0,"authorization":true}
+{"seq":4,"receivedAt":"2026-11-27T07:30:55.194Z","method":"POST","path":"/v1/chat/completions","model":"e2e-model","stream":true,"messageCount":8,"toolCount":0,"authorization":true}
+{"seq":5,"receivedAt":"2026-11-27T07:31:13.377Z","method":"POST","path":"/v1/chat/completions","model":"e2e-model","stream":true,"messageCount":10,"toolCount":0,"authorization":true}

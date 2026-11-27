@@ -1,0 +1,22 @@
+keel telemetry live E2E residue
+generatedAt=2026-11-27T07:31:21Z
+workDir=/var/folders/tn/y_b12zxs2dldn8thmfnpy9c80000gp/T//keel-telemetry-e2e.20261127-153010.c9Yc1U
+database=keel_telemetry_e2e_1795764610
+ports: serve=13600 model=13601 collector=13604 postgres=13605
+serve.pid=70248 serve.alive=no
+model.pid=70243 model.alive=no
+collector.pid=70235 collector.alive=no
+postgres.alive=no
+pgrep.postgres=none
+postgres.clusterRemoved=yes
+servePort.state=free
+modelPort.state=free
+collectorPort.state=free
+postgresPort.state=free
+pgrep.serve=none
+pgrep.model=none
+pgrep.collector=none
+secretScan.otlpToken=leaked=no
+secretScan.adminKey=leaked=no
+workDir.removed=yes
+teardown=clean

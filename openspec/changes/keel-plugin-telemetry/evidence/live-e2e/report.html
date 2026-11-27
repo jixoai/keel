@@ -1,0 +1,1169 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>keel.telemetry live E2E — 2026-11-27T07:30:22.622Z</title>
+<style>
+:root { color-scheme: light dark; --bg:#f7f8fa; --card:#fff; --ink:#16181d; --muted:#626b7a; --line:#e3e6ec; --ok:#0a7a3d; --bad:#b42318; --accent:#0b5ed7; }
+@media (prefers-color-scheme: dark) { :root { --bg:#111318; --card:#181b22; --ink:#e8ebf1; --muted:#9aa4b2; --line:#2a2f39; --ok:#4ade80; --bad:#f87171; --accent:#60a5fa; } }
+* { box-sizing: border-box; }
+body { margin:0; padding:28px; background:var(--bg); color:var(--ink); font:14px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans SC",sans-serif; }
+main { max-width:1180px; margin:0 auto; }
+h1 { font-size:24px; margin:0 0 4px; }
+h2 { font-size:17px; margin:0 0 6px; display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+p { margin:8px 0; }
+.muted { color:var(--muted); }
+.meta { color:var(--muted); font-size:12px; }
+.badge { display:inline-block; padding:1px 8px; border-radius:999px; font-size:12px; font-weight:600; color:#fff; }
+.badge.ok { background:var(--ok); }
+.badge.bad { background:var(--bad); }
+.hero { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:18px 20px; margin-bottom:18px; }
+.stats { display:flex; gap:18px; flex-wrap:wrap; margin-top:10px; }
+.stat { min-width:150px; }
+.stat b { display:block; font-size:22px; }
+table { width:100%; border-collapse:collapse; background:var(--card); border:1px solid var(--line); border-radius:8px; overflow:hidden; margin:10px 0; }
+th, td { text-align:left; padding:7px 10px; border-bottom:1px solid var(--line); vertical-align:top; }
+th { font-size:12px; color:var(--muted); font-weight:600; }
+tr.failed td { background:color-mix(in srgb, var(--bad) 8%, transparent); }
+code { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12px; overflow-wrap:anywhere; }
+pre { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:12px; overflow:auto; font-size:12px; }
+section.step { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px 18px; margin:16px 0; }
+details { margin-top:10px; }
+summary { cursor:pointer; color:var(--accent); font-size:13px; }
+ul { margin:6px 0; padding-left:22px; }
+.cols { display:grid; grid-template-columns:repeat(auto-fit,minmax(320px,1fr)); gap:16px; }
+.panel { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:14px 16px; margin:16px 0; }
+a { color:var(--accent); }
+</style>
+</head>
+<body>
+<main>
+<section class="hero">
+  <h1>keel.telemetry 真实服务 E2E PASS</h1>
+  <p class="muted">任务 7.4 · 真实 PostgreSQL + 真实 <code>keel serve</code> + 独立 OTLP collector · HTTP/JSON 证据（无浏览器）</p>
+  <div class="stats">
+    <div class="stat"><span class="muted">步骤</span><b>8/8</b></div>
+    <div class="stat"><span class="muted">断言</span><b>104/104</b></div>
+    <div class="stat"><span class="muted">collector 请求</span><b>5</b></div>
+    <div class="stat"><span class="muted">commit</span><b><code>563d208cbcb6</code></b></div>
+  </div>
+  
+</section>
+
+<section class="panel">
+  <h2>环境</h2>
+  <table><tbody><tr><th>tenant</th><td>6f0004b4-1fe5-48a3-b53d-8a16ce917e05</td></tr>
+<tr><th>collector</th><td>http://127.0.0.1:13604</td></tr>
+<tr><th>serviceName</th><td>keel-telemetry-e2e</td></tr>
+<tr><th>signals</th><td>traces,metrics,logs</td></tr>
+<tr><th>database</th><td>throwaway PostgreSQL cluster (keel db start)</td></tr>
+<tr><th>model</th><td>e2e-model via scripts/keel-telemetry-e2e/fake-provider.mjs</td></tr>
+<tr><th>lane</th><td>HTTP/JSON only (no browser)</td></tr></tbody></table>
+  <p class="muted">开始 2026-11-27T07:30:22.622Z · 结束 2026-11-27T07:31:21.589Z</p>
+</section>
+
+<section class="panel">
+  <h2>collector 收到的事实</h2>
+  <div class="cols">
+    <div>
+      <h3>按路径</h3>
+      <table><thead><tr><th>路径</th><th>请求数</th></tr></thead><tbody><tr><td><code>/v1/traces</code></td><td>1</td></tr>
+<tr><td><code>/v1/metrics</code></td><td>2</td></tr>
+<tr><td><code>/v1/logs</code></td><td>2</td></tr></tbody></table>
+      <h3>Authorization</h3>
+      <p class="muted">只记录 SHA-256 指纹，secrets 不出现在证据中。</p>
+      <ul><li><code>sha256:4a3b39a6ac29a8d3…</code></li></ul>
+    </div>
+    <div>
+      <h3>span 名</h3><ul><li><code>keel.agent.run</code></li><li><code>keel.agent.turn</code></li></ul>
+      <h3>metric 名</h3><ul><li><code>keel.agent.run.duration</code></li><li><code>keel.agent.runs</code></li></ul>
+      <h3>log event</h3><ul><li><code>turn.finished</code></li></ul>
+    </div>
+  </div>
+  <h3>插件审计（enable）</h3>
+  <ul><li><code>discover</code> ok boot</li><li><code>configure</code> ok system:plugin-start</li><li><code>enable</code> ok approver:00000000-0000-0000-0000-00000000a002</li></ul>
+</section>
+
+<section class="step" id="step-stack">
+  <h2>00 · 真实栈：PostgreSQL + keel serve + 独立 collector，插件默认关闭 <span class="badge ok">PASS</span></h2>
+  <p class="meta">stack · 116 ms · 11 条断言 · 0 条失败</p>
+  <table><thead><tr><th>断言</th><th>结果</th><th>实际</th><th>期望</th></tr></thead><tbody>
+<tr class="">
+  <td>keel serve /v1/health 200</td>
+  <td>PASS</td>
+  <td><code>200</code></td>
+  <td><code>200</code></td>
+</tr>
+<tr class="">
+  <td>local-only 超管会话</td>
+  <td>PASS</td>
+  <td><code>{&quot;authenticated&quot;:true,&quot;localAdmin&quot;:true,&quot;isSuperAdmin&quot;:true}</code></td>
+  <td><code>true</code></td>
+</tr>
+<tr class="">
+  <td>会话租户 = E2E 租户</td>
+  <td>PASS</td>
+  <td><code>6f0004b4-1fe5-48a3-b53d-8a16ce917e05</code></td>
+  <td><code>&quot;6f0004b4-1fe5-48a3-b53d-8a16ce917e05&quot;</code></td>
+</tr>
+<tr class="">
+  <td>真实 PostgreSQL 可达</td>
+  <td>PASS</td>
+  <td><code>PostgreSQL 18.7 (Homebrew) on aarch64-apple-darwin27.2.0</code></td>
+  <td><code>&quot;PostgreSQL&quot;</code></td>
+</tr>
+<tr class="">
+  <td>keel.telemetry 随二进制提供</td>
+  <td>PASS</td>
+  <td><code>keel.telemetry</code></td>
+  <td><code>&quot;keel.telemetry&quot;</code></td>
+</tr>
+<tr class="">
+  <td>keel.telemetry 默认未启用</td>
+  <td>PASS</td>
+  <td><code>installed</code></td>
+  <td><code>&quot;installed|disabled&quot;</code></td>
+</tr>
+<tr class="">
+  <td>keel.telemetry 是 bundled 插件</td>
+  <td>PASS</td>
+  <td><code>true</code></td>
+  <td><code>true</code></td>
+</tr>
+<tr class="">
+  <td>清单 enabled 不含 keel.telemetry</td>
+  <td>PASS</td>
+  <td><code>[&quot;keel.approval&quot;,&quot;keel.bot&quot;,&quot;keel.creation&quot;,&quot;keel.example&quot;,&quot;keel.file&quot;,&quot;keel.model&quot;,&quot;keel.notify&quot;,&quot;keel.shell&quot;,&quot;keel.spill&quot;,&quot;keel.tasks&quot;,&quot;keel.team-bot&quot;]</code></td>
+  <td><code>&quot;no keel.telemetry&quot;</code></td>
+</tr>
+<tr class="">
+  <td>GET /v1/telemetry/status 200</td>
+  <td>PASS</td>
+  <td><code>200</code></td>
+  <td><code>200</code></td>
+</tr>
+<tr class="">
+  <td>telemetry hub 默认 disabled</td>
+  <td>PASS</td>
+  <td><code>{&quot;enabled&quot;:false,&quot;state&quot;:&quot;plugin_disabled&quot;}</code></td>
+  <td><code>{&quot;enabled&quot;:false}</code></td>
+</tr>
+<tr class="">
+  <td>collector 起步 0 请求</td>
+  <td>PASS</td>
+  <td><code>0</code></td>
+  <td><code>0</code></td>
+</tr>
+</tbody></table>
+  <details><summary>结构化细节 (745 bytes)</summary><pre>{
+  &quot;health&quot;: {
+    &quot;bootId&quot;: &quot;cede3566-b6c2-4aa5-a6ab-c40eb0d9f749&quot;,
+    &quot;goroutine&quot;: 22,
+    &quot;heapMB&quot;: 6.73324,
+    &quot;ok&quot;: true,
+    &quot;pid&quot;: 70248,
+    &quot;rssMB&quot;: 19.630344
+  },
+  &quot;account&quot;: &quot;local-admin&quot;,
+  &quot;postgres&quot;: &quot;PostgreSQL 18.7 (Homebrew) on aarch64-apple-darwin27.2.0&quot;,
+  &quot;bootPluginState&quot;: &quot;installed&quot;,
+  &quot;bootTelemetry&quot;: {
+    &quot;pluginId&quot;: &quot;keel.telemetry&quot;,
+    &quot;state&quot;: &quot;plugin_disabled&quot;,
+    &quot;enabled&quot;: false,
+    &quot;signals&quot;: [],
+    &quot;headerCount&quot;: 0,
+    &quot;sampleRatio&quot;: 1,
+    &quot;logRatio&quot;: 1,
+    &quot;queueDepth&quot;: 0,
+    &quot;dropped&quot;: 0,
+    &quot;exported&quot;: 0,
+    &quot;metricSeriesDropped&quot;: 0,
+    &quot;attributesDropped&quot;: 0,
+    &quot;eventsDropped&quot;: 0,
+    &quot;linksDropped&quot;: 0,
+    &quot;configured&quot;: false,
+    &quot;adapter&quot;: &quot;none&quot;,
+    &quot;serviceName&quot;: &quot;keel&quot;
+  }
+}</pre></details>
+</section>
+<section class="step" id="step-default-off">
+  <h2>01 · 默认关闭：未启用插件时一轮真实对话，collector 收到 0 请求 <span class="badge ok">PASS</span></h2>
+  <p class="meta">default-off · 7411 ms · 5 条断言 · 0 条失败</p>
+  <table><thead><tr><th>断言</th><th>结果</th><th>实际</th><th>期望</th></tr></thead><tbody>
+<tr class="">
+  <td>真实会话已创建</td>
+  <td>PASS</td>
+  <td><code>3f3db5d3-dde9-47b6-84ab-34e574497e41</code></td>
+  <td><code>&quot;sessionId&quot;</code></td>
+</tr>
+<tr class="">
+  <td>默认关闭轮次 run.finished=done</td>
+  <td>PASS</td>
+  <td><code>done</code></td>
+  <td><code>&quot;done&quot;</code></td>
+</tr>
+<tr class="">
+  <td>脚本化模型确实被调用</td>
+  <td>PASS</td>
+  <td><code>0 -&gt; 1</code></td>
+  <td><code>&quot;increases&quot;</code></td>
+</tr>
+<tr class="">
+  <td>关闭状态一轮对话后 collector 仍为 0 请求</td>
+  <td>PASS</td>
+  <td><code>0</code></td>
+  <td><code>0</code></td>
+</tr>
+<tr class="">
+  <td>关闭状态无 trace/metric/log 请求</td>
+  <td>PASS</td>
+  <td><code>{}</code></td>
+  <td><code>{}</code></td>
+</tr>
+</tbody></table>
+  <details><summary>结构化细节 (485 bytes)</summary><pre>{
+  &quot;deployment&quot;: {
+    &quot;accountId&quot;: &quot;00000000-0000-0000-0000-00000000a002&quot;,
+    &quot;roleId&quot;: &quot;a3a9156f-d56f-46b2-9e1e-f77d9a2462bf&quot;,
+    &quot;profileId&quot;: &quot;6747c806-1653-4626-8f1b-1b7a4dd6c668&quot;,
+    &quot;botId&quot;: &quot;bot_1f85e9c6f0c74bf2ae8963abb1c8dfce&quot;,
+    &quot;sessionId&quot;: &quot;3f3db5d3-dde9-47b6-84ab-34e574497e41&quot;
+  },
+  &quot;turn&quot;: {
+    &quot;startedAt&quot;: &quot;2026-11-27T07:30:22.793Z&quot;,
+    &quot;finishedAt&quot;: &quot;2026-11-27T07:30:23.145Z&quot;,
+    &quot;finishedCount&quot;: 1,
+    &quot;lastStatus&quot;: &quot;done&quot;
+  },
+  &quot;collectorRequests&quot;: 0
+}</pre></details>
+</section>
+<section class="step" id="step-configured-disabled">
+  <h2>02 · 真实 admin API 写入 tenant telemetry 文档与 secret，插件未启用仍零请求 <span class="badge ok">PASS</span></h2>
+  <p class="meta">configured-disabled · 7421 ms · 15 条断言 · 0 条失败</p>
+  <table><thead><tr><th>断言</th><th>结果</th><th>实际</th><th>期望</th></tr></thead><tbody>
+<tr class="">
+  <td>secret 写入 200</td>
+  <td>PASS</td>
+  <td><code>200</code></td>
+  <td><code>200</code></td>
+</tr>
+<tr class="">
+  <td>secret 响应只回 masked preview</td>
+  <td>PASS</td>
+  <td><code>masked non-empty preview</code></td>
+  <td><code>&quot;masked non-empty preview&quot;</code></td>
+</tr>
+<tr class="">
+  <td>secret 响应不含明文值</td>
+  <td>PASS</td>
+  <td><code>no raw token</code></td>
+  <td><code>&quot;no raw token&quot;</code></td>
+</tr>
+<tr class="">
+  <td>PUT tenant config 200</td>
+  <td>PASS</td>
+  <td><code>200</code></td>
+  <td><code>200</code></td>
+</tr>
+<tr class="">
+  <td>config revision &gt;= 1</td>
+  <td>PASS</td>
+  <td><code>2</code></td>
+  <td><code>&quot;&gt;= 1&quot;</code></td>
+</tr>
+<tr class="">
+  <td>GET tenant config 200</td>
+  <td>PASS</td>
+  <td><code>200</code></td>
+  <td><code>200</code></td>
+</tr>
+<tr class="">
+  <td>stored adapter=otlp</td>
+  <td>PASS</td>
+  <td><code>otlp</code></td>
+  <td><code>&quot;otlp&quot;</code></td>
+</tr>
+<tr class="">
+  <td>stored endpoint 指向 collector</td>
+  <td>PASS</td>
+  <td><code>http://127.0.0.1:13604</code></td>
+  <td><code>&quot;http://127.0.0.1:13604&quot;</code></td>
+</tr>
+<tr class="">
+  <td>stored header 是 secret 引用</td>
+  <td>PASS</td>
+  <td><code>secret:OTLP_TOKEN</code></td>
+  <td><code>&quot;secret:OTLP_TOKEN&quot;</code></td>
+</tr>
+<tr class="">
+  <td>stored sampleRatio=1</td>
+  <td>PASS</td>
+  <td><code>1</code></td>
+  <td><code>1</code></td>
+</tr>
+<tr class="">
+  <td>config 读回不含明文 secret</td>
+  <td>PASS</td>
+  <td><code>no raw token</code></td>
+  <td><code>&quot;no raw token&quot;</code></td>
+</tr>
+<tr class="">
+  <td>PostgreSQL tenants.config 已落盘</td>
+  <td>PASS</td>
+  <td><code>otlp|http://127.0.0.1:13604|2</code></td>
+  <td><code>&quot;otlp|…endpoint…|revision&quot;</code></td>
+</tr>
+<tr class="">
+  <td>写入配置但未启用：status enabled=false</td>
+  <td>PASS</td>
+  <td><code>{&quot;enabled&quot;:false,&quot;state&quot;:&quot;plugin_disabled&quot;}</code></td>
+  <td><code>{&quot;enabled&quot;:false}</code></td>
+</tr>
+<tr class="">
+  <td>配置已写但插件未启用：轮次完成</td>
+  <td>PASS</td>
+  <td><code>done</code></td>
+  <td><code>&quot;done&quot;</code></td>
+</tr>
+<tr class="">
+  <td>配置已写但插件未启用：collector 仍 0 新请求</td>
+  <td>PASS</td>
+  <td><code>0</code></td>
+  <td><code>0</code></td>
+</tr>
+</tbody></table>
+  <details><summary>结构化细节 (904 bytes)</summary><pre>{
+  &quot;config&quot;: {
+    &quot;mcp&quot;: {},
+    &quot;agent&quot;: {
+      &quot;sections&quot;: null
+    },
+    &quot;hooks&quot;: {
+      &quot;commands&quot;: null
+    },
+    &quot;quota&quot;: {},
+    &quot;tools&quot;: {
+      &quot;allow&quot;: null
+    },
+    &quot;skills&quot;: {
+      &quot;roots&quot;: null
+    },
+    &quot;external&quot;: {
+      &quot;quota&quot;: {}
+    },
+    &quot;telemetry&quot;: {
+      &quot;adapter&quot;: &quot;otlp&quot;,
+      &quot;headers&quot;: {
+        &quot;Authorization&quot;: &quot;secret:OTLP_TOKEN&quot;
+      },
+      &quot;signals&quot;: [
+        &quot;traces&quot;,
+        &quot;metrics&quot;,
+        &quot;logs&quot;
+      ],
+      &quot;endpoint&quot;: &quot;http://127.0.0.1:13604&quot;,
+      &quot;logMinLevel&quot;: &quot;info&quot;,
+      &quot;sampleRatio&quot;: 1,
+      &quot;serviceName&quot;: &quot;keel-telemetry-e2e&quot;
+    },
+    &quot;compaction&quot;: {},
+    &quot;filesystem&quot;: {
+      &quot;capture&quot;: {}
+    }
+  },
+  &quot;storedRow&quot;: &quot;otlp|http://127.0.0.1:13604|2&quot;,
+  &quot;revision&quot;: 2,
+  &quot;turn&quot;: {
+    &quot;startedAt&quot;: &quot;2026-11-27T07:30:30.255Z&quot;,
+    &quot;finishedAt&quot;: &quot;2026-11-27T07:30:30.571Z&quot;,
+    &quot;finishedCount&quot;: 2,
+    &quot;lastStatus&quot;: &quot;done&quot;
+  }
+}</pre></details>
+</section>
+<section class="step" id="step-enable-approval">
+  <h2>03 · 两阶段审批启用 keel.telemetry：202 → allow → 200 enabled <span class="badge ok">PASS</span></h2>
+  <p class="meta">enable-approval · 25 ms · 22 条断言 · 0 条失败</p>
+  <table><thead><tr><th>断言</th><th>结果</th><th>实际</th><th>期望</th></tr></thead><tbody>
+<tr class="">
+  <td>首次 enable 返回 202 审批问题</td>
+  <td>PASS</td>
+  <td><code>202</code></td>
+  <td><code>202</code></td>
+</tr>
+<tr class="">
+  <td>审批类型 plugin.enable</td>
+  <td>PASS</td>
+  <td><code>plugin.enable</code></td>
+  <td><code>&quot;plugin.enable&quot;</code></td>
+</tr>
+<tr class="">
+  <td>审批问题为 open</td>
+  <td>PASS</td>
+  <td><code>open</code></td>
+  <td><code>&quot;open&quot;</code></td>
+</tr>
+<tr class="">
+  <td>审批问题渲染 exporter=otlp</td>
+  <td>PASS</td>
+  <td><code>Enable plugin keel.telemetry 1.0.0? Enabling runs what the plugin declares (tools, hooks, triggers, UI).
+Telemetry export: exporter=otlp; signals=traces,metrics,logs; sampleRatio=1; logRatio=1; endpointHost=127.0.0.1:13604; headers=Authorization.</code></td>
+  <td><code>&quot;exporter=otlp&quot;</code></td>
+</tr>
+<tr class="">
+  <td>审批问题渲染 endpoint host</td>
+  <td>PASS</td>
+  <td><code>Enable plugin keel.telemetry 1.0.0? Enabling runs what the plugin declares (tools, hooks, triggers, UI).
+Telemetry export: exporter=otlp; signals=traces,metrics,logs; sampleRatio=1; logRatio=1; endpointHost=127.0.0.1:13604; headers=Authorization.</code></td>
+  <td><code>&quot;endpointHost=127.0.0.1:13604&quot;</code></td>
+</tr>
+<tr class="">
+  <td>审批问题渲染 sampleRatio=1</td>
+  <td>PASS</td>
+  <td><code>Enable plugin keel.telemetry 1.0.0? Enabling runs what the plugin declares (tools, hooks, triggers, UI).
+Telemetry export: exporter=otlp; signals=traces,metrics,logs; sampleRatio=1; logRatio=1; endpointHost=127.0.0.1:13604; headers=Authorization.</code></td>
+  <td><code>&quot;sampleRatio=1&quot;</code></td>
+</tr>
+<tr class="">
+  <td>审批问题只渲染 header 名</td>
+  <td>PASS</td>
+  <td><code>Enable plugin keel.telemetry 1.0.0? Enabling runs what the plugin declares (tools, hooks, triggers, UI).
+Telemetry export: exporter=otlp; signals=traces,metrics,logs; sampleRatio=1; logRatio=1; endpointHost=127.0.0.1:13604; headers=Authorization.</code></td>
+  <td><code>&quot;headers=Authorization&quot;</code></td>
+</tr>
+<tr class="">
+  <td>审批问题不含明文 secret</td>
+  <td>PASS</td>
+  <td><code>no raw token</code></td>
+  <td><code>&quot;no raw token&quot;</code></td>
+</tr>
+<tr class="">
+  <td>审批问题不含 secret 引用值</td>
+  <td>PASS</td>
+  <td><code>no secret ref</code></td>
+  <td><code>&quot;no secret ref&quot;</code></td>
+</tr>
+<tr class="">
+  <td>allow 回答 200</td>
+  <td>PASS</td>
+  <td><code>200</code></td>
+  <td><code>200</code></td>
+</tr>
+<tr class="">
+  <td>审批已回答 allow</td>
+  <td>PASS</td>
+  <td><code>answered</code></td>
+  <td><code>&quot;answered/allow&quot;</code></td>
+</tr>
+<tr class="">
+  <td>重复 enable 200</td>
+  <td>PASS</td>
+  <td><code>200</code></td>
+  <td><code>200</code></td>
+</tr>
+<tr class="">
+  <td>插件状态 enabled</td>
+  <td>PASS</td>
+  <td><code>enabled</code></td>
+  <td><code>&quot;enabled&quot;</code></td>
+</tr>
+<tr class="">
+  <td>清单显示 keel.telemetry enabled</td>
+  <td>PASS</td>
+  <td><code>enabled</code></td>
+  <td><code>&quot;enabled&quot;</code></td>
+</tr>
+<tr class="">
+  <td>telemetry status active+enabled</td>
+  <td>PASS</td>
+  <td><code>{&quot;enabled&quot;:true,&quot;state&quot;:&quot;active&quot;}</code></td>
+  <td><code>{&quot;enabled&quot;:true,&quot;state&quot;:&quot;active&quot;}</code></td>
+</tr>
+<tr class="">
+  <td>status signals = traces/metrics/logs</td>
+  <td>PASS</td>
+  <td><code>[&quot;logs&quot;,&quot;metrics&quot;,&quot;traces&quot;]</code></td>
+  <td><code>[&quot;logs&quot;,&quot;metrics&quot;,&quot;traces&quot;]</code></td>
+</tr>
+<tr class="">
+  <td>status endpointHost 来自配置</td>
+  <td>PASS</td>
+  <td><code>127.0.0.1:13604</code></td>
+  <td><code>&quot;127.0.0.1:13604&quot;</code></td>
+</tr>
+<tr class="">
+  <td>status sampleRatio=1</td>
+  <td>PASS</td>
+  <td><code>1</code></td>
+  <td><code>1</code></td>
+</tr>
+<tr class="">
+  <td>status headerNames=[Authorization]</td>
+  <td>PASS</td>
+  <td><code>[&quot;Authorization&quot;]</code></td>
+  <td><code>[&quot;Authorization&quot;]</code></td>
+</tr>
+<tr class="">
+  <td>status 不含明文 secret</td>
+  <td>PASS</td>
+  <td><code>no raw token</code></td>
+  <td><code>&quot;no raw token&quot;</code></td>
+</tr>
+<tr class="">
+  <td>环境审计可见 enable 成功</td>
+  <td>PASS</td>
+  <td><code>[&quot;discover:ok&quot;,&quot;configure:ok&quot;,&quot;enable:ok&quot;]</code></td>
+  <td><code>&quot;enable:ok&quot;</code></td>
+</tr>
+<tr class="">
+  <td>审计不含明文 secret</td>
+  <td>PASS</td>
+  <td><code>no raw token</code></td>
+  <td><code>&quot;no raw token&quot;</code></td>
+</tr>
+</tbody></table>
+  <details><summary>结构化细节 (2016 bytes)</summary><pre>{
+  &quot;decisionId&quot;: &quot;5439bc4a-0e90-5908-aaeb-c773daa2f051&quot;,
+  &quot;prompt&quot;: &quot;Enable plugin keel.telemetry 1.0.0? Enabling runs what the plugin declares (tools, hooks, triggers, UI).\nTelemetry export: exporter=otlp; signals=traces,metrics,logs; sampleRatio=1; logRatio=1; endpointHost=127.0.0.1:13604; headers=Authorization.&quot;,
+  &quot;status&quot;: {
+    &quot;pluginId&quot;: &quot;keel.telemetry&quot;,
+    &quot;state&quot;: &quot;active&quot;,
+    &quot;enabled&quot;: true,
+    &quot;signals&quot;: [
+      &quot;traces&quot;,
+      &quot;metrics&quot;,
+      &quot;logs&quot;
+    ],
+    &quot;endpointHost&quot;: &quot;127.0.0.1:13604&quot;,
+    &quot;headerNames&quot;: [
+      &quot;Authorization&quot;
+    ],
+    &quot;headerCount&quot;: 1,
+    &quot;sampleRatio&quot;: 1,
+    &quot;logRatio&quot;: 1,
+    &quot;queueDepth&quot;: 0,
+    &quot;dropped&quot;: 0,
+    &quot;exported&quot;: 0,
+    &quot;metricSeriesDropped&quot;: 0,
+    &quot;attributesDropped&quot;: 0,
+    &quot;eventsDropped&quot;: 0,
+    &quot;linksDropped&quot;: 0,
+    &quot;configured&quot;: true,
+    &quot;adapter&quot;: &quot;otlp&quot;,
+    &quot;serviceName&quot;: &quot;keel-telemetry-e2e&quot;,
+    &quot;exporters&quot;: [
+      {
+        &quot;name&quot;: &quot;otlp-http&quot;,
+        &quot;state&quot;: &quot;active&quot;,
+        &quot;signals&quot;: [
+          &quot;traces&quot;,
+          &quot;metrics&quot;,
+          &quot;logs&quot;
+        ],
+        &quot;endpointHost&quot;: &quot;127.0.0.1:13604&quot;,
+        &quot;queueDepth&quot;: 0,
+        &quot;dropped&quot;: 0,
+        &quot;exported&quot;: 0,
+        &quot;seriesDropped&quot;: 0
+      }
+    ]
+  },
+  &quot;auditActions&quot;: [
+    {
+      &quot;action&quot;: &quot;discover&quot;,
+      &quot;result&quot;: &quot;ok&quot;,
+      &quot;actor&quot;: &quot;boot&quot;
+    },
+    {
+      &quot;action&quot;: &quot;configure&quot;,
+      &quot;result&quot;: &quot;ok&quot;,
+      &quot;actor&quot;: &quot;system:plugin-start&quot;
+    },
+    {
+      &quot;action&quot;: &quot;enable&quot;,
+      &quot;result&quot;: &quot;ok&quot;,
+      &quot;actor&quot;: &quot;approver:00000000-0000-0000-0000-00000000a002&quot;
+    }
+  ],
+  &quot;auditDetailSample&quot;: {
+    &quot;adapter&quot;: &quot;otlp&quot;,
+    &quot;dropped&quot;: 0,
+    &quot;signals&quot;: [
+      &quot;traces&quot;,
+      &quot;metrics&quot;,
+      &quot;logs&quot;
+    ],
+    &quot;surface&quot;: &quot;runtime&quot;,
+    &quot;exported&quot;: 0,
+    &quot;logRatio&quot;: 1,
+    &quot;generation&quot;: 2,
+    &quot;queueDepth&quot;: 0,
+    &quot;headerCount&quot;: 1,
+    &quot;headerNames&quot;: [
+      &quot;Authorization&quot;
+    ],
+    &quot;sampleRatio&quot;: 1,
+    &quot;endpointHost&quot;: &quot;127.0.0.1:13604&quot;,
+    &quot;lastErrorClass&quot;: &quot;&quot;,
+    &quot;telemetryState&quot;: &quot;active&quot;,
+    &quot;metricSeriesDrop&quot;: 0
+  }
+}</pre></details>
+</section>
+<section class="step" id="step-export-enabled">
+  <h2>04 · 启用后一轮真实对话：collector 收到 keel.agent.run span、metric 与 turn.finished log <span class="badge ok">PASS</span></h2>
+  <p class="meta">export-enabled · 5159 ms · 25 条断言 · 0 条失败</p>
+  <table><thead><tr><th>断言</th><th>结果</th><th>实际</th><th>期望</th></tr></thead><tbody>
+<tr class="">
+  <td>enable 本身不产生 collector 请求</td>
+  <td>PASS</td>
+  <td><code>0</code></td>
+  <td><code>0</code></td>
+</tr>
+<tr class="">
+  <td>启用轮次 run.finished=done</td>
+  <td>PASS</td>
+  <td><code>done</code></td>
+  <td><code>&quot;done&quot;</code></td>
+</tr>
+<tr class="">
+  <td>收到 /v1/traces 请求</td>
+  <td>PASS</td>
+  <td><code>{&quot;/v1/traces&quot;:1,&quot;/v1/metrics&quot;:1,&quot;/v1/logs&quot;:1}</code></td>
+  <td><code>&quot;traces&gt;=1&quot;</code></td>
+</tr>
+<tr class="">
+  <td>收到 /v1/metrics 请求</td>
+  <td>PASS</td>
+  <td><code>{&quot;/v1/traces&quot;:1,&quot;/v1/metrics&quot;:1,&quot;/v1/logs&quot;:1}</code></td>
+  <td><code>&quot;metrics&gt;=1&quot;</code></td>
+</tr>
+<tr class="">
+  <td>收到 /v1/logs 请求</td>
+  <td>PASS</td>
+  <td><code>{&quot;/v1/traces&quot;:1,&quot;/v1/metrics&quot;:1,&quot;/v1/logs&quot;:1}</code></td>
+  <td><code>&quot;logs&gt;=1&quot;</code></td>
+</tr>
+<tr class="">
+  <td>span 名 keel.agent.run</td>
+  <td>PASS</td>
+  <td><code>keel.agent.run</code></td>
+  <td><code>&quot;keel.agent.run&quot;</code></td>
+</tr>
+<tr class="">
+  <td>span tenant = E2E 租户</td>
+  <td>PASS</td>
+  <td><code>6f0004b4-1fe5-48a3-b53d-8a16ce917e05</code></td>
+  <td><code>&quot;6f0004b4-1fe5-48a3-b53d-8a16ce917e05&quot;</code></td>
+</tr>
+<tr class="">
+  <td>span session = 真实 sessionId</td>
+  <td>PASS</td>
+  <td><code>3f3db5d3-dde9-47b6-84ab-34e574497e41</code></td>
+  <td><code>&quot;3f3db5d3-dde9-47b6-84ab-34e574497e41&quot;</code></td>
+</tr>
+<tr class="">
+  <td>span model 来自本轮解析</td>
+  <td>PASS</td>
+  <td><code>e2e-model</code></td>
+  <td><code>&quot;e2e-model&quot;</code></td>
+</tr>
+<tr class="">
+  <td>span provider 非空</td>
+  <td>PASS</td>
+  <td><code>e2e</code></td>
+  <td><code>&quot;non-empty&quot;</code></td>
+</tr>
+<tr class="">
+  <td>span status OK</td>
+  <td>PASS</td>
+  <td><code>1</code></td>
+  <td><code>1</code></td>
+</tr>
+<tr class="">
+  <td>metric keel.agent.runs 存在</td>
+  <td>PASS</td>
+  <td><code>keel.agent.runs</code></td>
+  <td><code>&quot;keel.agent.runs&quot;</code></td>
+</tr>
+<tr class="">
+  <td>metric outcome=ok</td>
+  <td>PASS</td>
+  <td><code>{&quot;model&quot;:&quot;e2e-model&quot;,&quot;outcome&quot;:&quot;ok&quot;,&quot;provider&quot;:&quot;e2e&quot;}</code></td>
+  <td><code>{&quot;outcome&quot;:&quot;ok&quot;}</code></td>
+</tr>
+<tr class="">
+  <td>metric model 标签存在</td>
+  <td>PASS</td>
+  <td><code>e2e-model</code></td>
+  <td><code>&quot;e2e-model&quot;</code></td>
+</tr>
+<tr class="">
+  <td>metric 不带 tenant/session 身份标签</td>
+  <td>PASS</td>
+  <td><code>[]</code></td>
+  <td><code>[]</code></td>
+</tr>
+<tr class="">
+  <td>log event turn.finished</td>
+  <td>PASS</td>
+  <td><code>turn.finished</code></td>
+  <td><code>&quot;turn.finished&quot;</code></td>
+</tr>
+<tr class="">
+  <td>log 带 tenant/session</td>
+  <td>PASS</td>
+  <td><code>{&quot;tenant&quot;:&quot;6f0004b4-1fe5-48a3-b53d-8a16ce917e05&quot;,&quot;session&quot;:&quot;3f3db5d3-dde9-47b6-84ab-34e574497e41&quot;}</code></td>
+  <td><code>{&quot;tenant&quot;:&quot;6f0004b4-1fe5-48a3-b53d-8a16ce917e05&quot;,&quot;session&quot;:&quot;3f3db5d3-dde9-47b6-84ab-34e574497e41&quot;}</code></td>
+</tr>
+<tr class="">
+  <td>log status=ok</td>
+  <td>PASS</td>
+  <td><code>ok</code></td>
+  <td><code>&quot;ok&quot;</code></td>
+</tr>
+<tr class="">
+  <td>resource service.name 来自配置</td>
+  <td>PASS</td>
+  <td><code>keel-telemetry-e2e</code></td>
+  <td><code>&quot;keel-telemetry-e2e&quot;</code></td>
+</tr>
+<tr class="">
+  <td>resource tenant.id = 租户</td>
+  <td>PASS</td>
+  <td><code>6f0004b4-1fe5-48a3-b53d-8a16ce917e05</code></td>
+  <td><code>&quot;6f0004b4-1fe5-48a3-b53d-8a16ce917e05&quot;</code></td>
+</tr>
+<tr class="">
+  <td>每个请求都带配置的 Authorization</td>
+  <td>PASS</td>
+  <td><code>3/3</code></td>
+  <td><code>&quot;all&quot;</code></td>
+</tr>
+<tr class="">
+  <td>Authorization 指纹来自 secret 值</td>
+  <td>PASS</td>
+  <td><code>[&quot;4a3b39a6ac29&quot;,&quot;4a3b39a6ac29&quot;,&quot;4a3b39a6ac29&quot;]</code></td>
+  <td><code>&quot;4a3b39a6ac29&quot;</code></td>
+</tr>
+<tr class="">
+  <td>collector 记录中无明文 secret</td>
+  <td>PASS</td>
+  <td><code>no raw token</code></td>
+  <td><code>&quot;no raw token&quot;</code></td>
+</tr>
+<tr class="">
+  <td>请求 Content-Type 为 JSON</td>
+  <td>PASS</td>
+  <td><code>[&quot;application/json&quot;,&quot;application/json&quot;,&quot;application/json&quot;]</code></td>
+  <td><code>&quot;application/json&quot;</code></td>
+</tr>
+<tr class="">
+  <td>只请求 OTLP 信号路径</td>
+  <td>PASS</td>
+  <td><code>{&quot;/v1/traces&quot;:1,&quot;/v1/metrics&quot;:1,&quot;/v1/logs&quot;:1}</code></td>
+  <td><code>[&quot;/v1/traces&quot;,&quot;/v1/metrics&quot;,&quot;/v1/logs&quot;]</code></td>
+</tr>
+</tbody></table>
+  <details><summary>结构化细节 (1500 bytes)</summary><pre>{
+  &quot;turn&quot;: {
+    &quot;startedAt&quot;: &quot;2026-11-27T07:30:37.600Z&quot;,
+    &quot;finishedAt&quot;: &quot;2026-11-27T07:30:37.919Z&quot;,
+    &quot;finishedCount&quot;: 3,
+    &quot;lastStatus&quot;: &quot;done&quot;
+  },
+  &quot;runSpan&quot;: {
+    &quot;name&quot;: &quot;keel.agent.run&quot;,
+    &quot;attributes&quot;: {
+      &quot;model&quot;: &quot;e2e-model&quot;,
+      &quot;provider&quot;: &quot;e2e&quot;,
+      &quot;session&quot;: &quot;3f3db5d3-dde9-47b6-84ab-34e574497e41&quot;,
+      &quot;tenant&quot;: &quot;6f0004b4-1fe5-48a3-b53d-8a16ce917e05&quot;
+    },
+    &quot;status&quot;: 1
+  },
+  &quot;metric&quot;: {
+    &quot;name&quot;: &quot;keel.agent.runs&quot;,
+    &quot;points&quot;: [
+      {
+        &quot;attributes&quot;: {
+          &quot;model&quot;: &quot;e2e-model&quot;,
+          &quot;outcome&quot;: &quot;ok&quot;,
+          &quot;provider&quot;: &quot;e2e&quot;
+        },
+        &quot;value&quot;: 1,
+        &quot;count&quot;: null
+      }
+    ]
+  },
+  &quot;log&quot;: {
+    &quot;body&quot;: &quot;turn.finished&quot;,
+    &quot;severityText&quot;: &quot;INFO&quot;,
+    &quot;severityNumber&quot;: 9,
+    &quot;attributes&quot;: {
+      &quot;event&quot;: &quot;turn.finished&quot;,
+      &quot;level&quot;: &quot;info&quot;,
+      &quot;logger&quot;: &quot;harnessext.turn&quot;,
+      &quot;model&quot;: &quot;e2e-model&quot;,
+      &quot;provider&quot;: &quot;e2e&quot;,
+      &quot;run&quot;: &quot;3f3db5d3-dde9-47b6-84ab-34e574497e41-1795764637773&quot;,
+      &quot;session&quot;: &quot;3f3db5d3-dde9-47b6-84ab-34e574497e41&quot;,
+      &quot;status&quot;: &quot;ok&quot;,
+      &quot;tenant&quot;: &quot;6f0004b4-1fe5-48a3-b53d-8a16ce917e05&quot;
+    }
+  },
+  &quot;paths&quot;: {
+    &quot;/v1/traces&quot;: 1,
+    &quot;/v1/metrics&quot;: 1,
+    &quot;/v1/logs&quot;: 1
+  },
+  &quot;authorizationFingerprint&quot;: &quot;4a3b39a6ac29a8d3abc01d4bb7e08da3f3b08575095c71e49e61bf90b1dd3780&quot;,
+  &quot;resource&quot;: {
+    &quot;service.name&quot;: &quot;keel-telemetry-e2e&quot;,
+    &quot;tenant.id&quot;: &quot;6f0004b4-1fe5-48a3-b53d-8a16ce917e05&quot;
+  },
+  &quot;childSpans&quot;: [
+    &quot;keel.agent.turn&quot;,
+    &quot;keel.agent.run&quot;
+  ]
+}</pre></details>
+</section>
+<section class="step" id="step-sampling-zero">
+  <h2>05 · 采样率改为 0：重读配置后无 trace 请求，metric/log 仍到达 <span class="badge ok">PASS</span></h2>
+  <p class="meta">sampling-zero · 23345 ms · 13 条断言 · 0 条失败</p>
+  <table><thead><tr><th>断言</th><th>结果</th><th>实际</th><th>期望</th></tr></thead><tbody>
+<tr class="">
+  <td>PUT sampleRatio=0 200</td>
+  <td>PASS</td>
+  <td><code>200</code></td>
+  <td><code>200</code></td>
+</tr>
+<tr class="">
+  <td>改采样前停用插件 200</td>
+  <td>PASS</td>
+  <td><code>{&quot;status&quot;:200,&quot;state&quot;:&quot;disabled&quot;}</code></td>
+  <td><code>{&quot;status&quot;:200,&quot;state&quot;:&quot;disabled&quot;}</code></td>
+</tr>
+<tr class="">
+  <td>重新启用 202→allow→200</td>
+  <td>PASS</td>
+  <td><code>{&quot;first&quot;:202,&quot;answer&quot;:200,&quot;repeat&quot;:200}</code></td>
+  <td><code>&quot;202/200/200&quot;</code></td>
+</tr>
+<tr class="">
+  <td>审批问题渲染 sampleRatio=0</td>
+  <td>PASS</td>
+  <td><code>Enable plugin keel.telemetry 1.0.0? Enabling runs what the plugin declares (tools, hooks, triggers, UI).
+Telemetry export: exporter=otlp; signals=traces,metrics,logs; sampleRatio=0; logRatio=1; endpointHost=127.0.0.1:13604; headers=Authorization.</code></td>
+  <td><code>&quot;sampleRatio=0&quot;</code></td>
+</tr>
+<tr class="">
+  <td>重新启用后插件 enabled</td>
+  <td>PASS</td>
+  <td><code>enabled</code></td>
+  <td><code>&quot;enabled&quot;</code></td>
+</tr>
+<tr class="">
+  <td>status sampleRatio=0</td>
+  <td>PASS</td>
+  <td><code>0</code></td>
+  <td><code>0</code></td>
+</tr>
+<tr class="">
+  <td>status 仍 active</td>
+  <td>PASS</td>
+  <td><code>{&quot;state&quot;:&quot;active&quot;,&quot;enabled&quot;:true}</code></td>
+  <td><code>{&quot;state&quot;:&quot;active&quot;,&quot;enabled&quot;:true}</code></td>
+</tr>
+<tr class="">
+  <td>采样 0 轮次 run.finished=done</td>
+  <td>PASS</td>
+  <td><code>done</code></td>
+  <td><code>&quot;done&quot;</code></td>
+</tr>
+<tr class="">
+  <td>采样 0：metric 仍到达</td>
+  <td>PASS</td>
+  <td><code>keel.agent.runs</code></td>
+  <td><code>&quot;keel.agent.runs&quot;</code></td>
+</tr>
+<tr class="">
+  <td>采样 0：log 仍到达</td>
+  <td>PASS</td>
+  <td><code>turn.finished</code></td>
+  <td><code>&quot;turn.finished&quot;</code></td>
+</tr>
+<tr class="">
+  <td>采样 0：没有新的 trace 请求</td>
+  <td>PASS</td>
+  <td><code>{&quot;/v1/metrics&quot;:1,&quot;/v1/logs&quot;:1}</code></td>
+  <td><code>{&quot;traces&quot;:0}</code></td>
+</tr>
+<tr class="">
+  <td>采样 0：没有 keel.agent.run span</td>
+  <td>PASS</td>
+  <td><code></code></td>
+  <td></td>
+</tr>
+<tr class="">
+  <td>采样 0：本轮只有 metric/log 请求</td>
+  <td>PASS</td>
+  <td><code>{&quot;/v1/metrics&quot;:1,&quot;/v1/logs&quot;:1}</code></td>
+  <td><code>&quot;metrics+logs&quot;</code></td>
+</tr>
+</tbody></table>
+  <details><summary>结构化细节 (1191 bytes)</summary><pre>{
+  &quot;turn&quot;: {
+    &quot;startedAt&quot;: &quot;2026-11-27T07:30:54.953Z&quot;,
+    &quot;finishedAt&quot;: &quot;2026-11-27T07:30:55.283Z&quot;,
+    &quot;finishedCount&quot;: 4,
+    &quot;lastStatus&quot;: &quot;done&quot;
+  },
+  &quot;baseline&quot;: 3,
+  &quot;newPaths&quot;: {
+    &quot;/v1/metrics&quot;: 1,
+    &quot;/v1/logs&quot;: 1
+  },
+  &quot;metric&quot;: &quot;keel.agent.runs&quot;,
+  &quot;log&quot;: &quot;turn.finished&quot;,
+  &quot;status&quot;: {
+    &quot;pluginId&quot;: &quot;keel.telemetry&quot;,
+    &quot;state&quot;: &quot;active&quot;,
+    &quot;enabled&quot;: true,
+    &quot;signals&quot;: [
+      &quot;traces&quot;,
+      &quot;metrics&quot;,
+      &quot;logs&quot;
+    ],
+    &quot;endpointHost&quot;: &quot;127.0.0.1:13604&quot;,
+    &quot;headerNames&quot;: [
+      &quot;Authorization&quot;
+    ],
+    &quot;headerCount&quot;: 1,
+    &quot;sampleRatio&quot;: 0,
+    &quot;logRatio&quot;: 1,
+    &quot;queueDepth&quot;: 0,
+    &quot;dropped&quot;: 0,
+    &quot;exported&quot;: 0,
+    &quot;metricSeriesDropped&quot;: 0,
+    &quot;attributesDropped&quot;: 5,
+    &quot;eventsDropped&quot;: 0,
+    &quot;linksDropped&quot;: 0,
+    &quot;configured&quot;: true,
+    &quot;adapter&quot;: &quot;otlp&quot;,
+    &quot;serviceName&quot;: &quot;keel-telemetry-e2e&quot;,
+    &quot;exporters&quot;: [
+      {
+        &quot;name&quot;: &quot;otlp-http&quot;,
+        &quot;state&quot;: &quot;active&quot;,
+        &quot;signals&quot;: [
+          &quot;traces&quot;,
+          &quot;metrics&quot;,
+          &quot;logs&quot;
+        ],
+        &quot;endpointHost&quot;: &quot;127.0.0.1:13604&quot;,
+        &quot;queueDepth&quot;: 0,
+        &quot;dropped&quot;: 0,
+        &quot;exported&quot;: 0,
+        &quot;seriesDropped&quot;: 0
+      }
+    ]
+  }
+}</pre></details>
+</section>
+<section class="step" id="step-disable">
+  <h2>06 · 停用插件：再发一轮真实对话，collector 不再收到新请求 <span class="badge ok">PASS</span></h2>
+  <p class="meta">disable · 15483 ms · 8 条断言 · 0 条失败</p>
+  <table><thead><tr><th>断言</th><th>结果</th><th>实际</th><th>期望</th></tr></thead><tbody>
+<tr class="">
+  <td>disable 200</td>
+  <td>PASS</td>
+  <td><code>200</code></td>
+  <td><code>200</code></td>
+</tr>
+<tr class="">
+  <td>插件状态 disabled</td>
+  <td>PASS</td>
+  <td><code>disabled</code></td>
+  <td><code>&quot;disabled&quot;</code></td>
+</tr>
+<tr class="">
+  <td>status enabled=false</td>
+  <td>PASS</td>
+  <td><code>{&quot;enabled&quot;:false,&quot;state&quot;:&quot;plugin_disabled&quot;}</code></td>
+  <td><code>{&quot;enabled&quot;:false}</code></td>
+</tr>
+<tr class="">
+  <td>清单 keel.telemetry disabled</td>
+  <td>PASS</td>
+  <td><code>disabled</code></td>
+  <td><code>&quot;disabled&quot;</code></td>
+</tr>
+<tr class="">
+  <td>停用后轮次 run.finished=done</td>
+  <td>PASS</td>
+  <td><code>done</code></td>
+  <td><code>&quot;done&quot;</code></td>
+</tr>
+<tr class="">
+  <td>脚本化模型仍被调用</td>
+  <td>PASS</td>
+  <td><code>4 -&gt; 5</code></td>
+  <td><code>&quot;increases&quot;</code></td>
+</tr>
+<tr class="">
+  <td>停用后无任何新 collector 请求</td>
+  <td>PASS</td>
+  <td><code>5</code></td>
+  <td><code>5</code></td>
+</tr>
+<tr class="">
+  <td>停用后无新 span/metric/log</td>
+  <td>PASS</td>
+  <td><code>{}</code></td>
+  <td><code>{}</code></td>
+</tr>
+</tbody></table>
+  <details><summary>结构化细节 (787 bytes)</summary><pre>{
+  &quot;turn&quot;: {
+    &quot;startedAt&quot;: &quot;2026-11-27T07:31:13.269Z&quot;,
+    &quot;finishedAt&quot;: &quot;2026-11-27T07:31:13.583Z&quot;,
+    &quot;finishedCount&quot;: 5,
+    &quot;lastStatus&quot;: &quot;done&quot;
+  },
+  &quot;baseline&quot;: 5,
+  &quot;status&quot;: {
+    &quot;pluginId&quot;: &quot;keel.telemetry&quot;,
+    &quot;state&quot;: &quot;plugin_disabled&quot;,
+    &quot;enabled&quot;: false,
+    &quot;signals&quot;: [
+      &quot;traces&quot;,
+      &quot;metrics&quot;,
+      &quot;logs&quot;
+    ],
+    &quot;endpointHost&quot;: &quot;127.0.0.1:13604&quot;,
+    &quot;headerNames&quot;: [
+      &quot;Authorization&quot;
+    ],
+    &quot;headerCount&quot;: 1,
+    &quot;sampleRatio&quot;: 0,
+    &quot;logRatio&quot;: 1,
+    &quot;queueDepth&quot;: 0,
+    &quot;dropped&quot;: 0,
+    &quot;exported&quot;: 0,
+    &quot;metricSeriesDropped&quot;: 0,
+    &quot;attributesDropped&quot;: 5,
+    &quot;eventsDropped&quot;: 0,
+    &quot;linksDropped&quot;: 0,
+    &quot;configured&quot;: true,
+    &quot;adapter&quot;: &quot;otlp&quot;,
+    &quot;serviceName&quot;: &quot;keel-telemetry-e2e&quot;
+  },
+  &quot;inventoryState&quot;: &quot;disabled&quot;
+}</pre></details>
+</section>
+<section class="step" id="step-evidence-hygiene">
+  <h2>07 · 证据卫生：secret 值不进入 collector/模型/serve 日志 <span class="badge ok">PASS</span></h2>
+  <p class="meta">evidence-hygiene · 2 ms · 5 条断言 · 0 条失败</p>
+  <table><thead><tr><th>断言</th><th>结果</th><th>实际</th><th>期望</th></tr></thead><tbody>
+<tr class="">
+  <td>collector-requests.jsonl 不含明文 secret</td>
+  <td>PASS</td>
+  <td><code>no raw token</code></td>
+  <td><code>&quot;no raw token&quot;</code></td>
+</tr>
+<tr class="">
+  <td>model-requests.jsonl 不含明文 secret</td>
+  <td>PASS</td>
+  <td><code>no raw token</code></td>
+  <td><code>&quot;no raw token&quot;</code></td>
+</tr>
+<tr class="">
+  <td>serve.log 不含明文 secret</td>
+  <td>PASS</td>
+  <td><code>no raw token</code></td>
+  <td><code>&quot;no raw token&quot;</code></td>
+</tr>
+<tr class="">
+  <td>collector 只记录 Authorization 指纹</td>
+  <td>PASS</td>
+  <td><code>fingerprint only</code></td>
+  <td><code>&quot;fingerprint only&quot;</code></td>
+</tr>
+<tr class="">
+  <td>interaction 全程 secret 未泄漏</td>
+  <td>PASS</td>
+  <td><code>no raw token</code></td>
+  <td><code>&quot;no raw token&quot;</code></td>
+</tr>
+</tbody></table>
+  <details><summary>结构化细节 (632 bytes)</summary><pre>{
+  &quot;collectorSummary&quot;: {
+    &quot;requests&quot;: 5,
+    &quot;paths&quot;: {
+      &quot;/v1/traces&quot;: 1,
+      &quot;/v1/metrics&quot;: 2,
+      &quot;/v1/logs&quot;: 2
+    },
+    &quot;spanNames&quot;: [
+      &quot;keel.agent.run&quot;,
+      &quot;keel.agent.turn&quot;
+    ],
+    &quot;metricNames&quot;: [
+      &quot;keel.agent.run.duration&quot;,
+      &quot;keel.agent.runs&quot;
+    ],
+    &quot;logEvents&quot;: [
+      &quot;turn.finished&quot;
+    ],
+    &quot;authorizationFingerprints&quot;: [
+      &quot;4a3b39a6ac29a8d3abc01d4bb7e08da3f3b08575095c71e49e61bf90b1dd3780&quot;
+    ]
+  },
+  &quot;modelSummary&quot;: {
+    &quot;requests&quot;: 5,
+    &quot;models&quot;: [
+      &quot;e2e-model&quot;
+    ],
+    &quot;streams&quot;: [
+      true
+    ]
+  },
+  &quot;collectorBytes&quot;: 10391,
+  &quot;serveLogBytes&quot;: 20091
+}</pre></details>
+</section>
+
+<section class="panel">
+  <h2>资源回收 residue.txt</h2>
+  <pre>keel telemetry live E2E residue
+generatedAt=2026-11-27T07:31:21Z
+workDir=/var/folders/tn/y_b12zxs2dldn8thmfnpy9c80000gp/T//keel-telemetry-e2e.20261127-153010.c9Yc1U
+database=keel_telemetry_e2e_1795764610
+ports: serve=13600 model=13601 collector=13604 postgres=13605
+serve.pid=70248 serve.alive=no
+model.pid=70243 model.alive=no
+collector.pid=70235 collector.alive=no
+postgres.alive=no
+pgrep.postgres=none
+postgres.clusterRemoved=yes
+servePort.state=free
+modelPort.state=free
+collectorPort.state=free
+postgresPort.state=free
+pgrep.serve=none
+pgrep.model=none
+pgrep.collector=none
+secretScan.otlpToken=leaked=no
+secretScan.adminKey=leaked=no
+workDir.removed=yes
+teardown=clean
+</pre>
+</section>
+</main>
+</body>
+</html>

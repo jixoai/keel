@@ -1,0 +1,146 @@
+ports: serve=13600 model=13601 collector=13604 postgres=13605
+tenant: 6f0004b4-1fe5-48a3-b53d-8a16ce917e05
+building keel -> /var/folders/tn/y_b12zxs2dldn8thmfnpy9c80000gp/T//keel-telemetry-e2e.20261127-153010.c9Yc1U/keel
+starting throwaway PostgreSQL on 127.0.0.1:13605 (database keel_telemetry_e2e_1795764610)
+PostgreSQL ready: PostgreSQL 18.7 (Homebrew) on aarch64-apple-darwin27.2.0, compiled by Apple clang version 21.0.0 (clang-2100.4.1.1), 64-bit
+starting fake OTLP collector on 127.0.0.1:13604
+starting scripted model on 127.0.0.1:13601
+starting keel serve on 127.0.0.1:13600
+keel serve healthy (pid 70248)
+running live E2E driver
+
+[step] stack: 真实栈：PostgreSQL + keel serve + 独立 collector，插件默认关闭
+  ok   keel serve /v1/health 200
+  ok   local-only 超管会话
+  ok   会话租户 = E2E 租户
+  ok   真实 PostgreSQL 可达
+  ok   keel.telemetry 随二进制提供
+  ok   keel.telemetry 默认未启用
+  ok   keel.telemetry 是 bundled 插件
+  ok   清单 enabled 不含 keel.telemetry
+  ok   GET /v1/telemetry/status 200
+  ok   telemetry hub 默认 disabled
+  ok   collector 起步 0 请求
+[step] stack: PASSED (11/11)
+
+[step] default-off: 默认关闭：未启用插件时一轮真实对话，collector 收到 0 请求
+  ok   真实会话已创建
+  ok   默认关闭轮次 run.finished=done
+  ok   脚本化模型确实被调用
+  ok   关闭状态一轮对话后 collector 仍为 0 请求
+  ok   关闭状态无 trace/metric/log 请求
+[step] default-off: PASSED (5/5)
+
+[step] configured-disabled: 真实 admin API 写入 tenant telemetry 文档与 secret，插件未启用仍零请求
+  ok   secret 写入 200
+  ok   secret 响应只回 masked preview
+  ok   secret 响应不含明文值
+  ok   PUT tenant config 200
+  ok   config revision >= 1
+  ok   GET tenant config 200
+  ok   stored adapter=otlp
+  ok   stored endpoint 指向 collector
+  ok   stored header 是 secret 引用
+  ok   stored sampleRatio=1
+  ok   config 读回不含明文 secret
+  ok   PostgreSQL tenants.config 已落盘
+  ok   写入配置但未启用：status enabled=false
+  ok   配置已写但插件未启用：轮次完成
+  ok   配置已写但插件未启用：collector 仍 0 新请求
+[step] configured-disabled: PASSED (15/15)
+
+[step] enable-approval: 两阶段审批启用 keel.telemetry：202 → allow → 200 enabled
+  ok   首次 enable 返回 202 审批问题
+  ok   审批类型 plugin.enable
+  ok   审批问题为 open
+  ok   审批问题渲染 exporter=otlp
+  ok   审批问题渲染 endpoint host
+  ok   审批问题渲染 sampleRatio=1
+  ok   审批问题只渲染 header 名
+  ok   审批问题不含明文 secret
+  ok   审批问题不含 secret 引用值
+  ok   allow 回答 200
+  ok   审批已回答 allow
+  ok   重复 enable 200
+  ok   插件状态 enabled
+  ok   清单显示 keel.telemetry enabled
+  ok   telemetry status active+enabled
+  ok   status signals = traces/metrics/logs
+  ok   status endpointHost 来自配置
+  ok   status sampleRatio=1
+  ok   status headerNames=[Authorization]
+  ok   status 不含明文 secret
+  ok   环境审计可见 enable 成功
+  ok   审计不含明文 secret
+[step] enable-approval: PASSED (22/22)
+
+[step] export-enabled: 启用后一轮真实对话：collector 收到 keel.agent.run span、metric 与 turn.finished log
+  ok   enable 本身不产生 collector 请求
+  ok   启用轮次 run.finished=done
+  ok   收到 /v1/traces 请求
+  ok   收到 /v1/metrics 请求
+  ok   收到 /v1/logs 请求
+  ok   span 名 keel.agent.run
+  ok   span tenant = E2E 租户
+  ok   span session = 真实 sessionId
+  ok   span model 来自本轮解析
+  ok   span provider 非空
+  ok   span status OK
+  ok   metric keel.agent.runs 存在
+  ok   metric outcome=ok
+  ok   metric model 标签存在
+  ok   metric 不带 tenant/session 身份标签
+  ok   log event turn.finished
+  ok   log 带 tenant/session
+  ok   log status=ok
+  ok   resource service.name 来自配置
+  ok   resource tenant.id = 租户
+  ok   每个请求都带配置的 Authorization
+  ok   Authorization 指纹来自 secret 值
+  ok   collector 记录中无明文 secret
+  ok   请求 Content-Type 为 JSON
+  ok   只请求 OTLP 信号路径
+[step] export-enabled: PASSED (25/25)
+
+[step] sampling-zero: 采样率改为 0：重读配置后无 trace 请求，metric/log 仍到达
+  ok   PUT sampleRatio=0 200
+  ok   改采样前停用插件 200
+  ok   重新启用 202→allow→200
+  ok   审批问题渲染 sampleRatio=0
+  ok   重新启用后插件 enabled
+  ok   status sampleRatio=0
+  ok   status 仍 active
+  ok   采样 0 轮次 run.finished=done
+  ok   采样 0：metric 仍到达
+  ok   采样 0：log 仍到达
+  ok   采样 0：没有新的 trace 请求
+  ok   采样 0：没有 keel.agent.run span
+  ok   采样 0：本轮只有 metric/log 请求
+[step] sampling-zero: PASSED (13/13)
+
+[step] disable: 停用插件：再发一轮真实对话，collector 不再收到新请求
+  ok   disable 200
+  ok   插件状态 disabled
+  ok   status enabled=false
+  ok   清单 keel.telemetry disabled
+  ok   停用后轮次 run.finished=done
+  ok   脚本化模型仍被调用
+  ok   停用后无任何新 collector 请求
+  ok   停用后无新 span/metric/log
+[step] disable: PASSED (8/8)
+
+[step] evidence-hygiene: 证据卫生：secret 值不进入 collector/模型/serve 日志
+  ok   collector-requests.jsonl 不含明文 secret
+  ok   model-requests.jsonl 不含明文 secret
+  ok   serve.log 不含明文 secret
+  ok   collector 只记录 Authorization 指纹
+  ok   interaction 全程 secret 未泄漏
+[step] evidence-hygiene: PASSED (5/5)
+
+[e2e] PASS steps=8 failedChecks=0 collectorRequests=5
+stopping serve/model/collector
+rendering report.html
+report: /Users/kzf/Development/GitHub/jixoai/fde2e/.worktrees/keel-plugin-telemetry-e2e/openspec/changes/keel-plugin-telemetry/evidence/live-e2e/report.html (39305 bytes, PASS)
+summary: /Users/kzf/Development/GitHub/jixoai/fde2e/.worktrees/keel-plugin-telemetry-e2e/openspec/changes/keel-plugin-telemetry/evidence/live-e2e/summary.txt
+evidence: /Users/kzf/Development/GitHub/jixoai/fde2e/.worktrees/keel-plugin-telemetry-e2e/openspec/changes/keel-plugin-telemetry/evidence/live-e2e
+exit: 0

@@ -84,10 +84,14 @@
   带 tenant/session 的 span 与无身份标签的 metric；停用后停止。
 - [x] 7.3 故障：collector 500/429/超时/宕机；run 全部完成；状态计数正确；恢复后半开
   成功。
-- [ ] 7.4 真实服务 E2E（6 步起）：默认关闭 → 启用审批 → 发一轮对话 → collector
+- [x] 7.4 真实服务 E2E（6 步起）：默认关闭 → 启用审批 → 发一轮对话 → collector
   收到 span/metric → 改采样 → 停用 → 零请求；日志/报告证据归档。
-  > 按本次任务约定，以假 OTLP collector 的集成/E2E 测试代替（见 `evidence/fake-collector-e2e.txt`），
-  > 未跑真实外部 collector 的浏览器 6 步。
+  > `scripts/keel-telemetry-e2e/run.sh`：临时 PostgreSQL + 真实 `keel serve --local-only`
+  > + 独立假 OTLP collector + 脚本化 OpenAI-compatible 模型；8 步 104 断言全过，
+  > collector 实收 5 请求（1 traces / 2 metrics / 2 logs），采样 0 仅停 traces，停用后零新请求。
+  > 证据：`evidence/live-e2e/{summary.txt,report.html,steps.json,collector-requests.jsonl,serve.log,residue.txt}`。
+  > 期间修复接入 bug：`KEEL_ADMIN_KEY` Bearer 仅放行 `/v1/admin/*`，`/v1/tenants/{id}/config`
+  > 实际不可达；现按 accessgate `ModeOperator` 路由放行，测试见 `cmd/keel/auth_operator_test.go`。
 - [x] 7.5 进程 kill -9 后重启：未 flush 有界丢失；正常关机不重复已确认批次；无持久队列，
   重启不重放（at-most-once across restart）；存活 exporter 的模糊重试可能重复；无孤儿 goroutine。
 
