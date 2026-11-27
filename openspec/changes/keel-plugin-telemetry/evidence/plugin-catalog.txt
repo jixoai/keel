@@ -1,0 +1,2 @@
+$ node scripts/plugin-catalog.mjs --check
+plugin-catalog: OK (103 entries, §A/§B/§C mapped, §H current)
