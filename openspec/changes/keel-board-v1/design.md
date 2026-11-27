@@ -10,8 +10,8 @@ SSE、watchers/schedules、sync 引擎与 Slack/GitHub/Linear/Chat SDK 适配）
 | --- | --- |
 | 独立仓库 | `github.com/jixoai/keel-board`，Apache-2.0 |
 | 上游参考 pin | `vercel/board@26428ed4e0661ff362c59abdf1215997c59891b0`（Apache-2.0，仅概念/契约） |
-| 独立仓库 pin | phase 0 产出不可变 commit + `v0.1.0` tag；README/NOTICE 记录 |
-| keel 依赖 | `go.mod` 固定 `github.com/jixoai/keel-board@<phase-0-commit>` 的 pseudo-version；MUST NOT 浮动 branch/tag |
+| 独立仓库 pin | phase 0 `v0.1.0`；phase 1 修复后 `v0.1.1`（annotated tag → commit `70b503f0cdbd8f860ac1a373a6d1576175018ff0`）；README/NOTICE 记录 |
+| keel 依赖 | `go.mod` 固定 `github.com/jixoai/keel-board v0.1.1`（annotated tag；commit 记录在 NOTICE）；MUST NOT 跟随 branch/浮动 tag |
 | 升级 | 独立 PR + keel-board conformance + keel 集成/E2E；不得静默跟随 main |
 | 许可 | keel-board `LICENSE` Apache-2.0；`NOTICE` 写明独立实现与上游归属；keel `NOTICE` 记录 module+commit |
 
@@ -140,9 +140,9 @@ Linear 与任意 Chat SDK adapter 的线程；否则“通用任务/线程标准
   它自己创建的任务。这与 Vercel 的 “principal 改所有 profile、profile 只改自己” 同构。
 - **`for` 只指向 owner 的 Actor。** 可以指向 owner Account 本身或它的某个 Bot；不允许把
   任务指派给别的 Account 的 Bot（跨主体指派是未来的 offer/accept，不在本 change）。
-- **认证不引入 OIDC。** 沿用 keel Account 的会话/API key。v0.1.0 未提供
+- **认证不引入 OIDC。** 沿用 keel Account 的会话/API key。v0.1.x 未提供
   `GET /v1/board/me`；当前身份用 `GET /v1/board/actors` 或消息/任务的 author 投影读取。
-- **Bot actor 命名（实现偏离）。** v0.1.0 的 profile 文法是
+- **Bot actor 命名（实现偏离）。** board v0.1.x 的 profile 文法是
   `^[a-z][a-z0-9-]{0,31}$`，而 keel Bot ID 形如 `bot_<32hex>`，无法原样放在 `+` 后；
   因此 actor 为 `account:<account-id>+bot-<sha256 前 24 hex>`，Bot ID 与显示名分别放在
   `Actor.Handle`/`Actor.Name`。这保持 `task.For == actor.ID` 的 claim 语义稳定。
@@ -617,7 +617,7 @@ Board 不依赖后台定时器保证正确性：
 
 ### 7.3 Claim-ready 选择顺序
 
-`POST /tasks/claim {channel, label?, from?, lease?, wait?, token?}`（v0.1.0 路径；设计旧名 claim-ready）：
+`POST /tasks/claim {channel, label?, from?, lease?, wait?, token?}`（v0.1.x 路径；设计旧名 claim-ready）：
 
 1. 频道（或 `channel/` 子树）内 `state=ready`（含租约已过期的 claimed，按 effective state）；
 2. 先选 `for` 等于调用者 Actor 的任务；
@@ -718,7 +718,7 @@ Base：`/v1/board`。认证沿用 keel；tenant 来自凭据，不出现在路�
 | POST | `/tasks/{id}/cancel` | `{reason}` | `{task}` | owner/manage |
 | GET | `/events` | `channel?`, `label?`, `state?`, `owner?`, `for?`, `after?`, `Last-Event-ID` | SSE | board.read + viewer |
 
-v0.1.0 未提供 `GET /me`（用 `/actors` 或消息/任务的 author 投影）；`claim` 与 SSE 的实际路径
+v0.1.x 未提供 `GET /me`（用 `/actors` 或消息/任务的 author 投影）；`claim` 与 SSE 的实际路径
 以上表为准，`claim-ready`/`events/stream` 是早期设计名。
 
 Phase 0 追加（独立仓库）：`POST /tasks/batch`、`GET /tasks/batch/{id}`、`GET /threads`、
@@ -1379,8 +1379,8 @@ sync:
 
 - **独立仓库先行**：phase 0 在 `github.com/jixoai/keel-board` 完成 core + sync + watch；
   产出 `v0.1.0` tag 与不可变 commit。keel 在此之前不写平行 core。
-- **导入**：keel `go.mod` 固定 `github.com/jixoai/keel-board@<phase-0-commit>` 的
-  pseudo-version；`internal/boardintegration` 只做身份/权限/PG/SSE/secret/telemetry 适配，
+- **导入**：keel `go.mod` 固定 `github.com/jixoai/keel-board v0.1.1`（annotated tag，commit
+  `70b503f…` 记录在 NOTICE）；`internal/boardintegration` 只做身份/权限/PG/SSE/secret/telemetry 适配，
   不复制领域逻辑。升级走独立 PR + conformance + keel 集成测试。
 - **Schema**：keel-board 自带新增表/索引/RLS 条目；keel 在启动时幂等迁移同一 PG，
   不改既有表。Alpha 零兼容：没有旧字段/旧路径垫片。

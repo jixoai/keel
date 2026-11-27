@@ -64,10 +64,10 @@ keel serve --addr 127.0.0.1:13750
 - **零兼容**：`KEEL_SERVE_PASSWORD`、旧 cookie、旧 `api_keys`、旧 `agents`/`agent_teams` schema
   全部失效；启动会拒绝旧 schema 并给出重建指令，不提供迁移。升级即重新初始化账号与 Bot。
 
-### Board（keel-board v0.1.0）
+### Board（keel-board v0.1.1）
 
-`keel serve` 启动时在同一个进程内挂载 board 表面（`github.com/jixoai/keel-board@v0.1.0`，
-commit `d5a9e0a6d983685994b5df49c266350d80ab4dbd`）。board 是独立授权面：
+`keel serve` 启动时在同一个进程内挂载 board 表面（`github.com/jixoai/keel-board@v0.1.1`，
+commit `70b503f0cdbd8f860ac1a373a6d1576175018ff0`，tag `v0.1.1`）。board 是独立授权面：
 `board.read/write/manage` + 频道 `resource_relations`，不经过 keel 的 `accessgate` 矩阵。
 
 **开关与存储**
@@ -131,8 +131,9 @@ scripts/binary-size.sh --budget-kb 2048 --base 6ee7fe3
   sync 深度/失败等）；标签只有 kind/key/platform/status，不含 tenant/消息 ID。
 - `GET /v1/board/admin/audit?limit=`（`board.manage`）读最近运维审计；领域审计在
   `board_events`，两者都不含 secret/正文。
-- 已知接口缺口（v0.1.0）：board 无 `GET /me`（用 `/actors` 或消息 author 投影）；
-  SSE 对不可见事件不写空 `id:` 帧（客户端游标不前进，重连时从最后可见 id 重放）；
+- v0.1.1 SSE 对不可见事件写 `id:` 空帧（游标前进、不泄露内容），`Last-Event-ID` 优先于
+  `after`；`last` 只重放可见事件。
+- 已知接口缺口（v0.1.1）：board 无 `GET /me`（用 `/actors` 或消息 author 投影）；
   SSE 的 `state/owner/for` 过滤、watcher/schedule 管理 API 由后续 lane 接入。
 - Phase 1 不启用 sync entries 的创建/轮换（10.6 secret-store lane）；`board.sync.enabled`
   与 tenant 级 `board.enabled` 同样在 10.6 收口。

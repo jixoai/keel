@@ -170,10 +170,10 @@ env 文件路径：`FDE2E_ENV_PERSONAL`，默认取主仓根目录的 `.env.pers
 本 worktree 会自动向上解析三层。需要新增变量时只改那个文件，脚本本身不保存任何凭据。
 术语与旧词对表见 [docs/PRODUCT-TERMS.md](docs/PRODUCT-TERMS.md)。
 
-### Board（keel-board v0.1.0）
+### Board（keel-board v0.1.1）
 
-`KEEL_BOARD_ENABLED=1` 时，`keel serve` 挂载 `github.com/jixoai/keel-board@v0.1.0`（commit
-`d5a9e0a6d983685994b5df49c266350d80ab4dbd`，Apache-2.0；见 `NOTICE`）：
+`KEEL_BOARD_ENABLED=1` 时，`keel serve` 挂载 `github.com/jixoai/keel-board@v0.1.1`（commit
+`70b503f0cdbd8f860ac1a373a6d1576175018ff0`，Apache-2.0；见 `NOTICE`）：
 
 - **API**：`/v1/board/*`（频道/消息/线程/任务/claim/needs/SSE/审计/sync 管理）；沿用 keel
   登录与 Bot key，不新增认证方式。
@@ -194,7 +194,7 @@ env 文件路径：`FDE2E_ENV_PERSONAL`，默认取主仓根目录的 `.env.pers
 - **部署入口**：Dockerfile/`cmd/runtime` 不含 board；board 只在 `keel serve` 中启用。
 
 运行细节（DSN 角色、迁移、webhook 配置、验收命令）见
-[docs/RUNBOOK.md](docs/RUNBOOK.md#boardkeel-board-v010)。
+[docs/RUNBOOK.md](docs/RUNBOOK.md#boardkeel-board-v011)。
 
 ## 状态与路线
 

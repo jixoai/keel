@@ -312,8 +312,10 @@ func TestBoardAuthorizerRejectsForgedActorAndForeignTenant(t *testing.T) {
 		ID: AccountActorID(env.bob.record.ID), Principal: AccountActorID(env.bob.record.ID),
 		Kind: protocol.ActorPerson,
 	}
-	if err := authorizer.Authorize(ctx, env.tenant.String(), forged, "work", protocol.PermissionRead); err == nil {
-		t.Fatal("Authorize accepted an actor for another account")
+	err = authorizer.Authorize(ctx, env.tenant.String(), forged, "work", protocol.PermissionRead)
+	var boardErr *protocol.Error
+	if !asProtocolError(err, &boardErr) || boardErr.Status != 401 {
+		t.Fatalf("Authorize(forged actor) = %v, want 401 before any relation lookup", err)
 	}
 	if err := authorizer.ValidateRequest(ctx, env.other.String(), aliceActor); err == nil {
 		t.Fatal("ValidateRequest accepted a foreign tenant")
@@ -404,8 +406,8 @@ func TestBoardCrossTenantAuthorizationIsNotReachable(t *testing.T) {
 		t.Fatal("cross-tenant authorization was allowed")
 	}
 	var boardErr *protocol.Error
-	if !asProtocolError(err, &boardErr) || (boardErr.Status != 401 && boardErr.Status != 404) {
-		t.Fatalf("cross-tenant error = %v", err)
+	if !asProtocolError(err, &boardErr) || boardErr.Status != 401 {
+		t.Fatalf("cross-tenant error = %v, want 401", err)
 	}
 }
 

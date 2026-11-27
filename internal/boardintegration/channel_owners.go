@@ -118,7 +118,7 @@ func (h *handler) createThreadRoot(w http.ResponseWriter, r *http.Request) {
 		h.next.ServeHTTP(w, r)
 		return
 	}
-	existed := h.channelExists(principal.TenantID.String(), channel)
+	existed := h.channelExists(r.Context(), principal.TenantID.String(), channel)
 
 	recorder := &statusWriter{ResponseWriter: w}
 	h.next.ServeHTTP(recorder, r)
@@ -133,10 +133,13 @@ func (h *handler) createThreadRoot(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (h *handler) channelExists(tenant, channel string) bool {
+func (h *handler) channelExists(ctx context.Context, tenant, channel string) bool {
 	if h.board == nil {
 		return true
 	}
+	// A second replica may have created this channel inside the freshness window;
+	// refresh before deciding whether this root is the implicit creator.
+	_ = h.board.Refresh(ctx, tenant)
 	exists := false
 	if err := h.board.Read(tenant, func(snapshot *boardlog.Snapshot) error {
 		exists = snapshot.Channel(channel) != nil
