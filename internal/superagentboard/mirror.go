@@ -439,14 +439,15 @@ func (m *Mirror) syncTicketState(ctx context.Context, ticket superagent.Ticket, 
 				"ticket", ticket.ID, "report", row.ID, "err", err)
 			continue
 		}
-		report.Replies++
 		if _, err := m.Links.PutBoardLink(ctx, store.BoardLink{
 			TenantID: m.TenantID, Source: BoardSource, SourceID: row.ID.String(),
 			Kind: store.BoardLinkReport, BoardTaskID: task.ID,
 		}); err != nil {
 			m.Logger.Warn("superagent board mirror report link failed",
 				"ticket", ticket.ID, "report", row.ID, "err", err)
+			continue
 		}
+		report.Replies++
 	}
 	task, _ = m.Board.Task(ctx, m.TenantID, task.ID)
 
@@ -580,13 +581,13 @@ func (m *Mirror) mirrorAttentionReply(ctx context.Context, ticket superagent.Tic
 	if err != nil {
 		return err
 	}
-	report.Replies++
 	if _, err := m.Links.PutBoardLink(ctx, store.BoardLink{
 		TenantID: m.TenantID, Source: BoardSource, SourceID: attention.ID.String(),
 		Kind: store.BoardLinkAttention, BoardTaskID: taskID,
 	}); err != nil {
 		return err
 	}
+	report.Replies++
 	return nil
 }
 

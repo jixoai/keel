@@ -1742,6 +1742,7 @@ CREATE TABLE IF NOT EXISTS board_links (
 -- enough for the bridge's reverse lookup. The old unique index was too wide:
 -- the second Attention/report of one ticket collided on it.
 DROP INDEX IF EXISTS board_links_by_task;
+DROP INDEX IF EXISTS board_links_by_task_any;
 CREATE UNIQUE INDEX IF NOT EXISTS board_links_ticket_by_task
     ON board_links (tenant_id, source, board_task_id)
     WHERE kind = 'ticket';

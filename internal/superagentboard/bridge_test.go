@@ -785,3 +785,19 @@ func TestBridgeUnblockPassesOptionID(t *testing.T) {
 		t.Fatal("free-text answer lost")
 	}
 }
+
+func TestBridgeMessageDeleteAndLabelsAreReadOnly(t *testing.T) {
+	world := newBridgeWorld(t, SuperagentConfig{Mirror: true, Bridge: true, Channel: "superagent"}, nil)
+	for _, action := range []string{"delete", "labels"} {
+		request := httptest.NewRequest(http.MethodPost,
+			"/v1/board/messages/"+formatID(world.taskID)+"/"+action, strings.NewReader(`{}`))
+		recorder := httptest.NewRecorder()
+		world.surf.ServeHTTP(recorder, request)
+		if recorder.Code != http.StatusConflict {
+			t.Fatalf("%s status = %d body=%s", action, recorder.Code, recorder.Body.String())
+		}
+		if code := decodeCode(t, recorder); code != "mirror_read_only" {
+			t.Fatalf("%s code = %q", action, code)
+		}
+	}
+}
