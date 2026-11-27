@@ -1,0 +1,17 @@
+$ MUTATION P0: enable ServiceTelemetry only from tenant telemetry.adapter (ignore the process hub)
+$ go test ./cmd/keel -run TestServeTelemetryConfigReachesApprovalAndCollector
+2026/11/27 14:35:37 INFO creation plugin started tools=5 template=webview-react-solidglass
+2026/11/27 14:35:37 INFO example plugin started plugin=keel.example tools=2 hooks=3 triggers=0
+2026/11/27 14:35:37 INFO plugin assembly generation=1 plugins=11 active=11 pending=0
+--- FAIL: TestServeTelemetryConfigReachesApprovalAndCollector (0.02s)
+    telemetry_config_test.go:255: telemetry service state = 
+FAIL
+FAIL	github.com/jixoai/keel/cmd/keel	0.739s
+FAIL
+
+$ go test ./internal/loadout -run TestTelemetryServiceSelectedByProcessHub
+--- FAIL: TestTelemetryServiceSelectedByProcessHub (0.00s)
+    loadout_test.go:439: telemetry service not selected by Options.Telemetry: [store llm prompt tools pi-loop session-projection]
+FAIL
+FAIL	github.com/jixoai/keel/internal/loadout	0.395s
+FAIL

@@ -1,9 +1,10 @@
-$ go test -race ./internal/telemetry ./internal/harnessext ./internal/harnessapi ./internal/pluginpkg ./internal/servicehost ./internal/host ./internal/agent ./cmd/keel
-ok  	github.com/jixoai/keel/internal/telemetry	3.406s
-ok  	github.com/jixoai/keel/internal/harnessext	21.952s
-ok  	github.com/jixoai/keel/internal/harnessapi	8.483s
-ok  	github.com/jixoai/keel/internal/pluginpkg	2.124s
-ok  	github.com/jixoai/keel/internal/servicehost	19.376s
-ok  	github.com/jixoai/keel/internal/host	2.248s
-ok  	github.com/jixoai/keel/internal/agent	2.224s
-ok  	github.com/jixoai/keel/cmd/keel	9.133s
+$ go test -race ./internal/telemetry ./internal/harnessext ./internal/harnessapi ./internal/pluginpkg ./internal/servicehost ./internal/host ./internal/agent ./internal/loadout ./cmd/keel
+ok  	github.com/jixoai/keel/internal/telemetry	3.083s
+ok  	github.com/jixoai/keel/internal/harnessext	20.686s
+ok  	github.com/jixoai/keel/internal/harnessapi	8.087s
+ok  	github.com/jixoai/keel/internal/pluginpkg	1.751s
+ok  	github.com/jixoai/keel/internal/servicehost	17.066s
+ok  	github.com/jixoai/keel/internal/host	1.812s
+ok  	github.com/jixoai/keel/internal/agent	1.909s
+ok  	github.com/jixoai/keel/internal/loadout	1.510s
+ok  	github.com/jixoai/keel/cmd/keel	8.609s

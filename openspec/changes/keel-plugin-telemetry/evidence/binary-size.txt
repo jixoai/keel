@@ -4,7 +4,7 @@ base:    1b10e35 (1b10e358279182161db187a75d2efc4ec0cc1adb)
 budget:  256 KiB per binary and target
 targets: linux/amd64 linux/arm64
 bins:    ./cmd/keel ./cmd/runtime
-keel        linux/amd64      base=36618400 current=36835488 delta=+217088 bytes (+212 KiB)
+keel        linux/amd64      base=36618400 current=36839584 delta=+221184 bytes (+216 KiB)
 keel        linux/arm64      base=33292448 current=33489056 delta=+196608 bytes (+192 KiB)
 runtime     linux/amd64      base=20644000 current=20693152 delta=+49152 bytes (+48 KiB)
 runtime     linux/arm64      base=19136672 current=19136672 delta=+0 bytes (+0 KiB)
