@@ -39,6 +39,16 @@ import {
 import { PluginAttachmentPreview } from "../plugins/slots";
 import type { SlotRegistry } from "../plugins/registry";
 
+/** Only a ready projection's thumbnail URL is ever a thumbnail source. A
+ * `pending`, `failed` or `none` blob is a placeholder: the original bytes must
+ * never be cropped into the thumbnail box. Exported so the rule has a direct
+ * reverse test. */
+export function thumbnailSource(part: AttachmentPart): string {
+  if (part.kind !== "image") return "";
+  if (part.thumbStatus === "ready" && part.thumbnailUrl) return part.thumbnailUrl;
+  return "";
+}
+
 /** One attachment's kind glyph: the host's single icon language. */
 export const attachmentIcon = (kind: string): IconName =>
   kind === "image" ? "image" : kind === "audio" || kind === "video" ? "play" : "file";
@@ -96,12 +106,7 @@ export function AttachmentRow(props: {
   /** Only the projection's ready thumbnail is ever a thumbnail. A `none` or
    * `failed` blob is a placeholder, never the original bytes under a
    * 280×158 crop. */
-  const thumbSrc = () => {
-    const value = part();
-    if (value.kind !== "image") return "";
-    if (value.thumbStatus === "ready" && value.thumbnailUrl) return value.thumbnailUrl;
-    return "";
-  };
+  const thumbSrc = () => thumbnailSource(part());
   const thumbLoadedFor = signal<string | null>(null);
   const thumbError = signal<{ src: string; code?: string } | null>(null);
   const thumbLoaded = () => !!thumbSrc() && thumbLoadedFor() === thumbSrc();

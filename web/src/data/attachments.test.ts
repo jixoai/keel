@@ -15,7 +15,7 @@ import {
   refreshAttachmentPart,
   retryAttachmentPart,
 } from "./attachments";
-import { uniqueAttachments } from "../screens/attachment-row";
+import { thumbnailSource, uniqueAttachments } from "../screens/attachment-row";
 import { KeelApiError } from "./http";
 
 const part: AttachmentPart = {
@@ -116,4 +116,12 @@ test("dedupe: the same fileId (or the same local identity) renders once", () => 
   ).toBe(3);
   expect(uniqueAttachments([])).toEqual([]);
   expect(uniqueAttachments(undefined)).toEqual([]);
+});
+
+test("thumbnail source: only a ready thumbnail; pending/failed/none never fall back to the original", () => {
+  expect(thumbnailSource(part)).toBe(part.thumbnailUrl);
+  expect(thumbnailSource({ ...part, thumbStatus: "pending", thumbnailUrl: undefined })).toBe("");
+  expect(thumbnailSource({ ...part, thumbStatus: "failed", thumbnailUrl: undefined })).toBe("");
+  expect(thumbnailSource({ ...part, thumbStatus: "none", thumbnailUrl: undefined })).toBe("");
+  expect(thumbnailSource({ ...part, kind: "pdf" })).toBe("");
 });
