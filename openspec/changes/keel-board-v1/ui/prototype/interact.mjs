@@ -82,7 +82,7 @@ await page.goto(`${base}?chrome=0&scene=queue`);
 await page.waitForTimeout(250);
 await page.locator('[data-action="tab"][data-tab="completed"]').click();
 await page.waitForTimeout(200);
-assert.equal(await page.locator(".row").count(), 4);
+assert.equal(await page.locator(".row").count(), 3);
 await page.locator('[data-action="tab"][data-tab="failed"]').click();
 await page.waitForTimeout(200);
 assert.equal(await page.locator(".row").count(), 2);
@@ -223,6 +223,165 @@ await page.goto(`${base}?chrome=0&scene=sync`);
 await page.waitForTimeout(200);
 assert.equal(await page.locator(".switch").first().evaluate((el) => Math.round(el.getBoundingClientRect().height)), 44);
 pass("mobile tabs, chips and switches meet the 44px floor");
+
+// P1-1: keyboard and confirmAction must respect TaskView.moves.
+await page.setViewportSize({ width: 1440, height: 1000 });
+const stateOf = (id) => page.evaluate((taskId) => eval(`taskById("${taskId}").state`), id);
+const movesOf = (id) => page.evaluate((taskId) => eval(`taskById("${taskId}").moves`), id);
+await page.goto(`${base}?chrome=0&scene=task&id=806`);
+await page.waitForTimeout(200);
+assert.deepEqual(await movesOf("806"), ["reply"]);
+await page.keyboard.press("x");
+await page.waitForTimeout(150);
+assert.equal(await page.locator(".dialog").count(), 0);
+assert.equal(await stateOf("806"), "completed");
+await page.goto(`${base}?chrome=0&scene=task&id=809`);
+await page.waitForTimeout(200);
+await page.keyboard.press("e");
+await page.waitForTimeout(150);
+assert.equal(await page.locator(".dialog").count(), 0);
+assert.equal(await stateOf("809"), "ready");
+await page.goto(`${base}?chrome=0&scene=task&id=830`);
+await page.waitForTimeout(200);
+assert.equal((await movesOf("830")).includes("block"), false);
+await page.keyboard.press("b");
+await page.waitForTimeout(150);
+assert.equal(await page.locator(".dialog").count(), 0);
+await page.goto(`${base}?chrome=0&scene=task&id=812`);
+await page.waitForTimeout(200);
+await page.keyboard.press("e");
+await page.waitForTimeout(150);
+assert.match(await page.locator(".dialog h2").innerText(), /完成 #812/);
+await page.keyboard.press("Escape");
+await page.goto(`${base}?chrome=0&scene=task&id=806&dialog=cancel`);
+await page.waitForTimeout(200);
+await page.locator('[data-action="confirm"][data-kind="cancel"]').click();
+await page.waitForTimeout(200);
+assert.equal(await stateOf("806"), "completed");
+assert.equal(await page.locator(".dialog").count(), 0);
+pass("keyboard and confirmAction are fenced by moves");
+
+// P1-2: desktop NewTask is a 480px right sheet with a visible footer; mobile is full screen.
+await page.goto(`${base}?chrome=0&scene=queue&dialog=new`);
+await page.waitForTimeout(250);
+const sheet = await page.locator(".dialog.sheet").evaluate((el) => {
+  const r = el.getBoundingClientRect();
+  return { left: r.left, right: r.right, width: r.width, height: r.height };
+});
+const desktopFooter = await page.locator('[data-action="confirm"][data-kind="new"]').evaluate((el) => el.getBoundingClientRect().bottom);
+assert.ok(sheet.width >= 470 && sheet.width <= 490);
+assert.ok(sheet.left > 700);
+assert.ok(desktopFooter <= 1000);
+await page.setViewportSize({ width: 390, height: 844 });
+await page.goto(`${base}?chrome=0&scene=queue&dialog=new`);
+await page.waitForTimeout(250);
+const full = await page.locator(".dialog.full").evaluate((el) => { const r = el.getBoundingClientRect(); return { top: r.top, height: r.height }; });
+const mobileFooter = await page.locator('[data-action="confirm"][data-kind="new"]').evaluate((el) => el.getBoundingClientRect().bottom);
+assert.ok(Math.abs(full.height - 844) < 2);
+assert.ok(mobileFooter <= 844);
+pass("NewTask is a right sheet on desktop and full screen on mobile with visible footer");
+
+// P1-3: mobile last content stays above the tab bar / Composer.
+await page.goto(`${base}?chrome=0&scene=task&id=812`);
+await page.waitForTimeout(250);
+const primaryRect = await page.locator(".action-primary .btn").first().evaluate((el) => el.getBoundingClientRect().toJSON());
+assert.ok(primaryRect.top > 0 && primaryRect.bottom <= 788);
+const sendHeight = await page.locator('.composer-bar [data-action="send-reply"]').evaluate((el) => Math.round(el.getBoundingClientRect().height));
+assert.equal(sendHeight, 44);
+await page.evaluate(() => { const paper = document.getElementById("paper"); paper.scrollTop = paper.scrollHeight; });
+await page.waitForTimeout(150);
+const lastReply = await page.locator(".reply").last().evaluate((el) => el.getBoundingClientRect().bottom);
+const composerTop = await page.locator(".composer").evaluate((el) => el.getBoundingClientRect().top);
+assert.ok(lastReply <= composerTop - 4, `reply ${lastReply} composer ${composerTop}`);
+await page.goto(`${base}?chrome=0&scene=automation`);
+await page.waitForTimeout(250);
+await page.evaluate(() => { const paper = document.getElementById("paper"); paper.scrollTop = paper.scrollHeight; });
+await page.waitForTimeout(150);
+const lastAuto = await page.locator(".auto-row").last().locator(".btn").last().evaluate((el) => el.getBoundingClientRect().bottom);
+assert.ok(lastAuto <= 788, `automation ${lastAuto}`);
+await page.goto(`${base}?chrome=0&scene=sync`);
+await page.waitForTimeout(250);
+await page.evaluate(() => { const paper = document.getElementById("paper"); paper.scrollTop = paper.scrollHeight; });
+await page.waitForTimeout(150);
+const lastDead = await page.locator(".dead-row .btn").last().evaluate((el) => el.getBoundingClientRect().bottom);
+assert.ok(lastDead <= 788, `dead ${lastDead}`);
+pass("mobile tab/Composer never cover the last action or reply");
+
+// P1-4: page-specific error copy and retained data.
+await page.setViewportSize({ width: 1440, height: 1000 });
+await page.goto(`${base}?chrome=0&scene=queue&state=error`);
+await page.waitForTimeout(200);
+assert.ok((await page.locator(".row").count()) > 0);
+assert.match(await page.locator("#main").innerText(), /你的筛选还在/);
+await page.goto(`${base}?chrome=0&scene=task&id=812&state=error`);
+await page.waitForTimeout(200);
+assert.equal(await page.locator(".task-card").count(), 1);
+assert.doesNotMatch(await page.locator("#main").innerText(), /你的筛选还在/);
+await page.goto(`${base}?chrome=0&scene=sync&state=error`);
+await page.waitForTimeout(200);
+assert.ok((await page.locator(".sync-card").count()) > 0);
+assert.doesNotMatch(await page.locator("#main").innerText(), /你的筛选还在/);
+await page.goto(`${base}?chrome=0&scene=automation&state=error`);
+await page.waitForTimeout(200);
+assert.ok((await page.locator(".auto-row").count()) > 0);
+assert.doesNotMatch(await page.locator("#main").innerText(), /你的筛选还在/);
+await page.goto(`${base}?chrome=0&scene=sync&state=error&me=reader`);
+await page.waitForTimeout(200);
+assert.match(await page.locator("#main").innerText(), /管理任务面/);
+assert.doesNotMatch(await page.locator("#main").innerText(), /没能读到同步状态/);
+pass("errors retain data, keep page-specific copy and gate non-managers");
+
+// P1-5: no board.read hides the task entry; legacy keeps it.
+await page.goto(`${base}?chrome=0&scene=queue&state=permission&me=reader`);
+await page.waitForTimeout(200);
+assert.deepEqual(await page.locator('[data-scene="queue"]').evaluateAll((els) => els.map((el) => el.hidden)), [true, true]);
+await page.goto(`${base}?chrome=0&scene=queue&state=migrate`);
+await page.waitForTimeout(200);
+assert.deepEqual(await page.locator('[data-scene="queue"]').evaluateAll((els) => els.map((el) => el.hidden)), [false, false]);
+pass("task entry is hidden without board.read/task.read and kept for legacy");
+
+// P2: archive only under archive=1; batch retry and delivery sheet.
+await page.goto(`${base}?chrome=0&scene=queue&state=success&tab=all`);
+await page.waitForTimeout(200);
+assert.equal(await page.locator('[data-action="open-task"][data-id="852"]').count(), 0);
+await page.goto(`${base}?chrome=0&scene=queue&archive=1`);
+await page.waitForTimeout(200);
+assert.equal(await page.locator('[data-action="open-task"][data-id="852"]').count(), 1);
+await page.goto(`${base}?chrome=0&scene=sync`);
+await page.waitForTimeout(200);
+assert.equal(await page.locator('[data-action="retry-all"]').count(), 1);
+await page.locator('[data-action="retry-all"]').click();
+await page.waitForTimeout(200);
+assert.equal(await page.locator(".dead-row").count(), 0);
+await page.locator('[data-action="dialog"][data-dialog="deliveries"]').first().click();
+await page.waitForTimeout(200);
+assert.match(await page.locator(".dialog").innerText(), /投递记录/);
+await page.locator('[data-action="dialog-close"]').last().click();
+pass("archive is gated, dead letters batch-retry and delivery sheet open");
+
+// P2: watcher has no fake 5s undo affordance.
+await page.goto(`${base}?chrome=0&scene=automation`);
+await page.waitForTimeout(200);
+await page.locator('[data-action="toggle-watcher"][data-id="triage-inbox"]').click();
+await page.waitForTimeout(200);
+assert.doesNotMatch(await page.locator(".toast").last().innerText(), /5 秒/);
+pass("watcher toggle has no fake undo promise");
+
+// P2: shortcut help lists only implemented keys and tab navigation exists.
+await page.goto(`${base}?chrome=0&scene=task&id=812&dialog=shortcuts`);
+await page.waitForTimeout(200);
+const help = await page.locator(".dialog").innerText();
+assert.match(help, /1–5/);
+assert.doesNotMatch(help, /Space/);
+await page.goto(`${base}?chrome=0&scene=queue`);
+await page.waitForTimeout(200);
+await page.keyboard.press("]");
+await page.waitForTimeout(150);
+assert.ok((await page.locator('[data-action="tab"][data-tab="completed"]').getAttribute("aria-selected")) === "true");
+await page.keyboard.press("2");
+await page.waitForTimeout(150);
+assert.ok((await page.locator('[data-action="sub"][data-sub="waiting"]').getAttribute("class")).includes("active"));
+pass("shortcut help aligns with implemented keys and tab/subfilter keys work");
 
 assert.deepEqual(errors, []);
 pass("no page or console errors");

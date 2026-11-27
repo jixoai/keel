@@ -23,7 +23,7 @@
 | `ui/DESIGN.md` | IA、路由、组件树、状态模型、moves 动作矩阵、权限/403/404、五态、键盘、TUI 线框、响应式、sync/自动化故障、归档/迁移、退役、契约依赖 |
 | `ui/prototype/index.html` | 自包含原型（内嵌 CSS/JS，零构建、零运行时依赖） |
 | `ui/prototype/shoot.mjs` | 截图矩阵 + `shots/manifest.json` 生成；逐 URL 记录 bytes/sha1/overflow/errors |
-| `ui/prototype/interact.mjs` | 20 组原型交互断言；生成 `interact.log` |
+| `ui/prototype/interact.mjs` | 28 组原型交互断言；生成 `interact.log` |
 | `ui/prototype/shots/*.png` | 92 张：1440×1000（63）、768×1000（6）、390×844（19）、1024×1000（2）、1180×1000（2） |
 | `ui/prototype/shots/manifest.json` | 每张图的 name/query/width/height/bytes/sha1/overflow/errors |
 | `ui/prototype/interact.log` | 20 条 PASS、生成时间、Playwright 路径、errors=0 |
@@ -55,16 +55,40 @@
 | sync/automation 空态 badge 归零 | empty 时 `syncIssueCount`/`autoIssueCount` 返回 0 | `sync-1440-empty.png`、`automation-1440-empty.png`；交互断言 |
 | 非队列错误保留 view tabs | sync/automation loading/error 渲染 view tabs | `sync-1440-error.png`、`automation-1440-error.png` |
 | readonly 不显示“本标签页持有” | lease label 仅当 `moves` 含 `complete`/`renew` 且 token 在本页；read-only 显示持有者 | `task-1440-readonly.png`；交互断言 |
-| assigned ready 文案 | 行 `已指派 / 仅限 X`；任务页 `已指派 · 仅限 X` | `queue-1440-success.png`、`task-1440-ready`/`#824`；交互断言 |
+| assigned ready 文案 | 行 `已指派 / 仅限 X`；任务页 `已指派 · 仅限 X` | `task-1440-ready.png`（#809 可认领）与 `queue-1440-success.png` 的 #824 行（仅限 X）；交互断言 |
 | stale 不显示“实时更新” | stale 队列右列 `最后更新 14:02:11`；header `重连中` | `queue-1440-stale.png`；交互断言 |
 | dark destructive token | 原型 dark `destructive-foreground:#171717`（5.92:1）；生产 `web/theme.json` 需同步改 | 对比度表 §5.2；`task-1440-dialog-force-release.png` |
 | 手机 tabs/chips/switch ≥44 | view tabs/state tabs/chips/归档/switch 全部 44px；switch 44×44 命中区 | 交互断言实测 44；`queue-390-success.png`、`sync-390.png` |
+| 键盘/confirm 只走 moves | 单字母动作先判 moves；confirmAction 再校验；矩阵外键不弹框/不改状态；waiting 无 block | 交互断言 `keyboard and confirmAction are fenced by moves` |
+| NewTask 右侧 Sheet + 固定 footer | 桌面 480px 右侧 Sheet，body 滚动、footer 可见；手机全屏 100vh | `task-1440-dialog-new.png`、`task-390-dialog-new.png`；交互断言 footer 在视口内 |
+| 手机最后元素不被遮挡 | 内容 padding = tab 56 + Composer 高 + safe-area；最后动作/回复在 tab/Composer 之上；发送 44px | `task-390-composer.png`、`automation-390.png`、`sync-390.png`；交互断言几何 |
+| 错误保留数据 + 分页文案 | 队列保留筛选；任务/同步/自动化不写“你的筛选”；已加载数据标 stale | `queue-1440-error.png`、`task-1440-error.png`、`sync-1440-error.png`、`automation-1440-error.png`；交互断言 |
+| 无 board.read 404 隐藏入口 | shell 按 `board.read || task.read`；404 帧隐藏 02 rail/mobile tab；legacy 保留 | `queue-1440-noread-404.png`、`queue-390-noread-404.png`；交互断言 |
 | 镜像只读入口按事实 | `taskActions` 只看 `moves`/`mirror.readOnly`；不看 `source=` | `task-1440-mirror-readonly.png` |
 | NewTask 6 字段 | 频道/说明/标签/依赖/指派/立即认领；手机全屏 100vh | `task-1440-dialog-new.png`、`task-390-dialog-new.png`；交互断言 |
 | TUI 线框/键位/焦点/smoke | DESIGN §12.4 80×24/120×40 线框、焦点模型、8 条 smoke；**未执行** | DESIGN §12.4；§8 未验证 |
-| 访问 Sheet 无假编辑 | 无 API 时只显示关系与“不能在这里授权”，无输入/添加行 | `task-1440-dialog-access.png`；交互断言 |
+| 访问 Sheet 无假编辑 | 桌面右侧/手机底部 Sheet；无 API 时只显示关系与“不能在这里授权”，无输入/添加行 | `task-1440-dialog-access.png`；交互断言 |
 | 动作菜单由矩阵生成 | `MOVE_META` + `taskActions` 由 `moves` 生成 primary/secondary/overflow | 原型代码；所有任务帧 |
 | 768 折叠次要信息 | ≤1179 只留 频道/创建者；`详情` 展开事实/标签/外部副本；线程进首屏 | `task-768-claimed.png`、`task-1024.png`、`task-1180.png` |
+
+## 4b. P2 一并修复
+
+| P2 | 修复 |
+| --- | --- |
+| 手机主操作首屏 | 390 主操作在首屏内；设计改为“状态/租约在顶部，主操作在事实/依赖之后”，消除与实现冲突 |
+| 错误保留数据 | 见 §4；错误横幅 + 缓存时间，不整页清空 |
+| 批量重试 | 死信区 `重试全部`，成功后该 entry 死信归零 |
+| delivery 抽屉 | `查看投递` 右侧 Sheet（sync card / watcher），只读 target/root/status |
+| 同步停用 badge | entry 卡片 `已停用` 状态与 Switch 同步；健康行只统计 active |
+| 非 manage 失败文案 | 权限检查先于 error；非 manage 显示 `board.manage` 权限页，不显示“读取失败” |
+| Watcher 5s Undo 假 affordance | 删除“5 秒内可撤销”文案；只保留真实可逆的 Switch |
+| ShortcutHelp 对齐 | 实现 `[`/`]` 全量 tabs 与 `1–5` 子筛选；help 只列已实现键并注明 moves 限制 |
+| Access 用 Sheet | 访问关系改为桌面右侧/手机底部 Sheet |
+| token/epoch 文案 | UI 不再出现“epoch/token”；改为“认领凭据/旧认领” |
+| 归档只在 archive=1 | 普通队列排除 archived；archive 筛选才显示 |
+| REVIEW #824 指针 | 改为 `queue-1440-success.png` 的 #824 行（不再指向不存在的 assigned 帧） |
+| 生产 theme token 排期 | §5.2 明确：原型已改，生产 `web/theme.json` 单独 PR 修改 |
+| TUI smoke | DESIGN §12.4 明确“未执行”，不写成证据 |
 
 ## 5. 视觉与可测量自检
 
@@ -125,7 +149,7 @@
 
 ### 7.1 截图
 
-- 构建身份：`prototype/index.html` SHA-256 `46f6b0261846e63cf0e9cc934cb3b32ecf0e9b36fe64c9f02e8146ca974ea3f7`。
+- 构建身份：`prototype/index.html` SHA-256 `5660b319b7cf73becc504a1d6099d3386168c3474ebf2d718ed58227a3cbfd18`。
 - 92 张：1440×1000（63）、768×1000（6）、390×844（19）、1024×1000（2）、1180×1000（2）。
   **上一轮“50/53”计数已纠正为 manifest 实测的 63 张 1440。**
 - 生成：
@@ -136,7 +160,7 @@
 - `shots/manifest.json` 记录每张图的 name/query/width/height/bytes/sha1/overflow/errors；
   本次结果：`overflow:false` 92/92、`errors:[]` 92/92、SHA1 92/92 不同。
 - 非空白门限（本设计板定档）：数据页非主色像素 ≥5%，空/权限/迁移页 ≥4%；unique colors ≥100；
-  文件 ≥20 KB。实测最小：非主色 4.26%（`queue-390-noread-404.png`）、unique 203
+  文件 ≥20 KB。实测最小：非主色 4.18%（`queue-390-noread-404.png`）、unique 203
   （`queue-390-migrate.png`）、28 KB（`queue-390-noread-404.png`），全部通过。空白/黑图为 0% / 1 色，
   会被拦下。
 - 可复算边界：字体/Chrome 版本不同会改变字节；承诺结论级复算（同一矩阵、同一状态、同一
@@ -144,7 +168,7 @@
 
 ### 7.2 交互
 
-- `interact.mjs` 20 组断言全 PASS，生成 `interact.log`（含生成时间、Playwright 路径、errors=0）。
+- `interact.mjs` 28 组断言全 PASS，生成 `interact.log`（含生成时间、Playwright 路径、errors=0）。
 - 覆盖：分页、claim、complete+依赖就绪、answer、reply、tabs/filter、claim-lost takeover/force-release、
   read-only、watcher/schedule 开关、手机 44px Sheet、loading tabs/filter、stale 无实时、空态 badge 0、
   assigned 仅限、readonly 持有者、归档无动作、迁移/404、6 字段 NewTask、访问 Sheet 只读。
@@ -216,7 +240,7 @@ cd openspec/changes/keel-board-v1/ui/prototype
 # 92 张截图 + manifest.json
 PLAYWRIGHT_MODULE=/absolute/path/to/playwright/index.mjs node shoot.mjs
 
-# 20 组交互 + interact.log
+# 28 组交互 + interact.log
 PLAYWRIGHT_MODULE=/absolute/path/to/playwright/index.mjs node interact.mjs
 
 # 单张
@@ -227,9 +251,9 @@ PLAYWRIGHT_MODULE=/absolute/path/to/playwright/index.mjs node shoot.mjs --only q
 
 ## 12. OpenMotion
 
-- 项目 ID：`5e8f42d0-3237-4d8e-b37b-2676f5ea7866`
-- 本机预览：`http://127.0.0.1:63535/motion-api/design/raw/5e8f42d0-3237-4d8e-b37b-2676f5ea7866/index.html`
-- 本机编辑器：`http://127.0.0.1:63535/?page=design&scene=projects&designProject=5e8f42d0-3237-4d8e-b37b-2676f5ea7866`
+- 项目 ID：`92ebe246-f8ab-4acb-a76c-b96ee5d74b35`
+- 本机预览：`http://127.0.0.1:63535/motion-api/design/raw/92ebe246-f8ab-4acb-a76c-b96ee5d74b35/index.html`
+- 本机编辑器：`http://127.0.0.1:63535/?page=design&scene=projects&designProject=92ebe246-f8ab-4acb-a76c-b96ee5d74b35`
 - 这是设计工作站本机地址，不是公网交付链接；仓库 `prototype/index.html` 仍是唯一版本化源。
 
 ## 13. 文件清单

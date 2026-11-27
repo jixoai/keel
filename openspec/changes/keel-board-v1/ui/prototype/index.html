@@ -132,6 +132,7 @@ svg{display:block}
 .btn:focus-visible{outline:2px solid color-mix(in srgb,var(--foreground) 65%,transparent);outline-offset:0}
 .btn[disabled],.btn.is-disabled{opacity:.5;pointer-events:none}
 .btn[hidden]{display:none!important}
+[hidden]{display:none!important}
 .btn.primary{background:var(--primary);color:var(--primary-fg);border-color:var(--primary-edge);box-shadow:inset 0 1px 0 var(--primary-rim),inset 0 -1px 0 var(--primary-under),inset 0 0 0 1px var(--primary-inner),0 1px 2px var(--glass-contact)}
 .btn.secondary{background:var(--secondary);color:var(--secondary-fg);border-color:var(--glass-edge);box-shadow:inset 0 1px 0 var(--glass-control-rim)}
 .btn.outline{background:transparent;color:var(--foreground);border-color:var(--border);box-shadow:inset 0 1px 0 var(--glass-control-rim)}
@@ -211,7 +212,7 @@ svg{display:block}
   .brand span{display:none}
   .sys-btn.hide-mobile{display:none}
   .rail{display:none}
-  .paper-inner{padding:16px 16px 96px}
+  .paper-inner{padding:16px 16px calc(56px + env(safe-area-inset-bottom) + 48px)}
   .mobile-tabs{display:flex;position:fixed;left:0;right:0;bottom:0;height:calc(56px + env(safe-area-inset-bottom));padding-bottom:env(safe-area-inset-bottom);border-top:1px solid var(--border);background:color-mix(in srgb,var(--background) 88%,transparent);backdrop-filter:blur(24px) saturate(180%);z-index:40}
   .mobile-tab{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;color:var(--muted-fg);font-size:10px;min-height:44px}
   .mobile-tab .icon{width:18px;height:18px}
@@ -501,6 +502,8 @@ svg{display:block}
 .stale-banner{display:flex;align-items:center;gap:8px;padding:8px 12px;border-radius:8px;background:var(--warning-tint);border:1px solid color-mix(in srgb,var(--warning) 28%,transparent);font-size:12px;margin-bottom:12px}
 .stale-banner .icon{color:var(--warning)}
 .stale-banner .btn{margin-left:auto}
+.error-banner{background:var(--danger-tint);border-color:color-mix(in srgb,var(--destructive) 28%,transparent)}
+.error-banner .icon{color:var(--destructive)}
 .login-card{max-width:420px;margin:64px auto}
 
 /* ==========================================================================
@@ -512,6 +515,10 @@ svg{display:block}
 .dialog .desc{font-size:12px;line-height:1.6;color:var(--muted-fg)}
 .dialog .body{display:flex;flex-direction:column;gap:12px}
 .dialog .actions{display:flex;align-items:center;justify-content:flex-end;gap:8px;padding-top:4px}
+.scrim.sheet{align-items:stretch;justify-content:flex-end;padding:0}
+.dialog.sheet{width:480px;max-width:480px;height:100vh;max-height:100vh;border-radius:0;padding:24px;overflow:hidden}
+.dialog.sheet .body{flex:1;min-height:0;overflow:auto}
+.dialog.sheet .actions{flex:none;position:sticky;bottom:0;background:var(--popover);padding-top:12px}
 .dialog .actions .left{margin-right:auto}
 .form-row{display:flex;flex-direction:column;gap:6px}
 .form-row>label{font-size:12px;font-weight:500}
@@ -530,6 +537,7 @@ svg{display:block}
 @media (max-width:767px){
   .scrim{align-items:flex-end;padding:0}
   .dialog{width:100%;max-height:88vh;border-radius:16px 16px 0 0;padding:20px 16px calc(20px + env(safe-area-inset-bottom))}
+  .dialog.sheet{width:100%;max-width:100%;height:auto;max-height:88vh;border-radius:16px 16px 0 0;padding:20px 16px calc(20px + env(safe-area-inset-bottom))}
   .dialog.full{height:100vh;max-height:100vh;border-radius:0;padding-top:calc(20px + env(safe-area-inset-top))}
   .dialog.full .body{overflow:auto;flex:1}
   .dialog.full .actions{padding-bottom:calc(12px + env(safe-area-inset-bottom))}
@@ -563,7 +571,7 @@ svg{display:block}
 .proto-expand{position:fixed;left:12px;bottom:12px;z-index:91;height:32px;padding:0 10px;border-radius:8px;font-size:11px;font-family:var(--font-mono);letter-spacing:.06em;display:none}
 .proto.is-collapsed + .proto-expand{display:flex;align-items:center;gap:6px}
 body.no-chrome .proto,body.no-chrome .proto-expand{display:none!important}
-body.no-chrome .paper-inner{padding-bottom:32px}
+@media (min-width:768px){body.no-chrome .paper-inner{padding-bottom:32px}}
 @media (max-width:767px){
   .proto{bottom:calc(64px + env(safe-area-inset-bottom));overflow:auto;flex-wrap:wrap;max-width:calc(100vw - 24px)}
   .proto .hide-mobile{display:none}
@@ -674,7 +682,9 @@ body.no-chrome .paper-inner{padding-bottom:32px}
   .task-actions .btn.ghost{height:44px}
   .msg-body{font-size:14px}
   .reply .msg-body{font-size:13px}
-  .composer{position:sticky;bottom:calc(56px + env(safe-area-inset-bottom));z-index:30;margin:16px -16px -96px;border-radius:12px 12px 0 0;background:color-mix(in srgb,var(--background) 92%,transparent);backdrop-filter:blur(24px);padding:10px 16px calc(10px + env(safe-area-inset-bottom));border-left:0;border-right:0;border-bottom:0}
+  body[data-board-scene="task"] .paper-inner{padding-bottom:calc(56px + 128px + env(safe-area-inset-bottom) + 16px)}
+  .composer{position:sticky;bottom:calc(56px + env(safe-area-inset-bottom));z-index:30;margin:16px -16px 0;border-radius:12px 12px 0 0;background:color-mix(in srgb,var(--background) 92%,transparent);backdrop-filter:blur(24px);padding:10px 16px calc(10px + env(safe-area-inset-bottom));border-left:0;border-right:0;border-bottom:0}
+  .composer-bar .btn{height:44px}
   .composer textarea{min-height:48px}
   .composer-bar .hint{display:none}
   .composer-error .btn{height:44px}
@@ -703,6 +713,10 @@ body.no-chrome .paper-inner{padding-bottom:32px}
   .switch.warn[aria-checked="true"]::before{background:var(--warning);border-color:color-mix(in srgb,var(--warning) 40%,transparent)}
   .switch::after{top:15px;left:6px;z-index:1}
   .switch[aria-checked="true"]::after{transform:translateX(16px)}
+}
+@media (max-width:767px){
+  body .paper-inner{padding:16px 16px calc(56px + env(safe-area-inset-bottom) + 48px)}
+  body[data-board-scene="task"] .paper-inner{padding-bottom:calc(56px + 128px + env(safe-area-inset-bottom) + 16px)}
 }
 @media (prefers-reduced-motion:reduce){
   *,*::before,*::after{animation-duration:.001ms!important;animation-iteration-count:1!important;transition-duration:.001ms!important}
@@ -1089,6 +1103,7 @@ function sourceLine(t) {
 }
 function matches(t, ignoreTab = false) {
   const st = effective(t);
+  if (!S.archive && t.archived) return false;
   if (S.archive) {
     if (!t.archived) return false;
   } else if (!ignoreTab) {
@@ -1162,7 +1177,7 @@ function fixtureMoves(t) {
   } else if (st === "failed") {
     if (owner) moves.push("reopen", "cancel");
   } else if (st === "waiting") {
-    if (owner) moves.push("assign", "needs", "block", "cancel");
+    if (owner) moves.push("assign", "needs", "cancel");
   }
   return moves;
 }
@@ -1181,6 +1196,7 @@ function activeFilterCount() {
    ========================================================================== */
 function liveBadge() {
   if (S.state === "stale") return `<span class="badge warning">${icon("refresh")}重连中</span>`;
+  if (S.state === "error") return `<span class="badge destructive">${icon("alert")}更新失败</span>`;
   return `<span class="badge success">${icon("wifi")}实时</span>`;
 }
 function header(opts) {
@@ -1397,16 +1413,11 @@ function permissionState(kind) {
     actions: `<button class="btn outline" data-action="view" data-view="queue">返回队列</button><button class="btn ghost" data-action="copy-request">复制申请说明</button>`
   });
 }
-function errorState(opts) {
-  return emptyState({
-    icon: "alert", tone: "danger", title: opts.title || "没能读到任务队列",
-    description: `${esc(opts.message || "请求失败，队列没有加载出来。")} 你的筛选还在，可以重试。`,
-    requestId: opts.requestId || "req_8f2c1a",
-    actions: `<button class="btn outline" data-action="retry">${icon("refresh")}重试</button>${opts.back ? `<button class="btn ghost" data-action="view" data-view="queue">返回队列</button>` : ""}`
-  });
-}
 function staleBanner(text) {
   return `<div class="stale-banner">${icon("alert", "sm")}<span>${esc(text)}</span><button class="btn ghost sm" data-action="retry">立即重连</button></div>`;
+}
+function errorBanner(text) {
+  return `<div class="stale-banner error-banner">${icon("alert", "sm")}<span><b>更新失败</b> · ${esc(text)}</span><button class="btn ghost sm" data-action="retry">重试</button></div>`;
 }
 
 /* ==========================================================================
@@ -1421,8 +1432,6 @@ function renderQueue() {
   let content = "";
   if (S.state === "loading") {
     content = skeletonRows(window.innerWidth <= 767 ? 3 : 6);
-  } else if (S.state === "error") {
-    content = errorState({ title: "没能读到任务队列", message: "实时连接正常，但列表请求失败了。", requestId: "req_7a1e0c" });
   } else if (S.state === "permission") {
     content = permissionState("permission");
   } else if (S.state === "disabled") {
@@ -1445,7 +1454,8 @@ function renderQueue() {
   } else {
     content = `
       ${S.state === "stale" ? staleBanner("实时连接已断开，显示的是 14:02:11 的数据。恢复后会自动补齐。") : ""}
-      <div class="queue-meta"><span>${S.archive ? "归档任务 · 只读" : filtersActive ? "筛选后" : "打开的任务"}</span><span class="mono">本页 ${shown.length} 条 · ${S.archive ? "不实时" : S.state === "stale" ? "最后更新 14:02:11" : "实时更新"}</span></div>
+      ${S.state === "error" ? errorBanner("没能读到任务队列；当前显示 14:02:11 的缓存。你的筛选还在。") : ""}
+      <div class="queue-meta"><span>${S.archive ? "归档任务 · 只读" : filtersActive ? "筛选后" : "打开的任务"}</span><span class="mono">本页 ${shown.length} 条 · ${S.archive ? "不实时" : S.state === "stale" || S.state === "error" ? "最后更新 14:02:11" : "实时更新"}</span></div>
       <div class="column-head" aria-hidden="true"><span style="text-align:right">任务</span><span>状态</span><span>标题 / 频道 / 依赖</span><span style="text-align:right">期限 / 归属</span></div>
       <div class="queue-list" role="listbox" aria-label="任务队列">
         ${shown.map((t, i) => queueRow(t, i)).join("")}
@@ -1618,7 +1628,7 @@ function taskActions(t) {
   const moreBtn = overflow.length ? `<div class="filter-wrap"><button class="btn outline" data-action="menu" aria-haspopup="menu" aria-expanded="false">${icon("more")}更多</button><div class="menu glass-popover" role="menu">${overflow.join("")}</div></div>` : "";
   let note = "";
   if (has("complete")) note = `完成后，${TASKS.filter((x) => (x.needs || []).includes(t.id)).length} 个依赖任务会变为可认领。`;
-  else if (has("takeover")) note = "这是你认领的任务，但凭据不在本标签页；重新认领会作废旧 epoch 并签发新凭据。";
+  else if (has("takeover")) note = "这是你认领的任务，但凭据不在本标签页；重新认领会结束旧认领并签发新凭据。";
   else if (has("release.force") && !t.claim?.mine) note = "强制结束当前认领，任务回到可认领；写审计记录。";
   else if (has("claim")) note = "认领后开始计租约；到期未完成会自动回到可认领。";
   else if (has("unblock") || has("answer")) note = "回答或解除后按前置依赖回到可认领或等待依赖。";
@@ -1758,16 +1768,14 @@ function renderTask() {
   if (S.state === "loading") {
     return `${header({ kicker: "任务", title: t.title, icon: "inbox", purpose: "读取任务与线程…" })}${skeletonRows(window.innerWidth <= 767 ? 3 : 5)}`;
   }
-  if (S.state === "error") {
-    return `${header({ kicker: "任务", title: "没能读到这条任务", icon: "alert", purpose: "任务与线程没有加载出来。" })}${errorState({ title: "没能读到这条任务", message: "实时连接正常，但请求失败了。", requestId: "req_5c9d21", back: true })}`;
-  }
   if (S.state === "permission") {
     return `${header({ kicker: "任务", title: "任务不存在，或你没有访问这个频道", icon: "lock", purpose: "地址没有对应到你可读的任务。" })}${emptyState({ icon: "lock", title: "任务不存在，或你没有访问这个频道", description: "它可能已被删除，或频道权限已变化。为避免泄露任务是否存在，这里不区分两种情况。", actions: `<button class="btn outline" data-action="view" data-view="queue">返回队列</button>` })}`;
   }
   const src = sourceLine(t);
   return `
     ${taskHeader(t)}
-    ${S.state === "stale" ? staleBanner("更新失败，显示的是 14:02:11 的数据。操作前先刷新。") : ""}
+    ${S.state === "stale" ? staleBanner("实时连接已断开，显示的是 14:02:11 的数据。恢复后会自动补齐。") : ""}
+    ${S.state === "error" ? errorBanner("没能读到任务的最新状态；当前显示 14:02:11 的缓存。操作前先刷新。") : ""}
     <div class="task-grid">
       <div class="thread-col">
         <article class="root-message" id="root-message">
@@ -1815,6 +1823,7 @@ function syncCard(e) {
     <div class="sync-actions">
       ${e.dead ? `<button class="btn outline sm" data-action="retry-dead">${icon("rotate", "sm")}重试死信</button>` : ""}
       ${can("manage") ? `<button class="btn ghost sm" data-action="dialog" data-dialog="inbox" data-key="${e.key}">${icon("eye", "sm")}查看收件箱</button>` : ""}
+      ${e.targets.length ? `<button class="btn ghost sm" data-action="dialog" data-dialog="deliveries" data-key="${e.key}">${icon("git", "sm")}查看投递</button>` : ""}
       <span class="hint">${esc(e.note || "")}</span>
     </div>
   </article>`;
@@ -1824,11 +1833,6 @@ function renderSync() {
     return `${header({ kicker: "同步", title: "同步", icon: "refresh", purpose: "外部平台的线程与任务双向镜像。" })}
       ${viewTabs("sync")}
       ${skeletonRows(3)}`;
-  }
-  if (S.state === "error") {
-    return `${header({ kicker: "同步", title: "同步", icon: "refresh", purpose: "外部平台的线程与任务双向镜像。" })}
-      ${viewTabs("sync")}
-      ${errorState({ title: "没能读到同步状态", message: "健康数据没有加载出来；任务队列不受影响。", requestId: "req_sync_41", back: true })}`;
   }
   if (S.state === "permission" || !can("manage")) {
     return `${header({ kicker: "同步", title: "同步", icon: "refresh", purpose: "外部平台的线程与任务双向镜像。" })}${permissionState("permission")}`;
@@ -1844,10 +1848,11 @@ function renderSync() {
   return `${header({ kicker: "同步", title: "同步", icon: "refresh", purpose: "外部平台的线程与任务双向镜像。这里只看健康与故障处置；凭据与路由由部署配置管理。" })}
     ${viewTabs("sync")}
     ${S.state === "stale" ? staleBanner("同步状态更新失败，显示的是 14:02:11 的数据。任务队列不受影响。") : ""}
+    ${S.state === "error" ? errorBanner("没能读到同步状态；当前显示 14:02:11 的缓存。任务队列不受影响。") : ""}
     <div class="health-line">${icon("activity", "sm")}<span><b>${entries.length}</b> 个入口</span><span class="sep">·</span><span><b>${entries.filter((e) => e.enabled).length}</b> 个活跃</span><span class="sep">·</span><span>${invalid ? `<b style="color:var(--destructive)">${invalid}</b> 个凭据失效` : "无凭据失效"}</span><span class="sep">·</span><span>${dead ? `<b style="color:var(--warning)">${dead}</b> 条死信` : "无死信"}</span><span class="sep">·</span><span class="mono">最后投递 14:02:11</span></div>
     <div class="sync-list">${entries.map(syncCard).join("")}</div>
     <section class="dead-section" id="dead-section">
-      <div class="section-head"><h2>死信</h2><span class="badge ${DEAD.length ? "warning" : "secondary"}">${DEAD.length}</span><span class="hint">只阻塞该外部线程；其他线程和任务主路径继续。</span></div>
+      <div class="section-head"><h2>死信</h2><span class="badge ${DEAD.length ? "warning" : "secondary"}">${DEAD.length}</span><span class="hint">只阻塞该外部线程；其他线程和任务主路径继续。</span>${DEAD.length > 1 ? `<button class="btn outline sm" data-action="retry-all">${icon("rotate", "sm")}重试全部</button>` : ""}</div>
       <div class="dead-list"><div class="dead-head" aria-hidden="true"><span>事件</span><span>收到</span><span>尝试</span><span>错误</span><span>操作</span></div>${DEAD.length ? DEAD.map((d) => `<div class="dead-row"><span class="id">${esc(d.entry)}:${esc(d.id)}</span><span class="received">${esc(d.received)}</span><span class="att">尝试 ${d.attempts} 次</span><span class="err" title="${esc(d.error)}">${esc(d.error)}</span><button class="btn outline sm" data-action="retry-one" data-id="${esc(d.id)}">${icon("rotate", "sm")}重试</button></div>`).join("") : `<div class="dead-empty">没有死信 · 所有入站事件都已处理或正在重试。</div>`}</div>
     </section>`;
 }
@@ -1863,7 +1868,7 @@ function watcherRow(w) {
       <div class="auto-meta">最近 ${esc(w.last)} · 24h ${w.ok} 次 · ${w.fail} 失败 · ${w.dead} 死信</div>
       ${w.error ? `<div class="auto-error">${icon("alert", "xs")}最近一次失败：${esc(w.error)}</div>` : ""}
     </div>
-    <div class="auto-side">${w.dead ? `<button class="btn ghost sm" data-action="retry-dead">${icon("rotate", "sm")}重试</button>` : ""}<button class="switch" role="switch" aria-checked="${w.enabled}" aria-label="${w.enabled ? "停用" : "启用"} ${esc(w.id)}" data-action="toggle-watcher" data-id="${esc(w.id)}"></button></div>
+    <div class="auto-side">${w.dead ? `<button class="btn ghost sm" data-action="retry-dead">${icon("rotate", "sm")}重试</button>` : ""}${w.fail || w.dead ? `<button class="btn ghost sm" data-action="dialog" data-dialog="deliveries" data-key="${esc(w.id)}">${icon("git", "sm")}投递</button>` : ""}<button class="switch" role="switch" aria-checked="${w.enabled}" aria-label="${w.enabled ? "停用" : "启用"} ${esc(w.id)}" data-action="toggle-watcher" data-id="${esc(w.id)}"></button></div>
   </div>`;
 }
 function scheduleRow(s) {
@@ -1885,11 +1890,6 @@ function renderAutomation() {
       ${viewTabs("automation")}
       ${skeletonRows(3)}`;
   }
-  if (S.state === "error") {
-    return `${header({ kicker: "自动化", title: "自动化", icon: "activity", purpose: "监视器按事件触发已声明的动作；定时任务按计划发消息。" })}
-      ${viewTabs("automation")}
-      ${errorState({ title: "没能读到自动化状态", message: "监视器与定时任务没有加载出来；任务队列不受影响。", requestId: "req_auto_19", back: true })}`;
-  }
   if (S.state === "permission" || !can("manage")) {
     return `${header({ kicker: "自动化", title: "自动化", icon: "activity", purpose: "监视器按事件触发已声明的动作；定时任务按计划发消息。" })}${permissionState("permission")}`;
   }
@@ -1901,6 +1901,7 @@ function renderAutomation() {
   return `${header({ kicker: "自动化", title: "自动化", icon: "activity", purpose: "监视器按事件触发已声明的动作；定时任务按计划发消息。失败不阻塞任务主路径。" })}
     ${viewTabs("automation")}
     ${S.state === "stale" ? staleBanner("自动化状态更新失败，显示的是 14:02:11 的数据。任务队列不受影响。") : ""}
+    ${S.state === "error" ? errorBanner("没能读到自动化状态；当前显示 14:02:11 的缓存。任务队列不受影响。") : ""}
     <section class="auto-block glass-card" id="watchers-section">
       <div class="section-head"><h2>监视器</h2><span class="badge secondary">${WATCHERS.length}</span><span class="hint">动作与 URL 在部署时声明，界面不编辑任意运行时 URL。</span></div>
       ${WATCHERS.map(watcherRow).join("")}
@@ -1926,6 +1927,11 @@ function renderGone() {
 function render() {
   applyFixtureMoves();
   document.documentElement.dataset.theme = S.theme;
+  document.body.dataset.boardScene = S.scene;
+  const taskEntry = can("read") || !!me().taskRead;
+  document.querySelectorAll('[data-scene="queue"]').forEach((el) => {
+    if (el.classList.contains("rail-item") || el.classList.contains("mobile-tab")) el.hidden = !taskEntry;
+  });
   document.body.classList.toggle("no-chrome", !S.chrome);
   const activeView = S.scene === "sync" ? "sync" : S.scene === "automation" ? "automation" : "queue";
   let html = "";
@@ -1958,8 +1964,8 @@ function prop(n) { return n * 2; }
    Dialogs
    ========================================================================== */
 function dialogShell(title, desc, body, actions, opts = {}) {
-  return `<div class="scrim" data-action="scrim" role="presentation">
-    <div class="dialog glass-popover ${opts.full ? "full" : ""}" role="dialog" aria-modal="true" aria-labelledby="dlg-title" ${opts.id ? `id="${opts.id}"` : ""}>
+  return `<div class="scrim ${opts.sheet ? "sheet" : ""}" data-action="scrim" role="presentation">
+    <div class="dialog glass-popover ${opts.sheet ? "sheet" : ""} ${opts.full ? "full" : ""}" role="dialog" aria-modal="true" aria-labelledby="dlg-title" ${opts.id ? `id="${opts.id}"` : ""}>
       <h2 id="dlg-title">${esc(title)}</h2>
       ${desc ? `<p class="desc">${desc}</p>` : ""}
       <div class="body">${body}</div>
@@ -2026,7 +2032,7 @@ function renderDialog() {
       <div class="form-row"><label>4 · 前置依赖（可选，最多 20）</label><div class="check-list" style="max-height:160px">${candidates.map((x) => `<label class="check-row"><input type="checkbox" name="d-needs-new" value="${x.id}"><span class="id">#${x.id}</span><span class="title">${esc(x.title)}</span><span class="badge outline small">${esc(STATES[effective(x)].label)}</span></label>`).join("")}</div></div>
       <div class="form-row"><label for="d-assign-new">5 · 指派</label><div class="field"><select id="d-assign-new"><option>池中（任何有编辑权限的人）</option><option>陈墨（账号）</option><option>发布员·小铖（陈墨的 Bot）</option></select>${icon("chevron-down", "sm")}</div></div>
       <div class="form-row"><label>6 · 创建后立即认领</label><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><button class="switch" role="switch" aria-checked="${S.newClaim}" aria-label="创建后立即认领" data-action="toggle-new-claim"></button><div class="field" style="width:180px"><select id="d-lease"><option value="900">15 分钟</option><option value="1800">30 分钟</option><option value="3600">60 分钟</option></select>${icon("chevron-down", "sm")}</div><span class="hint">有前置依赖时先创建为等待依赖，不会立即认领。</span></div></div>`,
-      `${close}<button class="btn primary" data-action="confirm" data-kind="new">创建任务</button>`, { full: true });
+      `${close}<button class="btn primary" data-action="confirm" data-kind="new">创建任务</button>`, { full: true, sheet: true });
   } else if (S.dialog === "filters") {
     html = dialogShell("筛选任务", "选择后立即应用；清空会回到全部频道与全部条件。",
       `<div class="form-row"><label>频道</label><div class="field"><select id="f-channel"><option value="all">全部频道</option>${CHANNELS.map((c) => `<option value="${esc(c.path)}" ${S.filters.channel === c.path ? "selected" : ""}>${esc(c.label)}</option>`).join("")}</select>${icon("chevron-down", "sm")}</div></div>
@@ -2042,9 +2048,9 @@ function renderDialog() {
         <div class="check-row"><span class="id">审计组</span><span class="title">权限组</span><span class="badge outline small">可查看</span></div>
       </div>
       <div class="alert info">${icon("info", "sm")}<div class="alert-body">这个部署还没有提供频道访问管理接口，不能在这里授权；请找频道所有者或任务面管理员。</div></div>`,
-      `<button class="btn primary" data-action="dialog-close">关闭</button>`);
+      `<button class="btn primary" data-action="dialog-close">关闭</button>`, { sheet: true });
   } else if (S.dialog === "shortcuts") {
-    html = dialogShell("快捷键", "输入框聚焦时，单字母动作键失效；Cmd/Ctrl+Enter 始终发送回复。",
+    html = dialogShell("快捷键", "只列出已实现的键；单字母动作只在该任务 moves 中才触发，输入框聚焦时失效；Cmd/Ctrl+Enter 始终发送回复。",
       `<div class="facts" style="grid-template-columns:84px 1fr;gap:6px 12px">
         <dt>j / k</dt><dd>下一行 / 上一行</dd><dt>Enter</dt><dd>打开任务 / 触发按钮</dd>
         <dt>c</dt><dd>认领</dd><dt>r</dt><dd>续租</dd><dt>e</dt><dd>完成</dd><dt>f</dt><dd>失败</dd>
@@ -2053,6 +2059,12 @@ function renderDialog() {
         <dt>Esc</dt><dd>关闭 / 返回队列</dd><dt>?</dt><dd>本帮助</dd>
       </div>`,
       `<button class="btn primary" data-action="dialog-close">知道了</button>`);
+  } else if (S.dialog === "deliveries") {
+    const rows = SYNC.find((x) => x.key === S.deliveryKey)?.targets || [];
+    if (!rows.length && WATCHERS.some((w) => w.id === S.deliveryKey)) rows.push({ target: S.deliveryKey, root: "—", state: "retry" });
+    html = dialogShell(`投递记录 · ${S.deliveryKey || "slack"}`, "只读；同一 thread 的投递按事件顺序，不同 thread 并行。",
+      `<div class="dead-list" style="border:0">${rows.map((x) => `<div class="dead-row" style="grid-template-columns:1fr 90px 90px"><span class="id">${esc(x.target)}</span><span class="received">→ #${esc(x.root)}</span><span class="badge ${x.state === "synced" ? "success" : "info"} small">${x.state === "synced" ? "已投递" : "重试中"}</span></div>`).join("")}</div>`,
+      `${close}<button class="btn primary" data-action="dialog-close">关闭</button>`, { sheet: true });
   } else if (S.dialog === "inbox") {
     html = dialogShell("收件箱 · slack", "原始事件只对 board.manage 开放；字段已脱敏，不含正文与 secret。",
       `<div class="dead-list" style="border:0">
@@ -2061,7 +2073,7 @@ function renderDialog() {
       </div>`,
       `${close}<button class="btn primary" data-action="dialog-close">关闭</button>`);
   } else if (S.dialog === "force-release") {
-    html = dialogShell(`收回 #${t.id} 的认领？`, "强制结束当前认领（无需 token）；任务回到可认领，写审计记录。",
+    html = dialogShell(`收回 #${t.id} 的认领？`, "强制结束当前认领（无需认领凭据）；任务回到可认领，写审计记录。",
       `<div class="alert warning">${icon("alert", "sm")}<div class="alert-body">当前持有者会失去完成/续租能力；如果对方正在执行，请先沟通。</div></div>`,
       `<button class="btn outline" data-action="dialog-close">保持认领</button><button class="btn destructive" data-action="confirm" data-kind="force-release">${icon("lock")}收回认领</button>`);
   } else if (S.dialog === "confirm-disable-sync") {
@@ -2121,6 +2133,11 @@ function rerender() { render(); saveHistory(); }
 
 function confirmAction(kind) {
   const t = taskById(S.id) || TASKS[0];
+  const move = kind === "force-release" ? "release.force" : kind;
+  const taskKinds = ["complete", "fail", "block", "unblock", "reopen", "assign", "needs", "cancel", "answer", "release", "release.force"];
+  if (taskKinds.includes(move) && !(t.moves || []).includes(move)) {
+    closeDialog(); toast("这个动作当前不可用", "error"); return;
+  }
   if (kind === "complete") {
     const result = (document.getElementById("d-result")?.value || "").trim();
     t.state = "completed"; t.result = result || "已完成。"; t.claim = null; t.updated = "刚刚";
@@ -2273,6 +2290,7 @@ document.addEventListener("click", (event) => {
   }
   if (action === "takeover") {
     const t = taskById(el.dataset.id || S.id);
+    if (!(t.moves || []).includes("takeover")) { toast("当前不能重新认领", "error"); return; }
     t.epoch = (t.epoch || 0) + 1;
     t.state = "claimed";
     t.claim = { actor: me().actor, mine: true, until: Date.now() + 900000, lease: 900 };
@@ -2281,12 +2299,14 @@ document.addEventListener("click", (event) => {
   }
   if (action === "claim") {
     const t = taskById(el.dataset.id || S.id);
+    if (!(t.moves || []).includes("claim")) { toast("当前不能认领", "error"); return; }
     t.state = "claimed"; t.claim = { actor: me().actor, mine: true, until: Date.now() + 900000, lease: 900 }; t.updated = "刚刚";
     toast(`已认领 #${t.id} · 租约至 ${new Date(t.claim.until).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}`); rerender(); return;
   }
   if (action === "claim-options") { toast("认领时长：30 秒 / 15 分钟 / 60 分钟（原型）", "info"); return; }
   if (action === "renew") {
     const t = taskById(S.id);
+    if (!(t.moves || []).includes("renew")) { toast("当前不能续租", "error"); return; }
     if (t.claim) { t.claim.until = Date.now() + 900000; t.claim.lease = 900; toast("租约已延长 15 分钟"); rerender(); }
     return;
   }
@@ -2321,7 +2341,9 @@ document.addEventListener("click", (event) => {
   if (action === "load-more") { S.page = 1; rerender(); return; }
   if (action === "load-earlier") { S.replyMore = true; toast("已加载更早的回复", "info"); rerender(); return; }
   if (action === "reply") {
-    S.scene = "task"; document.getElementById("composer-input")?.focus(); return;
+    const t = taskById(S.id);
+    if (!(t?.moves || []).includes("reply")) { toast("当前不能回复", "error"); return; }
+    document.getElementById("composer-input")?.focus(); return;
   }
   if (action === "focus-composer") {
     document.getElementById("composer-input")?.focus(); return;
@@ -2333,7 +2355,9 @@ document.addEventListener("click", (event) => {
     S.sendFailed = false; S.composerError = false; sendReply(); return;
   }
   if (action === "dialog") {
-    S.dialog = el.dataset.dialog; render(); return;
+    S.dialog = el.dataset.dialog;
+    if (el.dataset.key) S.deliveryKey = el.dataset.key;
+    render(); return;
   }
   if (action === "dialog-close") { closeDialog(); return; }
   if (action === "scrim" && event.target === el) { closeDialog(); return; }
@@ -2362,11 +2386,24 @@ document.addEventListener("click", (event) => {
     closeDialog(); toast("已停用同步入口 · 已同步的副本保留"); rerender(); return;
   }
   if (action === "retry-dead") { toast("已重新排队死信 · 只影响该外部线程"); return; }
-  if (action === "retry-one") { toast("已重新排队 · 等待下次投递"); return; }
+  if (action === "retry-one") {
+    const at = DEAD.findIndex((d) => d.id === el.dataset.id);
+    if (at >= 0) {
+      const [dead] = DEAD.splice(at, 1);
+      const entry = SYNC.find((e) => e.key === dead.entry);
+      if (entry) entry.dead = Math.max(0, entry.dead - 1);
+    }
+    toast("已重新排队 · 等待下次投递"); rerender(); return;
+  }
+  if (action === "retry-all") {
+    DEAD.splice(0);
+    SYNC.forEach((e) => { e.dead = 0; });
+    toast("已重新排队全部死信"); rerender(); return;
+  }
   if (action === "toggle-watcher") {
     const w = WATCHERS.find((x) => x.id === el.dataset.id);
     w.enabled = !w.enabled;
-    toast(w.enabled ? `已启用 ${w.id}` : `已停用 ${w.id} · 5 秒内可撤销`, w.enabled ? "success" : "info");
+    toast(w.enabled ? `已启用 ${w.id}` : `已停用 ${w.id}`, w.enabled ? "success" : "info");
     rerender(); return;
   }
   if (action === "toggle-schedule") {
@@ -2388,6 +2425,7 @@ document.addEventListener("click", (event) => {
 
 function sendReply() {
   const t = taskById(S.id);
+  if (!(t.moves || []).includes("reply")) { toast("当前不能回复", "error"); return; }
   const input = document.getElementById("composer-input");
   if (input) S.draft = input.value;
   if (!S.draft.trim()) return;
@@ -2428,7 +2466,7 @@ document.addEventListener("change", (event) => {
   if (event.target.id === "p-scene") { S.scene = event.target.value; S.state = "success"; S.dialog = ""; rerender(); }
   if (event.target.id === "p-state") {
     S.state = event.target.value;
-    if (S.state === "migrate") S.me = "legacy";
+    if (S.state === "migrate" || S.me === "legacy") { S.state = "migrate"; S.me = "legacy"; }
     else if (S.state === "permission") S.me = "none";
     rerender();
   }
@@ -2459,25 +2497,49 @@ document.addEventListener("keydown", (event) => {
   if (event.key === "?") { S.dialog = "shortcuts"; render(); return; }
   if (S.scene === "queue") {
     const rows = visibleTasks();
+    const tabIds = ["open", "completed", "failed", "canceled", "all"];
+    const subIds = ["all", "waiting", "ready", "claimed", "blocked"];
     if (event.key === "j" || event.key === "ArrowDown") { event.preventDefault(); S.selected = Math.min(rows.length - 1, S.selected + 1); rerender(); return; }
     if (event.key === "k" || event.key === "ArrowUp") { event.preventDefault(); S.selected = Math.max(0, S.selected - 1); rerender(); return; }
+    if (event.key === "Home") { event.preventDefault(); S.selected = 0; rerender(); return; }
+    if (event.key === "End") { event.preventDefault(); S.selected = Math.max(0, rows.length - 1); rerender(); return; }
     if (event.key === "Enter" && rows[S.selected]) { S.scene = "task"; S.id = rows[S.selected].id; S.state = "success"; rerender(); return; }
-    if (event.key === "[") { S.tab = "open"; S.sub = "all"; rerender(); return; }
-    if (event.key === "]") { S.tab = "completed"; rerender(); return; }
+    if (event.key === "[" || event.key === "]") {
+      const at = Math.max(0, tabIds.indexOf(S.tab));
+      const next = event.key === "]" ? (at + 1) % tabIds.length : (at + tabIds.length - 1) % tabIds.length;
+      S.tab = tabIds[next]; S.sub = "all"; S.page = 0; rerender(); return;
+    }
+    if (/^[1-5]$/.test(event.key)) {
+      S.tab = "open"; S.sub = subIds[Number(event.key) - 1]; S.page = 0; rerender(); return;
+    }
     if (event.key === "/") { event.preventDefault(); S.dialog = "filters"; render(); return; }
     if (event.key === "c" && rows[S.selected]) {
       const t = rows[S.selected];
-      if (canClaim(t)) { t.state = "claimed"; t.claim = { actor: me().actor, mine: true, until: Date.now() + 900000, lease: 900 }; toast(`已认领 #${t.id}`); rerender(); }
-      else toast("这个任务当前不能认领", "error");
+      if ((t.moves || []).includes("claim")) {
+        t.state = "claimed"; t.claim = { actor: me().actor, mine: true, until: Date.now() + 900000, lease: 900 }; toast(`已认领 #${t.id}`); rerender();
+      } else toast("这个任务当前不能认领", "error");
       return;
     }
   }
   if (S.scene === "task") {
     const t = taskById(S.id);
     const map = { e: "complete", f: "fail", b: "block", a: "assign", n: "needs", x: "cancel", o: "reopen", u: "unblock" };
-    if (event.key === "r") { const b = document.querySelector('[data-action="renew"]'); if (b) b.click(); return; }
-    if (map[event.key]) { S.dialog = map[event.key]; render(); return; }
-    if (event.key === "c" && effective(t) === "ready") { document.querySelector('[data-action="claim"]')?.click(); return; }
+    if (event.key === "r") {
+      if ((t.moves || []).includes("renew")) document.querySelector('[data-action="renew"]')?.click();
+      else toast("当前不能续租", "error");
+      return;
+    }
+    if (map[event.key]) {
+      const move = map[event.key];
+      if ((t.moves || []).includes(move)) { S.dialog = move; render(); }
+      else toast("这个动作当前不可用", "error");
+      return;
+    }
+    if (event.key === "c") {
+      if ((t.moves || []).includes("claim")) document.querySelector('[data-action="claim"]')?.click();
+      else toast("当前不能认领", "error");
+      return;
+    }
   }
 });
 
@@ -2512,7 +2574,7 @@ function boot() {
   }
   document.getElementById("proto").classList.toggle("is-collapsed", window.innerWidth <= 767);
   if (S.state === "permission") S.me = "none";
-  if (S.state === "migrate") S.me = "legacy";
+  if (S.state === "migrate" || S.me === "legacy") { S.state = "migrate"; S.me = "legacy"; }
   if (p.get("facts") === "1") S.showFacts = true;
   if (p.get("archive") === "1") S.archive = true;
   render();

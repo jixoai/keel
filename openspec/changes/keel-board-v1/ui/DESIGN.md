@@ -293,6 +293,7 @@
   - `创建后立即认领`（Switch + 租约时长），仅 ready 且可认领时显示。
 - 提交：`创建任务`；成功 → 跳 `/board/:id` + toast；失败保留输入并显示服务端错误。
 - 六字段固定顺序：频道、说明、标签、前置依赖、指派、创建后立即认领（Switch + 租约时长）。
+- 桌面：右侧 480px Sheet，body 内部滚动，footer 固定可见；手机：全屏 100vh，footer 固定。
 - 手机：全屏 Sheet（100vh，圆角 0，底部固定提交 44px）；桌面：右侧 480px Sheet。
 - 有前置依赖时，`创建后立即认领`不生效，任务创建为 `waiting`；UI 明确说明，不静默忽略。
 
@@ -308,6 +309,7 @@
 #### 4.1.10 归档任务（只读）
 
 - 入口：队列筛选条的 `归档 N` 开关（`/board?archive=1`）；不是新页面、不是旧看板。
+- 归档任务**不出现在普通队列的 打开/完成/全部 tab**，只有 `archive=1` 才进入；避免终态列表被归档污染。
 - 内容：`source=superagent` 的归档 Ticket（适配器不得跳过归档），列表按最早优先，保留原 task ID。
 - 行：状态仍为终态 badge，额外 `归档` 来源标签；期限列 `只读归档 / 更新时间`。
 - 任务页：`只读归档` badge；无动作、无 Composer、无“重新打开/取消”；线程只读。
@@ -467,6 +469,7 @@
 - 路由：`#channel → board/channel` 或 `repo → board/channel`；不显示平台 token。
 - 目标：最多默认 3 行 + `展开全部`；每行 target mono、board 根 `#id`（可点）、状态、undelivered 数。
 - 动作：
+  - `查看投递`：右侧 Sheet 显示 target/root/状态/尝试/错误；只读。
   - `启用/停用` Switch（停用需 AlertDialog：`停用后不再收发外部消息；已同步的副本保留。`）。
   - `重试死信`（仅 dead > 0；跳/滚动到死信区并筛选该 entry）。
   - `查看收件箱`（manage；抽屉显示脱敏 raw：dedupe、received、status、attempts、last_error；不含
@@ -480,7 +483,8 @@
 
 - 区标题 `死信 · 2`；表格/列表列：`dedupe`（截断）、`收到`、`尝试`、`错误`、`入口`、`重试`。
 - 空：`没有死信 · 所有入站事件都已处理或正在重试`。
-- 重试：单条 `重试`（loading → `已重新排队` / 错误 inline）；批量 `重试全部` 需二次确认。
+- 重试：单条 `重试`（loading → `已重新排队` / 错误 inline）；批量 `重试全部` 一个按钮，成功后死信计数归零；
+  不做假进度。
 - 说明：`死信只阻塞该外部线程；其他线程和 board 主路径继续。`
 - 权限：仅 `board.manage`；普通成员看不到此区，也看不到 raw 收件箱。
 
@@ -516,7 +520,7 @@ triage-inbox     work/ 子树 · state=ready       插件：assign-by-label     
   event seq、状态、尝试、next_at、last_error）。
 - 说明：`动作与 URL 在部署时声明，界面不编辑任意运行时 URL。`
 - 一键停用不弹确认？停用监视器是“暂停自动化”，可逆；但会停止通知。设计：Switch 立即生效 +
-  toast `已停用 triage-inbox`，并提供 Undo（重新启用）5 秒。不弹模态，减少摩擦。
+  toast `已停用 triage-inbox`；不弹模态。**不显示未实现的 Undo 承诺**；开关可立即再切换。
 - 失败：`escalate-blocked` 一行 warning `最近一次失败：Bot 缺少频道 editor 权限`；Switch 仍可用。
 
 #### 4.5.3 定时任务（schedules）
@@ -825,7 +829,8 @@ BoardRoute
 | 取消 | 是 | Danger Dialog（必填原因） |
 | 回答 | 是 | Dialog（答案即回复） |
 | 停用同步 / 取消定时任务 | 是 | AlertDialog |
-| 启用/停用监视器、暂停定时任务 | 否（可逆） | Switch + toast + 5s Undo |
+| 所有任务动作 | — | 确认时再次校验 moves；不通过则关闭并提示“当前动作不可用” |
+| 启用/停用监视器、暂停定时任务 | 否（可逆） | Switch + toast；无假 Undo |
 | 重试死信 | 否（幂等） | Button + loading |
 
 ## 7. 状态模型（客户端）
@@ -922,8 +927,8 @@ deadlineText(task, now):
 | --- | --- | --- | --- | --- | --- |
 | 队列 | 桌面 6 行骨架/390 3 行 × 3 段；tabs + filter 保留 | 无打开任务 / 无匹配筛选 / 无可读频道 / 无归档任务 四种文案 | 错误 + request id + 重试；保留 tabs/筛选与已加载行（stale banner）；**不显示实时更新** | 无 board.read → 404；legacy task.read → 迁移页；board_disabled → 404；未登录 → 401 | 行 + 分页 + 实时 |
 | 任务 | 标题 + 根 + 回复骨架 | 无回复 ≠ 无任务；根永远在 | 读失败：返回队列 + 重试；已有内容标 stale | 不可读频道 404；只读 403 内容可见；归档/镜像只读 | 卡 + 线程 + 由 moves 渲染的动作 |
-| 同步 | 摘要 + 2 卡骨架；保留 view tabs | 同步未启用 / 无入口；badge 0 | 状态读取失败 + 重试；保留 view tabs/旧数据 | 无 board.manage | 入口/目标/死信 |
-| 自动化 | 列表骨架；保留 view tabs | 无监视器/定时任务；badge 0 | 读取失败 + 重试；保留 view tabs | 无 board.manage | 监视器/定时任务 |
+| 同步 | 摘要 + 2 卡骨架；保留 view tabs | 同步未启用 / 无入口；badge 0 | 状态读取失败 + 重试；保留 view tabs/旧数据并标 stale；**不写“你的筛选”** | 无 board.manage 优先显示权限页 | 入口/目标/死信 |
+| 自动化 | 列表骨架；保留 view tabs | 无监视器/定时任务；badge 0 | 读取失败 + 重试；保留 view tabs/旧数据并标 stale；**不写“你的筛选”** | 无 board.manage 优先显示权限页 | 监视器/定时任务 |
 
 ### 8.3 空态文案（三分别）
 
@@ -1051,6 +1056,8 @@ deadlineText(task, now):
 | `Space` | 切换 Switch | 自动化 |
 
 - 输入框/Textarea 聚焦时，单字母动作键失效；`Cmd/Ctrl+Enter` 仍有效。
+- **所有单字母动作先判 `TaskView.moves`**；`confirmAction` 在写入前再次校验。矩阵外的键不弹对话框、
+  不改状态；ShortcutHelp 只列已实现的键。
 - 每个动作按钮都有 `accessibilityLabel` 与可见文字；图标按钮（复制、更多、刷新）有 tooltip +
   aria-label；不依赖 hover。
 - 焦点顺序与视觉顺序一致；对话框打开时焦点进入标题/第一个字段，`Tab` 循环，关闭后回到触发按钮。
@@ -1091,11 +1098,12 @@ deadlineText(task, now):
   筛选 badge 显示活动条件数；Switch 用 44×44 命中区（视觉轨道仍 36×20）。
 - 390 loading：3 行骨架，每行 3 段（ID+状态 / 标题 / 元信息），tabs+filter 保留。
 - 任务摘要卡：
-  - 状态 + 主操作同一行；租约大字第二行。
+  - 顶部是状态 + 租约大字；主操作在首屏内（事实/依赖之后），不要求与状态同一行。
   - `详情` 展开事实；needs/blocked/result 默认展开。
-  - 次要动作 2 列；`更多` 打开 bottom sheet。
-- Composer 吸底：`position: sticky; bottom: 56px`（底部 tab 高度）+ safe-area；内容区底部 padding
-  等于 Composer 高度，避免最后一条回复被遮。
+  - 次要动作 2 列；`更多` 打开菜单（同一动作集合）。
+- Composer 吸底：`position: sticky; bottom: 56px`（底部 tab 高度）+ safe-area；内容区底部 padding =
+  `56px + Composer 高度（约 128px） + safe-area + 16px`，最后一条回复与最后动作必须能滚到
+  Tab/Composer 之上。Composer 的发送键 ≥44px。
 - 对话框：`Sheet` 从底部升起，圆角 16 顶部；标题 + 描述 + 字段 + 底部按钮（primary full width）。
   `新建任务` 手机端 **全屏 100vh**（圆角 0），字段/按钮 44px，底部提交固定。
 - 无横向滚动：`overflow-x: clip`；长频道路径/actor 名 `min-width: 0` + ellipsis；代码块横向滚动
@@ -1290,18 +1298,18 @@ open openspec/changes/keel-board-v1/ui/prototype/index.html
 ### 14.2 截图
 
 `prototype/shots/` 下的 PNG 由本地 Chrome + Playwright 生成，覆盖 390/768/1024/1180/1440 与五态/对话框/归档/迁移/404/浅色。
-构建身份：`index.html` SHA-256 `46f6b0261846e63cf0e9cc934cb3b32ecf0e9b36fe64c9f02e8146ca974ea3f7`。92 张截图（63×1440、6×768、19×390、2×1024、2×1180），含浅色五态、归档、迁移、404、强制收回；`shots/manifest.json` 与 `interact.log` 见 `prototype/`。可复算命令见 [`REVIEW.md`](REVIEW.md) §7。
+构建身份：`index.html` SHA-256 `5660b319b7cf73becc504a1d6099d3386168c3474ebf2d718ed58227a3cbfd18`。92 张截图（63×1440、6×768、19×390、2×1024、2×1180），含浅色五态、归档、迁移、404、强制收回；`shots/manifest.json` 与 `interact.log` 见 `prototype/`。可复算命令见 [`REVIEW.md`](REVIEW.md) §7。
 
 ### 14.3 设计工作台
 
-- **OpenMotion Design Studio**：项目 ID `5e8f42d0-3237-4d8e-b37b-2676f5ea7866`，v1 导入
+- **OpenMotion Design Studio**：项目 ID `92ebe246-f8ab-4acb-a76c-b96ee5d74b35`，v1 导入
   （`scenario=prototype`，entry `index.html`）。
-  - 本机预览：`http://127.0.0.1:63535/motion-api/design/raw/5e8f42d0-3237-4d8e-b37b-2676f5ea7866/index.html`
-  - 本机编辑器：`http://127.0.0.1:63535/?page=design&scene=projects&designProject=5e8f42d0-3237-4d8e-b37b-2676f5ea7866`
+  - 本机预览：`http://127.0.0.1:63535/motion-api/design/raw/92ebe246-f8ab-4acb-a76c-b96ee5d74b35/index.html`
+  - 本机编辑器：`http://127.0.0.1:63535/?page=design&scene=projects&designProject=92ebe246-f8ab-4acb-a76c-b96ee5d74b35`
   - 说明：以上是**设计工作站本机地址**，不是 Owner 交付链接；公网暴露需走 alpha/隧道。
   - 仓库内静态原型是唯一可版本化源；工作台副本是 v1 导入，后续修改以仓库为准再重新导入。
 - 静态原型是可复算的基线（`shoot.mjs` 逐 URL 生成 92 张截图 + `shots/manifest.json`；
-  `interact.mjs` 跑 20 组交互断言 + `interact.log`）。
+  `interact.mjs` 跑 28 组交互断言 + `interact.log`）。
 
 ## 15. 后端契约缺口（设计倒逼，待确认）
 
