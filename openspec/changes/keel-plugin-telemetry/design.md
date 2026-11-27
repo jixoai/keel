@@ -105,7 +105,7 @@ record → allowlist/redaction → bounded queue → batch → POST /v1/{traces,
 | 重试 | 5xx/429/网络 | 1s 起指数退避至 60s，最多 5 次；429 优先 `Retry-After` |
 | 熔断 | 连续 5 次失败 | 打开 30s，半开只放一个探针 |
 | 关机 | 5s deadline | flush 剩余；未发出计数，不阻塞进程退出 |
-| 去重 | 每 exporter 一个确认游标 | 同一 exporter 生命周期内已 2xx 的批次不再导出；崩溃重启 MAY 重复游标之前的批次（at-least-once） |
+| 去重 | 每 exporter 一个确认游标 | 同一 exporter 生命周期内已 2xx 的批次不再导出；无持久队列，崩溃重启丢失未发出批次且不重放（at-most-once across restart）；存活 exporter 的“已发送但响应丢失”重试可能重复（collector 按 trace/span id 幂等） |
 
 不使用 OpenTelemetry SDK（`scripts/binary-size.sh` 门）；OTLP/HTTP JSON 由现有零依赖
 adapter 承担。

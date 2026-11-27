@@ -165,7 +165,8 @@ manager 缓存（Runner/host 范围）、过期 pending 的后台清理。
 - `FindMetrics` 按 `(interval,name,kind,unit,attrs)` 聚合 count/sum/min/max；PI memory adapter 返回 count-one 原始行
   （PI 的 `StoredMetric` 形状本身是聚合形状，这是 adapter 实现差异）。原始顺序由 `Measurements()` 保留。
 - PI `telemetryNow()` 的 10ms 重锚时钟未移植；Go 用 `time.Now()` + 可注入 clock，µs 分辨率与顺序测试通过。
-- TS 编译期 schema 推导、render、OTLP/Prometheus adapter 未在本次范围。
+- TS 编译期 schema 推导、render、Prometheus adapter 未在本次范围；OTLP/HTTP JSON 由
+  `internal/telemetry` 的零依赖 exporter 管线承载（`keel.telemetry` 插件默认关闭）。
 
 ### 2.6 Extensions / Hooks（`internal/hooks/*_test.go`）
 
@@ -264,7 +265,8 @@ python3 scripts/summarize-conformance.py /tmp/keel-conformance-no-dsn.json
   扫描与 `AppendUsage` 调用属于 composition root，待 Runner 升级 change 接线。
 - **coding-agent 宿主**：extensions loader 的完整注册/信任模型、project-trust UI、交互式 `/mcp`
   菜单、TUI/CLI 不复刻（明确非目标）。
-- **telemetry**：OTLP / Prometheus adapter 未实现；`pi.ai.request` 请求级 span/token 指标
-  模块已交付（`internal/agent.NewObservedStream` + memory adapter 测试），composition root
-  待 Runner 接线；当前 run 级 span + run counter/duration 已在线。
+- **telemetry**：Prometheus adapter 未实现（`/metrics` 由 `internal/metrics` 独立拥有）；
+  OTLP/HTTP JSON 导出已实现为默认关闭的 `keel.telemetry` 插件（有界队列/批量/退避/脱敏/
+  采样）；`pi.ai.request` 请求级 span/token 指标模块已交付
+  （`internal/agent.NewObservedStream` + memory adapter 测试）。
 - 所有未覆盖项必须在报告里显式登记，不得用「已对齐」一笔带过。

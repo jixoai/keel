@@ -89,8 +89,8 @@
   收到 span/metric → 改采样 → 停用 → 零请求；日志/报告证据归档。
   > 按本次任务约定，以假 OTLP collector 的集成/E2E 测试代替（见 `evidence/fake-collector-e2e.txt`），
   > 未跑真实外部 collector 的浏览器 6 步。
-- [x] 7.5 进程 kill -9 后重启：未 flush 有界丢失；正常关机不重复已确认批次；崩溃后
-  可接受游标之前的 at-least-once 重复（文档写明）；无孤儿 goroutine。
+- [x] 7.5 进程 kill -9 后重启：未 flush 有界丢失；正常关机不重复已确认批次；无持久队列，
+  重启不重放（at-most-once across restart）；存活 exporter 的模糊重试可能重复；无孤儿 goroutine。
 
 ## 8. 验收与归档
 

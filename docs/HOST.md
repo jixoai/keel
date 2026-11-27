@@ -52,10 +52,14 @@ compaction:
   # ttlHours: 168             # 旧 checkpoint 投影过期；0 = 不过期；最近一个始终保留
   # manualCompact: true       # 是否允许 POST /v1/sessions/{id}/compact
 telemetry:
-  adapter: "memory"         # memory | none | otlp（otlp 需 endpoint，默认不连接）
-  # endpoint: "http://127.0.0.1:4318"   # OTLP/HTTP
-  # headers: { "authorization": "Bearer ${OTLP_TOKEN}" }
+  adapter: "memory"         # memory | none | otlp（otlp 需 endpoint；插件启用后才出网）
+  # endpoint: "https://collector.example:4318"   # OTLP/HTTP；http 仅限 loopback/私网
+  # headers: { "Authorization": "secret:OTLP_TOKEN" }  # 只接受 secret: 引用，禁止明文
   # serviceName: "keel"
+  # signals: ["traces", "metrics"]   # 省略 = traces+metrics；logs 需显式
+  # sampleRatio: 1.0                 # 0 只停 traces
+  # logRatio: 1.0                    # error 日志不受比例影响
+  # logMinLevel: "info"
 tools:
   # 省略 = 不过滤（推荐）；显式 [] = 不保留任何工具；尾部 * 为前缀通配（如 "keel_*"）
   allow: ["bash", "read", "write", "edit", "mcp", "skills", "tasks", "agent", "approve", "notify", "creation"]

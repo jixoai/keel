@@ -80,8 +80,10 @@ MUST NOT 留下 goroutine、连接或定时器。同一进程多 tenant 时 MUST
 绝对 http(s) endpoint；MUST NOT 引入 OpenTelemetry SDK。导出 MUST 周期批量（默认 512
 spans 或 1 MiB 或 5s），单 POST ≤4 MiB；队列 MUST 有字节与条数上限，满时丢最旧并计数。5xx/429/网络
 失败 MUST 指数退避（429 优先 `Retry-After`），连续失败 MUST 熔断；其它 4xx MUST 丢弃
-该批并计数，不无限重试。同一 exporter 生命周期内已收到 2xx 的批次 MUST NOT 再导出；崩溃
-重启 MAY 重复确认游标之前的批次（at-least-once），文档 MUST 写明。关机 MUST 在期限内
+该批并计数，不无限重试。同一 exporter 生命周期内已收到 2xx 的批次 MUST NOT 再导出；无持久
+队列时崩溃重启 MUST 丢失未发出批次且 MUST NOT 重放已确认批次（at-most-once across restart）；
+存活 exporter 的“已发送但响应丢失”重试 MAY 重复，collector 必须按 trace/span id 幂等。关机
+MUST 在期限内
 有界 flush，剩余丢弃并计数，MUST NOT 阻塞进程退出。
 
 #### Scenario: collector 不可用

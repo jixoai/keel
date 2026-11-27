@@ -320,8 +320,9 @@ PI telemetry 契约（`internal/telemetry`，见 `docs/PI-PARITY.md` §3）形�
 - **有界导出**：每 tenant 独立队列（8192 spans / 4096 metrics / 2048 logs / 8 MiB），
   512 spans 或 1 MiB 或 5s 批；单 POST ≤4 MiB 自动拆分；满时丢最旧并计数。5xx/429/网络
   指数退避（429 优先 `Retry-After`，上限 60s），最多 5 次；连续 5 次失败熔断 30s，半开
-  单探针；其它 4xx 丢弃该批并计数。已 2xx 的批次在同一 exporter 生命周期内不重复导出；
-  崩溃重启可能重发游标之前的批次（at-least-once）。
+  单探针；其它 3xx/4xx 丢弃该批并计数（不跟随 redirect）。已 2xx 的批次在同一 exporter
+  生命周期内不重复导出。**没有持久队列**：kill -9 丢失未 flush 批次且重启不重放；唯一重复
+  窗口是存活 exporter 的“已发送但响应丢失”重试（collector 需按 trace/span id 幂等）。
 - **采样/脱敏/基数**：span 头采样按 trace id 确定性（子 span 继承，0 只停 traces）；metric
   不采样；log 按级别 + 独立比例（error 不受比例影响）。首版无尾采样，错误 span 不保证被
   采样。所有信号经 allowlist（见 `internal/telemetry/signals.go`），metric 标签只允许有界

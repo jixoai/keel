@@ -107,9 +107,10 @@ curl -sS "$KEEL_URL/v1/telemetry/status" -H "X-Tenant-ID: $TENANT" | jq .
 - `metricSeriesDropped`：指标名未注册或 series 超过每族 1,000 / 全局 5,000；不是进程故障。
 - 停用：`POST /v1/plugins/keel.telemetry/disable`，先注销 exporter 再 5s 有界 flush；
   bundled 插件不可卸载（409 `ErrPluginBundled`）。
-- 关机：5s flush 期限内尽力导出；超时记录 `dropped` 后退出。进程被 `kill -9` 时未确认批次
-  丢失，重启后可能重发确认游标之前的批次（at-least-once），collector 侧需按
-  (traceId, spanId) 去重。
+- 关机：5s flush 期限内尽力导出；超时记录 `dropped` 后退出。没有持久队列：进程被 `kill -9`
+  时未确认/未发出的批次直接丢失，重启不会重放；同一存活 exporter 的“已发送但响应丢失”重试
+  可能让 collector 收到同一批次两次，collector 侧应按 (traceId, spanId) 幂等。
+  这不是跨重启的 at-least-once（重启不补发），文档按 at-most-once across restart 执行。
 - 旧 `KEEL_TELEMETRY=memory` 仍只启用内存 recorder；OTLP 是否出网只取决于插件是否启用。
 
 ## 租户 provisioning
