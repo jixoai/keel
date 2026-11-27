@@ -608,6 +608,29 @@ func TestOTLPExporterLogFiltering(t *testing.T) {
 	}
 }
 
+func TestOTLPExporterUnknownMetricWarningsAreBounded(t *testing.T) {
+	collector := newFakeCollector(t)
+	exporter, err := NewOTLPExporter(testExporterOptions(collector.server.URL, []Signal{SignalMetrics}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for index := 0; index < MaxWarnKeys+100; index++ {
+		exporter.ExportMetric(RecordedMeasurement{
+			Kind: MetricKindCounter, Name: fmt.Sprintf("unknown-%d", index), Value: 1,
+		})
+	}
+	status := exporter.Status()
+	if status.SeriesDropped != uint64(MaxWarnKeys+100) {
+		t.Fatalf("series dropped = %d", status.SeriesDropped)
+	}
+	exporter.mu.Lock()
+	warned := len(exporter.warned)
+	exporter.mu.Unlock()
+	if warned > MaxWarnKeys {
+		t.Fatalf("warn memo = %d, want <= %d", warned, MaxWarnKeys)
+	}
+}
+
 func TestOTLPExporterMetricShapeIsDeltaWithCorrectBuckets(t *testing.T) {
 	options := testExporterOptions("https://collector.example:4318", []Signal{SignalMetrics})
 	exporter, err := NewOTLPExporter(options)
