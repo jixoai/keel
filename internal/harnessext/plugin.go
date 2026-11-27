@@ -13,6 +13,7 @@ import (
 
 	"github.com/jixoai/keel/internal/agentcore"
 	"github.com/jixoai/keel/internal/pluginpkg"
+	"github.com/jixoai/keel/internal/telemetry"
 )
 
 // Agent plugin contract. A plugin is declarative: it declares what it provides,
@@ -83,6 +84,15 @@ type PluginEnv struct {
 	Subagents SubagentAPI
 	Partials  *PartialHub
 	Logger    *slog.Logger
+	// Telemetry is the process-level PI telemetry hub. A plugin that owns an
+	// exporter (keel.telemetry) registers it at Start and unregisters it at Stop;
+	// registration works after the service graph exists because the hub is
+	// resolved per record, not at boot.
+	Telemetry *telemetry.Hub
+	// Audit records one plugin-owned fact in the tenant's lifecycle audit trail.
+	// It is bound to this plugin's id/version and never carries payloads,
+	// secrets or header values.
+	Audit func(ctx context.Context, action, result string, detail map[string]any)
 }
 
 // Plugin is one agent extension.
@@ -130,6 +140,11 @@ type RuntimeOptions struct {
 	Tools     ToolSink
 	// Prompt publishes the active prompt sections (nil keeps them snapshot-only).
 	Prompt func(sections []PromptSection) error
+	// Telemetry is the PI telemetry hub handed to every plugin's Start.
+	Telemetry *telemetry.Hub
+	// Audit receives plugin-owned audit facts (the telemetry plugin's config
+	// application). Nil drops them; the host wires the plugin manager.
+	Audit  func(ctx context.Context, pluginID, version, action, result string, detail map[string]any)
 	Logger *slog.Logger
 	Now    func() time.Time
 }
@@ -173,6 +188,8 @@ type Runtime struct {
 	partials   *PartialHub
 	sink       ToolSink
 	promptSink func(sections []PromptSection) error
+	telHub     *telemetry.Hub
+	audit      func(ctx context.Context, pluginID, version, action, result string, detail map[string]any)
 	log        *slog.Logger
 	now        func() time.Time
 
@@ -216,6 +233,8 @@ func NewRuntime(opts RuntimeOptions) *Runtime {
 		partials:   opts.Partials,
 		sink:       opts.Tools,
 		promptSink: opts.Prompt,
+		telHub:     opts.Telemetry,
+		audit:      opts.Audit,
 		log:        opts.Logger,
 		now:        opts.Now,
 		plugins:    append([]*Plugin(nil), opts.Plugins...),
@@ -376,6 +395,13 @@ func (r *Runtime) activate(ctx context.Context, plugin *Plugin) (*activatedPlugi
 		Subagents: r.subagents,
 		Partials:  r.partials,
 		Logger:    r.log,
+		Telemetry: r.telHub,
+	}
+	if r.audit != nil {
+		pluginID, version := plugin.ID, plugin.Version
+		env.Audit = func(ctx context.Context, action, result string, detail map[string]any) {
+			r.audit(ctx, pluginID, version, action, result, detail)
+		}
 	}
 	if plugin.Start != nil {
 		// The lifecycle context, not the activation context: activation returns

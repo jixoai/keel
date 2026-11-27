@@ -120,7 +120,7 @@ func newMCPSurfaceHarness(t *testing.T) *mcpSurfaceHarness {
 	surface, err := newPluginSurface(ctx, rt, nil, serveOptions{
 		TenantID:    tenant,
 		PluginsRoot: t.TempDir(),
-	}, hooks, triggers, decisions, nil, nil, subagents, partials, nil, log)
+	}, hooks, triggers, decisions, nil, nil, subagents, partials, nil, nil, log)
 	if err != nil {
 		t.Fatalf("plugin surface: %v", err)
 	}

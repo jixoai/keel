@@ -373,6 +373,9 @@ var rules = []Rule{
 	route(http.MethodPost, "/v1/plugins/{id}/update", ModeKey, access.KeyPluginLifecycleInstall),
 	route(http.MethodGet, "/v1/plugins/{id}/bridge/state", ModeKey, access.KeyPluginRead),
 	route(http.MethodGet, "/v1/plugins/{id}/bridge/subscribe", ModeKey, access.KeyPluginRead),
+	// Telemetry status is a plugin read: it exposes the optional exporter's
+	// bounded state, never a header value or a record payload.
+	route(http.MethodGet, "/v1/telemetry/status", ModeKey, access.KeyPluginRead),
 	route(http.MethodGet, "/v1/plugins/{id}/bridge/approvals/{decisionId}", ModeKey, access.KeyPluginInvoke),
 	route(http.MethodPost, "/v1/plugins/{id}/bridge/call", ModeKey, access.KeyPluginInvoke),
 	route(http.MethodPost, "/v1/plugins/{id}/bridge/approve", ModeKey, access.KeyPluginInvoke),

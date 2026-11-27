@@ -1393,6 +1393,21 @@ func (m *Manager) auditLocked(ctx context.Context, audit AuditContext, id, versi
 	if m.store == nil {
 		return
 	}
+	if m.auditInfo != nil {
+		if extra := m.auditInfo(id); len(extra) > 0 {
+			merged := make(map[string]any, len(detail)+len(extra))
+			for key, value := range detail {
+				merged[key] = value
+			}
+			for key, value := range extra {
+				if _, exists := merged[key]; exists {
+					continue
+				}
+				merged[key] = value
+			}
+			detail = merged
+		}
+	}
 	actor := audit.Actor
 	if actor == "" {
 		actor = "unknown"

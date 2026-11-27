@@ -41,6 +41,10 @@ const (
 	PluginActionUninstall = "uninstall"
 	PluginActionUpdate    = "update"
 	PluginActionDiscover  = "discover"
+	// PluginActionConfigure records a plugin applying a configuration change
+	// (keel.telemetry: exporter/signals/sampling). It is an audit action only;
+	// no new lifecycle state is implied.
+	PluginActionConfigure = "configure"
 )
 
 // Plugin audit results.

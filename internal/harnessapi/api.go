@@ -46,6 +46,7 @@ import (
 	"github.com/jixoai/keel/internal/routemux"
 	"github.com/jixoai/keel/internal/store"
 	"github.com/jixoai/keel/internal/tasklog"
+	"github.com/jixoai/keel/internal/telemetry"
 )
 
 // Version is the HarnessAPI service version reported by /v1/capabilities.
@@ -135,6 +136,14 @@ type Config struct {
 	// PluginTools is the plugin UI bridge's tool invocation seam: calling a tool
 	// the plugin declared. Nil answers 501 on bridge calls.
 	PluginTools PluginToolInvoker
+	// Telemetry is the process-level PI telemetry hub behind
+	// GET /v1/telemetry/status. Nil answers 503 and reports the capability false.
+	Telemetry *telemetry.Hub
+	// TelemetryApproval renders the sanitized telemetry configuration for the
+	// keel.telemetry enable approval (exporter, signals, endpoint host, sample
+	// ratio, header names). It must never include a header value. Nil omits the
+	// lines from the question.
+	TelemetryApproval func() []string
 	// Theme is the host theme token document pushed to plugin UIs through the
 	// bridge state verb ("宿主把主题令牌下发给插件 UI"). The host process reads
 	// it from the web build (web/theme.json); nil omits it from the answer.
@@ -472,6 +481,7 @@ func (s *Server) routes() {
 	s.approvalRoutes()
 	s.notificationRoutes()
 	s.pluginRoutes()
+	s.mux.HandleFunc("GET /v1/telemetry/status", s.telemetryStatus)
 	// MCP Apps (P2.4): the fleet projection, the app catalogue and the
 	// document host. The httpapi edge keeps the more specific /v1/mcp routes
 	// (sign-in, callback) and forwards the rest here.
@@ -646,6 +656,7 @@ func (s *Server) capabilities(w http.ResponseWriter, _ *http.Request) {
 		// control. plugins.bridge is the plugin-UI capability channel.
 		"plugins.approvals": s.cfg.PluginManager != nil && s.cfg.Decisions != nil,
 		"plugins.bridge":    s.cfg.PluginManager != nil,
+		"telemetry.status":  s.cfg.Telemetry != nil,
 		"triggers":          s.cfg.Triggers != nil,
 		"subagents":         s.cfg.Subagents != nil,
 		// collab.modes is the read-only collaboration catalogue. It does not

@@ -38,6 +38,7 @@ func TestBuiltinManifestsDescribeTheirPlugins(t *testing.T) {
 		{BotPluginID, NewBotPlugin()},
 		{TeamBotPluginID, NewTeamBotPlugin()},
 		{SpillPluginID, NewSpillPlugin()},
+		{TelemetryPluginID, NewTelemetryPlugin(TelemetryPluginOptions{})},
 	}
 	if len(manifests) != len(pairs) {
 		t.Fatalf("embedded manifests = %d, registered builtins = %d", len(manifests), len(pairs))

@@ -210,6 +210,10 @@ type ManagerOptions struct {
 	Now         func() time.Time
 	// KnownHookEvent is the closed hook-event set (manifest validation).
 	KnownHookEvent func(string) bool
+	// AuditDetail augments every lifecycle audit row with plugin-specific,
+	// already-sanitized facts (keel.telemetry reports signals/endpoint
+	// host/sample ratio there; never header values or payloads). Nil adds none.
+	AuditDetail func(pluginID string) map[string]any
 }
 
 // managerEntry is the manager's view of one plugin: intent state, package
@@ -253,6 +257,7 @@ type Manager struct {
 	log       *slog.Logger
 	now       func() time.Time
 	knownHook func(string) bool
+	auditInfo func(string) map[string]any
 
 	mu       sync.Mutex
 	entries  map[string]*managerEntry
@@ -327,6 +332,7 @@ func NewPluginManager(opts ManagerOptions) (*Manager, error) {
 		log:       opts.Logger,
 		now:       opts.Now,
 		knownHook: opts.KnownHookEvent,
+		auditInfo: opts.AuditDetail,
 		entries:   make(map[string]*managerEntry),
 	}
 	// A loader that refuses permissions at its own boundary hands the manager

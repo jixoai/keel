@@ -154,6 +154,10 @@ type serveOptions struct {
 	// before servicehost.Boot (the host assembly captures the tool instances)
 	// and receives the orchestrator after newSuperagentRuntime succeeds.
 	SuperagentWorkerTools *superagentToolBackend
+	// TelemetryConfig is the tenant telemetry section in the plugin vocabulary.
+	// It is snapshotted after the config.toml overlay and shared by the service
+	// factory, the plugin factory, the approval preview and the status hub.
+	TelemetryConfig telemetry.Config
 }
 
 const (
@@ -642,6 +646,18 @@ func runServe(parent context.Context, opts serveOptions) error {
 	// and the media wiring: both resolve access.ref / access.env the same way,
 	// so "settings says available" and "the call authenticates" cannot drift.
 	tenantSecrets := tenantSecretLookup(st, secretBox, opts.TenantID, log)
+	// The process telemetry hub is created before Boot so the plugin surface and
+	// GET /v1/telemetry/status read the same object the run path writes to. The
+	// configured values are recorded for status/approval but stay inert: the
+	// OTLP exporter only exists while keel.telemetry is enabled.
+	opts.TelemetryConfig = servicehost.TelemetryPluginConfig(tenantCfg)
+	opts.TelemetryConfig.TenantID = opts.TenantID.String()
+	telemetryHub := telemetry.NewHub(telemetry.HubOptions{
+		TenantID: opts.TenantID.String(),
+		Base:     telemetry.NoopContext,
+		Logger:   log,
+	})
+	telemetryHub.Configure(telemetry.SummarizeConfig(opts.TelemetryConfig))
 	// mediaOptions is the product-layer media seam input for one generation.
 	// servicehost calls the builders per host assembly, so a settings write that
 	// changes a provider reaches the next run without a restart. The HTTP client
@@ -777,6 +793,10 @@ func runServe(parent context.Context, opts serveOptions) error {
 			Logger:    log,
 		},
 		Tenant: tenantCfg,
+		// The telemetry hub is process-level: its exporters survive a loadout
+		// reload, and the plugin/serve layers hold the same pointer.
+		TenantID:  opts.TenantID,
+		Telemetry: servicehost.TelemetryOptions{Hub: telemetryHub},
 		// The deployment document stays the boot fallback: a stored override
 		// whose credentials no longer resolve falls back to it instead of
 		// failing the deployment (the rejection is surfaced on the settings
@@ -1500,7 +1520,7 @@ func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, 
 	// typed unavailable refusal.
 	opts.SuperagentWorkerTools.set(superagentRuntime)
 
-	surface, err := newPluginSurface(ctx, rt, st, opts, hooks, triggers, decisions, approvals, notifications, subagents, partials, taskLog, log)
+	surface, err := newPluginSurface(ctx, rt, st, opts, hooks, triggers, decisions, approvals, notifications, subagents, partials, taskLog, tenantSecretLookup(st, secretBox, opts.TenantID, log), log)
 	if err != nil {
 		return nil, err
 	}
@@ -1606,7 +1626,13 @@ func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, 
 		// plugin UIs receive the host theme tokens with their state.
 		PluginAuditWriter: pluginAuditStore{store: st},
 		PluginTools:       &pluginToolBridge{index: toolIndex, manager: manager},
-		Theme:             theme,
+		// Telemetry status and the enable question read the process hub and the
+		// snapshotted tenant section; the question never renders header values.
+		Telemetry: rt.TelemetryHub(),
+		TelemetryApproval: func() []string {
+			return telemetryApprovalLines(opts.TelemetryConfig)
+		},
+		Theme: theme,
 		// Chat commands (change keel-plugin-commands): the durable invocation
 		// state machine is the same store; plugin commands come from the live
 		// manager registry and execute through Manager.InvokePluginTool (never
@@ -1863,7 +1889,7 @@ type pluginSurface struct {
 // It is a constructor rather than inline code so the serving path and its tests
 // share exactly this wiring: the model-side proof that a plugin's prompt
 // section reaches the system prompt rides on these sinks.
-func newPluginSurface(ctx context.Context, rt *servicehost.Runtime, persistence harnessext.PluginPersistence, opts serveOptions, hooks *harnessext.HookBus, triggers *harnessext.TriggerEngine, decisions *harnessext.DecisionBroker, approvals *approval.Service, notifications *notify.Service, subagents *harnessext.SubagentRunner, partials *harnessext.PartialHub, tasks *tasklog.Service, log *slog.Logger) (*pluginSurface, error) {
+func newPluginSurface(ctx context.Context, rt *servicehost.Runtime, persistence harnessext.PluginPersistence, opts serveOptions, hooks *harnessext.HookBus, triggers *harnessext.TriggerEngine, decisions *harnessext.DecisionBroker, approvals *approval.Service, notifications *notify.Service, subagents *harnessext.SubagentRunner, partials *harnessext.PartialHub, tasks *tasklog.Service, lookupSecret func(string) (string, bool), log *slog.Logger) (*pluginSurface, error) {
 	builtinManifests, err := builtin.Manifests()
 	if err != nil {
 		return nil, fmt.Errorf("builtin plugin manifests: %w", err)
@@ -1923,6 +1949,14 @@ func newPluginSurface(ctx context.Context, rt *servicehost.Runtime, persistence 
 				Logger:  log,
 			})
 		},
+		harnessext.TelemetryPluginID: func() *harnessext.Plugin {
+			return harnessext.NewTelemetryPlugin(harnessext.TelemetryPluginOptions{
+				TenantID:     opts.TenantID.String(),
+				Config:       opts.TelemetryConfig,
+				LookupSecret: lookupSecret,
+				Logger:       log,
+			})
+		},
 	}
 	builtins := make([]harnessext.Builtin, 0, len(builtinManifests))
 	for _, manifest := range builtinManifests {
@@ -1936,14 +1970,22 @@ func newPluginSurface(ctx context.Context, rt *servicehost.Runtime, persistence 
 		if !ok {
 			return nil, fmt.Errorf("no built-in plugin is registered for the manifest %s", manifest.ID)
 		}
-		defaultEnabled := manifest.ID != testkit.PluginID
+		defaultEnabled := manifest.ID != testkit.PluginID && manifest.ID != harnessext.TelemetryPluginID
 		builtins = append(builtins, harnessext.Builtin{Manifest: manifest, Factory: factory, DefaultEnabled: defaultEnabled})
 	}
 	// The tool index mirrors the dynamic tool set the plugin runtime publishes:
 	// the plugin UI bridge calls a plugin's own tools through it, so a bridge call
 	// executes exactly what the model would execute.
 	toolIndex := newProductToolIndex()
-	plugins := newPluginRuntime(rt, toolIndex, hooks, triggers, decisions, subagents, partials, log)
+	auditSink := func(ctx context.Context, pluginID, version, action, result string, detail map[string]any) {
+		if pluginManager == nil {
+			return
+		}
+		tenantID := opts.TenantID
+		pluginManager.RecordAudit(ctx, harnessext.AuditContext{TenantID: &tenantID, Actor: "system:plugin-start"},
+			pluginID, version, action, result, detail)
+	}
+	plugins := newPluginRuntime(rt, toolIndex, hooks, triggers, decisions, subagents, partials, auditSink, log)
 	manager, err := harnessext.NewPluginManager(harnessext.ManagerOptions{
 		// Plugin install/state/audit is tenant-scoped (keel-creation). `keel serve`
 		// is a single-tenant process, so this is the one tenant and the only code
@@ -1964,6 +2006,34 @@ func newPluginSurface(ctx context.Context, rt *servicehost.Runtime, persistence 
 		},
 		KeelVersion: version,
 		Logger:      log,
+		// Telemetry lifecycle rows carry the exporter/signals/endpoint/sampling
+		// projection; header values and payloads never enter audit.
+		AuditDetail: func(pluginID string) map[string]any {
+			hub := rt.TelemetryHub()
+			if pluginID != harnessext.TelemetryPluginID || hub == nil {
+				return nil
+			}
+			status := hub.Status()
+			detail := map[string]any{
+				"telemetryState":   string(status.State),
+				"adapter":          status.Config.Adapter,
+				"signals":          telemetrySignalStrings(status.Signals),
+				"endpointHost":     status.EndpointHost,
+				"sampleRatio":      status.SampleRatio,
+				"logRatio":         status.LogRatio,
+				"headerNames":      status.HeaderNames,
+				"headerCount":      status.HeaderCount,
+				"queueDepth":       status.QueueDepth,
+				"dropped":          status.Dropped,
+				"exported":         status.Exported,
+				"lastErrorClass":   status.LastErrorClass,
+				"metricSeriesDrop": status.MetricSeriesDropped,
+			}
+			if status.Reason != "" {
+				detail["reason"] = status.Reason
+			}
+			return detail
+		},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("plugin manager: %w", err)
@@ -1990,13 +2060,18 @@ func newPluginSurface(ctx context.Context, rt *servicehost.Runtime, persistence 
 //
 // The prompt sink is what makes a plugin's PromptSections reach the model:
 // RuntimeOptions.Prompt is the runtime's seam, and this is its wiring.
-func newPluginRuntime(rt *servicehost.Runtime, toolIndex *productToolIndex, hooks *harnessext.HookBus, triggers *harnessext.TriggerEngine, decisions *harnessext.DecisionBroker, subagents *harnessext.SubagentRunner, partials *harnessext.PartialHub, log *slog.Logger) *harnessext.Runtime {
+func newPluginRuntime(rt *servicehost.Runtime, toolIndex *productToolIndex, hooks *harnessext.HookBus, triggers *harnessext.TriggerEngine, decisions *harnessext.DecisionBroker, subagents *harnessext.SubagentRunner, partials *harnessext.PartialHub, audit func(ctx context.Context, pluginID, version, action, result string, detail map[string]any), log *slog.Logger) *harnessext.Runtime {
 	return harnessext.NewRuntime(harnessext.RuntimeOptions{
 		Hooks:     hooks,
 		Triggers:  triggers,
 		Decisions: decisions,
 		Subagents: subagents,
 		Partials:  partials,
+		// The telemetry hub is the same process object the run path uses; a
+		// plugin registering an exporter later is exactly the late-registration
+		// seam the hub exists for.
+		Telemetry: rt.TelemetryHub(),
+		Audit:     audit,
 		Tools: func(tools []agentcore.AgentTool) error {
 			toolIndex.publish(tools)
 			return rt.RefreshProductTools(tools)
@@ -2005,6 +2080,37 @@ func newPluginRuntime(rt *servicehost.Runtime, toolIndex *productToolIndex, hook
 			return rt.RefreshProductPrompt(pluginPromptSections(sections))
 		},
 	})
+}
+
+func telemetrySignalStrings(signals []telemetry.Signal) []string {
+	out := make([]string, 0, len(signals))
+	for _, signal := range signals {
+		out = append(out, string(signal))
+	}
+	return out
+}
+
+// telemetryApprovalLines renders the sanitized telemetry configuration for the
+// keel.telemetry enable question: exporter, signals, endpoint host, sampling and
+// header names/count. It never renders a header value or a secret reference.
+func telemetryApprovalLines(config telemetry.Config) []string {
+	summary := telemetry.SummarizeConfig(config)
+	lines := []string{
+		"exporter=" + summary.Adapter,
+		"signals=" + strings.Join(telemetrySignalStrings(summary.Signals), ","),
+		"sampleRatio=" + telemetry.FormatRatio(summary.SampleRatio),
+		"logRatio=" + telemetry.FormatRatio(summary.LogRatio),
+	}
+	if summary.EndpointHost != "" {
+		lines = append(lines, "endpointHost="+summary.EndpointHost)
+	}
+	if len(summary.HeaderNames) > 0 {
+		lines = append(lines, "headers="+strings.Join(summary.HeaderNames, ","))
+	}
+	if !summary.Valid && summary.Reason != "" {
+		lines = append(lines, "configProblem="+summary.Reason)
+	}
+	return lines
 }
 
 // pluginPromptSections projects the plugin runtime's published prompt sections

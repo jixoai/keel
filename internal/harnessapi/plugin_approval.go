@@ -120,6 +120,10 @@ type pluginApprovalAsk struct {
 	// question (change keel-plugin-commands): every published name with its
 	// danger class and client targets.
 	Commands []string
+	// Telemetry renders the keel.telemetry export configuration for the enable
+	// question: exporter/signals/endpoint host/sampling/header names. Values are
+	// never included.
+	Telemetry []string
 }
 
 // pluginWriteContext is the single entrance of every approval-gated lifecycle
@@ -424,6 +428,9 @@ func pluginApprovalPrompt(ask pluginApprovalAsk) string {
 		// name, danger class and targets are part of what is being approved.
 		prompt += "\nThis plugin will add commands: " + strings.Join(ask.Commands, "; ") + "."
 	}
+	if len(ask.Telemetry) > 0 {
+		prompt += "\nTelemetry export: " + strings.Join(ask.Telemetry, "; ") + "."
+	}
 	return prompt
 }
 
@@ -653,8 +660,30 @@ func (s *Server) pluginIDApprovalAsk(action, id string) pluginApprovalAsk {
 	if version != "" {
 		label = id + " " + version
 	}
-	return pluginApprovalAsk{Action: action, Target: id, Label: label, PluginID: id,
+	ask := pluginApprovalAsk{Action: action, Target: id, Label: label, PluginID: id,
 		Version: version, ContentHash: contentHash, Claims: claims, Commands: commands}
+	if id == harnessext.TelemetryPluginID && s.cfg.TelemetryApproval != nil {
+		ask.Telemetry = sanitizeApprovalLines(s.cfg.TelemetryApproval())
+	}
+	return ask
+}
+
+// sanitizeApprovalLines bounds and filters the telemetry approval lines. They
+// are configuration metadata (never a header value); the cap keeps a pathological
+// summary from flooding the decision UI.
+func sanitizeApprovalLines(lines []string) []string {
+	out := make([]string, 0, len(lines))
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		out = append(out, boundApprovalText(line, 512))
+		if len(out) >= 16 {
+			break
+		}
+	}
+	return out
 }
 
 // pluginApprovalSession is the session namespace plugin approvals live in.

@@ -230,7 +230,27 @@ type Provides struct {
 	// implementation. The action set itself is owned by the tool surface; a
 	// backend cannot add an action name.
 	Backends []BackendDecl `yaml:"backends,omitempty" json:"backends,omitempty"`
+	// Telemetry declares the telemetry exporter capability (change
+	// keel-plugin-telemetry). It is a closed vocabulary: one exporter protocol
+	// and the three PI signals. A plugin without it cannot register an exporter.
+	Telemetry *TelemetryDecl `yaml:"telemetry,omitempty" json:"telemetry,omitempty"`
 }
+
+// TelemetryDecl is the `provides.telemetry` block.
+type TelemetryDecl struct {
+	// Exporters are the exporter protocols the plugin can drive. The closed set
+	// is otlp-http (the zero-dependency adapter); OTLP/gRPC and vendor SDKs are
+	// out of scope.
+	Exporters []string `yaml:"exporters,omitempty" json:"exporters,omitempty"`
+	// Signals are the PI signal families the exporter can carry.
+	Signals []string `yaml:"signals,omitempty" json:"signals,omitempty"`
+}
+
+// TelemetryExporters is the closed exporter set.
+func TelemetryExporters() []string { return []string{"otlp-http"} }
+
+// TelemetrySignals is the closed signal set (mirrors internal/telemetry).
+func TelemetrySignals() []string { return []string{"traces", "metrics", "logs"} }
 
 // SlotForm is one contribution carrier a slot may accept.
 type SlotForm string
@@ -980,6 +1000,7 @@ func (m *Manifest) validateProvides(errs *fieldSet, env Environment, validKind b
 	m.validateSlots(errs)
 	m.validateBackends(errs, env)
 	m.validateContributions(errs, env)
+	m.validateTelemetry(errs)
 	m.validateExtensibility(errs, env)
 	// An iframe contribution is an HTML surface: the package must declare the
 	// resource entry it is loaded from (spec: webview 的两种承载). This is
@@ -1003,6 +1024,56 @@ func (m *Manifest) validateProvides(errs *fieldSet, env Environment, validKind b
 	if len([]rune(m.Provides.UI.Title)) > 128 {
 		errs.add("provides.ui.title", "title must be at most 128 characters")
 	}
+}
+
+// validateTelemetry checks the closed `provides.telemetry` vocabulary. The set
+// is deliberately small: one zero-dependency exporter protocol and the three PI
+// signals. A typo must fail at install, not silently advertise a capability the
+// host cannot register.
+func (m *Manifest) validateTelemetry(errs *fieldSet) {
+	declaration := m.Provides.Telemetry
+	if declaration == nil {
+		return
+	}
+	if len(declaration.Exporters) == 0 {
+		errs.add("provides.telemetry.exporters", "a telemetry plugin must declare at least one exporter")
+	}
+	exporters := map[string]bool{}
+	for index, exporter := range declaration.Exporters {
+		field := fmt.Sprintf("provides.telemetry.exporters[%d]", index)
+		switch {
+		case !manifestContains(TelemetryExporters(), exporter):
+			errs.add(field, "exporter %q is not one of %s", exporter, strings.Join(TelemetryExporters(), "|"))
+		case exporters[exporter]:
+			errs.add(field, "exporter %q is declared twice", exporter)
+		default:
+			exporters[exporter] = true
+		}
+	}
+	if len(declaration.Signals) == 0 {
+		errs.add("provides.telemetry.signals", "a telemetry plugin must declare at least one signal")
+	}
+	signals := map[string]bool{}
+	for index, signal := range declaration.Signals {
+		field := fmt.Sprintf("provides.telemetry.signals[%d]", index)
+		switch {
+		case !manifestContains(TelemetrySignals(), signal):
+			errs.add(field, "signal %q is not one of %s", signal, strings.Join(TelemetrySignals(), "|"))
+		case signals[signal]:
+			errs.add(field, "signal %q is declared twice", signal)
+		default:
+			signals[signal] = true
+		}
+	}
+}
+
+func manifestContains(values []string, value string) bool {
+	for _, candidate := range values {
+		if candidate == value {
+			return true
+		}
+	}
+	return false
 }
 
 // validateSlots checks `provides.slots`: namespaced ids owned by this manifest,

@@ -47,7 +47,7 @@ func (t *TurnTelemetry) StartSpan(options telemetry.SpanOptions, callback func(t
 	if t.Base == nil {
 		return callback(&nopSpan{})
 	}
-	if options.Name != RunSpanName || t.Hooks == nil {
+	if options.Name != RunSpanName {
 		return t.Base.StartSpan(options, callback)
 	}
 	tenantID := attributeString(options.Attributes, "tenant")
@@ -57,7 +57,7 @@ func (t *TurnTelemetry) StartSpan(options telemetry.SpanOptions, callback func(t
 	if sessionID != "" {
 		runID = fmt.Sprintf("%s-%d", sessionID, started.UnixMilli())
 	}
-	if tenantID != "" {
+	if tenantID != "" && t.Hooks != nil {
 		payload := HookPayload{
 			Event:     HookTurnStarted,
 			TenantID:  tenantID,
@@ -95,7 +95,30 @@ func (t *TurnTelemetry) StartSpan(options telemetry.SpanOptions, callback func(t
 		// No error text: a provider failure message may echo request details, and
 		// hook payloads are built from identifiers only by contract. The status
 		// and the hook counters make the failure visible; the log carries detail.
-		t.Hooks.Emit(payload)
+		if t.Hooks != nil {
+			t.Hooks.Emit(payload)
+		}
+		// The telemetry log channel carries only a bounded event code and the
+		// same identity the run span has; no free text, no error message.
+		if sink, ok := t.Base.(telemetry.LogSink); ok {
+			level := telemetry.LogLevelInfo
+			if status == "error" {
+				level = telemetry.LogLevelError
+			}
+			sink.Log(telemetry.LogRecord{
+				Level:  level,
+				Event:  "turn.finished",
+				Logger: "harnessext.turn",
+				Attributes: telemetry.SpanAttributes{
+					"tenant":   tenantID,
+					"session":  sessionID,
+					"run":      runID,
+					"status":   status,
+					"model":    attributeString(options.Attributes, "model"),
+					"provider": attributeString(options.Attributes, "provider"),
+				},
+			})
+		}
 	}
 	return err
 }

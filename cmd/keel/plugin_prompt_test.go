@@ -30,6 +30,53 @@ import (
 	"github.com/jixoai/keel/internal/store"
 )
 
+func TestTelemetryPluginShipsDisabledWithProvidesTelemetry(t *testing.T) {
+	ctx := context.Background()
+	log := discardLogger()
+	rt := pluginPromptTestRuntime(t)
+	hooks := harnessext.NewHookBus(harnessext.HookBusOptions{Logger: log})
+	decisions := harnessext.NewDecisionBroker(harnessext.DecisionBrokerOptions{Logger: log})
+	partials := harnessext.NewPartialHub()
+	triggers := harnessext.NewTriggerEngine(harnessext.TriggerEngineOptions{Hooks: hooks, Logger: log})
+	subagents := harnessext.NewSubagentRunner(harnessext.SubagentOptions{Hooks: hooks, Logger: log})
+	t.Cleanup(func() {
+		triggers.Close()
+		decisions.Close()
+		hooks.Close()
+	})
+	surface, err := newPluginSurface(ctx, rt, nil, serveOptions{
+		TenantID:    uuid.New(),
+		PluginsRoot: t.TempDir(),
+	}, hooks, triggers, decisions, nil, nil, subagents, partials, nil, nil, log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { surface.runtime.Close(context.Background()) })
+	var telemetryView *harnessext.PluginView
+	for index := range surface.manager.Snapshot().Plugins {
+		view := surface.manager.Snapshot().Plugins[index]
+		if view.ID == harnessext.TelemetryPluginID {
+			telemetryView = &view
+		}
+	}
+	if telemetryView == nil {
+		t.Fatal("keel.telemetry is not registered")
+	}
+	if !telemetryView.Bundled {
+		t.Fatal("keel.telemetry is not bundled")
+	}
+	if telemetryView.State != harnessext.LifecycleInstalled {
+		t.Fatalf("default state = %s, want installed (disabled by default)", telemetryView.State)
+	}
+	provides := telemetryView.Provides.Telemetry
+	if provides == nil || len(provides.Exporters) != 1 || provides.Exporters[0] != "otlp-http" {
+		t.Fatalf("provides.telemetry = %#v", provides)
+	}
+	if len(provides.Signals) != 3 {
+		t.Fatalf("provides.telemetry.signals = %v", provides.Signals)
+	}
+}
+
 func TestPluginPromptReachesSystemPrompt(t *testing.T) {
 	ctx := context.Background()
 	log := discardLogger()
@@ -49,7 +96,7 @@ func TestPluginPromptReachesSystemPrompt(t *testing.T) {
 	surface, err := newPluginSurface(ctx, rt, nil, serveOptions{
 		TenantID:    uuid.New(),
 		PluginsRoot: t.TempDir(),
-	}, hooks, triggers, decisions, nil, nil, subagents, partials, nil, log)
+	}, hooks, triggers, decisions, nil, nil, subagents, partials, nil, nil, log)
 	if err != nil {
 		t.Fatalf("plugin surface: %v", err)
 	}

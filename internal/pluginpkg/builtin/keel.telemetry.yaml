@@ -1,0 +1,17 @@
+id: keel.telemetry
+version: 1.0.0
+kind: in-process
+description: "Optional OTLP/HTTP JSON exporter for PI telemetry signals (traces, metrics, logs). Disabled by default; enabling requires the plugin lifecycle approval. When disabled, configured telemetry stays inert and no collector request is made."
+engines:
+  keel: ">=0.1.0 <1.0.0"
+provides:
+  telemetry:
+    exporters:
+      - otlp-http
+    signals:
+      - traces
+      - metrics
+      - logs
+permissions: {}
+source:
+  type: builtin
