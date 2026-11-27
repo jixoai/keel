@@ -16,9 +16,10 @@ represented as passing in the UI or evidence.
 - a 24h failure count.
 
 The sync page therefore shows entries, inbox/outbox depth, dead letters,
-outbound failures, retries and credential state, and labels targets, time lag
-and 24h counts as **unknown** (`lag: null` from the mount layer). It does not
-synthesize values. Tasks 14.2 and 15.5 remain partially checked with this note.
+outbound failures, retries and credential state. It does not render the
+unavailable target list, time-lag age or 24h failure count, and one neutral
+note says the backend does not report them; the page never synthesizes a
+value. Tasks 14.2 and 15.5 remain partially checked with this note.
 Adding these fields requires a board module API change (v0.1.x) and is deferred
 to the next board change, not hidden behind a client fallback.
 
