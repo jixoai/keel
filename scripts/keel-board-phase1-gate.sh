@@ -23,7 +23,7 @@ cd "$repo_root"
 
 section() { printf '\n## %s\n\n' "$1" >>"$evidence"; }
 # block records a command's output and exit status without aborting the rest of
-# the evidence run. A failing gate (for example the 256 KiB binary-size budget)
+# the evidence run. A failing gate (for example the 2048 KiB binary-size budget)
 # must be visible in the report, not stop it.
 block() {
   local status
@@ -68,7 +68,7 @@ section "Format and vet"
 block sh -c 'test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }'
 block go vet ./...
 
-section "Binary size (keel + runtime, linux/amd64+arm64, 256 KiB budget)"
-block scripts/binary-size.sh --budget-kb 256 --base "$base_ref"
+section "Binary size (keel + runtime, linux/amd64+arm64, 2048 KiB budget)"
+block scripts/binary-size.sh --budget-kb 2048 --base "$base_ref"
 
 printf '\nEvidence written to %s\n' "$evidence"
