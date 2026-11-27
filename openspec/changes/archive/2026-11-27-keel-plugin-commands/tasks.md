@@ -79,6 +79,9 @@
 - [x] 6.1 `go test -race` 相关包（pluginpkg/harnessext/harnessapi/access/toolsurface/
   web 构建）全绿；`nsh check`、`nsh test --target tui` 全绿。
 - [x] 6.2 `openspec validate keel-plugin-commands --strict` 通过；证据目录含输出。
-- [ ] 6.3 独立 reviewer（子代理）复核 P0/P1 清零；重点审“命令不是 prompt 模板”与权限派生。
-- [ ] 6.4 归档：`openspec archive keel-plugin-commands`，更新 `MAINLINE.md` 与
+- [x] 6.3 独立 reviewer（子代理）复核 P0/P1 清零；重点审“命令不是 prompt 模板”与权限派生。
+  > 三轮复审：P1 prompt 回退、审批重放、报告虚假声明、PG race 假绿、pending 4xx 均关闭；最终 PASS。
+- [x] 6.4 归档：`openspec archive keel-plugin-commands`，更新 `MAINLINE.md` 与
   `openspec/specs/plugin-commands/spec.md` 的 Purpose。
+  > 2026-11-27 归档为 `archive/2026-11-27-keel-plugin-commands`；spec Purpose 已写实，
+  > MAINLINE 记入插件生态快照；公网报告与 UNCOVERED=0 已归档。
