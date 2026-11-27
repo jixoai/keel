@@ -262,6 +262,7 @@ const rules = [
   { re: /^docs\/HARNESS\.md$/, cov: "docs pin scan + `go test` harnessapi 404/report/ask" },
   { re: /^docs\/RUNBOOK\.md$/, cov: "docs pin scan + `openspec validate --strict`" },
   { re: /^openspec\/changes\/keel-board-v1\/(design|tasks)\.md$/, cov: "`openspec validate --strict`" },
+  { re: /^openspec\/changes\/keel-board-v1\/DISPOSITION\.md$/, cov: "documented Phase 2 limitations + `openspec validate --strict`" },
   { re: /^cmd\/board-sync-e2e\//, cov: "`go test -p 1 ./...` (compile) + sync route tests" },
   { re: /^cmd\/keel\/board_serve_options_test\.go$/, cov: "`go test -p 1 ./...` (cmd/keel mount options)" },
   { re: /^cmd\/keel\/board_superagent(_test)?\.go$/, cov: "`go test` cmd/keel gate + board 404 TUI" },
