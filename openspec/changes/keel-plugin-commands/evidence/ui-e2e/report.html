@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>keel-plugin-commands E2E — 2026-11-27T09:28:36.564Z</title>
+<title>keel-plugin-commands E2E — 2026-11-27T10:29:23.895Z</title>
 <style>
 :root { color-scheme: light dark; --bg:#f7f8fa; --card:#fff; --ink:#16181d; --muted:#626b7a; --line:#e3e6ec; --ok:#0a7a3d; --bad:#b42318; --warn:#8a5a00; --accent:#0b5ed7; }
 @media (prefers-color-scheme: dark) { :root { --bg:#111318; --card:#181b22; --ink:#e8ebf1; --muted:#9aa4b2; --line:#2a2f39; --ok:#4ade80; --bad:#f87171; --warn:#fbbf24; --accent:#60a5fa; } }
@@ -44,28 +44,30 @@ a { color:var(--accent); }
 <body>
 <main>
 <h1>keel-plugin-commands · 真实栈 E2E 报告</h1>
-<p class="meta">生成于 2026-11-27T09:28:36.564Z → 2026-11-27T09:29:05.749Z · 耗时 29s · commit <code>8370343eab00f79802baa334b36ba675e7b65fb7</code></p>
-<div class="banner">公网：<strong>未部署</strong>：本报告只来自本地 <code>127.0.0.1</code> 真实栈，没有公网链接。</div>
+<p class="meta">生成于 2026-11-27T10:29:23.895Z → 2026-11-27T10:29:53.491Z · 耗时 30s · commit <code>0e53860ca85339807e07df84e5c830bc4245dad2</code></p>
+<div class="banner">公网：<a href="https://local-kzf-keel-live-gh.fde2e.com/commands/report.html">https://local-kzf-keel-live-gh.fde2e.com/commands/report.html</a></div>
 <div class="grid">
   <div class="kpi"><b>PASS</b>总结果</div>
-  <div class="kpi"><b>36</b>断言（失败 0）</div>
-  <div class="kpi"><b>9</b>步骤</div>
+  <div class="kpi"><b>37</b>断言（失败 0）</div>
+  <div class="kpi"><b>10</b>步骤</div>
   <div class="kpi"><b>19</b>截图</div>
+  <div class="kpi"><b>0</b>UNCOVERED</div>
 </div>
 
 
 
 <div class="card">
   <h2>环境</h2>
-  <table><tbody><tr><th>database</th><td>keel_commands_e2e_1795771715</td></tr>
+  <table><tbody><tr><th>database</th><td>keel_commands_e2e_1795775363</td></tr>
 <tr><th>postgres</th><td>psql (PostgreSQL) 18.7 (Homebrew)</td></tr>
 <tr><th>node</th><td>v22.23.3</td></tr>
 <tr><th>chrome</th><td>/Applications/Google Chrome.app/Contents/MacOS/Google Chrome</td></tr>
 <tr><th>models</th><td>e2e-model (deterministic loopback provider; /compact summary included)</td></tr>
 <tr><th>plugin</th><td>/Users/kzf/Development/GitHub/jixoai/fde2e/.worktrees/keel-plugin-commands-ui/scripts/keel-commands-e2e/plugin</td></tr>
 <tr><th>databaseRowProbe</th><td>command_invocations (tenant, session, request_id)</td></tr>
-<tr><th>publicDeployment</th><td>未部署（仅本地 127.0.0.1 证据）</td></tr>
-<tr><th>durationSeconds</th><td>29</td></tr></tbody></table>
+<tr><th>publicDeployment</th><td>https://local-kzf-keel-live-gh.fde2e.com/commands/report.html</td></tr>
+<tr><th>coverageBaseline</th><td>f40b8df..HEAD（本 change 提交 + 工作区）</td></tr>
+<tr><th>durationSeconds</th><td>30</td></tr></tbody></table>
   <p class="muted">真实 PostgreSQL 临时库 + 真实 <code>keel serve --auth local-only</code>（13600–13799 临时端口）+ 真实插件安装/审批；无 Docker、无夹具命令。数据库与临时密钥已由 cleanup 删除。</p>
   
 </div>
@@ -73,7 +75,7 @@ a { color:var(--accent); }
 <div class="card">
   <h2>进程回收验证 <span class="badge ok">CLEAN</span></h2>
   <p class="muted">由 <code>run.sh</code> 在报告生成前写入 <code>residue.txt</code>：serve/model 端口必须 free，sidecar 与 fake provider 必须 gone。这里的标记同时参与总结果（STILL_* 即失败）。</p>
-  <pre>run=keel_commands_e2e_1795771715
+  <pre>run=keel_commands_e2e_1795775363
 serve_port=13757
 model_port=13758
 serve_port=free
@@ -81,6 +83,135 @@ model_port=free
 sidecar=gone
 fake_provider=gone
 </pre>
+</div>
+
+<div class="card">
+  <h2>改动文件覆盖表 <span class="badge ok">UNCOVERED=0</span></h2>
+  <p class="meta">基线 <code>f40b8df..HEAD（本 change 提交 + 工作区）</code> · 120 个文件 · COVERED 56 · EXEMPT 64 · <b class="ok">UNCOVERED 0</b></p>
+  <p class="muted">EXEMPT 只允许 change 文档/证据与 E2E 运行器；其他任何未映射的产品/测试文件都标 UNCOVERED 并使本次 E2E 失败。没有自动豁免。</p>
+  <div style="max-height:520px;overflow:auto">
+  <table><thead><tr><th>文件</th><th>状态</th><th>面</th><th>证据</th></tr></thead><tbody>
+  <tr class=""><td><code>.github/workflows/ci.yml</code></td><td>COVERED</td><td>CI 增长预算与构建门</td><td>CI workflow（go build + web build）</td></tr>
+<tr class=""><td><code>cmd/keel/command_routes_test.go</code></td><td>COVERED</td><td>serve 装配与命令路由</td><td>go test ./cmd/keel + 本 E2E</td></tr>
+<tr class=""><td><code>cmd/keel/serve.go</code></td><td>COVERED</td><td>serve 装配与命令路由</td><td>go test ./cmd/keel + 本 E2E</td></tr>
+<tr class=""><td><code>docs/HARNESS.md</code></td><td>COVERED</td><td>HARNESS / PI parity 契约文档</td><td>后端契约测试 + 本 E2E</td></tr>
+<tr class=""><td><code>docs/PI-PARITY.md</code></td><td>COVERED</td><td>HARNESS / PI parity 契约文档</td><td>后端契约测试 + 本 E2E</td></tr>
+<tr class=""><td><code>internal/accessgate/matrix.go</code></td><td>COVERED</td><td>命令权限矩阵</td><td>go test ./internal/harnessapi ./internal/access</td></tr>
+<tr class=""><td><code>internal/agent/runner.go</code></td><td>COVERED</td><td>skill 下一轮加载 / runner</td><td>go test ./internal/agent</td></tr>
+<tr class=""><td><code>internal/agent/skills_preload.go</code></td><td>COVERED</td><td>skill 下一轮加载 / runner</td><td>go test ./internal/agent</td></tr>
+<tr class=""><td><code>internal/agent/skills_preload_test.go</code></td><td>COVERED</td><td>skill 下一轮加载 / runner</td><td>go test ./internal/agent</td></tr>
+<tr class=""><td><code>internal/harnessapi/api.go</code></td><td>COVERED</td><td>目录 / 执行 / 审批路由</td><td>go test ./internal/harnessapi + PG + 本 E2E</td></tr>
+<tr class=""><td><code>internal/harnessapi/commands.go</code></td><td>COVERED</td><td>目录 / 执行 / 审批路由</td><td>go test ./internal/harnessapi + PG + 本 E2E</td></tr>
+<tr class=""><td><code>internal/harnessapi/commands_pg_test.go</code></td><td>COVERED</td><td>目录 / 执行 / 审批路由</td><td>go test ./internal/harnessapi + PG + 本 E2E</td></tr>
+<tr class=""><td><code>internal/harnessapi/commands_test.go</code></td><td>COVERED</td><td>目录 / 执行 / 审批路由</td><td>go test ./internal/harnessapi + PG + 本 E2E</td></tr>
+<tr class=""><td><code>internal/harnessapi/compact.go</code></td><td>COVERED</td><td>目录 / 执行 / 审批路由</td><td>go test ./internal/harnessapi + PG + 本 E2E</td></tr>
+<tr class=""><td><code>internal/harnessapi/compact_test.go</code></td><td>COVERED</td><td>目录 / 执行 / 审批路由</td><td>go test ./internal/harnessapi + PG + 本 E2E</td></tr>
+<tr class=""><td><code>internal/harnessapi/plugin_approval.go</code></td><td>COVERED</td><td>目录 / 执行 / 审批路由</td><td>go test ./internal/harnessapi + PG + 本 E2E</td></tr>
+<tr class=""><td><code>internal/harnessapi/plugin_approval_test.go</code></td><td>COVERED</td><td>目录 / 执行 / 审批路由</td><td>go test ./internal/harnessapi + PG + 本 E2E</td></tr>
+<tr class=""><td><code>internal/harnessapi/plugins.go</code></td><td>COVERED</td><td>目录 / 执行 / 审批路由</td><td>go test ./internal/harnessapi + PG + 本 E2E</td></tr>
+<tr class=""><td><code>internal/harnessext/commands.go</code></td><td>COVERED</td><td>插件命令注册 / 工具分发</td><td>go test ./internal/harnessext + PG</td></tr>
+<tr class=""><td><code>internal/harnessext/commands_pg_test.go</code></td><td>COVERED</td><td>插件命令注册 / 工具分发</td><td>go test ./internal/harnessext + PG</td></tr>
+<tr class=""><td><code>internal/harnessext/commands_test.go</code></td><td>COVERED</td><td>插件命令注册 / 工具分发</td><td>go test ./internal/harnessext + PG</td></tr>
+<tr class=""><td><code>internal/pluginpkg/commands.go</code></td><td>COVERED</td><td>命令声明与字段校验</td><td>go test ./internal/pluginpkg</td></tr>
+<tr class=""><td><code>internal/pluginpkg/commands_test.go</code></td><td>COVERED</td><td>命令声明与字段校验</td><td>go test ./internal/pluginpkg</td></tr>
+<tr class=""><td><code>internal/pluginpkg/manifest.go</code></td><td>COVERED</td><td>命令声明与字段校验</td><td>go test ./internal/pluginpkg</td></tr>
+<tr class=""><td><code>internal/pluginpkg/testdata/commands/plugin.yaml</code></td><td>COVERED</td><td>命令声明与字段校验</td><td>go test ./internal/pluginpkg</td></tr>
+<tr class=""><td><code>internal/store/command_invocations.go</code></td><td>COVERED</td><td>invocation 账本 / 事件 / RLS / schema</td><td>go test ./internal/store + PG</td></tr>
+<tr class=""><td><code>internal/store/command_invocations_test.go</code></td><td>COVERED</td><td>invocation 账本 / 事件 / RLS / schema</td><td>go test ./internal/store + PG</td></tr>
+<tr class=""><td><code>internal/store/events.go</code></td><td>COVERED</td><td>invocation 账本 / 事件 / RLS / schema</td><td>go test ./internal/store + PG</td></tr>
+<tr class=""><td><code>internal/store/rls.go</code></td><td>COVERED</td><td>invocation 账本 / 事件 / RLS / schema</td><td>go test ./internal/store + PG</td></tr>
+<tr class=""><td><code>internal/store/schema.sql</code></td><td>COVERED</td><td>invocation 账本 / 事件 / RLS / schema</td><td>go test ./internal/store + PG</td></tr>
+<tr class=""><td><code>openspec/changes/keel-plugin-commands/design.md</code></td><td>EXEMPT</td><td>change 文档/证据</td><td>EXEMPT：显式白名单</td></tr>
+<tr class=""><td><code>openspec/changes/keel-plugin-commands/evidence/go-test-commands-pg.txt</code></td><td>EXEMPT</td><td>change 文档/证据</td><td>EXEMPT：显式白名单</td></tr>
+<tr class=""><td><code>openspec/changes/keel-plugin-commands/evidence/go-test-packages.txt</code></td><td>EXEMPT</td><td>change 文档/证据</td><td>EXEMPT：显式白名单</td></tr>
+<tr class=""><td><code>openspec/changes/keel-plugin-commands/evidence/go-test-race.txt</code></td><td>EXEMPT</td><td>change 文档/证据</td><td>EXEMPT：显式白名单</td></tr>
+<tr class=""><td><code>openspec/changes/keel-plugin-commands/evidence/go-vet.txt</code></td><td>EXEMPT</td><td>change 文档/证据</td><td>EXEMPT：显式白名单</td></tr>
+<tr class=""><td><code>openspec/changes/keel-plugin-commands/evidence/gofmt.txt</code></td><td>EXEMPT</td><td>change 文档/证据</td><td>EXEMPT：显式白名单</td></tr>
+<tr class=""><td><code>openspec/changes/keel-plugin-commands/evidence/mutation-p0-decision-cas.txt</code></td><td>EXEMPT</td><td>change 文档/证据</td><td>EXEMPT：显式白名单</td></tr>
+<tr class=""><td><code>openspec/changes/keel-plugin-commands/evidence/mutation-p1-decision-kind.txt</code></td><td>EXEMPT</td><td>change 文档/证据</td><td>EXEMPT：显式白名单</td></tr>
+<tr class=""><td><code>openspec/changes/keel-plugin-commands/evidence/mutation-p1-decision-requestid.txt</code></td><td>EXEMPT</td><td>change 文档/证据</td><td>EXEMPT：显式白名单</td></tr>
+<tr class=""><td><code>openspec/changes/keel-plugin-commands/evidence/mutation-p1-rls.txt</code></td><td>EXEMPT</td><td>change 文档/证据</td><td>EXEMPT：显式白名单</td></tr>
+<tr class=""><td><code>openspec/changes/keel-plugin-commands/evidence/openspec-validate.txt</code></td><td>EXEMPT</td><td>change 文档/证据</td><td>EXEMPT：显式白名单</td></tr>
+<tr class=""><td><code>openspec/changes/keel-plugin-commands/evidence/ui-chat-surface-test.txt</code></td><td>EXEMPT</td><td>change 文档/证据</td><td>EXEMPT：显式白名单</td></tr>
+<tr class=""><td><code>openspec/changes/keel-plugin-commands/evidence/ui-e2e-run.txt</code></td><td>EXEMPT</td><td>change 文档/证据</td><td>EXEMPT：显式白名单</td></tr>
+<tr class=""><td><code>openspec/changes/keel-plugin-commands/evidence/ui-e2e/cleanup.json</code></td><td>EXEMPT</td><td>change 文档/证据</td><td>EXEMPT：显式白名单</td></tr>
+<tr class=""><td><code>openspec/changes/keel-plugin-commands/evidence/ui-e2e/data/catalog-after.json</code></td><td>EXEMPT</td><td>change 文档/证据</td><td>EXEMPT：显式白名单</td></tr>
+<tr class=""><td><code>openspec/changes/keel-plugin-commands/evidence/ui-e2e/data/catalog-before.json</code></td><td>EXEMPT</td><td>change 文档/证据</td><td>EXEMPT：显式白名单</td></tr>
+<tr class=""><td><code>openspec/changes/keel-plugin-commands/evidence/ui-e2e/data/sidecar-calls.json</code></td><td>EXEMPT</td><td>change 文档/证据</td><td>EXEMPT：显式白名单</td></tr>
+<tr class=""><td><code>openspec/changes/keel-plugin-commands/evidence/ui-e2e/report.html</code></td><td>EXEMPT</td><td>change 文档/证据</td><td>EXEMPT：显式白名单</td></tr>
+<tr class=""><td><code>openspec/changes/keel-plugin-commands/evidence/ui-e2e/residue.txt</code></td><td>EXEMPT</td><td>change 文档/证据</td><td>EXEMPT：显式白名单</td></tr>
+<tr class=""><td><code>openspec/changes/keel-plugin-commands/evidence/ui-e2e/runtime/config.toml</code></td><td>EXEMPT</td><td>change 文档/证据</td><td>EXEMPT：显式白名单</td></tr>
+<tr class=""><td><code>openspec/changes/keel-plugin-commands/evidence/ui-e2e/runtime/fake-provider.log</code></td><td>EXEMPT</td><td>change 文档/证据</td><td>EXEMPT：显式白名单</td></tr>
+<tr class=""><td><code>openspec/changes/keel-plugin-commands/evidence/ui-e2e/runtime/models.json</code></td><td>EXEMPT</td><td>change 文档/证据</td><td>EXEMPT：显式白名单</td></tr>
+<tr class=""><td><code>openspec/changes/keel-plugin-commands/evidence/ui-e2e/runtime/plugin-state/calls.ndjson</code></td><td>EXEMPT</td><td>change 文档/证据</td><td>EXEMPT：显式白名单</td></tr>
+<tr class=""><td><code>openspec/changes/keel-plugin-commands/evidence/ui-e2e/runtime/serve.log</code></td><td>EXEMPT</td><td>change 文档/证据</td><td>EXEMPT：显式白名单</td></tr>
+<tr class=""><td><code>openspec/changes/keel-plugin-commands/evidence/ui-e2e/runtime/server.pid</code></td><td>EXEMPT</td><td>change 文档/证据</td><td>EXEMPT：显式白名单</td></tr>
+<tr class=""><td><code>openspec/changes/keel-plugin-commands/evidence/ui-e2e/secrets/</code></td><td>EXEMPT</td><td>change 文档/证据</td><td>EXEMPT：显式白名单</td></tr>
+<tr class=""><td><code>openspec/changes/keel-plugin-commands/evidence/ui-e2e/shots/01-catalog-builtin.png</code></td><td>EXEMPT</td><td>change 文档/证据</td><td>EXEMPT：显式白名单</td></tr>
+<tr class=""><td><code>openspec/changes/keel-plugin-commands/evidence/ui-e2e/shots/02-compact-result.png</code></td><td>EXEMPT</td><td>change 文档/证据</td><td>EXEMPT：显式白名单</td></tr>
+<tr class=""><td><code>openspec/changes/keel-plugin-commands/evidence/ui-e2e/shots/03-catalog-with-plugin.png</code></td><td>EXEMPT</td><td>change 文档/证据</td><td>EXEMPT：显式白名单</td></tr>
+<tr class=""><td><code>openspec/changes/keel-plugin-commands/evidence/ui-e2e/shots/04-plugin-result.png</code></td><td>EXEMPT</td><td>change 文档/证据</td><td>EXEMPT：显式白名单</td></tr>
+<tr class=""><td><code>openspec/changes/keel-plugin-commands/evidence/ui-e2e/shots/05-replay-row.png</code></td><td>EXEMPT</td><td>change 文档/证据</td><td>EXEMPT：显式白名单</td></tr>
+<tr class=""><td><code>openspec/changes/keel-plugin-commands/evidence/ui-e2e/shots/06-destructive-pending.png</code></td><td>EXEMPT</td><td>change 文档/证据</td><td>EXEMPT：显式白名单</td></tr>
+<tr class=""><td><code>openspec/changes/keel-plugin-commands/evidence/ui-e2e/shots/07-destructive-refused.png</code></td><td>EXEMPT</td><td>change 文档/证据</td><td>EXEMPT：显式白名单</td></tr>
+<tr class=""><td><code>openspec/changes/keel-plugin-commands/evidence/ui-e2e/shots/08-destructive-result.png</code></td><td>EXEMPT</td><td>change 文档/证据</td><td>EXEMPT：显式白名单</td></tr>
+<tr class=""><td><code>openspec/changes/keel-plugin-commands/evidence/ui-e2e/shots/09-catalog-390.png</code></td><td>EXEMPT</td><td>change 文档/证据</td><td>EXEMPT：显式白名单</td></tr>
+<tr class=""><td><code>openspec/changes/keel-plugin-commands/evidence/ui-e2e/shots/10-form-390.png</code></td><td>EXEMPT</td><td>change 文档/证据</td><td>EXEMPT：显式白名单</td></tr>
+<tr class=""><td><code>openspec/changes/keel-plugin-commands/evidence/ui-e2e/shots/11-catalog-768.png</code></td><td>EXEMPT</td><td>change 文档/证据</td><td>EXEMPT：显式白名单</td></tr>
+<tr class=""><td><code>openspec/changes/keel-plugin-commands/evidence/ui-e2e/shots/12-form-768.png</code></td><td>EXEMPT</td><td>change 文档/证据</td><td>EXEMPT：显式白名单</td></tr>
+<tr class=""><td><code>openspec/changes/keel-plugin-commands/evidence/ui-e2e/shots/13-catalog-1024.png</code></td><td>EXEMPT</td><td>change 文档/证据</td><td>EXEMPT：显式白名单</td></tr>
+<tr class=""><td><code>openspec/changes/keel-plugin-commands/evidence/ui-e2e/shots/14-form-1024.png</code></td><td>EXEMPT</td><td>change 文档/证据</td><td>EXEMPT：显式白名单</td></tr>
+<tr class=""><td><code>openspec/changes/keel-plugin-commands/evidence/ui-e2e/shots/15-catalog-1440.png</code></td><td>EXEMPT</td><td>change 文档/证据</td><td>EXEMPT：显式白名单</td></tr>
+<tr class=""><td><code>openspec/changes/keel-plugin-commands/evidence/ui-e2e/shots/16-form-1440.png</code></td><td>EXEMPT</td><td>change 文档/证据</td><td>EXEMPT：显式白名单</td></tr>
+<tr class=""><td><code>openspec/changes/keel-plugin-commands/evidence/ui-e2e/shots/17-workspace-final.png</code></td><td>EXEMPT</td><td>change 文档/证据</td><td>EXEMPT：显式白名单</td></tr>
+<tr class=""><td><code>openspec/changes/keel-plugin-commands/evidence/ui-e2e/shots/18-catalog-after-disable.png</code></td><td>EXEMPT</td><td>change 文档/证据</td><td>EXEMPT：显式白名单</td></tr>
+<tr class=""><td><code>openspec/changes/keel-plugin-commands/evidence/ui-e2e/shots/19-after-uninstall.png</code></td><td>EXEMPT</td><td>change 文档/证据</td><td>EXEMPT：显式白名单</td></tr>
+<tr class=""><td><code>openspec/changes/keel-plugin-commands/evidence/ui-e2e/steps.json</code></td><td>EXEMPT</td><td>change 文档/证据</td><td>EXEMPT：显式白名单</td></tr>
+<tr class=""><td><code>openspec/changes/keel-plugin-commands/evidence/ui-go-race-pg.txt</code></td><td>EXEMPT</td><td>change 文档/证据</td><td>EXEMPT：显式白名单</td></tr>
+<tr class=""><td><code>openspec/changes/keel-plugin-commands/evidence/ui-go-race.txt</code></td><td>EXEMPT</td><td>change 文档/证据</td><td>EXEMPT：显式白名单</td></tr>
+<tr class=""><td><code>openspec/changes/keel-plugin-commands/evidence/ui-kit-imports.txt</code></td><td>EXEMPT</td><td>change 文档/证据</td><td>EXEMPT：显式白名单</td></tr>
+<tr class=""><td><code>openspec/changes/keel-plugin-commands/evidence/ui-mutation-p1-1.txt</code></td><td>EXEMPT</td><td>change 文档/证据</td><td>EXEMPT：显式白名单</td></tr>
+<tr class=""><td><code>openspec/changes/keel-plugin-commands/evidence/ui-mutation-p1-2.txt</code></td><td>EXEMPT</td><td>change 文档/证据</td><td>EXEMPT：显式白名单</td></tr>
+<tr class=""><td><code>openspec/changes/keel-plugin-commands/evidence/ui-mutation-p1-a.txt</code></td><td>EXEMPT</td><td>change 文档/证据</td><td>EXEMPT：显式白名单</td></tr>
+<tr class=""><td><code>openspec/changes/keel-plugin-commands/evidence/ui-mutation-p1-b.txt</code></td><td>EXEMPT</td><td>change 文档/证据</td><td>EXEMPT：显式白名单</td></tr>
+<tr class=""><td><code>openspec/changes/keel-plugin-commands/evidence/ui-nsh-check.txt</code></td><td>EXEMPT</td><td>change 文档/证据</td><td>EXEMPT：显式白名单</td></tr>
+<tr class=""><td><code>openspec/changes/keel-plugin-commands/evidence/ui-nsh-test-tui-commands.txt</code></td><td>EXEMPT</td><td>change 文档/证据</td><td>EXEMPT：显式白名单</td></tr>
+<tr class=""><td><code>openspec/changes/keel-plugin-commands/evidence/ui-nsh-test-tui.txt</code></td><td>EXEMPT</td><td>change 文档/证据</td><td>EXEMPT：显式白名单</td></tr>
+<tr class=""><td><code>openspec/changes/keel-plugin-commands/evidence/ui-web-build.txt</code></td><td>EXEMPT</td><td>change 文档/证据</td><td>EXEMPT：显式白名单</td></tr>
+<tr class=""><td><code>openspec/changes/keel-plugin-commands/specs/plugin-commands/spec.md</code></td><td>EXEMPT</td><td>change 文档/证据</td><td>EXEMPT：显式白名单</td></tr>
+<tr class=""><td><code>openspec/changes/keel-plugin-commands/tasks.md</code></td><td>EXEMPT</td><td>change 文档/证据</td><td>EXEMPT：显式白名单</td></tr>
+<tr class=""><td><code>packages/chat-surface/src/events.ts</code></td><td>COVERED</td><td>命令投影与冻结契约</td><td>bun test chat-surface + TUI 命令测试</td></tr>
+<tr class=""><td><code>packages/chat-surface/src/index.ts</code></td><td>COVERED</td><td>命令投影与冻结契约</td><td>bun test chat-surface + TUI 命令测试</td></tr>
+<tr class=""><td><code>packages/chat-surface/src/projection.ts</code></td><td>COVERED</td><td>命令投影与冻结契约</td><td>bun test chat-surface + TUI 命令测试</td></tr>
+<tr class=""><td><code>packages/chat-surface/src/types.ts</code></td><td>COVERED</td><td>命令投影与冻结契约</td><td>bun test chat-surface + TUI 命令测试</td></tr>
+<tr class=""><td><code>packages/chat-surface/test/agui.test.ts</code></td><td>COVERED</td><td>投影 / AG-UI 测试</td><td>bun test chat-surface</td></tr>
+<tr class=""><td><code>packages/chat-surface/test/commands.test.ts</code></td><td>COVERED</td><td>投影 / AG-UI 测试</td><td>bun test chat-surface</td></tr>
+<tr class=""><td><code>scripts/keel-commands-e2e/e2e.mjs</code></td><td>EXEMPT</td><td>E2E 运行器（证据生产者）</td><td>EXEMPT：显式白名单</td></tr>
+<tr class=""><td><code>scripts/keel-commands-e2e/plugin/plugin.yaml</code></td><td>EXEMPT</td><td>E2E 运行器（证据生产者）</td><td>EXEMPT：显式白名单</td></tr>
+<tr class=""><td><code>scripts/keel-commands-e2e/plugin/sidecar.mjs</code></td><td>EXEMPT</td><td>E2E 运行器（证据生产者）</td><td>EXEMPT：显式白名单</td></tr>
+<tr class=""><td><code>scripts/keel-commands-e2e/report.mjs</code></td><td>EXEMPT</td><td>E2E 运行器（证据生产者）</td><td>EXEMPT：显式白名单</td></tr>
+<tr class=""><td><code>scripts/keel-commands-e2e/run.sh</code></td><td>EXEMPT</td><td>E2E 运行器（证据生产者）</td><td>EXEMPT：显式白名单</td></tr>
+<tr class=""><td><code>web/src/data/commands.pending.test.ts</code></td><td>COVERED</td><td>目录客户端 / store / fixture</td><td>TUI 命令五态/阻塞/pending 测试 + 本 E2E</td></tr>
+<tr class=""><td><code>web/src/data/commands.test.ts</code></td><td>COVERED</td><td>目录客户端 / store / fixture</td><td>TUI 命令五态/阻塞/pending 测试 + 本 E2E</td></tr>
+<tr class=""><td><code>web/src/data/commands.ts</code></td><td>COVERED</td><td>目录客户端 / store / fixture</td><td>TUI 命令五态/阻塞/pending 测试 + 本 E2E</td></tr>
+<tr class=""><td><code>web/src/data/contract.ts</code></td><td>COVERED</td><td>目录客户端 / store / fixture</td><td>TUI 命令五态/阻塞/pending 测试 + 本 E2E</td></tr>
+<tr class=""><td><code>web/src/data/fixture.ts</code></td><td>COVERED</td><td>目录客户端 / store / fixture</td><td>TUI 命令五态/阻塞/pending 测试 + 本 E2E</td></tr>
+<tr class=""><td><code>web/src/data/http.ts</code></td><td>COVERED</td><td>目录客户端 / store / fixture</td><td>TUI 命令五态/阻塞/pending 测试 + 本 E2E</td></tr>
+<tr class=""><td><code>web/src/data/store.ts</code></td><td>COVERED</td><td>目录客户端 / store / fixture</td><td>TUI 命令五态/阻塞/pending 测试 + 本 E2E</td></tr>
+<tr class=""><td><code>web/src/screens/command-invocation.tsx</code></td><td>COVERED</td><td>命令结果行 / 本地错误覆盖</td><td>E2E 步骤 2/4/7/8 + TUI</td></tr>
+<tr class=""><td><code>web/src/screens/command-palette.tsx</code></td><td>COVERED</td><td>Mod+K 命令分组</td><td>TUI 面板测试 + E2E 目录</td></tr>
+<tr class=""><td><code>web/src/screens/commands-blocked.harness.tsx</code></td><td>COVERED</td><td>命令 TUI 门禁与 harness</td><td>nsh test --target tui</td></tr>
+<tr class=""><td><code>web/src/screens/commands-blocked.test.tsx</code></td><td>COVERED</td><td>命令 TUI 门禁与 harness</td><td>nsh test --target tui</td></tr>
+<tr class=""><td><code>web/src/screens/commands-form.harness.tsx</code></td><td>COVERED</td><td>命令 TUI 门禁与 harness</td><td>nsh test --target tui</td></tr>
+<tr class=""><td><code>web/src/screens/commands-local-error.harness.tsx</code></td><td>COVERED</td><td>命令 TUI 门禁与 harness</td><td>nsh test --target tui</td></tr>
+<tr class=""><td><code>web/src/screens/commands-local-error.test.tsx</code></td><td>COVERED</td><td>命令 TUI 门禁与 harness</td><td>nsh test --target tui</td></tr>
+<tr class=""><td><code>web/src/screens/commands-states.harness.tsx</code></td><td>COVERED</td><td>命令 TUI 门禁与 harness</td><td>nsh test --target tui</td></tr>
+<tr class=""><td><code>web/src/screens/commands-states.test.tsx</code></td><td>COVERED</td><td>命令 TUI 门禁与 harness</td><td>nsh test --target tui</td></tr>
+<tr class=""><td><code>web/src/screens/commands.tui.test.tsx</code></td><td>COVERED</td><td>命令 TUI 门禁与 harness</td><td>nsh test --target tui</td></tr>
+<tr class=""><td><code>web/src/screens/composer-commands.tsx</code></td><td>COVERED</td><td>命令菜单 / schema 表单</td><td>E2E 步骤 1/3/4 + TUI</td></tr>
+<tr class=""><td><code>web/src/screens/composer.tsx</code></td><td>COVERED</td><td>发送门禁 / 参数映射</td><td>TUI 阻塞与命令测试 + E2E</td></tr>
+<tr class=""><td><code>web/src/screens/conversation.tsx</code></td><td>COVERED</td><td>按 seq 合并对话行</td><td>TUI destructive/palette + E2E</td></tr>
+  </tbody></table></div>
 </div>
 
 <div class="card">
@@ -95,12 +226,13 @@ fake_provider=gone
 <tr><td>7</td><td><a href="#step-destructive-approved">破坏性命令：审批允许 → 只执行一次并给出结果</a></td><td><span class="badge ok">PASS</span></td><td>1/1</td><td>1</td></tr>
 <tr><td>8</td><td><a href="#step-viewports">4.5 视觉：390/768/1024/1440 目录与表单无横向溢出</a></td><td><span class="badge ok">PASS</span></td><td>8/8</td><td>9</td></tr>
 <tr><td>9</td><td><a href="#step-disable-uninstall">停用/卸载插件：目录与执行入口一起撤销</a></td><td><span class="badge ok">PASS</span></td><td>4/4</td><td>2</td></tr>
+<tr><td>10</td><td><a href="#step-coverage">改动文件覆盖表：仅证据/运行器可 EXEMPT，其余必须 COVERED</a></td><td><span class="badge ok">PASS</span></td><td>1/1</td><td>0</td></tr>
   </tbody></table>
 </div>
 
 <section class="step" id="step-catalog-builtin">
   <h2>01 · 打开目录：内置命令可发现，顺序来自服务端 <span class="badge ok">PASS</span></h2>
-  <p class="meta">catalog-builtin · 2148 ms · 4 条断言 · 1 张图</p>
+  <p class="meta">catalog-builtin · 2397 ms · 4 条断言 · 1 张图</p>
   
   <table><thead><tr><th>断言</th><th>结果</th><th>实际</th><th>期望</th></tr></thead><tbody>
 <tr class="">
@@ -139,7 +271,7 @@ fake_provider=gone
 </section>
 <section class="step" id="step-compact">
   <h2>02 · 执行内置 /compact：命令行 + 既有压缩分隔线 <span class="badge ok">PASS</span></h2>
-  <p class="meta">compact · 939 ms · 4 条断言 · 1 张图</p>
+  <p class="meta">compact · 885 ms · 4 条断言 · 1 张图</p>
   
   <table><thead><tr><th>断言</th><th>结果</th><th>实际</th><th>期望</th></tr></thead><tbody>
 <tr class="">
@@ -172,7 +304,7 @@ fake_provider=gone
 </section>
 <section class="step" id="step-install-plugin">
   <h2>03 · 安装插件命令：真实两阶段审批（install + enable） <span class="badge ok">PASS</span></h2>
-  <p class="meta">install-plugin · 615 ms · 6 条断言 · 1 张图</p>
+  <p class="meta">install-plugin · 1083 ms · 6 条断言 · 1 张图</p>
   
   <table><thead><tr><th>断言</th><th>结果</th><th>实际</th><th>期望</th></tr></thead><tbody>
 <tr class="">
@@ -223,7 +355,7 @@ fake_provider=gone
 </section>
 <section class="step" id="step-plugin-form">
   <h2>04 · 执行插件命令：args_schema 生成表单 → 结构化结果 <span class="badge ok">PASS</span></h2>
-  <p class="meta">plugin-form · 1509 ms · 3 条断言 · 1 张图</p>
+  <p class="meta">plugin-form · 1078 ms · 3 条断言 · 1 张图</p>
   
   <table><thead><tr><th>断言</th><th>结果</th><th>实际</th><th>期望</th></tr></thead><tbody>
 <tr class="">
@@ -235,7 +367,7 @@ fake_provider=gone
 <tr class="">
   <td>result row carries a requestId</td>
   <td>PASS</td>
-  <td><code>cmd_39b23c8c-5ac7-4275-b685-c9d6455edf1e</code></td>
+  <td><code>cmd_fa94e513-7bc3-46ac-9b31-b280023125bd</code></td>
   <td></td>
 </tr>
 <tr class="">
@@ -250,7 +382,7 @@ fake_provider=gone
 </section>
 <section class="step" id="step-replay">
   <h2>05 · 重放同 requestId：同结果、不二次执行 <span class="badge ok">PASS</span></h2>
-  <p class="meta">replay · 1095 ms · 4 条断言 · 1 张图</p>
+  <p class="meta">replay · 1738 ms · 4 条断言 · 1 张图</p>
   
   <table><thead><tr><th>断言</th><th>结果</th><th>实际</th><th>期望</th></tr></thead><tbody>
 <tr class="">
@@ -263,7 +395,7 @@ fake_provider=gone
   <td>replay result is the first result</td>
   <td>PASS</td>
   <td><code>[object Object]</code></td>
-  <td><code>{&quot;indexed&quot;:7,&quot;requestId&quot;:&quot;cmd_39b23c8c-5ac7-4275-b685-c9d6455edf1e&quot;}</code></td>
+  <td><code>{&quot;indexed&quot;:7,&quot;requestId&quot;:&quot;cmd_fa94e513-7bc3-46ac-9b31-b280023125bd&quot;}</code></td>
 </tr>
 <tr class="">
   <td>replay did not execute the tool again</td>
@@ -283,7 +415,7 @@ fake_provider=gone
 </section>
 <section class="step" id="step-destructive-denied">
   <h2>06 · 破坏性命令：审批拒绝 → 已拒绝行，无副作用 <span class="badge ok">PASS</span></h2>
-  <p class="meta">destructive-denied · 2759 ms · 2 条断言 · 2 张图</p>
+  <p class="meta">destructive-denied · 3012 ms · 2 条断言 · 2 张图</p>
   
   <table><thead><tr><th>断言</th><th>结果</th><th>实际</th><th>期望</th></tr></thead><tbody>
 <tr class="">
@@ -309,7 +441,7 @@ fake_provider=gone
 </section>
 <section class="step" id="step-destructive-approved">
   <h2>07 · 破坏性命令：审批允许 → 只执行一次并给出结果 <span class="badge ok">PASS</span></h2>
-  <p class="meta">destructive-approved · 1761 ms · 1 条断言 · 1 张图</p>
+  <p class="meta">destructive-approved · 1808 ms · 1 条断言 · 1 张图</p>
   
   <table><thead><tr><th>断言</th><th>结果</th><th>实际</th><th>期望</th></tr></thead><tbody>
 <tr class="">
@@ -324,7 +456,7 @@ fake_provider=gone
 </section>
 <section class="step" id="step-viewports">
   <h2>08 · 4.5 视觉：390/768/1024/1440 目录与表单无横向溢出 <span class="badge ok">PASS</span></h2>
-  <p class="meta">viewports · 9620 ms · 8 条断言 · 9 张图</p>
+  <p class="meta">viewports · 9833 ms · 8 条断言 · 9 张图</p>
   
   <table><thead><tr><th>断言</th><th>结果</th><th>实际</th><th>期望</th></tr></thead><tbody>
 <tr class="">
@@ -430,7 +562,7 @@ fake_provider=gone
 </section>
 <section class="step" id="step-disable-uninstall">
   <h2>09 · 停用/卸载插件：目录与执行入口一起撤销 <span class="badge ok">PASS</span></h2>
-  <p class="meta">disable-uninstall · 1975 ms · 4 条断言 · 2 张图</p>
+  <p class="meta">disable-uninstall · 1514 ms · 4 条断言 · 2 张图</p>
   
   <table><thead><tr><th>断言</th><th>结果</th><th>实际</th><th>期望</th></tr></thead><tbody>
 <tr class="">
@@ -462,6 +594,27 @@ fake_provider=gone
 <figure><a href="shots/19-after-uninstall.png"><img src="shots/19-after-uninstall.png" loading="lazy" alt="shots/19-after-uninstall.png"></a><figcaption>shots/19-after-uninstall.png</figcaption></figure></div>
   
 </section>
+<section class="step" id="step-coverage">
+  <h2>10 · 改动文件覆盖表：仅证据/运行器可 EXEMPT，其余必须 COVERED <span class="badge ok">PASS</span></h2>
+  <p class="meta">coverage · 881 ms · 1 条断言 · 0 张图</p>
+  
+  <table><thead><tr><th>断言</th><th>结果</th><th>实际</th><th>期望</th></tr></thead><tbody>
+<tr class="">
+  <td>UNCOVERED=0</td>
+  <td>PASS</td>
+  <td><code>[object Object]</code></td>
+  <td><code>{&quot;uncovered&quot;:0}</code></td>
+</tr>
+</tbody></table>
+  <p class="muted">没有截图。</p>
+  <details><summary>结构化细节</summary><pre>{
+  &quot;baseline&quot;: &quot;f40b8df..HEAD（本 change 提交 + 工作区）&quot;,
+  &quot;total&quot;: 120,
+  &quot;covered&quot;: 56,
+  &quot;exempt&quot;: 64,
+  &quot;uncovered&quot;: 0
+}</pre></details>
+</section>
 
 <div class="card">
   <h2>浏览器诊断</h2>
@@ -486,7 +639,7 @@ fake_provider=gone
     <li>本报告的声明范围就是上列 9 个步骤的断言与截图；未列出的能力不作声明。</li>
     <li>无权限命令态由 TUI 五态门禁覆盖；本页的 403 是 destructive 审批拒绝的预期响应。</li>
     <li><strong>未部署公网</strong>：本报告与截图作为仓库内证据提交，不提供公网链接。</li>
-    <li>没有 coverageRows / 自动 EXEMPT 表，也不声明 <code>UNCOVERED=0</code>；覆盖性以 9 个步骤的 36 条断言与 19 张截图为准。</li>
+    <li>改动文件覆盖表见上：EXEMPT 仅 change 文档/证据与 E2E 运行器，任何未映射的产品/测试文件都会标 UNCOVERED 并让 E2E exit 1；本次 <b>UNCOVERED=0</b>。</li>
   </ul>
 </div>
 </main>

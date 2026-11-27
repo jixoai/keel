@@ -1,26 +1,27 @@
 {
   "lane": "keel-plugin-commands-e2e",
   "base": "http://127.0.0.1:13757",
-  "publicUrl": "",
-  "startedAt": "2026-11-27T09:28:36.564Z",
-  "finishedAt": "2026-11-27T09:29:05.749Z",
-  "commit": "8370343eab00f79802baa334b36ba675e7b65fb7",
+  "publicUrl": "https://local-kzf-keel-live-gh.fde2e.com/commands/report.html",
+  "startedAt": "2026-11-27T10:29:23.895Z",
+  "finishedAt": "2026-11-27T10:29:53.491Z",
+  "commit": "0e53860ca85339807e07df84e5c830bc4245dad2",
   "environment": {
-    "database": "keel_commands_e2e_1795771715",
+    "database": "keel_commands_e2e_1795775363",
     "postgres": "psql (PostgreSQL) 18.7 (Homebrew)",
     "node": "v22.23.3",
     "chrome": "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
     "models": "e2e-model (deterministic loopback provider; /compact summary included)",
     "plugin": "/Users/kzf/Development/GitHub/jixoai/fde2e/.worktrees/keel-plugin-commands-ui/scripts/keel-commands-e2e/plugin",
     "databaseRowProbe": "command_invocations (tenant, session, request_id)",
-    "publicDeployment": "未部署（仅本地 127.0.0.1 证据）",
-    "durationSeconds": 29
+    "publicDeployment": "https://local-kzf-keel-live-gh.fde2e.com/commands/report.html",
+    "coverageBaseline": "f40b8df..HEAD（本 change 提交 + 工作区）",
+    "durationSeconds": 30
   },
   "steps": [
     {
       "id": "catalog-builtin",
       "title": "打开目录：内置命令可发现，顺序来自服务端",
-      "startedAt": "2026-11-27T09:28:43.328Z",
+      "startedAt": "2026-11-27T10:29:29.261Z",
       "status": "passed",
       "checks": [
         {
@@ -72,12 +73,12 @@
           "bodyScrollWidth": 1440
         }
       },
-      "durationMs": 2148
+      "durationMs": 2397
     },
     {
       "id": "compact",
       "title": "执行内置 /compact：命令行 + 既有压缩分隔线",
-      "startedAt": "2026-11-27T09:28:45.476Z",
+      "startedAt": "2026-11-27T10:29:31.658Z",
       "status": "passed",
       "checks": [
         {
@@ -93,8 +94,8 @@
             "reason": "compacted",
             "replayed": false,
             "performed": true,
-            "requestId": "cmd_0b692c68-cfaf-4205-bdb3-bd537966c462",
-            "sessionId": "b78bae32-2b75-415e-bc91-e4934a67db14",
+            "requestId": "cmd_1e8d833f-dbbb-4c8b-9927-756091fb87e6",
+            "sessionId": "311bd5be-470a-4acd-9de4-eeaa16b70ddb",
             "keptFromSeq": 8,
             "tokensAfter": 141,
             "checkpointId": 10,
@@ -122,12 +123,12 @@
         "shots/02-compact-result.png"
       ],
       "details": {},
-      "durationMs": 939
+      "durationMs": 885
     },
     {
       "id": "install-plugin",
       "title": "安装插件命令：真实两阶段审批（install + enable）",
-      "startedAt": "2026-11-27T09:28:46.415Z",
+      "startedAt": "2026-11-27T10:29:32.543Z",
       "status": "passed",
       "checks": [
         {
@@ -211,12 +212,12 @@
           "bodyScrollWidth": 1440
         }
       },
-      "durationMs": 615
+      "durationMs": 1083
     },
     {
       "id": "plugin-form",
       "title": "执行插件命令：args_schema 生成表单 → 结构化结果",
-      "startedAt": "2026-11-27T09:28:47.030Z",
+      "startedAt": "2026-11-27T10:29:33.626Z",
       "status": "passed",
       "checks": [
         {
@@ -228,7 +229,7 @@
         {
           "label": "result row carries a requestId",
           "ok": true,
-          "actual": "cmd_39b23c8c-5ac7-4275-b685-c9d6455edf1e"
+          "actual": "cmd_fa94e513-7bc3-46ac-9b31-b280023125bd"
         },
         {
           "label": "sidecar executed refresh once",
@@ -245,12 +246,12 @@
         "shots/04-plugin-result.png"
       ],
       "details": {},
-      "durationMs": 1509
+      "durationMs": 1078
     },
     {
       "id": "replay",
       "title": "重放同 requestId：同结果、不二次执行",
-      "startedAt": "2026-11-27T09:28:48.539Z",
+      "startedAt": "2026-11-27T10:29:34.705Z",
       "status": "passed",
       "checks": [
         {
@@ -264,11 +265,11 @@
           "ok": true,
           "actual": {
             "indexed": 7,
-            "requestId": "cmd_39b23c8c-5ac7-4275-b685-c9d6455edf1e"
+            "requestId": "cmd_fa94e513-7bc3-46ac-9b31-b280023125bd"
           },
           "expected": {
             "indexed": 7,
-            "requestId": "cmd_39b23c8c-5ac7-4275-b685-c9d6455edf1e"
+            "requestId": "cmd_fa94e513-7bc3-46ac-9b31-b280023125bd"
           }
         },
         {
@@ -288,12 +289,12 @@
         "shots/05-replay-row.png"
       ],
       "details": {},
-      "durationMs": 1095
+      "durationMs": 1738
     },
     {
       "id": "destructive-denied",
       "title": "破坏性命令：审批拒绝 → 已拒绝行，无副作用",
-      "startedAt": "2026-11-27T09:28:49.634Z",
+      "startedAt": "2026-11-27T10:29:36.443Z",
       "status": "passed",
       "checks": [
         {
@@ -318,12 +319,12 @@
           "Failed to load resource: the server responded with a status of 403 (Forbidden)"
         ]
       },
-      "durationMs": 2759
+      "durationMs": 3012
     },
     {
       "id": "destructive-approved",
       "title": "破坏性命令：审批允许 → 只执行一次并给出结果",
-      "startedAt": "2026-11-27T09:28:52.393Z",
+      "startedAt": "2026-11-27T10:29:39.455Z",
       "status": "passed",
       "checks": [
         {
@@ -337,12 +338,12 @@
         "shots/08-destructive-result.png"
       ],
       "details": {},
-      "durationMs": 1761
+      "durationMs": 1808
     },
     {
       "id": "viewports",
       "title": "4.5 视觉：390/768/1024/1440 目录与表单无横向溢出",
-      "startedAt": "2026-11-27T09:28:54.154Z",
+      "startedAt": "2026-11-27T10:29:41.263Z",
       "status": "passed",
       "checks": [
         {
@@ -495,12 +496,12 @@
           "bodyScrollWidth": 1440
         }
       },
-      "durationMs": 9620
+      "durationMs": 9833
     },
     {
       "id": "disable-uninstall",
       "title": "停用/卸载插件：目录与执行入口一起撤销",
-      "startedAt": "2026-11-27T09:29:03.774Z",
+      "startedAt": "2026-11-27T10:29:51.096Z",
       "status": "passed",
       "checks": [
         {
@@ -539,7 +540,37 @@
         "shots/19-after-uninstall.png"
       ],
       "details": {},
-      "durationMs": 1975
+      "durationMs": 1514
+    },
+    {
+      "id": "coverage",
+      "title": "改动文件覆盖表：仅证据/运行器可 EXEMPT，其余必须 COVERED",
+      "startedAt": "2026-11-27T10:29:52.610Z",
+      "status": "passed",
+      "checks": [
+        {
+          "label": "UNCOVERED=0",
+          "ok": true,
+          "actual": {
+            "total": 120,
+            "covered": 56,
+            "exempt": 64,
+            "uncovered": 0
+          },
+          "expected": {
+            "uncovered": 0
+          }
+        }
+      ],
+      "screenshots": [],
+      "details": {
+        "baseline": "f40b8df..HEAD（本 change 提交 + 工作区）",
+        "total": 120,
+        "covered": 56,
+        "exempt": 64,
+        "uncovered": 0
+      },
+      "durationMs": 881
     }
   ],
   "console": [],
@@ -547,5 +578,734 @@
   "failedRequests": [],
   "failures": 0,
   "pass": true,
-  "error": ""
+  "error": "",
+  "coverage": {
+    "baseline": "f40b8df..HEAD（本 change 提交 + 工作区）",
+    "total": 120,
+    "covered": 56,
+    "exempt": 64,
+    "uncovered": 0,
+    "rows": [
+      {
+        "file": ".github/workflows/ci.yml",
+        "status": "COVERED",
+        "surface": "CI 增长预算与构建门",
+        "evidence": "CI workflow（go build + web build）"
+      },
+      {
+        "file": "cmd/keel/command_routes_test.go",
+        "status": "COVERED",
+        "surface": "serve 装配与命令路由",
+        "evidence": "go test ./cmd/keel + 本 E2E"
+      },
+      {
+        "file": "cmd/keel/serve.go",
+        "status": "COVERED",
+        "surface": "serve 装配与命令路由",
+        "evidence": "go test ./cmd/keel + 本 E2E"
+      },
+      {
+        "file": "docs/HARNESS.md",
+        "status": "COVERED",
+        "surface": "HARNESS / PI parity 契约文档",
+        "evidence": "后端契约测试 + 本 E2E"
+      },
+      {
+        "file": "docs/PI-PARITY.md",
+        "status": "COVERED",
+        "surface": "HARNESS / PI parity 契约文档",
+        "evidence": "后端契约测试 + 本 E2E"
+      },
+      {
+        "file": "internal/accessgate/matrix.go",
+        "status": "COVERED",
+        "surface": "命令权限矩阵",
+        "evidence": "go test ./internal/harnessapi ./internal/access"
+      },
+      {
+        "file": "internal/agent/runner.go",
+        "status": "COVERED",
+        "surface": "skill 下一轮加载 / runner",
+        "evidence": "go test ./internal/agent"
+      },
+      {
+        "file": "internal/agent/skills_preload.go",
+        "status": "COVERED",
+        "surface": "skill 下一轮加载 / runner",
+        "evidence": "go test ./internal/agent"
+      },
+      {
+        "file": "internal/agent/skills_preload_test.go",
+        "status": "COVERED",
+        "surface": "skill 下一轮加载 / runner",
+        "evidence": "go test ./internal/agent"
+      },
+      {
+        "file": "internal/harnessapi/api.go",
+        "status": "COVERED",
+        "surface": "目录 / 执行 / 审批路由",
+        "evidence": "go test ./internal/harnessapi + PG + 本 E2E"
+      },
+      {
+        "file": "internal/harnessapi/commands.go",
+        "status": "COVERED",
+        "surface": "目录 / 执行 / 审批路由",
+        "evidence": "go test ./internal/harnessapi + PG + 本 E2E"
+      },
+      {
+        "file": "internal/harnessapi/commands_pg_test.go",
+        "status": "COVERED",
+        "surface": "目录 / 执行 / 审批路由",
+        "evidence": "go test ./internal/harnessapi + PG + 本 E2E"
+      },
+      {
+        "file": "internal/harnessapi/commands_test.go",
+        "status": "COVERED",
+        "surface": "目录 / 执行 / 审批路由",
+        "evidence": "go test ./internal/harnessapi + PG + 本 E2E"
+      },
+      {
+        "file": "internal/harnessapi/compact.go",
+        "status": "COVERED",
+        "surface": "目录 / 执行 / 审批路由",
+        "evidence": "go test ./internal/harnessapi + PG + 本 E2E"
+      },
+      {
+        "file": "internal/harnessapi/compact_test.go",
+        "status": "COVERED",
+        "surface": "目录 / 执行 / 审批路由",
+        "evidence": "go test ./internal/harnessapi + PG + 本 E2E"
+      },
+      {
+        "file": "internal/harnessapi/plugin_approval.go",
+        "status": "COVERED",
+        "surface": "目录 / 执行 / 审批路由",
+        "evidence": "go test ./internal/harnessapi + PG + 本 E2E"
+      },
+      {
+        "file": "internal/harnessapi/plugin_approval_test.go",
+        "status": "COVERED",
+        "surface": "目录 / 执行 / 审批路由",
+        "evidence": "go test ./internal/harnessapi + PG + 本 E2E"
+      },
+      {
+        "file": "internal/harnessapi/plugins.go",
+        "status": "COVERED",
+        "surface": "目录 / 执行 / 审批路由",
+        "evidence": "go test ./internal/harnessapi + PG + 本 E2E"
+      },
+      {
+        "file": "internal/harnessext/commands.go",
+        "status": "COVERED",
+        "surface": "插件命令注册 / 工具分发",
+        "evidence": "go test ./internal/harnessext + PG"
+      },
+      {
+        "file": "internal/harnessext/commands_pg_test.go",
+        "status": "COVERED",
+        "surface": "插件命令注册 / 工具分发",
+        "evidence": "go test ./internal/harnessext + PG"
+      },
+      {
+        "file": "internal/harnessext/commands_test.go",
+        "status": "COVERED",
+        "surface": "插件命令注册 / 工具分发",
+        "evidence": "go test ./internal/harnessext + PG"
+      },
+      {
+        "file": "internal/pluginpkg/commands.go",
+        "status": "COVERED",
+        "surface": "命令声明与字段校验",
+        "evidence": "go test ./internal/pluginpkg"
+      },
+      {
+        "file": "internal/pluginpkg/commands_test.go",
+        "status": "COVERED",
+        "surface": "命令声明与字段校验",
+        "evidence": "go test ./internal/pluginpkg"
+      },
+      {
+        "file": "internal/pluginpkg/manifest.go",
+        "status": "COVERED",
+        "surface": "命令声明与字段校验",
+        "evidence": "go test ./internal/pluginpkg"
+      },
+      {
+        "file": "internal/pluginpkg/testdata/commands/plugin.yaml",
+        "status": "COVERED",
+        "surface": "命令声明与字段校验",
+        "evidence": "go test ./internal/pluginpkg"
+      },
+      {
+        "file": "internal/store/command_invocations.go",
+        "status": "COVERED",
+        "surface": "invocation 账本 / 事件 / RLS / schema",
+        "evidence": "go test ./internal/store + PG"
+      },
+      {
+        "file": "internal/store/command_invocations_test.go",
+        "status": "COVERED",
+        "surface": "invocation 账本 / 事件 / RLS / schema",
+        "evidence": "go test ./internal/store + PG"
+      },
+      {
+        "file": "internal/store/events.go",
+        "status": "COVERED",
+        "surface": "invocation 账本 / 事件 / RLS / schema",
+        "evidence": "go test ./internal/store + PG"
+      },
+      {
+        "file": "internal/store/rls.go",
+        "status": "COVERED",
+        "surface": "invocation 账本 / 事件 / RLS / schema",
+        "evidence": "go test ./internal/store + PG"
+      },
+      {
+        "file": "internal/store/schema.sql",
+        "status": "COVERED",
+        "surface": "invocation 账本 / 事件 / RLS / schema",
+        "evidence": "go test ./internal/store + PG"
+      },
+      {
+        "file": "openspec/changes/keel-plugin-commands/design.md",
+        "status": "EXEMPT",
+        "surface": "change 文档/证据",
+        "evidence": "EXEMPT：显式白名单"
+      },
+      {
+        "file": "openspec/changes/keel-plugin-commands/evidence/go-test-commands-pg.txt",
+        "status": "EXEMPT",
+        "surface": "change 文档/证据",
+        "evidence": "EXEMPT：显式白名单"
+      },
+      {
+        "file": "openspec/changes/keel-plugin-commands/evidence/go-test-packages.txt",
+        "status": "EXEMPT",
+        "surface": "change 文档/证据",
+        "evidence": "EXEMPT：显式白名单"
+      },
+      {
+        "file": "openspec/changes/keel-plugin-commands/evidence/go-test-race.txt",
+        "status": "EXEMPT",
+        "surface": "change 文档/证据",
+        "evidence": "EXEMPT：显式白名单"
+      },
+      {
+        "file": "openspec/changes/keel-plugin-commands/evidence/go-vet.txt",
+        "status": "EXEMPT",
+        "surface": "change 文档/证据",
+        "evidence": "EXEMPT：显式白名单"
+      },
+      {
+        "file": "openspec/changes/keel-plugin-commands/evidence/gofmt.txt",
+        "status": "EXEMPT",
+        "surface": "change 文档/证据",
+        "evidence": "EXEMPT：显式白名单"
+      },
+      {
+        "file": "openspec/changes/keel-plugin-commands/evidence/mutation-p0-decision-cas.txt",
+        "status": "EXEMPT",
+        "surface": "change 文档/证据",
+        "evidence": "EXEMPT：显式白名单"
+      },
+      {
+        "file": "openspec/changes/keel-plugin-commands/evidence/mutation-p1-decision-kind.txt",
+        "status": "EXEMPT",
+        "surface": "change 文档/证据",
+        "evidence": "EXEMPT：显式白名单"
+      },
+      {
+        "file": "openspec/changes/keel-plugin-commands/evidence/mutation-p1-decision-requestid.txt",
+        "status": "EXEMPT",
+        "surface": "change 文档/证据",
+        "evidence": "EXEMPT：显式白名单"
+      },
+      {
+        "file": "openspec/changes/keel-plugin-commands/evidence/mutation-p1-rls.txt",
+        "status": "EXEMPT",
+        "surface": "change 文档/证据",
+        "evidence": "EXEMPT：显式白名单"
+      },
+      {
+        "file": "openspec/changes/keel-plugin-commands/evidence/openspec-validate.txt",
+        "status": "EXEMPT",
+        "surface": "change 文档/证据",
+        "evidence": "EXEMPT：显式白名单"
+      },
+      {
+        "file": "openspec/changes/keel-plugin-commands/evidence/ui-chat-surface-test.txt",
+        "status": "EXEMPT",
+        "surface": "change 文档/证据",
+        "evidence": "EXEMPT：显式白名单"
+      },
+      {
+        "file": "openspec/changes/keel-plugin-commands/evidence/ui-e2e-run.txt",
+        "status": "EXEMPT",
+        "surface": "change 文档/证据",
+        "evidence": "EXEMPT：显式白名单"
+      },
+      {
+        "file": "openspec/changes/keel-plugin-commands/evidence/ui-e2e/cleanup.json",
+        "status": "EXEMPT",
+        "surface": "change 文档/证据",
+        "evidence": "EXEMPT：显式白名单"
+      },
+      {
+        "file": "openspec/changes/keel-plugin-commands/evidence/ui-e2e/data/catalog-after.json",
+        "status": "EXEMPT",
+        "surface": "change 文档/证据",
+        "evidence": "EXEMPT：显式白名单"
+      },
+      {
+        "file": "openspec/changes/keel-plugin-commands/evidence/ui-e2e/data/catalog-before.json",
+        "status": "EXEMPT",
+        "surface": "change 文档/证据",
+        "evidence": "EXEMPT：显式白名单"
+      },
+      {
+        "file": "openspec/changes/keel-plugin-commands/evidence/ui-e2e/data/sidecar-calls.json",
+        "status": "EXEMPT",
+        "surface": "change 文档/证据",
+        "evidence": "EXEMPT：显式白名单"
+      },
+      {
+        "file": "openspec/changes/keel-plugin-commands/evidence/ui-e2e/report.html",
+        "status": "EXEMPT",
+        "surface": "change 文档/证据",
+        "evidence": "EXEMPT：显式白名单"
+      },
+      {
+        "file": "openspec/changes/keel-plugin-commands/evidence/ui-e2e/residue.txt",
+        "status": "EXEMPT",
+        "surface": "change 文档/证据",
+        "evidence": "EXEMPT：显式白名单"
+      },
+      {
+        "file": "openspec/changes/keel-plugin-commands/evidence/ui-e2e/runtime/config.toml",
+        "status": "EXEMPT",
+        "surface": "change 文档/证据",
+        "evidence": "EXEMPT：显式白名单"
+      },
+      {
+        "file": "openspec/changes/keel-plugin-commands/evidence/ui-e2e/runtime/fake-provider.log",
+        "status": "EXEMPT",
+        "surface": "change 文档/证据",
+        "evidence": "EXEMPT：显式白名单"
+      },
+      {
+        "file": "openspec/changes/keel-plugin-commands/evidence/ui-e2e/runtime/models.json",
+        "status": "EXEMPT",
+        "surface": "change 文档/证据",
+        "evidence": "EXEMPT：显式白名单"
+      },
+      {
+        "file": "openspec/changes/keel-plugin-commands/evidence/ui-e2e/runtime/plugin-state/calls.ndjson",
+        "status": "EXEMPT",
+        "surface": "change 文档/证据",
+        "evidence": "EXEMPT：显式白名单"
+      },
+      {
+        "file": "openspec/changes/keel-plugin-commands/evidence/ui-e2e/runtime/serve.log",
+        "status": "EXEMPT",
+        "surface": "change 文档/证据",
+        "evidence": "EXEMPT：显式白名单"
+      },
+      {
+        "file": "openspec/changes/keel-plugin-commands/evidence/ui-e2e/runtime/server.pid",
+        "status": "EXEMPT",
+        "surface": "change 文档/证据",
+        "evidence": "EXEMPT：显式白名单"
+      },
+      {
+        "file": "openspec/changes/keel-plugin-commands/evidence/ui-e2e/secrets/",
+        "status": "EXEMPT",
+        "surface": "change 文档/证据",
+        "evidence": "EXEMPT：显式白名单"
+      },
+      {
+        "file": "openspec/changes/keel-plugin-commands/evidence/ui-e2e/shots/01-catalog-builtin.png",
+        "status": "EXEMPT",
+        "surface": "change 文档/证据",
+        "evidence": "EXEMPT：显式白名单"
+      },
+      {
+        "file": "openspec/changes/keel-plugin-commands/evidence/ui-e2e/shots/02-compact-result.png",
+        "status": "EXEMPT",
+        "surface": "change 文档/证据",
+        "evidence": "EXEMPT：显式白名单"
+      },
+      {
+        "file": "openspec/changes/keel-plugin-commands/evidence/ui-e2e/shots/03-catalog-with-plugin.png",
+        "status": "EXEMPT",
+        "surface": "change 文档/证据",
+        "evidence": "EXEMPT：显式白名单"
+      },
+      {
+        "file": "openspec/changes/keel-plugin-commands/evidence/ui-e2e/shots/04-plugin-result.png",
+        "status": "EXEMPT",
+        "surface": "change 文档/证据",
+        "evidence": "EXEMPT：显式白名单"
+      },
+      {
+        "file": "openspec/changes/keel-plugin-commands/evidence/ui-e2e/shots/05-replay-row.png",
+        "status": "EXEMPT",
+        "surface": "change 文档/证据",
+        "evidence": "EXEMPT：显式白名单"
+      },
+      {
+        "file": "openspec/changes/keel-plugin-commands/evidence/ui-e2e/shots/06-destructive-pending.png",
+        "status": "EXEMPT",
+        "surface": "change 文档/证据",
+        "evidence": "EXEMPT：显式白名单"
+      },
+      {
+        "file": "openspec/changes/keel-plugin-commands/evidence/ui-e2e/shots/07-destructive-refused.png",
+        "status": "EXEMPT",
+        "surface": "change 文档/证据",
+        "evidence": "EXEMPT：显式白名单"
+      },
+      {
+        "file": "openspec/changes/keel-plugin-commands/evidence/ui-e2e/shots/08-destructive-result.png",
+        "status": "EXEMPT",
+        "surface": "change 文档/证据",
+        "evidence": "EXEMPT：显式白名单"
+      },
+      {
+        "file": "openspec/changes/keel-plugin-commands/evidence/ui-e2e/shots/09-catalog-390.png",
+        "status": "EXEMPT",
+        "surface": "change 文档/证据",
+        "evidence": "EXEMPT：显式白名单"
+      },
+      {
+        "file": "openspec/changes/keel-plugin-commands/evidence/ui-e2e/shots/10-form-390.png",
+        "status": "EXEMPT",
+        "surface": "change 文档/证据",
+        "evidence": "EXEMPT：显式白名单"
+      },
+      {
+        "file": "openspec/changes/keel-plugin-commands/evidence/ui-e2e/shots/11-catalog-768.png",
+        "status": "EXEMPT",
+        "surface": "change 文档/证据",
+        "evidence": "EXEMPT：显式白名单"
+      },
+      {
+        "file": "openspec/changes/keel-plugin-commands/evidence/ui-e2e/shots/12-form-768.png",
+        "status": "EXEMPT",
+        "surface": "change 文档/证据",
+        "evidence": "EXEMPT：显式白名单"
+      },
+      {
+        "file": "openspec/changes/keel-plugin-commands/evidence/ui-e2e/shots/13-catalog-1024.png",
+        "status": "EXEMPT",
+        "surface": "change 文档/证据",
+        "evidence": "EXEMPT：显式白名单"
+      },
+      {
+        "file": "openspec/changes/keel-plugin-commands/evidence/ui-e2e/shots/14-form-1024.png",
+        "status": "EXEMPT",
+        "surface": "change 文档/证据",
+        "evidence": "EXEMPT：显式白名单"
+      },
+      {
+        "file": "openspec/changes/keel-plugin-commands/evidence/ui-e2e/shots/15-catalog-1440.png",
+        "status": "EXEMPT",
+        "surface": "change 文档/证据",
+        "evidence": "EXEMPT：显式白名单"
+      },
+      {
+        "file": "openspec/changes/keel-plugin-commands/evidence/ui-e2e/shots/16-form-1440.png",
+        "status": "EXEMPT",
+        "surface": "change 文档/证据",
+        "evidence": "EXEMPT：显式白名单"
+      },
+      {
+        "file": "openspec/changes/keel-plugin-commands/evidence/ui-e2e/shots/17-workspace-final.png",
+        "status": "EXEMPT",
+        "surface": "change 文档/证据",
+        "evidence": "EXEMPT：显式白名单"
+      },
+      {
+        "file": "openspec/changes/keel-plugin-commands/evidence/ui-e2e/shots/18-catalog-after-disable.png",
+        "status": "EXEMPT",
+        "surface": "change 文档/证据",
+        "evidence": "EXEMPT：显式白名单"
+      },
+      {
+        "file": "openspec/changes/keel-plugin-commands/evidence/ui-e2e/shots/19-after-uninstall.png",
+        "status": "EXEMPT",
+        "surface": "change 文档/证据",
+        "evidence": "EXEMPT：显式白名单"
+      },
+      {
+        "file": "openspec/changes/keel-plugin-commands/evidence/ui-e2e/steps.json",
+        "status": "EXEMPT",
+        "surface": "change 文档/证据",
+        "evidence": "EXEMPT：显式白名单"
+      },
+      {
+        "file": "openspec/changes/keel-plugin-commands/evidence/ui-go-race-pg.txt",
+        "status": "EXEMPT",
+        "surface": "change 文档/证据",
+        "evidence": "EXEMPT：显式白名单"
+      },
+      {
+        "file": "openspec/changes/keel-plugin-commands/evidence/ui-go-race.txt",
+        "status": "EXEMPT",
+        "surface": "change 文档/证据",
+        "evidence": "EXEMPT：显式白名单"
+      },
+      {
+        "file": "openspec/changes/keel-plugin-commands/evidence/ui-kit-imports.txt",
+        "status": "EXEMPT",
+        "surface": "change 文档/证据",
+        "evidence": "EXEMPT：显式白名单"
+      },
+      {
+        "file": "openspec/changes/keel-plugin-commands/evidence/ui-mutation-p1-1.txt",
+        "status": "EXEMPT",
+        "surface": "change 文档/证据",
+        "evidence": "EXEMPT：显式白名单"
+      },
+      {
+        "file": "openspec/changes/keel-plugin-commands/evidence/ui-mutation-p1-2.txt",
+        "status": "EXEMPT",
+        "surface": "change 文档/证据",
+        "evidence": "EXEMPT：显式白名单"
+      },
+      {
+        "file": "openspec/changes/keel-plugin-commands/evidence/ui-mutation-p1-a.txt",
+        "status": "EXEMPT",
+        "surface": "change 文档/证据",
+        "evidence": "EXEMPT：显式白名单"
+      },
+      {
+        "file": "openspec/changes/keel-plugin-commands/evidence/ui-mutation-p1-b.txt",
+        "status": "EXEMPT",
+        "surface": "change 文档/证据",
+        "evidence": "EXEMPT：显式白名单"
+      },
+      {
+        "file": "openspec/changes/keel-plugin-commands/evidence/ui-nsh-check.txt",
+        "status": "EXEMPT",
+        "surface": "change 文档/证据",
+        "evidence": "EXEMPT：显式白名单"
+      },
+      {
+        "file": "openspec/changes/keel-plugin-commands/evidence/ui-nsh-test-tui-commands.txt",
+        "status": "EXEMPT",
+        "surface": "change 文档/证据",
+        "evidence": "EXEMPT：显式白名单"
+      },
+      {
+        "file": "openspec/changes/keel-plugin-commands/evidence/ui-nsh-test-tui.txt",
+        "status": "EXEMPT",
+        "surface": "change 文档/证据",
+        "evidence": "EXEMPT：显式白名单"
+      },
+      {
+        "file": "openspec/changes/keel-plugin-commands/evidence/ui-web-build.txt",
+        "status": "EXEMPT",
+        "surface": "change 文档/证据",
+        "evidence": "EXEMPT：显式白名单"
+      },
+      {
+        "file": "openspec/changes/keel-plugin-commands/specs/plugin-commands/spec.md",
+        "status": "EXEMPT",
+        "surface": "change 文档/证据",
+        "evidence": "EXEMPT：显式白名单"
+      },
+      {
+        "file": "openspec/changes/keel-plugin-commands/tasks.md",
+        "status": "EXEMPT",
+        "surface": "change 文档/证据",
+        "evidence": "EXEMPT：显式白名单"
+      },
+      {
+        "file": "packages/chat-surface/src/events.ts",
+        "status": "COVERED",
+        "surface": "命令投影与冻结契约",
+        "evidence": "bun test chat-surface + TUI 命令测试"
+      },
+      {
+        "file": "packages/chat-surface/src/index.ts",
+        "status": "COVERED",
+        "surface": "命令投影与冻结契约",
+        "evidence": "bun test chat-surface + TUI 命令测试"
+      },
+      {
+        "file": "packages/chat-surface/src/projection.ts",
+        "status": "COVERED",
+        "surface": "命令投影与冻结契约",
+        "evidence": "bun test chat-surface + TUI 命令测试"
+      },
+      {
+        "file": "packages/chat-surface/src/types.ts",
+        "status": "COVERED",
+        "surface": "命令投影与冻结契约",
+        "evidence": "bun test chat-surface + TUI 命令测试"
+      },
+      {
+        "file": "packages/chat-surface/test/agui.test.ts",
+        "status": "COVERED",
+        "surface": "投影 / AG-UI 测试",
+        "evidence": "bun test chat-surface"
+      },
+      {
+        "file": "packages/chat-surface/test/commands.test.ts",
+        "status": "COVERED",
+        "surface": "投影 / AG-UI 测试",
+        "evidence": "bun test chat-surface"
+      },
+      {
+        "file": "scripts/keel-commands-e2e/e2e.mjs",
+        "status": "EXEMPT",
+        "surface": "E2E 运行器（证据生产者）",
+        "evidence": "EXEMPT：显式白名单"
+      },
+      {
+        "file": "scripts/keel-commands-e2e/plugin/plugin.yaml",
+        "status": "EXEMPT",
+        "surface": "E2E 运行器（证据生产者）",
+        "evidence": "EXEMPT：显式白名单"
+      },
+      {
+        "file": "scripts/keel-commands-e2e/plugin/sidecar.mjs",
+        "status": "EXEMPT",
+        "surface": "E2E 运行器（证据生产者）",
+        "evidence": "EXEMPT：显式白名单"
+      },
+      {
+        "file": "scripts/keel-commands-e2e/report.mjs",
+        "status": "EXEMPT",
+        "surface": "E2E 运行器（证据生产者）",
+        "evidence": "EXEMPT：显式白名单"
+      },
+      {
+        "file": "scripts/keel-commands-e2e/run.sh",
+        "status": "EXEMPT",
+        "surface": "E2E 运行器（证据生产者）",
+        "evidence": "EXEMPT：显式白名单"
+      },
+      {
+        "file": "web/src/data/commands.pending.test.ts",
+        "status": "COVERED",
+        "surface": "目录客户端 / store / fixture",
+        "evidence": "TUI 命令五态/阻塞/pending 测试 + 本 E2E"
+      },
+      {
+        "file": "web/src/data/commands.test.ts",
+        "status": "COVERED",
+        "surface": "目录客户端 / store / fixture",
+        "evidence": "TUI 命令五态/阻塞/pending 测试 + 本 E2E"
+      },
+      {
+        "file": "web/src/data/commands.ts",
+        "status": "COVERED",
+        "surface": "目录客户端 / store / fixture",
+        "evidence": "TUI 命令五态/阻塞/pending 测试 + 本 E2E"
+      },
+      {
+        "file": "web/src/data/contract.ts",
+        "status": "COVERED",
+        "surface": "目录客户端 / store / fixture",
+        "evidence": "TUI 命令五态/阻塞/pending 测试 + 本 E2E"
+      },
+      {
+        "file": "web/src/data/fixture.ts",
+        "status": "COVERED",
+        "surface": "目录客户端 / store / fixture",
+        "evidence": "TUI 命令五态/阻塞/pending 测试 + 本 E2E"
+      },
+      {
+        "file": "web/src/data/http.ts",
+        "status": "COVERED",
+        "surface": "目录客户端 / store / fixture",
+        "evidence": "TUI 命令五态/阻塞/pending 测试 + 本 E2E"
+      },
+      {
+        "file": "web/src/data/store.ts",
+        "status": "COVERED",
+        "surface": "目录客户端 / store / fixture",
+        "evidence": "TUI 命令五态/阻塞/pending 测试 + 本 E2E"
+      },
+      {
+        "file": "web/src/screens/command-invocation.tsx",
+        "status": "COVERED",
+        "surface": "命令结果行 / 本地错误覆盖",
+        "evidence": "E2E 步骤 2/4/7/8 + TUI"
+      },
+      {
+        "file": "web/src/screens/command-palette.tsx",
+        "status": "COVERED",
+        "surface": "Mod+K 命令分组",
+        "evidence": "TUI 面板测试 + E2E 目录"
+      },
+      {
+        "file": "web/src/screens/commands-blocked.harness.tsx",
+        "status": "COVERED",
+        "surface": "命令 TUI 门禁与 harness",
+        "evidence": "nsh test --target tui"
+      },
+      {
+        "file": "web/src/screens/commands-blocked.test.tsx",
+        "status": "COVERED",
+        "surface": "命令 TUI 门禁与 harness",
+        "evidence": "nsh test --target tui"
+      },
+      {
+        "file": "web/src/screens/commands-form.harness.tsx",
+        "status": "COVERED",
+        "surface": "命令 TUI 门禁与 harness",
+        "evidence": "nsh test --target tui"
+      },
+      {
+        "file": "web/src/screens/commands-local-error.harness.tsx",
+        "status": "COVERED",
+        "surface": "命令 TUI 门禁与 harness",
+        "evidence": "nsh test --target tui"
+      },
+      {
+        "file": "web/src/screens/commands-local-error.test.tsx",
+        "status": "COVERED",
+        "surface": "命令 TUI 门禁与 harness",
+        "evidence": "nsh test --target tui"
+      },
+      {
+        "file": "web/src/screens/commands-states.harness.tsx",
+        "status": "COVERED",
+        "surface": "命令 TUI 门禁与 harness",
+        "evidence": "nsh test --target tui"
+      },
+      {
+        "file": "web/src/screens/commands-states.test.tsx",
+        "status": "COVERED",
+        "surface": "命令 TUI 门禁与 harness",
+        "evidence": "nsh test --target tui"
+      },
+      {
+        "file": "web/src/screens/commands.tui.test.tsx",
+        "status": "COVERED",
+        "surface": "命令 TUI 门禁与 harness",
+        "evidence": "nsh test --target tui"
+      },
+      {
+        "file": "web/src/screens/composer-commands.tsx",
+        "status": "COVERED",
+        "surface": "命令菜单 / schema 表单",
+        "evidence": "E2E 步骤 1/3/4 + TUI"
+      },
+      {
+        "file": "web/src/screens/composer.tsx",
+        "status": "COVERED",
+        "surface": "发送门禁 / 参数映射",
+        "evidence": "TUI 阻塞与命令测试 + E2E"
+      },
+      {
+        "file": "web/src/screens/conversation.tsx",
+        "status": "COVERED",
+        "surface": "按 seq 合并对话行",
+        "evidence": "TUI destructive/palette + E2E"
+      }
+    ]
+  }
 }

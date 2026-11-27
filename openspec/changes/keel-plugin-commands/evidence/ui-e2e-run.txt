@@ -1,4 +1,4 @@
-creating database keel_commands_e2e_1795771715
+creating database keel_commands_e2e_1795775363
 starting fake provider on 127.0.0.1:13758
 starting keel serve…
   ok   keel serve healthy
@@ -6,7 +6,7 @@ starting keel serve…
   ok   bot-owned session created
   ok   three settled turns before compact
   ok   session retain budget narrowed to 1
-session b78bae32-2b75-415e-bc91-e4934a67db14 warmed up
+session 311bd5be-470a-4acd-9de4-eeaa16b70ddb warmed up
 
 == catalog-builtin · 打开目录：内置命令可发现，顺序来自服务端
   ok   builtin catalog has compact
@@ -89,6 +89,10 @@ session b78bae32-2b75-415e-bc91-e4934a67db14 warmed up
   ok   uninstall keeps the command gone
   shot shots/19-after-uninstall.png · 卸载后的工作区
 -- disable-uninstall: passed (4/4)
+
+== coverage · 改动文件覆盖表：仅证据/运行器可 EXEMPT，其余必须 COVERED
+  ok   UNCOVERED=0
+-- coverage: passed (1/1)
 
 result: PASS · failures=0
 report: /Users/kzf/Development/GitHub/jixoai/fde2e/.worktrees/keel-plugin-commands-ui/openspec/changes/keel-plugin-commands/evidence/ui-e2e/report.html
