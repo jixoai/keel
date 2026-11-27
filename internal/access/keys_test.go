@@ -70,6 +70,7 @@ func TestRegistryCoversAcceptanceSurface(t *testing.T) {
 		KeyAccountRead, KeyAccountManage, KeyAccountCredentialReset, KeyAccountPermissionGrant,
 		KeyPermissionRead, KeyPermissionManage,
 		KeyAuditRead,
+		KeyBoardRead, KeyBoardWrite, KeyBoardManage,
 		KeyAppRead, KeyFileRead, KeyFileWrite, KeyMediaRead, KeyMediaInvoke,
 		KeyMCPRead, KeyMCPUse, KeySkillRead, KeySkillManage,
 		KeyNotificationRead, KeyNotificationWrite,

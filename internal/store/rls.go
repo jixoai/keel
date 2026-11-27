@@ -54,6 +54,13 @@ const RLSRoleName = "keel_app"
 // `plugins` and `plugin_audit` are tenant-scoped (keel-creation): user-created
 // plugin state belongs to the installing tenant, and bundled rows are seeded
 // per tenant, so the policy is precise rather than a lie.
+//
+// The board's `board_*` tables are deliberately NOT listed here. They are owned
+// and migrated by github.com/jixoai/keel-board and carry their own
+// `keel.tenant_id` policies (internal/boardintegration); adding them would put
+// a second, app.tenant_id-based policy on the same table, and the two settings
+// would have to be set together on every board connection. Board queries run on
+// the board store's own pool, never through keel's TenantScoped path.
 var rlsTenantTables = []string{
 	"tenants",
 	"sessions",

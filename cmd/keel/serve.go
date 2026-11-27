@@ -27,6 +27,7 @@ import (
 	"github.com/jixoai/keel/internal/auth"
 	"github.com/jixoai/keel/internal/bashbridge"
 	"github.com/jixoai/keel/internal/blob"
+	"github.com/jixoai/keel/internal/boardintegration"
 	"github.com/jixoai/keel/internal/capturepolicy"
 	"github.com/jixoai/keel/internal/collab"
 	"github.com/jixoai/keel/internal/compaction"
@@ -1053,6 +1054,39 @@ func runServe(parent context.Context, opts serveOptions) error {
 	toolPluginManager = product.pluginManager
 	defer product.close()
 
+	// --- board (keel-board-v1, Phase 1) ---
+	// The board is a separate authorization and storage surface: it is mounted
+	// beside the httpapi mux (not behind accessgate) because its own authorizer
+	// maps board.read/write/manage plus channel relations, and its webhook
+	// namespace must stay outside the session edge. The board is off by default
+	// (design §20); the routes stay mounted but answer 404 board_disabled, so a
+	// disabled deployment does not reveal whether a channel exists. The
+	// tenant-level flag (board.enabled) lands with the secret-store lane (10.6).
+	boardEnabled, err := boardDeploymentEnabled()
+	if err != nil {
+		return err
+	}
+	var boardSurface *boardintegration.Surface
+	var boardHandler http.Handler = boardintegration.DisabledHandler()
+	var boardWebhook http.Handler = boardintegration.DisabledHandler()
+	if boardEnabled {
+		boardSurface, err = boardintegration.New(ctx, boardintegration.Options{
+			DSN:                 boardDSN(opts.DSN),
+			Schema:              strings.TrimSpace(os.Getenv("KEEL_BOARD_SCHEMA")),
+			Access:              product.access,
+			Store:               st,
+			TenantID:            opts.TenantID,
+			Logger:              log,
+			ChannelScanInterval: envDuration("KEEL_BOARD_CHANNEL_SCAN", 0),
+		})
+		if err != nil {
+			return fmt.Errorf("board surface: %w", err)
+		}
+		boardHandler = boardSurface
+		boardWebhook = boardSurface.Webhook()
+		defer boardSurface.Close()
+	}
+
 	// Automatic recovery is default behavior, not a button: scan every
 	// non-terminal run before the listener opens, record the recovery facts and
 	// keep reconciling failed runs in the background. The worker's claim/lease
@@ -1084,6 +1118,12 @@ func runServe(parent context.Context, opts serveOptions) error {
 	blobGC.Interval = envDuration("KEEL_BLOB_GC_INTERVAL", blob.DefaultGCInterval)
 	blobGC.OrphanInterval = envDuration("KEEL_BLOB_ORPHAN_INTERVAL", blob.DefaultOrphanInterval)
 	go blobGC.Run(ctx)
+	// Prometheus text at /metrics: the fixed runtime/MCP set registered at
+	// boot (P4.7), plus the board families when the board surface is enabled.
+	var metricsExporter httpapi.MetricsExporter = metricsReg
+	if boardSurface != nil {
+		metricsExporter = boardSurface.Expo(metricsReg)
+	}
 	api := httpapi.New(httpapi.Config{
 		Store:     st,
 		Hub:       hub,
@@ -1103,7 +1143,7 @@ func runServe(parent context.Context, opts serveOptions) error {
 		MaxUpload: uploadLimit,
 		// Prometheus text at /metrics: the fixed runtime/MCP set registered at
 		// boot (P4.7).
-		MetricsExporter: metricsReg,
+		MetricsExporter: metricsExporter,
 		Ready:           st,
 		Drain:           drainer,
 		Logger:          log,
@@ -1159,6 +1199,12 @@ func runServe(parent context.Context, opts serveOptions) error {
 	apiMux := http.NewServeMux()
 	product.auth.register(apiMux)
 	apiMux.Handle("/", api)
+	// Board routes are a concrete surface beside httpapi, not part of its
+	// accessgate matrix: the board authorizer owns board.read/write/manage and
+	// the channel relations, and /webhooks stays outside the session edge. The
+	// more specific patterns win over "/", so no existing /v1 route changes.
+	apiMux.Handle("/v1/board", boardHandler)
+	apiMux.Handle("/v1/board/", boardHandler)
 
 	// Plugin UIs are hosted on the same origin (the bridge and the static app
 	// share it), and they are not part of the /v1 API surface: the dispatcher
@@ -1175,6 +1221,12 @@ func runServe(parent context.Context, opts serveOptions) error {
 			// the web client's own route: a reload there must serve the SPA, not
 			// the plugin handler's "a plugin id is required" JSON.
 			pluginUI.ServeHTTP(w, r)
+		case r.URL.Path == "/webhooks" || strings.HasPrefix(r.URL.Path, "/webhooks/"):
+			// Platform webhooks are verified by the board sync provider that
+			// owns the key, never by a board session. The auth edge passes
+			// non-/v1 paths through; an unknown or disabled key is the board's
+			// pre-auth answer.
+			boardWebhook.ServeHTTP(w, r)
 		default:
 			static.ServeHTTP(w, r)
 		}

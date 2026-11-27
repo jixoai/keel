@@ -84,13 +84,18 @@
 
 ## 10. Phase 1：keel 导入与基础设施适配
 
-- [ ] 10.1 keel `go.mod` 固定 `github.com/jixoai/keel-board@<phase-0-commit>`；`go test ./...` 通过；记录 NOTICE/许可证。
-- [ ] 10.2 实现 Account/Bot/Profile 适配：`Principal/Actor` 解析、Bot 身份、owner/by/for、平台 actor 命名；测试人与 Bot 差异。
-- [ ] 10.3 实现 RBAC/ReBAC：`board.read/write/manage` 权限键、频道 `resource_relations` viewer/editor/owner、最近祖先继承；真实 PG 测试。
-- [ ] 10.4 接入 keel PG 与 RLS：keel-board migrations 在 keel 启动幂等执行，`tenant_id` 谓词 + RLS 双保险；A/B 租户测试。
-- [ ] 10.5 接入 SSE hub 与 Last-Event-ID；keel 的 tenant 鉴权、心跳、多副本 NOTIFY/poll；集成测试。
+> Phase 1 基础设施（10.1–10.5、10.7）证据：`evidence/phase-1-infrastructure.md`
+> （`scripts/keel-board-phase1-gate.sh` 生成）。10.6 由 secret-store lane 继续；
+> 10.7 的 credential 状态派生自 10.6 的 entry/secret，本 lane 先交付指标、
+> `permission.denied` 与 board audit（credential 状态随 10.6 补齐）。
+
+- [x] 10.1 keel `go.mod` 固定 `github.com/jixoai/keel-board@<phase-0-commit>`；`go test ./...` 通过；记录 NOTICE/许可证。
+- [x] 10.2 实现 Account/Bot/Profile 适配：`Principal/Actor` 解析、Bot 身份、owner/by/for、平台 actor 命名；测试人与 Bot 差异。
+- [x] 10.3 实现 RBAC/ReBAC：`board.read/write/manage` 权限键、频道 `resource_relations` viewer/editor/owner、最近祖先继承；真实 PG 测试。
+- [x] 10.4 接入 keel PG 与 RLS：keel-board migrations 在 keel 启动幂等执行，`tenant_id` 谓词 + RLS 双保险；A/B 租户测试。
+- [x] 10.5 接入 SSE hub 与 Last-Event-ID；keel 的 tenant 鉴权、心跳、多副本 NOTIFY/poll；集成测试。
 - [ ] 10.6 接入 tenant secret store：`SecretResolver`、sync entries 的 POST/PATCH（创建/启停/轮换/路由，只传 secret_ref）、`board.sync.enabled`/`board.enabled` feature flag；测试关闭即 404/无 webhook，日志/事件/响应无 secret。
-- [ ] 10.7 接入 telemetry/audit：board/sync 指标、permission.denied、credential 状态；测试无 secret/正文。
+- [x] 10.7 接入 telemetry/audit：board/sync 指标、permission.denied、credential 状态；测试无 secret/正文。
 
 ## 11. Phase 1：superagent 适配
 

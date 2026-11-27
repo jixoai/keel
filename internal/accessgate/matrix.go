@@ -140,6 +140,11 @@ var rules = []Rule{
 	route("", "/v1/mcp/callback", ModePublic, ""),
 	// Product subtree mount; the concrete harnessapi route owns the decision.
 	{Pattern: "/v1/", Mode: ModeDelegated, Note: "product subtree mount"},
+	// The board surface (/v1/board and /webhooks) is mounted beside httpapi and
+	// owns its authorization: board.read/write/manage plus channel relations in
+	// internal/boardintegration. It is deliberately not listed here; listing it
+	// as public or delegating a second prefix would let a request bypass one of
+	// the two decision points.
 
 	// --- operator surface (deployment credential checked in the handler) ----
 	route(http.MethodPost, "/v1/tenants", ModeOperator, ""),

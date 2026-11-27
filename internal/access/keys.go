@@ -121,6 +121,15 @@ const (
 
 	// Audit trail.
 	KeyAuditRead = "audit.read"
+
+	// Board (change keel-board-v1, Phase 1). read/write are resource-scoped
+	// against a board channel's viewer/editor relation; manage is the
+	// tenant-level administration key (channel metadata, sync entries, audit,
+	// projection operations). manage implies read and write on the board
+	// surface but never bypasses a channel relation.
+	KeyBoardRead   = "board.read"
+	KeyBoardWrite  = "board.write"
+	KeyBoardManage = "board.manage"
 )
 
 // Risk classifies how dangerous a key is. The UI uses it to add friction to a
@@ -314,6 +323,12 @@ var keyCatalog = []KeySpec{
 
 	// Audit.
 	key(KeyAuditRead, "Read the audit trail", RiskHigh, RelationNone, tenantScopes...),
+
+	// Board. A channel is the resource for read/write; the relation vocabulary
+	// is the existing viewer/editor/owner set on resource_type=board_channel.
+	key(KeyBoardRead, "Read boards", RiskNormal, RelationForAction(ActionRead), resourceScopes...),
+	key(KeyBoardWrite, "Write boards", RiskNormal, RelationForAction(ActionWrite), resourceScopes...),
+	key(KeyBoardManage, "Manage board settings and sync", RiskHigh, RelationNone, tenantScopes...),
 }
 
 // registry is the key lookup index. It is built once from keyCatalog.

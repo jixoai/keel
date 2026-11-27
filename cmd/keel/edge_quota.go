@@ -96,6 +96,7 @@ func edgeQuotaPath(r *http.Request) bool {
 	case http.MethodGet:
 		path := r.URL.Path
 		return strings.HasSuffix(path, "/events/stream") ||
+			path == "/v1/board/events" ||
 			strings.HasPrefix(path, "/v1/files/") ||
 			path == "/v1/realtime"
 	case http.MethodPost:

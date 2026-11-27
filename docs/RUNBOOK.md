@@ -64,6 +64,69 @@ keel serve --addr 127.0.0.1:13750
 - **零兼容**：`KEEL_SERVE_PASSWORD`、旧 cookie、旧 `api_keys`、旧 `agents`/`agent_teams` schema
   全部失效；启动会拒绝旧 schema 并给出重建指令，不提供迁移。升级即重新初始化账号与 Bot。
 
+### Board（keel-board v0.1.0）
+
+`keel serve` 启动时在同一个进程内挂载 board 表面（`github.com/jixoai/keel-board@v0.1.0`，
+commit `d5a9e0a6d983685994b5df49c266350d80ab4dbd`）。board 是独立授权面：
+`board.read/write/manage` + 频道 `resource_relations`，不经过 keel 的 `accessgate` 矩阵。
+
+**开关与存储**
+
+```bash
+export KEEL_BOARD_ENABLED=1          # 默认 0（关闭）：/v1/board/* 与 /webhooks/* 404 board_disabled；1 开启
+export KEEL_BOARD_DSN='postgres://…' # 可选；默认复用 KEEL_DSN
+export KEEL_BOARD_SCHEMA=board       # 可选；board 表独立 schema（不存在时自动 CREATE SCHEMA）
+export KEEL_BOARD_CHANNEL_SCAN=5m    # 可选；频道 owner 关系修复间隔，负值只跑启动扫描
+```
+
+- 启动幂等执行 board 的 `board_*` 迁移（core / sync / automation / audit RLS）。
+- **RLS 双设置边界**：keel 既有表用 `app.tenant_id`；board 表用 `keel.tenant_id`，且
+  **不**注册进 keel 的 `rlsTenantTables`。两套 policy 不互相覆盖；board 查询由 board 自己的
+  连接设置 tenant，未设置时匹配零行（fail closed）。
+- board 的 DSN 建议使用**非超级用户**角色（拥有 board 表即可；`FORCE RLS` 对 owner 生效，
+  超级用户总是绕过 RLS）。专用库/角色用 `KEEL_BOARD_DSN`；单库单租户可复用 `KEEL_DSN`。
+- 跨租户：HTTP 侧 tenant 只来自登录 principal（不读 header/path），A 租户读不到 B 的行；
+  数据库侧见 `internal/boardintegration` 的 RLS 测试（restricted role + unset tenant）。
+
+**权限**
+
+- `board.read` → 频道 viewer；`board.write` → 频道 editor；`board.manage` → tenant 级管理
+  （sync entries/audit/projection；`channel="*"`）。频道 owner 关系允许任务 owner 操作。
+- 最近祖先继承：先查精确路径，再逐级向上；某一层对调用者有任意关系即生效（显式 viewer
+  可收窄父级 editor）。
+- 创建频道（`POST /v1/board/channels`）成功 201 后，adapter 立即写创建者的 `owner` 关系；
+  写失败/崩溃由启动与周期扫描按 `channel.created` 事件修复。
+- 权限拒绝写 `auth_events`（`permission.denied`），detail 只有 key/relation/scope，不含正文。
+
+**API / SSE**
+
+- Base `/v1/board`；沿用 keel 登录与 Bot key，写请求仍要 `X-Keel-CSRF`（人类会话）。
+- `GET /v1/board/events`：SSE；`Last-Event-ID` 优先于 `after`；adapter 每 15s 发 `: ping`，
+  55s 主动断开由客户端带游标重连；无权事件不下发内容。
+- 同步：`GET /v1/board/sync/entries|status|inbox|outbox/failures|threads` 需要 `board.manage`；
+  平台 webhook `POST /webhooks/{key}` 不走会话认证，由 provider 验签；未配置 entry 时
+  不读取 body、不落库（pre-auth unknown key）。
+
+**验收 / 排障**
+
+```bash
+# board 适配（真实 PG；KEEL_TEST_DSN 指向专用库）
+KEEL_TEST_DSN='postgres://…' go test ./internal/boardintegration/ -v
+KEEL_TEST_DSN='postgres://…' go test -race ./internal/boardintegration/
+go test ./internal/access/ ./internal/accessgate/ ./cmd/keel/
+scripts/binary-size.sh --budget-kb 256
+```
+
+- `GET /metrics` 同时输出 `board_*`（事件数、append 延迟、live claims、SSE 连接/滞后、
+  sync 深度/失败等）；标签只有 kind/key/platform/status，不含 tenant/消息 ID。
+- `GET /v1/board/admin/audit?limit=`（`board.manage`）读最近运维审计；领域审计在
+  `board_events`，两者都不含 secret/正文。
+- 已知接口缺口（v0.1.0）：board 无 `GET /me`（用 `/actors` 或消息 author 投影）；
+  SSE 对不可见事件不写空 `id:` 帧（客户端游标不前进，重连时从最后可见 id 重放）；
+  SSE 的 `state/owner/for` 过滤、watcher/schedule 管理 API 由后续 lane 接入。
+- Phase 1 不启用 sync entries 的创建/轮换（10.6 secret-store lane）；`board.sync.enabled`
+  与 tenant 级 `board.enabled` 同样在 10.6 收口。
+
 ## 遥测导出插件（`keel.telemetry`）
 
 遥测是**默认关闭**的可选插件；配置 OTLP endpoint 不会自动出网。

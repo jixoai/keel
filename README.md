@@ -170,6 +170,30 @@ env 文件路径：`FDE2E_ENV_PERSONAL`，默认取主仓根目录的 `.env.pers
 本 worktree 会自动向上解析三层。需要新增变量时只改那个文件，脚本本身不保存任何凭据。
 术语与旧词对表见 [docs/PRODUCT-TERMS.md](docs/PRODUCT-TERMS.md)。
 
+### Board（keel-board v0.1.0）
+
+`KEEL_BOARD_ENABLED=1` 时，`keel serve` 挂载 `github.com/jixoai/keel-board@v0.1.0`（commit
+`d5a9e0a6d983685994b5df49c266350d80ab4dbd`，Apache-2.0；见 `NOTICE`）：
+
+- **API**：`/v1/board/*`（频道/消息/线程/任务/claim/needs/SSE/审计/sync 管理）；沿用 keel
+  登录与 Bot key，不新增认证方式。
+- **权限**：`board.read` / `board.write` / `board.manage` 三个权限键 + 频道
+  `resource_relations`（`resource_type=board_channel`，viewer/editor/owner，最近祖先继承）。
+  创建频道者自动成为 owner；不可读频道返回 404，可读但无写权限返回 403。
+- **存储**：board 自己的迁移（`board_*`）在启动时幂等执行；RLS 读 `keel.tenant_id`，与 keel
+  既有的 `app.tenant_id` 策略互不覆盖。默认复用 `KEEL_DSN`；`KEEL_BOARD_DSN` 可指向专用
+  数据库/非超级用户角色，`KEEL_BOARD_SCHEMA` 可隔离 schema。
+- **实时**：`GET /v1/board/events`（Last-Event-ID、频道/标签过滤、15s 心跳、55s 重连）。
+- **观测**：board 指标并入 `GET /metrics`（`board_*`）；拒绝写 `auth_events`
+  （`permission.denied`）；sync 运维审计写 `board_audit`，均不含正文/secret。
+- **开关**：默认关闭（`/v1/board/*` 与 `/webhooks/*` 返回 404 `board_disabled`）；部署级
+  `KEEL_BOARD_ENABLED=1` 开启，tenant 级 `board.enabled` 与 sync entries 由 10.6 的
+  secret-store lane 接入。
+- **平台 webhook**：`POST /webhooks/{key}` 不走 board 会话认证，由对应 provider 验签；
+  未配置 entry 时 fail closed。
+
+运行细节（DSN 角色、迁移、webhook 配置、验收命令）见
+[docs/RUNBOOK.md](docs/RUNBOOK.md#boardkeel-board-v010)。
 
 ## 状态与路线
 
