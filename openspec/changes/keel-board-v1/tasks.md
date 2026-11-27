@@ -114,9 +114,9 @@
 
 ## 12. Phase 1：keel 上的 sync 启用
 
-- [x] 12.1 从 tenant config/secret store 装配 Slack/GitHub/Linear/Chat SDK entries；webhook 路径注册；未配置时 `sync_disabled`；测试配置矩阵。entry 的静态 route 在写入与 boot 时都要求频道已存在且至少有一条 `board_channel` relation（fail closed），零 relation 频道走显式认领。（evidence: `evidence/phase-1-sync.md`）
+- [x] 12.1 从 tenant config/secret store 装配 Slack/GitHub/Linear/Chat SDK entries；webhook 路径注册；未配置时 `sync_disabled`；测试配置矩阵。entry 的静态 route 在写入与 boot 时都要求频道已存在且自身或任一祖先有至少一条 `board_channel` relation（fail closed），整条路径（自身/祖先/后代）零 relation 的频道走显式认领。（evidence: `evidence/phase-1-sync.md`）
 - [x] 12.2 验证 Slack/GitHub/Linear 在 keel 的 webhook→inbox→board→outbound→receipt 全链路；fake 平台 E2E。（evidence: `evidence/phase-1-sync-e2e.html`）
-- [x] 12.3 验证 bridge sidecar 在 keel 部署中的 HMAC/nonce/超时/5xx/malformed 重试；sidecar 不属于 keel 运行时。E2E 覆盖：真实 client timeout（sidecar 延迟 16s > 15s client timeout，第一次超时、第二次成功，attempts=2）、5xx 两次后成功、malformed 响应后重试成功；supervisor 侧由真实 PG + HTTP 的 bridge E2E 覆盖 timeout/5xx/retry 与 `board_disabled`。（evidence: `evidence/phase-1-sync-e2e.html`）
+- [x] 12.3 验证 bridge sidecar 在 keel 部署中的 HMAC/nonce/超时/5xx/malformed 重试；sidecar 不属于 keel 运行时。E2E 覆盖：真实 client timeout（sidecar 延迟 16s > 15s client timeout，至少一次超时后最终成功；client/outbox 各自重试使 attempts>=2，报告不写死次数）、5xx 两次后成功、malformed 响应后重试成功；supervisor 侧由真实 PG + HTTP 的 bridge E2E 覆盖 timeout/5xx/retry 与 `board_disabled`。（evidence: `evidence/phase-1-sync-e2e.html`）
 - [x] 12.4 验证 source read/typing/permalinks/attachments 在 keel 权限下的行为；`board.manage` 与频道关系测试。Slack permalink 在 E2E 中作为 board link 原样保留，并以 alice 会话读回。（evidence: `evidence/phase-1-sync.md`；attachments/source read/typing/permalink 在 `evidence/phase-1-sync-e2e.html`）
 
 ## 13. Phase 1：门禁
