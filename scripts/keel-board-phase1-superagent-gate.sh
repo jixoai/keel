@@ -12,7 +12,7 @@ set -euo pipefail
 
 repo_root="$(git rev-parse --show-toplevel)"
 evidence="$repo_root/openspec/changes/keel-board-v1/evidence/phase-1-superagent.md"
-base_ref="${KEEL_BOARD_BASE:-896b766}"
+base_ref="${KEEL_BOARD_BASE:-8435b3dd}"
 if [ -z "${KEEL_TEST_DSN:-}" ]; then
   echo "keel-board-phase1-superagent-gate: KEEL_TEST_DSN is required for the real-PostgreSQL suites" >&2
   exit 2
