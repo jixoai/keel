@@ -301,3 +301,69 @@ func pgCollabSnapshot(t *testing.T, st *keelstore.Store, tenant uuid.UUID) strin
 	}
 	return builder.String()
 }
+
+func TestPGBoardMirrorWritesManyAttentionAndReportLinks(t *testing.T) {
+	st, pg := newPGBoard(t)
+	ctx := context.Background()
+	tenant := uuid.New()
+	if err := st.CreateTenant(ctx, tenant, "many-links-"+tenant.String()[:8]); err != nil {
+		t.Fatalf("create tenant: %v", err)
+	}
+	ticket := pgSeedTicket(t, st, tenant, "evt-many")
+	assignment, err := st.CreateAssignment(ctx, collab.Assignment{
+		ID: uuid.New(), TenantID: tenant, WorkItemID: ticket.ID,
+		ModeID: superagent.DefaultModeID, BotID: "researcher", SessionID: uuid.New(),
+		Status: collab.AssignmentActive, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
+	})
+	if err != nil {
+		t.Fatalf("assignment: %v", err)
+	}
+	for index := 0; index < 2; index++ {
+		attention, err := st.CreateAttention(ctx, collab.Attention{
+			ID: uuid.New(), TenantID: tenant, WorkItemID: ticket.ID,
+			AssignmentID: assignment.ID, ModeID: superagent.DefaultModeID,
+			SessionID: assignment.SessionID, Kind: collab.AttentionClarify, Prompt: "Which?",
+			Route: collab.AttentionRouteChannel, Status: collab.AttentionAnswered,
+			Answer:    &collab.AttentionAnswer{OptionID: "yes", At: time.Now().UTC()},
+			CreatedAt: time.Now().UTC().Add(time.Duration(index) * time.Second),
+			Deadline:  time.Now().UTC().Add(time.Hour),
+		})
+		if err != nil {
+			t.Fatalf("attention %d: %v", index, err)
+		}
+		_ = attention
+	}
+	for index := 0; index < 2; index++ {
+		report, created, err := st.ClaimWorkerReport(ctx, superagent.WorkerReport{
+			ID: uuid.New(), TenantID: tenant, WorkItemID: ticket.ID, AssignmentID: assignment.ID,
+			SessionID: assignment.SessionID, RequestID: "report-" + uuid.NewString(),
+			State: superagent.ReportProgress, Summary: "step", CreatedAt: time.Now().UTC(),
+		})
+		if err != nil || !created {
+			t.Fatalf("report %d: created=%v err=%v", index, created, err)
+		}
+		if _, err := st.MarkWorkerReportAudited(ctx, tenant, report.ID, time.Now().UTC()); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := st.MarkWorkerReportApplied(ctx, tenant, report.ID, time.Now().UTC()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mirror := newMirrorForTest(t, tenant, st, pg.log, st,
+		SuperagentConfig{Mirror: true, Bridge: true, Channel: "superagent"}, newTestClock())
+	if _, err := mirror.SyncOnce(ctx); err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+	var attentions, reports int
+	if err := st.Pool().QueryRow(ctx,
+		`SELECT count(*) FROM board_links WHERE tenant_id=$1 AND kind='attention'`, tenant).Scan(&attentions); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Pool().QueryRow(ctx,
+		`SELECT count(*) FROM board_links WHERE tenant_id=$1 AND kind='report'`, tenant).Scan(&reports); err != nil {
+		t.Fatal(err)
+	}
+	if attentions != 2 || reports != 2 {
+		t.Fatalf("links = attention:%d report:%d, want 2/2", attentions, reports)
+	}
+}
