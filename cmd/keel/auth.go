@@ -34,6 +34,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jixoai/keel/internal/accessgate"
 	"github.com/jixoai/keel/internal/auth"
 	"github.com/jixoai/keel/internal/store"
 )
@@ -343,9 +344,12 @@ func (a *authController) machinePrincipal(w http.ResponseWriter, r *http.Request
 		return nil, true
 	}
 	// The operator provisioning surface keeps KEEL_ADMIN_KEY as a deployment
-	// credential. It is not a human or bot login: it reaches only /v1/admin/*
-	// and the handler re-checks it in constant time.
-	if strings.HasPrefix(r.URL.Path, "/v1/admin/") && adminKeyMatches(token) {
+	// credential. It is not a human or bot login: it reaches only the routes the
+	// accessgate matrix declares ModeOperator (/v1/admin/*, the /v1/tenants
+	// configuration API, /v1/metrics), and each handler re-checks it in constant
+	// time. Binding the check to the matrix keeps this edge from drifting from
+	// the route policy.
+	if operatorAdminRoute(r.Method, r.URL.Path) && adminKeyMatches(token) {
 		principal := auth.Principal{
 			Kind: auth.PrincipalLocal, TenantID: a.cfg.TenantID, IsSuperAdmin: true,
 		}
@@ -360,6 +364,14 @@ func (a *authController) machinePrincipal(w http.ResponseWriter, r *http.Request
 	// Any other bearer is the retired passphrase or an unknown credential.
 	writeAuthError(w, http.StatusUnauthorized, "invalid_credential", "invalid credentials")
 	return nil, true
+}
+
+// operatorAdminRoute reports whether (method, path) is an accessgate ModeOperator
+// route. KEEL_ADMIN_KEY is accepted on exactly these routes; a bearer on any
+// other route is never forwarded to a handler.
+func operatorAdminRoute(method, path string) bool {
+	match, ok := accessgate.Match(method, path)
+	return ok && match.Rule.Mode == accessgate.ModeOperator
 }
 
 // adminKeyMatches is the constant-time KEEL_ADMIN_KEY comparison.
