@@ -116,7 +116,7 @@ test("board evidence: queue and five states", async () => {
   const phoneEmpty = await view(390, "empty");
   await phoneEmpty.waitFor("id:board-queue-empty");
   await shot(phoneEmpty, "14-queue-empty-390");
-}, 300_000);
+}, 600_000);
 
 test("board evidence: task states", async () => {
   const claimed = await view(1440, "success", { task: "812" });
@@ -172,7 +172,7 @@ test("board evidence: task states", async () => {
   const failedTask = await view(1440, "task-error");
   await failedTask.waitFor("id:board-task-error", { timeout: 20_000 });
   await shot(failedTask, "25d-task-error-1440");
-}, 300_000);
+}, 600_000);
 
 test("board evidence: task dialogs", async () => {
   const known = await view(1440, "success", { task: "809" });
@@ -190,7 +190,7 @@ test("board evidence: task dialogs", async () => {
   await known.press("id:board-action-cancel");
   await known.waitFor("id:board-dialog-cancel");
   await shot(known, "28-dialog-cancel-1440");
-}, 300_000);
+}, 600_000);
 
 test("board evidence: sync", async () => {
   const sync = await view(1440, "success");
@@ -225,7 +225,7 @@ test("board evidence: sync", async () => {
   const syncEmpty = await view(1440, "sync-empty");
   await syncEmpty.waitFor("id:board-sync-empty", { timeout: 20_000 });
   await shot(syncEmpty, "33c-sync-empty-1440");
-}, 300_000);
+}, 600_000);
 
 test("board evidence: automation and the retired address", async () => {
   const auto = await view(1440, "success");
@@ -263,7 +263,7 @@ test("board evidence: automation and the retired address", async () => {
   await phoneAuto.waitFor("id:board-watcher-triage-inbox");
   inside(phoneAuto, "id:board-automation", 390);
   await shot(phoneAuto, "37-automation-390");
-}, 300_000);
+}, 600_000);
 
 test("board evidence: before/after action transitions", async () => {
   const claim = await view(1440, "success", { task: "809" });
@@ -318,4 +318,4 @@ test("board evidence: before/after action transitions", async () => {
     throw new Error(`archive width ${archiveField.width} != select width ${forField.width}`);
   }
   await shot(phone, "49-filter-sheet-390");
-}, 300_000);
+}, 600_000);

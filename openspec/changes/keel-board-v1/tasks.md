@@ -167,7 +167,8 @@
   > 证据：`evidence/phase-2-ui-gates-20261127T154424Z/full-tui.json`（独占跑，536/536，exit 0，10m24s）、`full-tui.log`/`full-tui-junit.xml`；`go test ./...` exit 0；`nsh check` 0 错。
 - [x] 16.2 脚本化最终 E2E：队列/任务卡/线程/租约/live/sync 状态/watcher 启停；每个屏幕/状态 before/after 截图，HTML 报告，`UNCOVERED=0`。
   > 证据：同一 evidence 目录的 `index.html`/`README.txt`/`shots/web`（53 张真实 web 截图）；coverage matrix 26/26，UNCOVERED=0；`sse-live-test` 用真实 HTTP 假服务器 + 真实 `KeelHttp` 证明 hidden frame、augment 重读与动作替换；关键帧有 390/768/1024/1440 横向溢出断言。
-- [ ] 16.3 独立子代理复核（禁 Codex）：五态/同源/权限、sync 故障 UI、回归；P0/P1 清零。
+- [x] 16.3 独立子代理复核（禁 Codex）：五态/同源/权限、sync 故障 UI、回归；P0/P1 清零。
+  > 证据：`evidence/phase-2-independent-review.md`（独立只读子代理；第一轮 P0=0/P1=2，修复后复核又发现 1 个新 P1，最终 `P0/P1=0, 16.3 PASS`）。
 - [x] 16.4 更新 docs/README/NOTICE：keel-board module+commit+Apache-2.0、上游归属、sync 配置与运行手册；确认未复制 vercel/board 代码、未新增运行时。（README/NOTICE 记录 `keel-board v0.1.1` / `70b503f…` / Apache-2.0 与 vercel/board 上游 pin；RUNBOOK 含 route/secret/moves/CanBridge/guard-only/验收命令；`cmd/runtime` 无新增依赖）
 - [x] 16.5 破坏性变更收口：在 CHANGELOG/README/升级说明明确“旧 superagent 看板已删除，board 为唯一任务面”，确认仓库内无旧看板路由/数据源/兼容开关残留。（README/RUNBOOK 已写“已删除（破坏性变更）”；`/superagent*` 为 404 历史页；harnessapi 仅保留 worker report/ask；旧脚本归档在 `scripts/archive/retired-superagent/`；residue-grep 无活跃调用）
 - [ ] 16.6 `openspec validate keel-board-v1 --strict`、`openspec archive keel-board-v1 --yes`、`openspec validate --specs --strict`；提交实现与 openspec（不 push，除非 Owner 要求），汇报 commit hash 与剩余 Owner 决策。

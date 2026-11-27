@@ -17,6 +17,9 @@ test("board SSE: hidden frame advances, visible frame moves the row, live badge"
   await view.waitFor("id:board-task-card", { timeout: 20_000 });
   expect(view.accessibility("id:board-task-state")?.label).toBe("可认领");
   expect(view.shows("id:board-action-claim")).toBe(true);
+  // The live badge starts as 连接中; wait for the stream before asserting the
+  // connected state, or a slow CI host fails an otherwise healthy SSE.
+  await view.waitUntil(() => view.texts().join("\n").includes("实时"), { timeout: 20_000 });
   expect(view.texts().join("\n")).toContain("实时");
   // The server writes an id-only frame first; then a raw task event with no
   // moves. The client must refetch the augmented view and swap the action set
