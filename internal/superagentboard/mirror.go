@@ -1,0 +1,733 @@
+package superagentboard
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log/slog"
+	"sort"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/jixoai/keel/internal/collab"
+	"github.com/jixoai/keel/internal/store"
+	"github.com/jixoai/keel/internal/superagent"
+
+	"github.com/jixoai/keel-board/protocol"
+)
+
+// LinkStore is the durable identity map the mirror and bridge share. The
+// production implementation is keel's *store.Store; tests use a map.
+type LinkStore interface {
+	PutBoardLink(ctx context.Context, link store.BoardLink) (store.BoardLink, error)
+	GetBoardLink(ctx context.Context, tenantID uuid.UUID, source, sourceID, kind string) (store.BoardLink, bool, error)
+	GetBoardLinkByTask(ctx context.Context, tenantID uuid.UUID, source, kind string, boardTaskID uint64) (store.BoardLink, bool, error)
+	SetBoardLinkClaimEpoch(ctx context.Context, tenantID uuid.UUID, source, sourceID, kind string, epoch uint64) error
+}
+
+// SyncReport is one mirror pass's accounting. It never carries text, a token
+// or a secret: counters and ids only.
+type SyncReport struct {
+	Tickets      int `json:"tickets"`
+	TasksCreated int `json:"tasksCreated"`
+	Claims       int `json:"claims"`
+	Renewed      int `json:"renewed"`
+	Released     int `json:"released"`
+	Reopened     int `json:"reopened"`
+	Blocked      int `json:"blocked"`
+	Unblocked    int `json:"unblocked"`
+	Replies      int `json:"replies"`
+	Completed    int `json:"completed"`
+	Failed       int `json:"failed"`
+	Canceled     int `json:"canceled"`
+	Skipped      int `json:"skipped"`
+	Conflicts    int `json:"conflicts"`
+}
+
+// ChannelACL grants the read-side relation a mirrored channel needs. The
+// mirror writes through the board log (no request identity), so it must record
+// who may read the channel: a board channel with no relation is invisible even
+// to a tenant's board.read holders. A nil ACL leaves the channel relation-free
+// (a deployment that wires its own access policy).
+type ChannelACL interface {
+	EnsureViewer(ctx context.Context, tenantID uuid.UUID, channel string) error
+}
+
+// Mirror projects one tenant's supervisor records into the board. It is a
+// read of collab_* plus append-only board writes; it never updates a
+// supervisor record, which is why a board write failure can be repaired by the
+// next pass without losing truth.
+type Mirror struct {
+	TenantID uuid.UUID
+	Store    superagent.Store
+	Board    BoardPort
+	Links    LinkStore
+	Config   ConfigReader
+	Secret   *TokenSource
+	ACL      ChannelACL
+	Logger   *slog.Logger
+	Now      func() time.Time
+
+	Lease       time.Duration
+	RenewBefore time.Duration
+	// Interval is Run's tick. Zero uses 30s; a negative value runs no ticker
+	// (a caller drives SyncOnce).
+	Interval time.Duration
+	// TicketLimit bounds one pass's head, newest-updated first. Zero uses 500.
+	TicketLimit int
+
+	aclMu       sync.Mutex
+	aclChannels map[string]bool
+}
+
+// NewMirror validates the mandatory seams. A missing secret is not a
+// construction error: Run and SyncOnce fail closed with ErrSecretMissing, so a
+// deployment can keep serving the board while an operator fixes the secret.
+func NewMirror(opts *Mirror) (*Mirror, error) {
+	if opts == nil {
+		return nil, errors.New("superagentboard: mirror options are required")
+	}
+	if opts.TenantID == uuid.Nil {
+		return nil, errors.New("superagentboard: mirror tenant is required")
+	}
+	if opts.Store == nil {
+		return nil, errors.New("superagentboard: mirror needs the supervisor store")
+	}
+	if opts.Board == nil {
+		return nil, errors.New("superagentboard: mirror needs a board port")
+	}
+	if opts.Links == nil {
+		return nil, errors.New("superagentboard: mirror needs a link store")
+	}
+	if opts.Config == nil {
+		return nil, errors.New("superagentboard: mirror needs a config reader")
+	}
+	if opts.Logger == nil {
+		opts.Logger = slog.Default()
+	}
+	if opts.Now == nil {
+		opts.Now = func() time.Time { return time.Now().UTC() }
+	}
+	if opts.Lease == 0 {
+		opts.Lease = DefaultLease
+	}
+	if opts.RenewBefore == 0 {
+		opts.RenewBefore = DefaultRenewBefore
+	}
+	if opts.Interval == 0 {
+		opts.Interval = 30 * time.Second
+	}
+	if opts.TicketLimit == 0 {
+		opts.TicketLimit = 500
+	}
+	return opts, nil
+}
+
+// Run syncs on a ticker until ctx ends. Every tick re-reads the tenant
+// configuration, so switching mirror off stops new board writes without a
+// restart and switching it on starts them.
+func (m *Mirror) Run(ctx context.Context) {
+	if m.Interval < 0 {
+		return
+	}
+	ticker := time.NewTicker(m.Interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if _, err := m.SyncOnce(ctx); err != nil && !errors.Is(err, ErrSecretMissing) && ctx.Err() == nil {
+				m.Logger.Warn("superagent board mirror pass failed", "err", err)
+			}
+		}
+	}
+}
+
+// SyncOnce mirrors every ticket. A disabled mirror is a no-op, not an error.
+func (m *Mirror) SyncOnce(ctx context.Context) (SyncReport, error) {
+	var report SyncReport
+	config, err := m.Config.SuperagentConfig(ctx, m.TenantID)
+	if err != nil {
+		return report, err
+	}
+	if !config.Mirror {
+		return report, nil
+	}
+	if m.Secret == nil {
+		return report, ErrSecretMissing
+	}
+	items, err := m.Store.ListWorkItems(ctx, m.TenantID, collab.WorkFilter{
+		ModeID: superagent.DefaultModeID, Order: collab.WorkOrderUpdatedDesc,
+	})
+	if err != nil {
+		return report, fmt.Errorf("superagentboard: list tickets: %w", err)
+	}
+	limit := m.TicketLimit
+	if limit > 0 && len(items) > limit {
+		items = items[:limit]
+	}
+	report.Tickets = len(items)
+	for _, item := range items {
+		if ctx.Err() != nil {
+			return report, ctx.Err()
+		}
+		ticketReport, err := m.syncTicket(ctx, config, superagent.TicketFromWorkItem(item))
+		accumulate(&report, ticketReport)
+		if err != nil {
+			// One ticket's failure must not stop the rest: each ticket is
+			// independent and the next pass retries it.
+			m.Logger.Warn("superagent board mirror ticket failed",
+				"ticket", item.ID, "err", err)
+			continue
+		}
+	}
+	return report, nil
+}
+
+// SyncTicket mirrors one ticket. The command bridge calls it after the
+// supervisor accepted an action, so the board reflects the new truth only
+// after the supervisor wrote it.
+func (m *Mirror) SyncTicket(ctx context.Context, ticketID uuid.UUID) (SyncReport, error) {
+	var report SyncReport
+	config, err := m.Config.SuperagentConfig(ctx, m.TenantID)
+	if err != nil {
+		return report, err
+	}
+	if !config.Mirror {
+		return report, nil
+	}
+	if m.Secret == nil {
+		return report, ErrSecretMissing
+	}
+	item, err := m.Store.GetWorkItem(ctx, m.TenantID, ticketID)
+	if err != nil {
+		return report, err
+	}
+	if item.ModeID != superagent.DefaultModeID {
+		return report, fmt.Errorf("superagentboard: work item %s is not a super-agent ticket", ticketID)
+	}
+	return m.syncTicket(ctx, config, superagent.TicketFromWorkItem(item))
+}
+
+func (m *Mirror) syncTicket(ctx context.Context, config SuperagentConfig, ticket superagent.Ticket) (SyncReport, error) {
+	var report SyncReport
+	if ticket.ID == uuid.Nil {
+		return report, errors.New("superagentboard: ticket has no id")
+	}
+	terminal := isTerminalTicket(ticket)
+	link, linked, err := m.Links.GetBoardLink(ctx, m.TenantID, BoardSource, ticket.ID.String(), store.BoardLinkTicket)
+	if err != nil {
+		return report, err
+	}
+	if terminal && !linked {
+		// An archived ticket that predates the mirror is left alone: importing
+		// it would append history nobody asked for, and the Ticket's own audit
+		// stays the record.
+		report.Skipped++
+		return report, nil
+	}
+	var task TaskInfo
+	if linked {
+		task, err = m.Board.Task(ctx, m.TenantID, link.BoardTaskID)
+		if err != nil {
+			return report, err
+		}
+	} else {
+		task, err = m.Board.EnsureTicketThread(ctx, m.TenantID, TicketThread{
+			TicketID: ticket.ID.String(),
+			Channel:  config.Channel,
+			Title:    ticket.Title,
+			Request:  ticket.Request,
+			Labels:   TicketLabels(ticket),
+			Actor:    ServiceActor(m.TenantID),
+		})
+		if err != nil {
+			return report, err
+		}
+		if _, err := m.Links.PutBoardLink(ctx, store.BoardLink{
+			TenantID: m.TenantID, Source: BoardSource, SourceID: ticket.ID.String(),
+			Kind: store.BoardLinkTicket, BoardTaskID: task.ID,
+		}); err != nil {
+			return report, err
+		}
+		report.TasksCreated++
+	}
+	m.ensureACL(ctx, config.Channel)
+	accumulate(&report, m.syncTicketState(ctx, ticket, task))
+	m.recordGitHubEvent(ctx, ticket, task.ID)
+	return report, nil
+}
+
+// ensureACL writes the channel's read relation once per process; a failure is
+// retried by the next pass instead of being forgotten with the created flag.
+func (m *Mirror) ensureACL(ctx context.Context, channel string) {
+	if m == nil || m.ACL == nil || strings.TrimSpace(channel) == "" {
+		return
+	}
+	m.aclMu.Lock()
+	if m.aclChannels == nil {
+		m.aclChannels = map[string]bool{}
+	}
+	if m.aclChannels[channel] {
+		m.aclMu.Unlock()
+		return
+	}
+	m.aclMu.Unlock()
+	if err := m.ACL.EnsureViewer(ctx, m.TenantID, channel); err != nil {
+		m.Logger.Warn("superagent board mirror channel relation failed", "channel", channel, "err", err)
+		return
+	}
+	m.aclMu.Lock()
+	m.aclChannels[channel] = true
+	m.aclMu.Unlock()
+}
+
+func (m *Mirror) syncTicketState(ctx context.Context, ticket superagent.Ticket, task TaskInfo) SyncReport {
+	var report SyncReport
+	if task.ID == 0 {
+		return report
+	}
+	assignments, err := m.Store.ListAssignments(ctx, m.TenantID, ticket.ID)
+	if err != nil {
+		m.Logger.Warn("superagent board mirror could not read assignments", "ticket", ticket.ID, "err", err)
+	}
+	attentions, err := m.Store.ListAttentions(ctx, m.TenantID, ticket.ID)
+	if err != nil {
+		m.Logger.Warn("superagent board mirror could not read attentions", "ticket", ticket.ID, "err", err)
+	}
+	reports, err := m.Store.ListWorkerReports(ctx, m.TenantID, ticket.ID)
+	if err != nil {
+		m.Logger.Warn("superagent board mirror could not read reports", "ticket", ticket.ID, "err", err)
+	}
+
+	activeAssignment := activeAssignmentOf(assignments)
+	openAttention := oldestOpenAttention(attentions)
+	ticketTerminal := isTerminalTicket(ticket)
+
+	// 0. A supervisor reopen (ResumeTicket) revives a failed task in place, so
+	// the same pass can claim or block it. A completed board task cannot be
+	// reopened by the board domain; that remains the supervisor's record.
+	if !ticketTerminal && task.State == StateFailed {
+		if reopened, err := m.Board.Reopen(ctx, m.TenantID, ReopenRequest{
+			TaskID: task.ID, Actor: ServiceActor(m.TenantID),
+		}); err != nil {
+			m.Logger.Warn("superagent board mirror reopen failed", "ticket", ticket.ID, "err", err)
+		} else if reopened {
+			report.Reopened++
+			task, _ = m.Board.Task(ctx, m.TenantID, task.ID)
+		}
+	}
+
+	// 1. A hold wins over a claim. When the newest Attention closed, unblock
+	// first so the same pass can claim the replacement assignment.
+	if openAttention != nil && !ticketTerminal {
+		actor := ServiceActor(m.TenantID)
+		if task.State == StateClaimed && strings.TrimSpace(task.ClaimActor) != "" {
+			// The hold comes from the claim that saw the question: the board's
+			// own rule is that a live claim's actor places the hold, and the
+			// fold then ends that claim.
+			actor = claimActorOf(task)
+		}
+		if err := m.Board.Block(ctx, m.TenantID, BlockRequest{
+			TaskID: task.ID, Kind: attentionHoldKind(openAttention.Kind),
+			Reason: openAttention.Prompt, Actor: actor,
+		}); err != nil {
+			if errors.Is(err, ErrClaimConflict) {
+				report.Conflicts++
+				m.logClaimConflict(ticket, task, err)
+			} else {
+				m.Logger.Warn("superagent board mirror block failed", "ticket", ticket.ID, "err", err)
+			}
+		} else {
+			report.Blocked++
+		}
+		task, _ = m.Board.Task(ctx, m.TenantID, task.ID)
+	} else if openAttention == nil && task.State == StateBlocked && !ticketTerminal &&
+		ticket.Status != collab.WorkItemBlocked {
+		if err := m.Board.Unblock(ctx, m.TenantID, UnblockRequest{
+			TaskID: task.ID, Actor: ServiceActor(m.TenantID),
+		}); err != nil {
+			m.Logger.Warn("superagent board mirror unblock failed", "ticket", ticket.ID, "err", err)
+		} else {
+			report.Unblocked++
+		}
+		task, _ = m.Board.Task(ctx, m.TenantID, task.ID)
+	}
+
+	// 2. Mirrored claim / lease. A blocked or finished ticket holds no claim.
+	if !ticketTerminal && openAttention == nil && activeAssignment != nil && task.State != StateBlocked {
+		if m.mirrorClaim(ctx, ticket, *activeAssignment, task, &report) {
+			task, _ = m.Board.Task(ctx, m.TenantID, task.ID)
+		}
+	}
+	if !ticketTerminal && openAttention == nil && activeAssignment == nil && task.State == StateClaimed {
+		if _, err := m.Board.Release(ctx, m.TenantID, ReleaseRequest{
+			TaskID: task.ID, Actor: claimActorOf(task), Epoch: task.Epoch,
+		}); err != nil {
+			if errors.Is(err, ErrClaimConflict) {
+				report.Conflicts++
+				m.logClaimConflict(ticket, task, err)
+			} else {
+				m.Logger.Warn("superagent board mirror release failed", "ticket", ticket.ID, "err", err)
+			}
+		} else {
+			report.Released++
+		}
+		task, _ = m.Board.Task(ctx, m.TenantID, task.ID)
+	}
+
+	// 3. Closed Attentions become replies; a free-text answer stays in
+	// superagent. The link row is the fast idempotency check, the board request
+	// key is the durable one.
+	for _, attention := range attentions {
+		if attention.Status == collab.AttentionOpen {
+			continue
+		}
+		if _, found, err := m.Links.GetBoardLink(ctx, m.TenantID, BoardSource, attention.ID.String(), store.BoardLinkAttention); err == nil && found {
+			continue
+		}
+		if err := m.mirrorAttentionReply(ctx, ticket, task.ID, attention, &report); err != nil {
+			m.Logger.Warn("superagent board mirror attention reply failed",
+				"ticket", ticket.ID, "attention", attention.ID, "err", err)
+		}
+	}
+
+	// 4. Reports become replies. A report whose state transition has not landed
+	// is skipped; the next pass sees the applied row.
+	for _, row := range reports {
+		if row.AppliedAt == nil {
+			continue
+		}
+		if _, found, err := m.Links.GetBoardLink(ctx, m.TenantID, BoardSource, row.ID.String(), store.BoardLinkReport); err == nil && found {
+			continue
+		}
+		if _, err := m.Board.Reply(ctx, m.TenantID, ReplyRequest{
+			TaskID:     task.ID,
+			Text:       ReportText(row),
+			Labels:     ReplyLabels(ticket.ID),
+			Actor:      ServiceActor(m.TenantID),
+			RequestKey: "superagent:report:" + row.ID.String(),
+			Digest:     digestOf(struct{ State, Summary string }{string(row.State), strings.TrimSpace(row.Summary)}),
+		}); err != nil {
+			m.Logger.Warn("superagent board mirror report reply failed",
+				"ticket", ticket.ID, "report", row.ID, "err", err)
+			continue
+		}
+		report.Replies++
+		if _, err := m.Links.PutBoardLink(ctx, store.BoardLink{
+			TenantID: m.TenantID, Source: BoardSource, SourceID: row.ID.String(),
+			Kind: store.BoardLinkReport, BoardTaskID: task.ID,
+		}); err != nil {
+			m.Logger.Warn("superagent board mirror report link failed",
+				"ticket", ticket.ID, "report", row.ID, "err", err)
+		}
+	}
+	task, _ = m.Board.Task(ctx, m.TenantID, task.ID)
+
+	// 5. Final ticket state. Terminal board states are append-only: a
+	// completed/canceled task is never reopened by a later mirror pass.
+	switch ticket.Status {
+	case collab.WorkItemDone:
+		if task.State != StateCompleted {
+			err := m.Board.Complete(ctx, m.TenantID, SettleRequest{
+				TaskID: task.ID, Epoch: task.Epoch, Result: finalSummary(ticket, reports),
+				Actor: claimActorOf(task),
+			})
+			m.accountSettle(err, "complete", ticket, task, &report, func() { report.Completed++ })
+		}
+	case collab.WorkItemFailed:
+		if task.State != StateFailed {
+			err := m.Board.Fail(ctx, m.TenantID, SettleRequest{
+				TaskID: task.ID, Epoch: task.Epoch, Reason: failureReason(ticket, reports, assignments),
+				Actor: claimActorOf(task),
+			})
+			m.accountSettle(err, "fail", ticket, task, &report, func() { report.Failed++ })
+		}
+	case collab.WorkItemCancelling, collab.WorkItemCancelled:
+		if task.State != StateCanceled {
+			reason := strings.TrimSpace(ticket.Mandate.RevocationCause)
+			if err := m.Board.Cancel(ctx, m.TenantID, SettleRequest{
+				TaskID: task.ID, Reason: reason, Actor: ServiceActor(m.TenantID),
+			}); err != nil {
+				m.Logger.Warn("superagent board mirror cancel failed", "ticket", ticket.ID, "err", err)
+			} else {
+				report.Canceled++
+			}
+		}
+	case collab.WorkItemBlocked:
+		if openAttention == nil && task.State != StateBlocked && !boardFinished(task.State) {
+			if err := m.Board.Block(ctx, m.TenantID, BlockRequest{
+				TaskID: task.ID, Kind: HoldNeedsInput, Reason: "the ticket is blocked",
+				Actor: ServiceActor(m.TenantID),
+			}); err != nil {
+				m.Logger.Warn("superagent board mirror ticket block failed", "ticket", ticket.ID, "err", err)
+			} else {
+				report.Blocked++
+			}
+		}
+	}
+	return report
+}
+
+func (m *Mirror) accountSettle(err error, action string, ticket superagent.Ticket, task TaskInfo, report *SyncReport, ok func()) {
+	if err != nil {
+		if errors.Is(err, ErrClaimConflict) || errors.Is(err, ErrNotClaimable) {
+			report.Conflicts++
+			m.logClaimConflict(ticket, task, err)
+			return
+		}
+		m.Logger.Warn("superagent board mirror "+action+" failed", "ticket", ticket.ID, "err", err)
+		return
+	}
+	ok()
+}
+
+// mirrorClaim returns true when the board task changed.
+func (m *Mirror) mirrorClaim(ctx context.Context, ticket superagent.Ticket, assignment collab.Assignment, task TaskInfo, report *SyncReport) bool {
+	if assignment.SessionID == uuid.Nil {
+		return false
+	}
+	actor := WorkerActor(assignment.BotID)
+	if !validActorID(actor.ID) {
+		actor = ServiceActor(m.TenantID)
+	}
+	token, err := m.Secret.ClaimToken(m.TenantID, assignment.ID, assignment.SessionID)
+	if err != nil {
+		m.Logger.Warn("superagent board mirror claim token unavailable", "ticket", ticket.ID, "err", err)
+		return false
+	}
+	info, claimed, err := m.Board.Claim(ctx, m.TenantID, ClaimRequest{
+		TaskID: task.ID, Actor: actor, Token: token, Lease: m.Lease,
+	})
+	if err != nil {
+		if errors.Is(err, ErrClaimConflict) || errors.Is(err, ErrNotClaimable) {
+			report.Conflicts++
+			m.logClaimConflict(ticket, task, err)
+			return false
+		}
+		m.Logger.Warn("superagent board mirror claim failed", "ticket", ticket.ID, "err", err)
+		return false
+	}
+	if claimed {
+		report.Claims++
+	}
+	epoch := info.Epoch
+	if epoch == 0 {
+		epoch = task.Epoch
+	}
+	if epoch != 0 {
+		if err := m.Links.SetBoardLinkClaimEpoch(ctx, m.TenantID, BoardSource, ticket.ID.String(), store.BoardLinkTicket, epoch); err != nil && !errors.Is(err, store.ErrNotFound) {
+			m.Logger.Warn("superagent board mirror claim epoch link failed", "ticket", ticket.ID, "err", err)
+		}
+	}
+	if info.State == StateClaimed && info.ClaimActor == actor.ID {
+		renewed, err := m.Board.Renew(ctx, m.TenantID, RenewRequest{
+			TaskID: info.ID, Actor: actor, Epoch: info.Epoch,
+			Lease: m.Lease, RenewBefore: m.RenewBefore,
+		})
+		if err != nil {
+			if errors.Is(err, ErrClaimConflict) {
+				report.Conflicts++
+				m.logClaimConflict(ticket, info, err)
+			}
+		} else if renewed {
+			report.Renewed++
+		}
+	}
+	return claimed
+}
+
+func (m *Mirror) mirrorAttentionReply(ctx context.Context, ticket superagent.Ticket, taskID uint64, attention collab.Attention, report *SyncReport) error {
+	if attention.Status == collab.AttentionOpen {
+		return nil
+	}
+	_, err := m.Board.Reply(ctx, m.TenantID, ReplyRequest{
+		TaskID:     taskID,
+		Text:       AttentionReplyText(attention),
+		Labels:     ReplyLabels(ticket.ID),
+		Actor:      ServiceActor(m.TenantID),
+		RequestKey: "superagent:attention:" + attention.ID.String() + ":reply",
+		Digest:     digestOf(struct{ Status, Option string }{string(attention.Status), answeredOption(attention)}),
+	})
+	if err != nil {
+		return err
+	}
+	report.Replies++
+	if _, err := m.Links.PutBoardLink(ctx, store.BoardLink{
+		TenantID: m.TenantID, Source: BoardSource, SourceID: attention.ID.String(),
+		Kind: store.BoardLinkAttention, BoardTaskID: taskID,
+	}); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (m *Mirror) recordGitHubEvent(ctx context.Context, ticket superagent.Ticket, taskID uint64) {
+	source := strings.TrimSpace(ticket.Mandate.Source)
+	threadSource := strings.TrimSpace(ticket.Thread.Source)
+	if source != superagent.SourceGitHub && threadSource != superagent.SourceGitHub {
+		return
+	}
+	eventID := strings.TrimSpace(ticket.IdempotencyKey)
+	if eventID == "" {
+		return
+	}
+	if _, err := m.Links.PutBoardLink(ctx, store.BoardLink{
+		TenantID: m.TenantID, Source: superagent.SourceGitHub, SourceID: eventID,
+		Kind: store.BoardLinkGitHub, BoardTaskID: taskID,
+	}); err != nil {
+		m.Logger.Warn("superagent board mirror github event link failed",
+			"ticket", ticket.ID, "err", err)
+	}
+}
+
+func (m *Mirror) logClaimConflict(ticket superagent.Ticket, task TaskInfo, err error) {
+	// No prompt/token/body: the ids and the holder are enough to investigate,
+	// and the supervisor's own records remain the truth.
+	m.Logger.Warn("superagent board mirror claim conflict; board claim left in place",
+		"ticket", ticket.ID, "task", task.ID, "reason", err)
+}
+
+func accumulate(into *SyncReport, add SyncReport) {
+	into.TasksCreated += add.TasksCreated
+	into.Claims += add.Claims
+	into.Renewed += add.Renewed
+	into.Released += add.Released
+	into.Reopened += add.Reopened
+	into.Blocked += add.Blocked
+	into.Unblocked += add.Unblocked
+	into.Replies += add.Replies
+	into.Completed += add.Completed
+	into.Failed += add.Failed
+	into.Canceled += add.Canceled
+	into.Skipped += add.Skipped
+	into.Conflicts += add.Conflicts
+}
+
+func isTerminalTicket(ticket superagent.Ticket) bool {
+	switch ticket.Status {
+	case collab.WorkItemDone, collab.WorkItemFailed, collab.WorkItemCancelling, collab.WorkItemCancelled:
+		return true
+	default:
+		return false
+	}
+}
+
+func boardFinished(state string) bool {
+	switch state {
+	case StateCompleted, StateFailed, StateCanceled:
+		return true
+	default:
+		return false
+	}
+}
+
+func activeAssignmentOf(assignments []collab.Assignment) *collab.Assignment {
+	// The newest active assignment is the worker the Ticket currently shows.
+	// Open assignments without a session are dispatch bookkeeping, not a claim.
+	var active *collab.Assignment
+	sorted := append([]collab.Assignment(nil), assignments...)
+	sort.Slice(sorted, func(i, j int) bool {
+		if !sorted[i].CreatedAt.Equal(sorted[j].CreatedAt) {
+			return sorted[i].CreatedAt.Before(sorted[j].CreatedAt)
+		}
+		return sorted[i].ID.String() < sorted[j].ID.String()
+	})
+	for index := range sorted {
+		assignment := sorted[index]
+		if assignment.Status == collab.AssignmentActive && assignment.SessionID != uuid.Nil {
+			active = &assignment
+		}
+	}
+	return active
+}
+
+func oldestOpenAttention(attentions []collab.Attention) *collab.Attention {
+	sorted := append([]collab.Attention(nil), attentions...)
+	sort.Slice(sorted, func(i, j int) bool {
+		if !sorted[i].CreatedAt.Equal(sorted[j].CreatedAt) {
+			return sorted[i].CreatedAt.Before(sorted[j].CreatedAt)
+		}
+		return sorted[i].ID.String() < sorted[j].ID.String()
+	})
+	for index := range sorted {
+		if sorted[index].Status == collab.AttentionOpen {
+			return &sorted[index]
+		}
+	}
+	return nil
+}
+
+func claimActorOf(task TaskInfo) ActorInfo {
+	if strings.TrimSpace(task.ClaimActor) == "" {
+		return ActorInfo{}
+	}
+	return ActorInfo{
+		ID: task.ClaimActor, Principal: task.ClaimActor,
+		Kind: string(protocol.ActorAgent), Handle: task.ClaimActor, Name: task.ClaimActor,
+	}
+}
+
+// ReportText is the board reply of one worker report: the state and the
+// summary, bounded and sanitized. The full report stays in superagent.
+func ReportText(report superagent.WorkerReport) string {
+	state := strings.TrimSpace(string(report.State))
+	summary := sanitizeText(strings.TrimSpace(report.Summary))
+	if summary == "" {
+		return state
+	}
+	if state == "" {
+		return summary
+	}
+	return state + ": " + summary
+}
+
+// AttentionReplyText is the board reply of a closed Attention. It names the
+// outcome and the chosen option only: a free-text answer can contain sensitive
+// content, so it stays in superagent.
+func AttentionReplyText(attention collab.Attention) string {
+	switch attention.Status {
+	case collab.AttentionAnswered:
+		if option := answeredOption(attention); option != "" {
+			return "Attention answered: " + option
+		}
+		return "Attention answered"
+	case collab.AttentionTimedOut:
+		return "Attention timed out"
+	case collab.AttentionCancelled:
+		return "Attention cancelled"
+	default:
+		return "Attention " + string(attention.Status)
+	}
+}
+
+func answeredOption(attention collab.Attention) string {
+	if attention.Answer == nil {
+		return ""
+	}
+	return strings.TrimSpace(attention.Answer.OptionID)
+}
+
+func finalSummary(ticket superagent.Ticket, reports []superagent.WorkerReport) string {
+	for index := len(reports) - 1; index >= 0; index-- {
+		if reports[index].AppliedAt == nil {
+			continue
+		}
+		if summary := strings.TrimSpace(reports[index].Summary); summary != "" {
+			return summary
+		}
+	}
+	return "completed"
+}
+
+func failureReason(ticket superagent.Ticket, reports []superagent.WorkerReport, assignments []collab.Assignment) string {
+	for index := len(assignments) - 1; index >= 0; index-- {
+		if reason := strings.TrimSpace(assignments[index].Error); reason != "" {
+			return reason
+		}
+	}
+	return finalSummary(ticket, reports)
+}

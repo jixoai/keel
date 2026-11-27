@@ -1,3 +1,5 @@
+// DEPRECATED (keel-board-v1 11.6): the legacy /superagent board is frozen and will
+// be deleted in Phase 2 15.7. The board task queue/thread is the task surface.
 // 02 任务 · 超级助理工单看板 — change keel-collab-superagent, 4.2/4.3.
 //
 // A product face over the orchestrator's read projections:

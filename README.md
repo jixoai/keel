@@ -192,6 +192,12 @@ env 文件路径：`FDE2E_ENV_PERSONAL`，默认取主仓根目录的 `.env.pers
 - **平台 webhook**：`POST /webhooks/{key}` 不走 board 会话认证，由对应 provider 验签；
   未配置 entry 时 fail closed。
 - **部署入口**：Dockerfile/`cmd/runtime` 不含 board；board 只在 `keel serve` 中启用。
+- **superagent 镜像/命令桥**：tenant 文档 `board.superagent.{mirror,bridge,channel}`（默认
+  `false/false/"superagent"`）。`mirror=true` 把 Ticket/Assignment/Attention/report 单向投影为
+  board 任务/claim/blocked/回复（`board_links` 幂等、`KEEL_SECRET_KEY` 派生确定性 claim token，
+  缺失即 fail closed）；`bridge=true` 让 board 上的 claim/complete/fail/block/unblock/assign/
+  cancel 先调 supervisor 既有 API，成功后才写 board。superagent 的 `collab_*` 仍是真值，
+  board 不反写；旧 `/superagent` 看板已冻结，Phase 2 15.7 删除。
 
 运行细节（DSN 角色、迁移、webhook 配置、验收命令）见
 [docs/RUNBOOK.md](docs/RUNBOOK.md#boardkeel-board-v011)。

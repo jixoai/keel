@@ -53,6 +53,8 @@ export const resolveRoute = (path: string, dev = false): RouteState => {
   if (path.startsWith("/settings")) return routeState("settings");
   if (path.startsWith("/plugins")) return routeState("plugins");
   if (dev && path.startsWith("/kit")) return routeState("kit");
+  // DEPRECATED (keel-board-v1 11.6): this legacy board route is deleted in
+  // Phase 2 15.7; the board queue/thread is the task surface.
   if (path === "/superagent" || path.startsWith("/superagent/")) {
     const parts = path.split("/").filter((part) => part !== "");
     return routeState("superagent", "accounts", decodePart(parts[1]));

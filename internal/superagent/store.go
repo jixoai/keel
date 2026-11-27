@@ -46,6 +46,10 @@ type Store interface {
 	ClaimWorkerReport(ctx context.Context, report WorkerReport) (WorkerReport, bool, error)
 	MarkWorkerReportAudited(ctx context.Context, tenantID, reportID uuid.UUID, at time.Time) (bool, error)
 	MarkWorkerReportApplied(ctx context.Context, tenantID, reportID uuid.UUID, at time.Time) (bool, error)
+	// ListWorkerReports returns every report of one work item, oldest first.
+	// The board mirror uses it to replay the ticket timeline after a restart;
+	// it is a read and never changes a report's claim markers.
+	ListWorkerReports(ctx context.Context, tenantID, workItemID uuid.UUID) ([]WorkerReport, error)
 
 	EnqueueOutbox(ctx context.Context, message OutboxMessage) (OutboxMessage, error)
 	ListOutbox(ctx context.Context, tenantID uuid.UUID, status OutboxStatus, limit int) ([]OutboxMessage, error)
@@ -599,6 +603,31 @@ func (m *MemoryStore) MarkWorkerReportApplied(_ context.Context, tenantID, repor
 	report.AppliedAt = &stamp
 	m.reports[reportID] = report
 	return true, nil
+}
+
+// ListWorkerReports returns one ticket's reports, oldest first. The order is
+// (created_at, id), so a mirror replay after a restart posts the timeline in
+// the same order every time.
+func (m *MemoryStore) ListWorkerReports(_ context.Context, tenantID, workItemID uuid.UUID) ([]WorkerReport, error) {
+	if tenantID == uuid.Nil || workItemID == uuid.Nil {
+		return nil, fmt.Errorf("%w: tenant and work item ids are required", collab.ErrTenantRequired)
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]WorkerReport, 0)
+	for _, report := range m.reports {
+		if report.TenantID != tenantID || report.WorkItemID != workItemID {
+			continue
+		}
+		out = append(out, cloneWorkerReport(report))
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if !out[i].CreatedAt.Equal(out[j].CreatedAt) {
+			return out[i].CreatedAt.Before(out[j].CreatedAt)
+		}
+		return out[i].ID.String() < out[j].ID.String()
+	})
+	return out, nil
 }
 
 func sortSubscriptions(subs []Subscription) {

@@ -122,6 +122,10 @@ var rlsTenantTables = []string{
 	"collab_source_events",
 	"collab_outbox",
 	"collab_session_index",
+	// board-v1 superagent mirror: the adapter's identity map is tenant scoped
+	// like the records it maps. The board's board_* tables stay out of this
+	// list; they carry board's own keel.tenant_id policies.
+	"board_links",
 	// Commands (keel-plugin-commands): the requestId ledger is tenant-scoped.
 	"command_invocations",
 }

@@ -61,6 +61,7 @@ import (
 	"github.com/jixoai/keel/internal/spillblob"
 	"github.com/jixoai/keel/internal/store"
 	"github.com/jixoai/keel/internal/stream"
+	"github.com/jixoai/keel/internal/superagentboard"
 	"github.com/jixoai/keel/internal/tasklog"
 	"github.com/jixoai/keel/internal/telemetry"
 	"github.com/jixoai/keel/internal/testkit"
@@ -1067,9 +1068,15 @@ func runServe(parent context.Context, opts serveOptions) error {
 		return err
 	}
 	boardSurface := boardWiring.Surface
+	var boardBridge *superagentboard.Bridge
 	boardHandler := boardWiring.API
 	boardWebhook := boardWiring.Webhook
 	if boardSurface != nil {
+		// The bridge starts as a pass-through and is attached to the supervisor
+		// after the agent runtime exists. It routes a mirrored task's actions
+		// to the supervisor before the board handler sees them.
+		boardBridge = newSuperagentBoardBridge(boardSurface, log)
+		boardHandler = boardBridge
 		defer boardSurface.Close()
 		if bypass, err := boardintegration.RoleBypassesRLS(ctx, boardDSN(opts.DSN)); err != nil {
 			log.Warn("board role privilege check failed", "detail", "row-level security may not be enforced")
@@ -1078,6 +1085,9 @@ func runServe(parent context.Context, opts serveOptions) error {
 				"detail", "use a non-superuser, NOBYPASSRLS role for the board DSN")
 		}
 	}
+	// Attach after both the product layer (the supervisor) and the board exist.
+	// A nil supervisor or board leaves the bridge a pass-through.
+	attachSuperagentBoard(ctx, opts.TenantID, st, boardSurface, boardBridge, product.superagent, log)
 
 	// Automatic recovery is default behavior, not a button: scan every
 	// non-terminal run before the listener opens, record the recovery facts and
@@ -1315,6 +1325,9 @@ type productLayer struct {
 	taskLog       *tasklog.Service
 	api           *harnessapi.Server
 	auth          *authController
+	// superagent is the assembled queue, nil when the deployment does not run
+	// one. serve attaches the board mirror/command bridge through it.
+	superagent harnessapi.SuperagentService
 	// access is the product authorization bridge shared by the identity routes,
 	// the bot invoke/start seams and the generic session-owner callback.
 	access *accesswire.Bridge
@@ -1645,6 +1658,9 @@ func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, 
 	if superagentRuntime != nil {
 		superagentService = superagentRuntime
 	}
+	// The superagent -> board mirror and command bridge attach in serve, after
+	// the board surface exists. The service stays on the product layer so the
+	// wiring does not reach back into this function's locals.
 	api := harnessapi.New(harnessapi.Config{
 		Sessions: harnessapi.NewPGSessionLister(st),
 		// Manual compaction and the session policy surface (change
@@ -1870,6 +1886,7 @@ func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, 
 		api:           api,
 		auth:          auth,
 		access:        accessBridge,
+		superagent:    superagentService,
 	}
 	layer.closeFns = []func(context.Context){
 		func(ctx context.Context) { plugins.Close(ctx) },

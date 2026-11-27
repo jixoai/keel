@@ -75,18 +75,20 @@ type TextExporter interface {
 // Surface owns the board's PostgreSQL pools, log, HTTP handlers and background
 // repair loop. Close releases them in dependency order.
 type Surface struct {
-	handler   *handler
-	webhook   *boardserver.Server
-	board     *boardlog.Board
-	store     *boardstore.Postgres
-	syncdb    *boardsyncstore.Postgres
-	audit     *boardaudit.Postgres
-	owners    *ChannelOwners
-	metrics   *boardmetrics.Registry
-	cancel    context.CancelFunc
-	done      chan struct{}
-	closeOnce sync.Once
-	logger    *slog.Logger
+	handler    *handler
+	webhook    *boardserver.Server
+	board      *boardlog.Board
+	store      *boardstore.Postgres
+	syncdb     *boardsyncstore.Postgres
+	audit      *boardaudit.Postgres
+	owners     *ChannelOwners
+	metrics    *boardmetrics.Registry
+	identity   *Identity
+	authorizer *Authorizer
+	cancel     context.CancelFunc
+	done       chan struct{}
+	closeOnce  sync.Once
+	logger     *slog.Logger
 }
 
 // New builds the board surface. It runs the board's idempotent migrations
@@ -192,16 +194,18 @@ func New(ctx context.Context, opts Options) (*Surface, error) {
 			sse:    &sseHandler{next: server, heartbeat: opts.Heartbeat, lifetime: opts.StreamLifetime, logger: opts.Logger},
 			logger: opts.Logger,
 		},
-		webhook: server,
-		board:   board,
-		store:   store,
-		syncdb:  syncdb,
-		audit:   auditStore,
-		owners:  owners,
-		metrics: metricsRegistry,
-		cancel:  cancel,
-		done:    make(chan struct{}),
-		logger:  opts.Logger,
+		webhook:    server,
+		board:      board,
+		store:      store,
+		syncdb:     syncdb,
+		audit:      auditStore,
+		owners:     owners,
+		metrics:    metricsRegistry,
+		identity:   identity,
+		authorizer: authorizer,
+		cancel:     cancel,
+		done:       make(chan struct{}),
+		logger:     opts.Logger,
 	}
 	go func() {
 		defer close(surface.done)
@@ -231,6 +235,21 @@ func (s *Surface) Webhook() http.Handler {
 
 // Metrics returns the board metric registry.
 func (s *Surface) Metrics() *boardmetrics.Registry { return s.metrics }
+
+// Board returns the board log the surface serves. It is the write seam the
+// superagent mirror needs (change keel-board-v1, 11.2): the adapter appends
+// through the board's own log API and projection, never raw SQL against
+// board_events. Callers outside this package must treat it as the board's API,
+// including its locking and idempotency rules.
+func (s *Surface) Board() *boardlog.Board { return s.board }
+
+// Identity returns the board's keel principal resolver. The superagent command
+// bridge reuses it; a second resolver would be a second authentication path.
+func (s *Surface) Identity() *Identity { return s.identity }
+
+// Authorizer returns the board's keel authorizer. The command bridge asks it
+// before routing a mirrored task action to the supervisor.
+func (s *Surface) Authorizer() *Authorizer { return s.authorizer }
 
 // SyncStore returns the durable sync store. The secret-store lane (10.6)
 // registers tenant entries through it; this lane leaves the registry empty.

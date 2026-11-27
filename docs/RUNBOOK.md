@@ -116,6 +116,39 @@ export KEEL_BOARD_CHANNEL_SCAN=5m    # 可选；频道 owner 关系修复间隔�
   平台 webhook `POST /webhooks/{key}` 不走会话认证，由 provider 验签；未配置 entry 时
   不读取 body、不落库（pre-auth unknown key）。
 
+**superagent 镜像 / 命令桥（Phase 1 11.x）**
+
+```jsonc
+// tenant 文档（PUT /v1/tenants/{id}/config 的 config 字段）
+{
+  "board": {
+    "superagent": {
+      "mirror": true,          // 默认 false：关闭时完全 no-op
+      "bridge": true,          // 默认 false：board 动作先调 supervisor
+      "channel": "superagent"  // 默认 superagent；非法路径导致该 adapter fail closed
+    }
+  }
+}
+```
+
+```bash
+export KEEL_SECRET_KEY='…'     # 必填；缺失时 mirror/bridge 均 fail closed（不镜像、不 claim）
+```
+
+- 方向：superagent → board 单向。Ticket→任务线程、Assignment→claim（lease 900s，按
+  assignment 心跳续期）、Attention→blocked（`needs_input`/`awaiting_approval`）、
+  report→回复；`collab_*` 始终是真值，适配器只追加 board 事件。
+- 幂等：`board_links` 的 `(tenant, source, source_id, kind)` 唯一；重复同步/重启复用同一
+  task/回复；report_id / attention_id 是回复幂等键；claim token 由
+  `HMAC-SHA256(KEEL_SECRET_KEY, "board-claim:v1:<tenant>:<assignment>:<session>")` 派生，服务端只存 hash。
+- 只读：镜像线程/消息写 `noSync`，统一 GitHub sync 不会二次回写；旧 `/superagent` 看板已
+  冻结（Phase 2 15.7 删除），board 队列/线程承接工单、答复与完成旅程。
+- 命令桥：board 的 claim/complete/fail/block/unblock/assign/cancel 先调 supervisor 既有
+  API（ResumeTicket/Report/Ask/AnswerAttention/StopTicket），成功后才由 mirror 追加 board
+  事件；supervisor 拒绝/超时不会改变 board 状态（返回 4xx/5xx，board 头不变）。
+- 验收：`KEEL_TEST_DSN='postgres://…' go test ./internal/superagentboard/ -v` 与
+  `go test -race ./internal/superagentboard/ ./internal/store/`。
+
 **验收 / 排障**
 
 ```bash

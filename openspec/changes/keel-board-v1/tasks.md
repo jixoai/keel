@@ -103,12 +103,15 @@
 
 ## 11. Phase 1：superagent 适配
 
-- [ ] 11.1 增加 `board_links` 与 `board.superagent.{mirror,bridge,channel}`；关闭时 no-op；测试开关矩阵。
-- [ ] 11.2 实现 Ticket→task 线程、Assignment→claim/lease 单向镜像：确定性 token（HMAC + `KEEL_SECRET_KEY`，缺失 fail closed）、状态映射、lease 续期；测试重复同步/重启。
-- [ ] 11.3 实现 Attention→blocked、answered/timed_out→unblock、report→reply；report_id/attention_id 幂等；测试重复事件。
-- [ ] 11.4 实现命令桥：board 动作先调 supervisor 既有 API，成功后才写 board 事件；拒绝/超时无 board 状态变化；测试全部动作。
-- [ ] 11.5 验证归档只读、不重写 `collab_*`；确认 GitHub 只有统一 sync 一个入口，superagent Source 不双同步；回归测试。
-- [ ] 11.6 冻结“单一任务面”：旧 superagent 看板（web/TUI `/superagent` 路由、页面、只读数据源）标记为待删除，不新增其功能/兼容层；board 队列/线程必须覆盖 Ticket/答复/完成旅程；测试旧看板不再是唯一入口。
+> 证据：`evidence/phase-1-superagent.md`（`scripts/keel-board-phase1-superagent-gate.sh`
+> 生成，含真实 PG A/B、restart、race 与二进制增量）。
+
+- [x] 11.1 增加 `board_links` 与 `board.superagent.{mirror,bridge,channel}`；关闭时 no-op；测试开关矩阵。
+- [x] 11.2 实现 Ticket→task 线程、Assignment→claim/lease 单向镜像：确定性 token（HMAC + `KEEL_SECRET_KEY`，缺失 fail closed）、状态映射、lease 续期；测试重复同步/重启。
+- [x] 11.3 实现 Attention→blocked、answered/timed_out→unblock、report→reply；report_id/attention_id 幂等；测试重复事件。
+- [x] 11.4 实现命令桥：board 动作先调 supervisor 既有 API，成功后才写 board 事件；拒绝/超时无 board 状态变化；测试全部动作。
+- [x] 11.5 验证归档只读、不重写 `collab_*`；确认 GitHub 只有统一 sync 一个入口，superagent Source 不双同步；回归测试。
+- [x] 11.6 冻结“单一任务面”：旧 superagent 看板（web/TUI `/superagent` 路由、页面、只读数据源）标记为待删除，不新增其功能/兼容层；board 队列/线程必须覆盖 Ticket/答复/完成旅程；测试旧看板不再是唯一入口。
 
 ## 12. Phase 1：keel 上的 sync 启用
 

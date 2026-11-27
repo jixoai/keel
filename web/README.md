@@ -129,6 +129,9 @@ web/
 
 ## 任务看板（change keel-collab-superagent, 4.2/4.3 产品 UI）
 
+> **DEPRECATED（keel-board-v1 11.6）**：本页 `/superagent`（web/TUI）已冻结，
+> Phase 2 15.7 删除；工单/答复/完成旅程由 board 队列/线程承接，不新增兼容层。
+
 「02 任务」是 superagent 工单模式的产品面，web 与 TUI 共用同一份 TSX：
 
 - **路由与入口**：`/superagent`（深链 `/superagent/<ticketId>`），主导航「任务」与命令面板

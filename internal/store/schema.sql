@@ -1716,6 +1716,32 @@ CREATE INDEX IF NOT EXISTS collab_session_index_mode
     ON collab_session_index (tenant_id, mode_id)
     WHERE state = 'active';
 
+-- board_links is the superagent -> board mirror's identity map (change
+-- keel-board-v1, 11.1). It is keel-owned, not board-owned: the board log keeps
+-- the projection, while this table remembers which board task a Ticket, an
+-- Assignment claim, an Attention, or a worker report became. The unique key is
+-- the mirror's idempotency: one source record maps to one board artifact, and
+-- a restart finds it instead of appending a second one. claim_epoch is the
+-- board epoch the adapter last mirrored for a claim; it never fences a
+-- supervisor write (the supervisor stays the truth) and exists so a lapsed or
+-- taken-over board claim is detected instead of overwritten.
+CREATE TABLE IF NOT EXISTS board_links (
+    tenant_id     uuid NOT NULL,
+    source        text NOT NULL,
+    source_id     text NOT NULL,
+    kind          text NOT NULL,
+    board_task_id bigint NOT NULL,
+    claim_epoch   bigint NOT NULL DEFAULT 0,
+    created_at    timestamptz NOT NULL DEFAULT now(),
+    updated_at    timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (tenant_id, source, source_id, kind)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS board_links_by_task
+    ON board_links (tenant_id, source, kind, board_task_id);
+CREATE INDEX IF NOT EXISTS board_links_by_task_any
+    ON board_links (tenant_id, board_task_id);
+
 -- Command invocations (change keel-plugin-commands): the durable idempotency
 -- and audit row of one chat command call. (tenant, session, requestId) is the
 -- idempotency key: a replay reads the first row instead of executing again, and

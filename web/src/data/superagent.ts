@@ -1,3 +1,5 @@
+// DEPRECATED (keel-board-v1 11.6): the legacy /superagent board is frozen and will
+// be deleted in Phase 2 15.7. The board task queue/thread is the task surface.
 // The super-agent ticket board — change keel-collab-superagent, 4.2/4.3.
 //
 // The board is a read projection (`GET /v1/superagent/tickets`) plus the open

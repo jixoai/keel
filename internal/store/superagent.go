@@ -401,6 +401,36 @@ func (s *Store) GetWorkerReport(ctx context.Context, tenantID, workItemID, assig
 	return row, nil
 }
 
+// ListWorkerReports returns every report of one work item, oldest first. It is
+// the board mirror's read after a restart: report rows are the idempotency
+// ledger, so replaying them must not skip a report that predates the process.
+func (s *Store) ListWorkerReports(ctx context.Context, tenantID, workItemID uuid.UUID) ([]superagent.WorkerReport, error) {
+	if tenantID == uuid.Nil || workItemID == uuid.Nil {
+		return nil, collabError(collab.ErrTenantRequired, collab.CodeTenantRequired,
+			"list_worker_reports", "tenant and work item ids are required")
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT tenant_id, report_id, work_item_id, assignment_id, session_id, request_id,
+		       state, summary, attention_id, result, audited_at, applied_at, created_at
+		  FROM collab_worker_reports
+		 WHERE tenant_id = $1 AND work_item_id = $2
+		 ORDER BY created_at ASC, report_id ASC`,
+		tenantID, workItemID)
+	if err != nil {
+		return nil, fmt.Errorf("store: list worker reports: %w", err)
+	}
+	defer rows.Close()
+	out := make([]superagent.WorkerReport, 0)
+	for rows.Next() {
+		report, err := scanWorkerReport(rows)
+		if err != nil {
+			return nil, fmt.Errorf("store: scan worker report: %w", err)
+		}
+		out = append(out, report)
+	}
+	return out, rows.Err()
+}
+
 // MarkWorkerReportAudited transitions an unaudited claim. It returns true when
 // this call performed the transition and false when the claim was already
 // audited; a missing claim is ErrReportNotFound.
