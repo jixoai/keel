@@ -203,7 +203,7 @@
 </style></head><body><main>
 <p class="overline">FDE2E · E2E Verification Report</p>
 <h1>keel-plugin-attachment · 真实浏览器 E2E</h1>
-<p class="meta">keel-plugin-attachment（tasks 3.6 / 5.4 / 5.5） · 2026-11-27 · 冻结基线 <code>/Users/kzf/Development/GitHub/jixoai/fde2e/.worktrees/keel-plugin-attachment-ui@3867e888b</code></p>
+<p class="meta">keel-plugin-attachment（tasks 3.6 / 5.4 / 5.5） · 2026-11-27 · 冻结基线 <code>/Users/kzf/Development/GitHub/jixoai/fde2e/.worktrees/keel-plugin-attachment-ui@973a03d1c</code></p>
 <p class="concl">9/9 步通过，116/116 条断言通过；P0/P1 = 0；UNCOVERED=0。</p>
 
 <div class="gate pass"><b>A6 判定：通过</b><span>P0/P1 = 0；P2 0 登记。</span></div>
@@ -230,15 +230,15 @@
       <tr class="cok"><td>✓</td><td>bot-operator 预设存在</td><td>present</td><td>5</td></tr>
       <tr class="cok"><td>✓</td><td>管理员进入 bot-operator</td><td>200</td><td>200</td></tr>
       <tr class="cok"><td>✓</td><td>创建附件会话 Bot</td><td>201</td><td>201</td></tr>
-      <tr class="cok"><td>✓</td><td>上传 PNG 返回 fileId</td><td>201 + fileId</td><td>201 2dbb1aaf-c801-429b-8dab-b75d8045085c</td></tr>
-      <tr class="cok"><td>✓</td><td>上传 PDF 返回 fileId</td><td>201 + fileId</td><td>201 36f718b5-26ba-49c8-abf6-b8f9c669a5ec</td></tr>
+      <tr class="cok"><td>✓</td><td>上传 PNG 返回 fileId</td><td>201 + fileId</td><td>201 649dbdef-bfb2-45f8-a058-6894977f7aec</td></tr>
+      <tr class="cok"><td>✓</td><td>上传 PDF 返回 fileId</td><td>201 + fileId</td><td>201 bbfee886-d991-4c51-894d-c45b4d2f4ea7</td></tr>
       <tr class="cok"><td>✓</td><td>创建 Bot 所有的会话</td><td>201 + sessionId</td><td>201</td></tr>
       <tr class="cok"><td>✓</td><td>提交带附件的输入</td><td>201/202</td><td>201</td></tr>
       <tr class="cok"><td>✓</td><td>运行结束</td><td>done</td><td>done</td></tr>
       <tr class="cok"><td>✓</td><td>事件流出现 user.message</td><td>user.message</td><td>user.message</td></tr>
       <tr class="cok"><td>✓</td><td>事件只存 fileId 与展示元数据</td><td>2 refs, no bytes</td><td>2</td></tr>
       <tr class="cok"><td>✓</td><td>canonical AttachmentPart 可读</td><td>200</td><td>200</td></tr>
-      <tr class="cok"><td>✓</td><td>part 字段完整</td><td>fileId/mime/kind/size/downloadUrl</td><td>{&quot;fileId&quot;:&quot;2dbb1aaf-c801-429b-8dab-b75d8045085c&quot;,&quot;mime&quot;:&quot;image/png&quot;,&quot;kind&quot;:&quot;image&quot;,&quot;size&quot;:39037}</td></tr>
+      <tr class="cok"><td>✓</td><td>part 字段完整</td><td>fileId/mime/kind/size/downloadUrl</td><td>{&quot;fileId&quot;:&quot;649dbdef-bfb2-45f8-a058-6894977f7aec&quot;,&quot;mime&quot;:&quot;image/png&quot;,&quot;kind&quot;:&quot;image&quot;,&quot;size&quot;:39037}</td></tr>
       <tr class="cok"><td>✓</td><td>part 含 thumbStatus 与 delivery</td><td>thumbStatus + delivery(native=false, reason)</td><td>ready / false</td></tr>
       <tr class="cok"><td>✓</td><td>part 不含字节/base64/CAS 路径</td><td>metadata only</td><td>fileId,name,mime,size,kind,thumbStatus,thumbnailUrl,downloadUrl,delivery</td></tr>
       <tr class="cok"><td>✓</td><td>缩略图终态 ready</td><td>ready</td><td>ready</td></tr>
@@ -248,7 +248,7 @@
       <tr class="cok"><td>✓</td><td>PDF 走文本兜底（含 blobId 与 MIME）</td><td>blobId + application/pdf</td><td>1</td></tr>
       <tr class="cok"><td>✓</td><td>PDF 兜底不带字节</td><td>no file bytes</td><td>no file_data</td></tr>
     </tbody></table></div></details>
-    <details class="log"><summary>关键日志</summary><pre class="logcode">session=07edd9fe-116f-471f-aa23-25e271b32658 seq=1 png=2dbb1aaf-c801-429b-8dab-b75d8045085c pdf=36f718b5-26ba-49c8-abf6-b8f9c669a5ec</pre></details>
+    <details class="log"><summary>关键日志</summary><pre class="logcode">session=32de76de-52a9-48fa-8304-1a96f76d0e65 seq=1 png=649dbdef-bfb2-45f8-a058-6894977f7aec pdf=bbfee886-d991-4c51-894d-c45b4d2f4ea7</pre></details>
 
   </section>
   <section class="step" data-no="2" data-name="浏览器默认附件行（无插件）" data-result="PASS" data-ok="1">
@@ -265,7 +265,7 @@
       <tr class="cok"><td>✓</td><td>默认行显示 PDF 名称与 MIME</td><td>name + mime</td><td>true</td></tr>
       <tr class="cok"><td>✓</td><td>没有插件预览时只显示默认行</td><td>no plugin preview</td><td>false</td></tr>
       <tr class="cok"><td>✓</td><td>投递形态如实标注未记录</td><td>delivery note</td><td>true</td></tr>
-      <tr class="cok"><td>✓</td><td>图片缩略图已绘制（naturalWidth &gt; 0，无空白占位）</td><td>complete + naturalWidth &gt; 0</td><td>{&quot;complete&quot;:true,&quot;naturalWidth&quot;:320,&quot;src&quot;:&quot;http://127.0.0.1:13730/v1/files/2dbb1aaf-c801-429b-8dab-b75d8045085c/thumbnail&quot;}</td></tr>
+      <tr class="cok"><td>✓</td><td>图片缩略图已绘制（naturalWidth &gt; 0，无空白占位）</td><td>complete + naturalWidth &gt; 0</td><td>{&quot;complete&quot;:true,&quot;naturalWidth&quot;:320,&quot;src&quot;:&quot;http://127.0.0.1:13730/v1/files/649dbdef-bfb2-45f8-a058-6894977f7aec/thumbnail&quot;}</td></tr>
       <tr class="cok"><td>✓</td><td>1440 无横向溢出</td><td>doc &lt;= inner</td><td>{&quot;inner&quot;:1440,&quot;doc&quot;:1440,&quot;body&quot;:1440}</td></tr>
     </tbody></table></div></details>
 
@@ -284,7 +284,7 @@
     </dl>
     <details class="checks" open><summary>断言 7/7</summary><div class="checkwrap"><table><thead><tr><th></th><th>断言</th><th>预期</th><th>实际</th></tr></thead><tbody>
       <tr class="cok"><td>✓</td><td>安装返回 202 审批并获批</td><td>202 → 200 → 201</td><td>202/200/201</td></tr>
-      <tr class="cok"><td>✓</td><td>审批文本展示附件认领</td><td>slot + part + mime</td><td>Install the plugin package /Users/kzf/Development/GitHub/jixoai/fde2e/.worktrees/keel-plugin-attachment-ui/.agents/reports/keel/attachment-e2e-2026-11-27-155209/e2e-plugins/e2e.attachment-preview? Ins</td></tr>
+      <tr class="cok"><td>✓</td><td>审批文本展示附件认领</td><td>slot + part + mime</td><td>Install the plugin package /Users/kzf/Development/GitHub/jixoai/fde2e/.worktrees/keel-plugin-attachment-ui/.agents/reports/keel/attachment-e2e-2026-11-27-155512/e2e-plugins/e2e.attachment-preview? Ins</td></tr>
       <tr class="cok"><td>✓</td><td>启用返回 200</td><td>200</td><td>200</td></tr>
       <tr class="cok"><td>✓</td><td>inventory 投影带 part/mime</td><td>part=attachment, mime=image/png</td><td>{&quot;slot&quot;:&quot;keel.ui.message-part&quot;,&quot;form&quot;:&quot;chunk&quot;,&quot;entry&quot;:&quot;ui/preview.js&quot;,&quot;part&quot;:&quot;attachment&quot;,&quot;mime&quot;:[&quot;image/png&quot;],&quot;plugin&quot;:&quot;e2e.attachment-preview&quot;}</td></tr>
       <tr class="cok"><td>✓</td><td>插件预览在 PNG 行渲染</td><td>preview text</td><td>true</td></tr>
@@ -439,7 +439,7 @@ Keel
       <div class="field"><dt>预期</dt><dd>全部 404；对称检查 A 读 B 也 404</dd></div>
     </dl>
     <details class="checks" open><summary>断言 13/13</summary><div class="checkwrap"><table><thead><tr><th></th><th>断言</th><th>预期</th><th>实际</th></tr></thead><tbody>
-      <tr class="cok"><td>✓</td><td>租户 B 登录</td><td>200 tenantId=d82bcb64-c4a4-44e8-ab33-65f0ee46c536</td><td>200 d82bcb64-c4a4-44e8-ab33-65f0ee46c536</td></tr>
+      <tr class="cok"><td>✓</td><td>租户 B 登录</td><td>200 tenantId=4203d361-0165-4127-bacb-89d17d7b9978</td><td>200 4203d361-0165-4127-bacb-89d17d7b9978</td></tr>
       <tr class="cok"><td>✓</td><td>租户 B 上传自己的文件</td><td>201</td><td>201</td></tr>
       <tr class="cok"><td>✓</td><td>租户 B 读自己的文件</td><td>200 + bytes</td><td>200 39037</td></tr>
       <tr class="cok"><td>✓</td><td>租户 B 读租户 A 附件 → 404</td><td>404</td><td>404</td></tr>
