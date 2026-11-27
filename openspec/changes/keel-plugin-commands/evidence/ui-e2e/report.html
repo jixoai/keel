@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>keel-plugin-commands E2E — 2026-11-27T08:13:41.799Z</title>
+<title>keel-plugin-commands E2E — 2026-11-27T09:28:36.564Z</title>
 <style>
 :root { color-scheme: light dark; --bg:#f7f8fa; --card:#fff; --ink:#16181d; --muted:#626b7a; --line:#e3e6ec; --ok:#0a7a3d; --bad:#b42318; --warn:#8a5a00; --accent:#0b5ed7; }
 @media (prefers-color-scheme: dark) { :root { --bg:#111318; --card:#181b22; --ink:#e8ebf1; --muted:#9aa4b2; --line:#2a2f39; --ok:#4ade80; --bad:#f87171; --warn:#fbbf24; --accent:#60a5fa; } }
@@ -44,7 +44,7 @@ a { color:var(--accent); }
 <body>
 <main>
 <h1>keel-plugin-commands · 真实栈 E2E 报告</h1>
-<p class="meta">生成于 2026-11-27T08:13:41.799Z → 2026-11-27T08:14:05.856Z · 耗时 24s · commit <code>921c3f21811165b263781c01f2b8d224c705ec3a</code></p>
+<p class="meta">生成于 2026-11-27T09:28:36.564Z → 2026-11-27T09:29:05.749Z · 耗时 29s · commit <code>8370343eab00f79802baa334b36ba675e7b65fb7</code></p>
 <div class="banner">公网：<strong>未部署</strong>：本报告只来自本地 <code>127.0.0.1</code> 真实栈，没有公网链接。</div>
 <div class="grid">
   <div class="kpi"><b>PASS</b>总结果</div>
@@ -57,7 +57,7 @@ a { color:var(--accent); }
 
 <div class="card">
   <h2>环境</h2>
-  <table><tbody><tr><th>database</th><td>keel_commands_e2e_1795767221</td></tr>
+  <table><tbody><tr><th>database</th><td>keel_commands_e2e_1795771715</td></tr>
 <tr><th>postgres</th><td>psql (PostgreSQL) 18.7 (Homebrew)</td></tr>
 <tr><th>node</th><td>v22.23.3</td></tr>
 <tr><th>chrome</th><td>/Applications/Google Chrome.app/Contents/MacOS/Google Chrome</td></tr>
@@ -65,7 +65,7 @@ a { color:var(--accent); }
 <tr><th>plugin</th><td>/Users/kzf/Development/GitHub/jixoai/fde2e/.worktrees/keel-plugin-commands-ui/scripts/keel-commands-e2e/plugin</td></tr>
 <tr><th>databaseRowProbe</th><td>command_invocations (tenant, session, request_id)</td></tr>
 <tr><th>publicDeployment</th><td>未部署（仅本地 127.0.0.1 证据）</td></tr>
-<tr><th>durationSeconds</th><td>24</td></tr></tbody></table>
+<tr><th>durationSeconds</th><td>29</td></tr></tbody></table>
   <p class="muted">真实 PostgreSQL 临时库 + 真实 <code>keel serve --auth local-only</code>（13600–13799 临时端口）+ 真实插件安装/审批；无 Docker、无夹具命令。数据库与临时密钥已由 cleanup 删除。</p>
   
 </div>
@@ -73,7 +73,7 @@ a { color:var(--accent); }
 <div class="card">
   <h2>进程回收验证 <span class="badge ok">CLEAN</span></h2>
   <p class="muted">由 <code>run.sh</code> 在报告生成前写入 <code>residue.txt</code>：serve/model 端口必须 free，sidecar 与 fake provider 必须 gone。这里的标记同时参与总结果（STILL_* 即失败）。</p>
-  <pre>run=keel_commands_e2e_1795767221
+  <pre>run=keel_commands_e2e_1795771715
 serve_port=13757
 model_port=13758
 serve_port=free
@@ -100,7 +100,7 @@ fake_provider=gone
 
 <section class="step" id="step-catalog-builtin">
   <h2>01 · 打开目录：内置命令可发现，顺序来自服务端 <span class="badge ok">PASS</span></h2>
-  <p class="meta">catalog-builtin · 1699 ms · 4 条断言 · 1 张图</p>
+  <p class="meta">catalog-builtin · 2148 ms · 4 条断言 · 1 张图</p>
   
   <table><thead><tr><th>断言</th><th>结果</th><th>实际</th><th>期望</th></tr></thead><tbody>
 <tr class="">
@@ -139,7 +139,7 @@ fake_provider=gone
 </section>
 <section class="step" id="step-compact">
   <h2>02 · 执行内置 /compact：命令行 + 既有压缩分隔线 <span class="badge ok">PASS</span></h2>
-  <p class="meta">compact · 775 ms · 4 条断言 · 1 张图</p>
+  <p class="meta">compact · 939 ms · 4 条断言 · 1 张图</p>
   
   <table><thead><tr><th>断言</th><th>结果</th><th>实际</th><th>期望</th></tr></thead><tbody>
 <tr class="">
@@ -172,7 +172,7 @@ fake_provider=gone
 </section>
 <section class="step" id="step-install-plugin">
   <h2>03 · 安装插件命令：真实两阶段审批（install + enable） <span class="badge ok">PASS</span></h2>
-  <p class="meta">install-plugin · 1110 ms · 6 条断言 · 1 张图</p>
+  <p class="meta">install-plugin · 615 ms · 6 条断言 · 1 张图</p>
   
   <table><thead><tr><th>断言</th><th>结果</th><th>实际</th><th>期望</th></tr></thead><tbody>
 <tr class="">
@@ -223,7 +223,7 @@ fake_provider=gone
 </section>
 <section class="step" id="step-plugin-form">
   <h2>04 · 执行插件命令：args_schema 生成表单 → 结构化结果 <span class="badge ok">PASS</span></h2>
-  <p class="meta">plugin-form · 1223 ms · 3 条断言 · 1 张图</p>
+  <p class="meta">plugin-form · 1509 ms · 3 条断言 · 1 张图</p>
   
   <table><thead><tr><th>断言</th><th>结果</th><th>实际</th><th>期望</th></tr></thead><tbody>
 <tr class="">
@@ -235,7 +235,7 @@ fake_provider=gone
 <tr class="">
   <td>result row carries a requestId</td>
   <td>PASS</td>
-  <td><code>cmd_1ac282a4-21ec-4a8d-b1bf-d3d9f358c720</code></td>
+  <td><code>cmd_39b23c8c-5ac7-4275-b685-c9d6455edf1e</code></td>
   <td></td>
 </tr>
 <tr class="">
@@ -250,7 +250,7 @@ fake_provider=gone
 </section>
 <section class="step" id="step-replay">
   <h2>05 · 重放同 requestId：同结果、不二次执行 <span class="badge ok">PASS</span></h2>
-  <p class="meta">replay · 1160 ms · 4 条断言 · 1 张图</p>
+  <p class="meta">replay · 1095 ms · 4 条断言 · 1 张图</p>
   
   <table><thead><tr><th>断言</th><th>结果</th><th>实际</th><th>期望</th></tr></thead><tbody>
 <tr class="">
@@ -263,7 +263,7 @@ fake_provider=gone
   <td>replay result is the first result</td>
   <td>PASS</td>
   <td><code>[object Object]</code></td>
-  <td><code>{&quot;indexed&quot;:7,&quot;requestId&quot;:&quot;cmd_1ac282a4-21ec-4a8d-b1bf-d3d9f358c720&quot;}</code></td>
+  <td><code>{&quot;indexed&quot;:7,&quot;requestId&quot;:&quot;cmd_39b23c8c-5ac7-4275-b685-c9d6455edf1e&quot;}</code></td>
 </tr>
 <tr class="">
   <td>replay did not execute the tool again</td>
@@ -283,7 +283,7 @@ fake_provider=gone
 </section>
 <section class="step" id="step-destructive-denied">
   <h2>06 · 破坏性命令：审批拒绝 → 已拒绝行，无副作用 <span class="badge ok">PASS</span></h2>
-  <p class="meta">destructive-denied · 2501 ms · 2 条断言 · 2 张图</p>
+  <p class="meta">destructive-denied · 2759 ms · 2 条断言 · 2 张图</p>
   
   <table><thead><tr><th>断言</th><th>结果</th><th>实际</th><th>期望</th></tr></thead><tbody>
 <tr class="">
@@ -309,7 +309,7 @@ fake_provider=gone
 </section>
 <section class="step" id="step-destructive-approved">
   <h2>07 · 破坏性命令：审批允许 → 只执行一次并给出结果 <span class="badge ok">PASS</span></h2>
-  <p class="meta">destructive-approved · 1884 ms · 1 条断言 · 1 张图</p>
+  <p class="meta">destructive-approved · 1761 ms · 1 条断言 · 1 张图</p>
   
   <table><thead><tr><th>断言</th><th>结果</th><th>实际</th><th>期望</th></tr></thead><tbody>
 <tr class="">
@@ -324,7 +324,7 @@ fake_provider=gone
 </section>
 <section class="step" id="step-viewports">
   <h2>08 · 4.5 视觉：390/768/1024/1440 目录与表单无横向溢出 <span class="badge ok">PASS</span></h2>
-  <p class="meta">viewports · 8836 ms · 8 条断言 · 9 张图</p>
+  <p class="meta">viewports · 9620 ms · 8 条断言 · 9 张图</p>
   
   <table><thead><tr><th>断言</th><th>结果</th><th>实际</th><th>期望</th></tr></thead><tbody>
 <tr class="">
@@ -430,7 +430,7 @@ fake_provider=gone
 </section>
 <section class="step" id="step-disable-uninstall">
   <h2>09 · 停用/卸载插件：目录与执行入口一起撤销 <span class="badge ok">PASS</span></h2>
-  <p class="meta">disable-uninstall · 1442 ms · 4 条断言 · 2 张图</p>
+  <p class="meta">disable-uninstall · 1975 ms · 4 条断言 · 2 张图</p>
   
   <table><thead><tr><th>断言</th><th>结果</th><th>实际</th><th>期望</th></tr></thead><tbody>
 <tr class="">
