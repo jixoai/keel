@@ -335,7 +335,7 @@ PI telemetry 契约（`internal/telemetry`，见 `docs/PI-PARITY.md` §3）形�
 | 指标族 | Owner | 命名空间/标签 | 用途 |
 |---|---|---|---|
 | `keel_agent_*` | `internal/metrics` | Prometheus；固定枚举标签 | `/metrics` 运维抓取 |
-| `keel.agent.runs` / `keel.agent.run.duration` | `internal/telemetry`（插件导出） | OTLP；model/provider/outcome 等有界标签 | 租户内 tracing/metric |
+| `keel.agent.runs` / `keel.agent.run.duration` / `pi.ai.*` | `internal/telemetry`（插件导出） | OTLP；model/provider/outcome 等有界标签 | 租户内 tracing/metric |
 | `keel.agent.run` / `turn` / `tool` / `compaction` span | `internal/agent` + `internal/harnessext` | OTLP traces；可带 tenant/session/run | 追踪与诊断 |
 | `run.finished` / `compaction` 事件 | kernel 事件日志 | 业务事实 | 回放/汇总，不是遥测替代 |
 

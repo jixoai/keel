@@ -95,8 +95,11 @@ func DefaultRetryPolicy() RetryPolicy {
 // plugin start. A measurement with another name is dropped and counted.
 func DefaultMetricNames() map[string]MetricKind {
 	return map[string]MetricKind{
-		"keel.agent.runs":         MetricKindCounter,
-		"keel.agent.run.duration": MetricKindHistogram,
+		"keel.agent.runs":            MetricKindCounter,
+		"keel.agent.run.duration":    MetricKindHistogram,
+		"pi.ai.request.duration":     MetricKindHistogram,
+		"pi.ai.first_chunk.duration": MetricKindHistogram,
+		"pi.ai.tokens":               MetricKindCounter,
 	}
 }
 

@@ -36,7 +36,10 @@ const (
 	attrUsageOutput = "usage.output"
 	attrCacheRead   = "usage.cache_read"
 	attrCacheWrite  = "usage.cache_write"
-	attrTokenType   = "type"
+	// attrTokenType is the bounded token-kind label (input/output/cache_*). It
+	// uses the telemetry metric allowlist's "kind" so token series survive the
+	// plugin's label whitelist instead of collapsing into one.
+	attrTokenType = "kind"
 )
 
 // NewObservedStream wraps base so every model request records a PI-style

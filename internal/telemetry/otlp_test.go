@@ -495,6 +495,21 @@ func TestOTLPExporterQueueByteCapDropsOldest(t *testing.T) {
 	}
 }
 
+func TestDefaultMetricNamesCoverTheInstrumentVocabulary(t *testing.T) {
+	names := DefaultMetricNames()
+	for name, kind := range map[string]MetricKind{
+		"keel.agent.runs":            MetricKindCounter,
+		"keel.agent.run.duration":    MetricKindHistogram,
+		"pi.ai.request.duration":     MetricKindHistogram,
+		"pi.ai.first_chunk.duration": MetricKindHistogram,
+		"pi.ai.tokens":               MetricKindCounter,
+	} {
+		if names[name] != kind {
+			t.Fatalf("metric %s kind = %s, want %s", name, names[name], kind)
+		}
+	}
+}
+
 func TestOTLPExporterMetricCardinalityAndRegistration(t *testing.T) {
 	collector := newFakeCollector(t)
 	options := testExporterOptions(collector.server.URL, []Signal{SignalMetrics})
