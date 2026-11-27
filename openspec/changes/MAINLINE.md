@@ -142,8 +142,9 @@ W0.5 插件全景/扩展面冻结
 **插件生态交付快照（2026-11-27）**：`keel-plugin-telemetry` 已归档（真实服务 E2E 8 步 /
 104 断言，collector 收到 run span/metric/log，采样与停用均生效）；`keel-board-v1` Phase 0
 独立仓库已在 `d5a9e0a` 打 `v0.1.0`，最终独立复审 P0/P1=0，CI test+stress 同一 commit 全绿。
-`keel-plugin-attachment` 与 `keel-plugin-commands` 的 UI 切片仍在独立复审/修复中，收口后
-再归档；此前不得把它们当作已交付。
+`keel-plugin-attachment` 已归档（UI 切片两轮复审 + E2E 证据绑定最终分支，公网报告
+https://local-kzf-keel-live-gh.fde2e.com/attachment/report.html）；`keel-plugin-commands` 的 UI
+切片仍在复审修复中，收口后再归档；此前不得把它当作已交付。
 
 ## 明确 Defer（Alpha 不做）
 

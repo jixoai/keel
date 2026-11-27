@@ -90,7 +90,8 @@
   > 12 张截图，`evidence/ui/steps.json` + `report.html`。覆盖基线取分支 merge-base
   > （本次 `2b88c8e`，不把 mainline 新文件算入），UNCOVERED=0；EXEMPT 只允许 openspec
   > 证据与 E2E 运行器，其余未映射即 UNCOVERED 并失败。
-  > 公网挂载受本 worktree 禁止 push/merge 的约束，合并后按 `fde2e-ops` 发布。
+  > 公网报告：https://local-kzf-keel-live-gh.fde2e.com/attachment/report.html （HTTP 200，
+> 截图与 steps.json 同目录；合并后按 `fde2e-ops` 发布）。
 - [x] 5.5 跨租户与无权限 E2E：租户 B 打开租户 A 的附件 URL/缩略图 404；无 `session.read`
   账号看到无权限态，不泄露字节。
   > 步骤 6-8：reader 无 `file.read` 显示无权限态且缩略图/下载 403；outsider 无
@@ -107,6 +108,10 @@
   > 全绿（`evidence/nsh-test-tui.txt`）；web 打包见 `evidence/web-build.txt`；
   > 反向变异证据（顺序/占位/退订各一条会变红）见 `evidence/mutation-attachment.txt`。
 - [x] 6.2 `openspec validate keel-plugin-attachment --strict` 通过；证据目录含校验输出。
-- [ ] 6.3 独立 reviewer（子代理）复核 P0/P1 清零；修复后复跑 6.1/6.4。
-- [ ] 6.4 归档：`openspec archive keel-plugin-attachment`，更新 `MAINLINE.md` 与
+- [x] 6.3 独立 reviewer（子代理）复核 P0/P1 清零；修复后复跑 6.1/6.4。
+  > 两轮复审：首轮 5 P1（顺序/订阅/none/UNCOVERED/证据），修复后第二轮代码层通过；
+  > 第三轮确认 E2E 证据绑定 rebase 后分支（frozenBase bd04b34，baseline 2b88c8e），PASS。
+- [x] 6.4 归档：`openspec archive keel-plugin-attachment`，更新 `MAINLINE.md` 与
   `openspec/specs/plugin-attachment/spec.md` 的 Purpose；不保留 draft 状态。
+  > 2026-11-27 归档为 `archive/2026-11-27-keel-plugin-attachment`；spec Purpose 已写实，
+  > MAINLINE 记入插件生态快照；公网报告已发布。
