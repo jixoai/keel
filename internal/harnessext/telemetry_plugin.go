@@ -108,6 +108,14 @@ func (p *telemetryPlugin) start(ctx context.Context, env *PluginEnv) error {
 		}
 		config = loaded
 	}
+	if strings.TrimSpace(config.TenantID) == "" {
+		config.TenantID = tenant
+	}
+	if strings.TrimSpace(config.TenantID) != tenant {
+		reason := "telemetry configuration belongs to another tenant; refusing to export"
+		hub.SetPluginState(telemetry.PluginFailed, reason)
+		return fmt.Errorf("telemetry: %s", reason)
+	}
 	summary := telemetry.SummarizeConfig(config)
 	hub.Configure(summary)
 	p.rememberHub(hub)

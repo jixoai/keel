@@ -540,6 +540,26 @@ func TestTelemetryPluginEmptyTenantFailsClosed(t *testing.T) {
 	}
 }
 
+func TestTelemetryPluginConfigTenantMismatchFailsClosed(t *testing.T) {
+	hub := telemetry.NewHub(telemetry.HubOptions{TenantID: "tenant-a", Logger: testLogger()})
+	plugin := NewTelemetryPlugin(TelemetryPluginOptions{
+		TenantID: "tenant-a",
+		Config: telemetry.Config{
+			Adapter: "otlp", Endpoint: "https://collector.example", TenantID: "tenant-b",
+		},
+		Logger: testLogger(),
+	})
+	if err := plugin.Start(context.Background(), &PluginEnv{Telemetry: hub}); err == nil {
+		t.Fatal("a config bound to another tenant was accepted")
+	}
+	if hub.ExporterCount() != 0 {
+		t.Fatalf("exporter registered: %d", hub.ExporterCount())
+	}
+	if status := hub.Status(); status.State != telemetry.PluginFailed {
+		t.Fatalf("state = %s", status.State)
+	}
+}
+
 func TestTelemetryPluginDisableFlushesQueuedBatch(t *testing.T) {
 	collector := newTelemetryCollector(t)
 	harness := newTelemetryHarness(t, telemetryFixture{config: telemetry.Config{
