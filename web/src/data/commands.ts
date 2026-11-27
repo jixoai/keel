@@ -17,6 +17,7 @@ import type {
   CommandSource,
   CommandTarget,
   CommandView,
+  DecisionView,
   SettingsIssue,
 } from "./contract";
 
@@ -25,7 +26,10 @@ import type {
 export type CommandFieldKind = "string" | "number" | "integer" | "boolean" | "enum" | "array" | "json";
 
 export interface CommandFieldOption {
+  /** The Select's string identity. */
   value: string;
+  /** The JSON value the schema declared (numbers/booleans keep their type). */
+  raw: string | number | boolean;
   label: string;
 }
 
@@ -77,21 +81,36 @@ const stringList = (value: unknown): string[] =>
 const numberValue = (value: unknown): number | undefined =>
   typeof value === "number" && Number.isFinite(value) ? value : undefined;
 
+/** Strip ANSI escape sequences and C0/C1 controls from copy a plugin/server
+ * supplied. A command name/summary is data, not terminal output: a control
+ * byte must never move the cursor or forge a row. Newlines are flattened in
+ * one-line contexts (summaries, labels). */
+export function cleanDisplayText(value: string, keepNewlines = false): string {
+  const withoutAnsi = value.replace(/\u001B\[[0-9;?]*[ -/]*[@-~]/g, "");
+  const pattern = keepNewlines
+    ? /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/g
+    : /[\u0000-\u001F\u007F-\u009F]/g;
+  const cleaned = withoutAnsi.replace(pattern, " ");
+  return keepNewlines
+    ? cleaned.replace(/[ \t]+/g, " ").trim()
+    : cleaned.replace(/\s+/g, " ").trim();
+}
+
 /** One catalog entry from the wire. An entry without a name is unusable and is
  * dropped by the caller; every other field falls back to the safe value. */
 export function parseCommand(value: unknown): CommandView | null {
   const row = isRecord(value) ? value : {};
   const name = text(row.name).trim();
-  if (!name) return null;
+  if (!name || /[\u0000-\u001F\u007F]/.test(name)) return null;
   const schema = row.argsSchema;
   const argsSchema = isRecord(schema) ? schema : { type: "object" };
   const targets = stringList(row.targets);
-  const reason = text(row.reason);
-  const missing = stringList(row.missingPermissions);
+  const reason = cleanDisplayText(text(row.reason));
+  const missing = stringList(row.missingPermissions).map((key) => cleanDisplayText(key));
   return {
     name,
-    source: text(row.source) || "plugin",
-    summary: text(row.summary),
+    source: cleanDisplayText(text(row.source) || "plugin"),
+    summary: cleanDisplayText(text(row.summary)),
     argsSchema,
     danger: text(row.danger) || "write",
     idempotent: row.idempotent === true,
@@ -112,7 +131,7 @@ export function parseCommandCatalog(value: unknown): CommandCatalogView {
     if (command) commands.push(command);
   }
   const generation = numberValue(body.generation);
-  const warnings = stringList(body.warnings);
+  const warnings = stringList(body.warnings).map((warning) => cleanDisplayText(warning));
   return {
     commands,
     truncated: body.truncated === true,
@@ -155,6 +174,28 @@ export function commandMenuQuery(draft: string): string | null {
   const token = draft.slice(1);
   if (/\s/.test(token)) return null;
   return token;
+}
+
+export interface CommandWord {
+  /** The first token without the leading '/'. */
+  name: string;
+  /** Everything after the first token, trimmed. */
+  rest: string;
+}
+
+/**
+ * The first command word of a draft, independent of the catalog. The Composer
+ * uses it to decide "this is a command attempt" BEFORE it can resolve a name:
+ * a first token starting with '/' must never fall back to an ordinary prompt
+ * when the catalog is still loading, failed, or does not know the name.
+ */
+export function commandWord(draft: string): CommandWord | null {
+  const trimmed = draft.trimStart();
+  if (!trimmed.startsWith("/")) return null;
+  const token = trimmed.slice(1);
+  const match = /^([^\s]*)([\s\S]*)$/.exec(token);
+  if (!match) return null;
+  return { name: match[1] ?? "", rest: (match[2] ?? "").trim() };
 }
 
 /**
@@ -339,7 +380,8 @@ export function commandResultSummary(data: unknown, max = 240): string {
     }
   }
   if (!text) return "";
-  return text.length > max ? `${text.slice(0, max)}…` : text;
+  const clean = cleanDisplayText(text, true);
+  return clean.length > max ? `${clean.slice(0, max)}…` : clean;
 }
 
 // ---- args_schema → form --------------------------------------------------
@@ -351,8 +393,7 @@ const enumOptions = (schema: Record<string, unknown>): CommandFieldOption[] | un
   const options: CommandFieldOption[] = [];
   for (const raw of schema.enum) {
     if (typeof raw === "string" || typeof raw === "number" || typeof raw === "boolean") {
-      const value = String(raw);
-      options.push({ value, label: value });
+      options.push({ value: String(raw), raw, label: String(raw) });
     }
   }
   return options.length ? options : undefined;
@@ -372,7 +413,7 @@ export function commandFields(command: CommandView): CommandField[] {
     const property = propertySchema(rawProperty) ?? {};
     const type = text(property.type);
     const options = enumOptions(property);
-    const hint = text(property.description) || undefined;
+    const hint = cleanDisplayText(text(property.description)) || undefined;
     const defaultValueRaw = property.default;
     const defaultValue =
       typeof defaultValueRaw === "string" || typeof defaultValueRaw === "boolean"
@@ -395,7 +436,7 @@ export function commandFields(command: CommandView): CommandField[] {
     else if (type === "string" || type === "") kind = "string";
     fields.push({
       name,
-      label: name,
+      label: cleanDisplayText(name) || name,
       kind,
       required: required.has(name),
       ...(hint ? { hint } : {}),
@@ -516,12 +557,12 @@ export function buildCommandArgs(fields: readonly CommandField[], values: Comman
         if (field.required) errors[field.name] = "必填";
         continue;
       }
-      const allowed = field.options?.some((option) => option.value === trimmed);
-      if (!allowed) {
+      const option = field.options?.find((candidate) => candidate.value === trimmed);
+      if (!option) {
         errors[field.name] = "不在允许的取值内";
         continue;
       }
-      args[field.name] = trimmed;
+      args[field.name] = option.raw;
       continue;
     }
     if (field.kind === "number" || field.kind === "integer") {
@@ -579,8 +620,11 @@ export function commandFieldName(path: string): string {
   const trimmed = path.trim();
   if (!trimmed) return "";
   if (trimmed === "args") return "";
-  if (trimmed.startsWith("args.")) return trimmed.slice("args.".length);
-  return trimmed;
+  const name = trimmed.startsWith("args.") ? trimmed.slice("args.".length) : trimmed;
+  // An array item (`tags[0]`) or a nested property (`nested.a`) belongs to the
+  // form field that owns it; the field renders the error beside that control.
+  const top = name.split(/[.[]/, 1)[0] ?? "";
+  return top.trim();
 }
 
 /** Merge a 400's field issues into the form's field errors. */
@@ -591,6 +635,75 @@ export function commandFieldErrors(issues: readonly SettingsIssue[]): Record<str
     if (name) errors[name] = issue.message;
   }
   return errors;
+}
+
+/** A command's durable failure text in the UI language. Known codes map to
+ * one sentence; an unknown code keeps the server's message (never hidden). */
+export function commandErrorText(errorCode: string | undefined, error: string | undefined): string {
+  switch (errorCode) {
+    case "decision_refused":
+      return "审批被拒绝，命令没有执行。";
+    case "decision_timeout":
+      return "审批超时，命令没有执行。";
+    case "decision_cancelled":
+      return "审批已取消，命令没有执行。";
+    case "session_busy":
+      return "会话正忙，命令没有执行。";
+    case "unknown_command":
+      return "命令不在当前目录中。";
+    case "permission_denied":
+      return "没有执行该命令的权限。";
+    case "plugin_unavailable":
+      return "插件当前不可用，命令没有执行。";
+    case "tool_error":
+      return "命令执行失败（工具错误）。";
+    case "not_wired":
+      return "此部署未接通命令执行。";
+    case "invalid_arguments":
+      return "命令参数不合法。";
+    case "compaction_disabled":
+      return "压缩策略已关闭，无法手动压缩。";
+    case "compaction_conflict":
+      return "当前上下文无法安全压缩。";
+    default:
+      return cleanDisplayText(error ?? "", true) || "命令执行失败。";
+  }
+}
+
+/** The destructive approval question is server text (English); render it in
+ * the product language while keeping the argument preview the approver needs. */
+export function localizeDecision(decision: DecisionView): DecisionView {
+  const prefix = "Run the destructive command /";
+  if (!decision.question.startsWith(prefix)) return decision;
+  const afterPrefix = decision.question.slice(prefix.length);
+  const name = afterPrefix.split("?", 1)[0] ?? "";
+  const argsAt = decision.question.indexOf("Arguments: ");
+  const args = argsAt >= 0 ? decision.question.slice(argsAt + "Arguments: ".length) : "";
+  const question = `是否执行破坏性命令 /${cleanDisplayText(name)}？批准后只会执行一次。${
+    args ? `\n参数：${cleanDisplayText(args, true)}` : ""
+  }`;
+  return {
+    ...decision,
+    question,
+    options: decision.options.map((option) => {
+      if (option.optionId === "allow") return { ...option, label: "执行" };
+      if (option.optionId === "deny") return { ...option, label: "取消" };
+      return option;
+    }),
+  };
+}
+
+/** The full (bounded) result document a row's detail fold shows. */
+export function commandResultDetail(data: unknown, max = 8000): string {
+  if (data === undefined || data === null) return "";
+  let text: string;
+  try {
+    text = typeof data === "string" ? data : JSON.stringify(data, null, 2);
+  } catch {
+    text = String(data);
+  }
+  const clean = cleanDisplayText(text, true);
+  return clean.length > max ? `${clean.slice(0, max)}…（已截断）` : clean;
 }
 
 /** The one-line label a menu/palette row shows. */

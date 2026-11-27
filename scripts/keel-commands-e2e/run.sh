@@ -44,6 +44,12 @@ SERVER_PID=""
 PROVIDER_PID=""
 DB_CREATED=0
 PLUGIN_STATE="$RUNTIME/plugin-state"
+# Record the build identity BEFORE this script rewrites its evidence: after
+# that the worktree is legitimately dirty and the marker would be misleading.
+HEAD_COMMIT="${E2E_HEAD_COMMIT:-$(cd "$ROOT" && git rev-parse HEAD)}"
+if [[ -z "${E2E_HEAD_COMMIT:-}" && -n "$(cd "$ROOT" && git status --porcelain)" ]]; then
+  HEAD_COMMIT="$HEAD_COMMIT-dirty"
+fi
 
 say() { printf '%s\n' "$*"; }
 fail() { say "keel-commands-e2e: $*" >&2; exit 1; }
@@ -275,10 +281,6 @@ done
 # ---- browser lane ----------------------------------------------------------
 export E2E_BASE="http://127.0.0.1:$PORT"
 export E2E_EVIDENCE="$RUN_DIR"
-HEAD_COMMIT="$(cd "$ROOT" && git rev-parse HEAD)"
-if [[ -n "$(cd "$ROOT" && git status --porcelain)" ]]; then
-  HEAD_COMMIT="$HEAD_COMMIT-dirty"
-fi
 export E2E_HEAD_COMMIT="$HEAD_COMMIT"
 export E2E_KEEL_BIN="$BIN"
 export E2E_WEB_DIR="$SITE_ROOT"

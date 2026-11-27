@@ -129,6 +129,10 @@ provides:
      （`plugin.invoke` + `permissions.tools` + 插件自身权限）；
 7. 持久化结果与 `command.invoked`，返回 200；工具错误 502。
 
+**target 不是执行授权**：执行路由没有 `target` 参数；它只校验会话归属、权限、参数、idle
+与命令存在性。`targets` 只控制目录中该命令对当前客户端是否 `available`（客户端 MUST NOT
+执行 `target_unsupported` 的行），不是安全边界，也不改变执行权限。
+
 **幂等**：`requestId` 是唯一身份。同 requestId 重放返回首次记录的结果，MUST NOT 二次
 执行工具或二次开 decision；若首次结果是失败，重放仍返回该失败（不自动重试）；需要重试
 必须换新 requestId。并发同 requestId 按 key 串行化。

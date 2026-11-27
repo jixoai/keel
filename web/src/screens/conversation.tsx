@@ -32,6 +32,7 @@
 import { cleanup, effect, List, type ListRef, platform, signal, Text, untracked, View, windowSize } from "nsh";
 import type { CommandInvocationView, ConversationView, DecisionView, QueueItemView, ScrollState, TurnView } from "../data/contract";
 import { store } from "../data/store";
+import { localizeDecision } from "../data/commands";
 import { Badge, color, ComposerDock, ConversationColumn, row, Skeleton, space, typeScale } from "../ui/kit";
 import { ApprovalCard, EmptyConversation, GuideWaitingRow, OfflineBanner, TurnErrorBanner, TurnRow } from "./messages";
 import { CommandInvocationRow } from "./command-invocation";
@@ -45,11 +46,25 @@ import { resolveSelectionSurface, type SurfaceDescriptor } from "../surfaces/reg
 interface Row {
   kind: "turn" | "decision" | "guide" | "command";
   id: string;
+  /** The ledger seq the row starts at; turns without one carry their
+   * predecessor's (a monotonic fallback), guides have none and stay last. */
+  seq?: number;
   turn?: TurnView;
   decision?: DecisionView;
   guide?: QueueItemView;
   command?: CommandInvocationView;
 }
+
+/** The event a turn starts at. A turn made from one event has `t_<seq>`; one
+ * made from an explicit turnId falls back to its first visible input. */
+const turnStartSeq = (turn: TurnView): number => {
+  const fromID = /^t_(\d+)$/.exec(turn.turnId);
+  if (fromID) return Number(fromID[1]);
+  const seqs = turn.visibleInputs
+    .map((input) => input.seq)
+    .filter((seq): seq is number => typeof seq === "number" && seq > 0);
+  return seqs.length ? Math.min(...seqs) : 0;
+};
 
 const submitting = signal<Record<string, boolean>>({});
 const now = signal(Date.now());
@@ -70,21 +85,32 @@ let pendingRestore: { sessionId: string; offset: number; tries: number } | null 
 
 const rowsOf = (view: ConversationView | null): Row[] => {
   if (!view) return [];
-  return [
-    ...view.turns.map((turn): Row => ({ kind: "turn", id: turn.turnId, turn })),
-    // Commands are top-level invocation records, never messages. They follow
-    // the turn list (commands run on an idle session, so they are the newest
-    // ledger facts) and sit before the approval cards they may have opened.
-    ...(view.commands ?? []).map(
-      (command): Row => ({ kind: "command", id: `command-${command.requestId}`, command }),
-    ),
-    ...view.decisions.map((decision): Row => ({ kind: "decision", id: `decision-${decision.decisionId}`, decision })),
-    // Guides still waiting for a boundary show at the stream's tail (C12):
-    // the place they will be injected.
-    ...view.queue
-      .filter((item) => item.delivery === "guide")
-      .map((item): Row => ({ kind: "guide", id: `guide-${item.requestId}`, guide: item })),
-  ];
+  // Commands are top-level invocation records, never messages. The transcript
+  // is read in ledger order: turns, commands and approval cards are merged by
+  // their starting seq, then the guides waiting for their boundary stay last.
+  let previousTurnSeq = 0;
+  const turns: Row[] = view.turns.map((turn) => {
+    const seq = turnStartSeq(turn);
+    if (seq > 0) previousTurnSeq = seq;
+    return { kind: "turn", id: turn.turnId, seq: seq > 0 ? seq : previousTurnSeq, turn };
+  });
+  const commands: Row[] = (view.commands ?? []).map((command) => ({
+    kind: "command",
+    id: `command-${command.requestId}`,
+    seq: command.seq,
+    command,
+  }));
+  const decisions: Row[] = view.decisions.map((decision) => ({
+    kind: "decision",
+    id: `decision-${decision.decisionId}`,
+    seq: decision.seq > 0 ? decision.seq : Number.MAX_SAFE_INTEGER,
+    decision,
+  }));
+  const ordered = [...turns, ...commands, ...decisions].sort((a, b) => (a.seq ?? 0) - (b.seq ?? 0));
+  const guides: Row[] = view.queue
+    .filter((item) => item.delivery === "guide")
+    .map((item) => ({ kind: "guide", id: `guide-${item.requestId}`, guide: item }));
+  return [...ordered, ...guides];
 };
 
 /** The rows' cells: content only. Their width, insets and shift are the
@@ -131,7 +157,7 @@ function RowCell(props: { row: () => Row }) {
       <If when={props.row().kind === "decision"}>
         <View style={{ paddingVertical: space.md }}>
           <ApprovalCard
-            decision={() => props.row().decision!}
+            decision={() => localizeDecision(props.row().decision!)}
             active={() => isActiveDecision(props.row().decision!.decisionId)}
             timeoutAt={() => store.decisionTimeout(props.row().decision!.decisionId)}
             submitting={() => !!submitting()[props.row().decision!.decisionId]}

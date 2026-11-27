@@ -1,0 +1,5 @@
+✗ src/screens/commands-blocked.test.tsx › TUI: 目录加载中，输入 /compact 空格不发送普通消息 (6.8s)
+    `text:/正在读取命令目录/` showing never happened in 5000 ms; on screen: ["sent:1", "目录加载中", "", "队列", "引导"]
+✗ src/screens/commands-blocked.test.tsx › TUI: 目录失败，/compact 空格被拦截；/learn 仍作为模板发送 (6.5s)
+    `text:/命令目录不可用/` showing never happened in 5000 ms; on screen: ["sent:1", "目录错误：命令目录读取失败：服务暂时没有响应", "", "队列", "引导"]
+error 2 tests: 0 passed, 2 failed (13.4s)

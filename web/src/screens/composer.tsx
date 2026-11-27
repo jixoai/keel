@@ -20,11 +20,11 @@ import type { CommandValues } from "../data/commands";
 import {
   buildCommandArgs,
   commandAvailabilityText,
-  commandDraft,
   commandFields,
   commandMenuQuery,
   commandNeedsForm,
   commandUsesFreeText,
+  commandWord,
   initialCommandValues,
 } from "../data/commands";
 import type { PendingAttachment } from "../data/store";
@@ -470,12 +470,35 @@ export function Composer(props: { view: ConversationView | null; compact?: boole
     // `/learn` is a client prompt template, deliberately NOT a catalog command:
     // it keeps the ordinary-message path below.
     const learn = parseLearnCommand(raw);
-    // A command is a named action, never a message: `/name` maps to the
-    // catalog entry and its arguments, or opens the schema form.
-    const trimmed = raw.trim();
-    const drafted = learn ? null : commandDraft(trimmed, catalogCommands());
-    if (drafted?.kind === "command") {
-      const command = drafted.command;
+    // A first token starting with '/' is a command ATTEMPT, never a prompt:
+    // the draft must resolve through the catalog, and a catalog that is still
+    // loading, failed, or does not know the name blocks the send instead of
+    // turning `/compact ` into a user message. `/learn` is handled first as
+    // the one client template.
+    const word = learn ? null : commandWord(raw);
+    if (word) {
+      const catalog = store.commandCatalog();
+      if (!catalog) {
+        if (store.commandCatalogLoading()) {
+          store.flash({ tone: "info", text: "正在读取命令目录，稍后重试。" });
+          return;
+        }
+        if (store.commandCatalogError()) {
+          store.flash({
+            tone: "danger",
+            text: `命令目录不可用：${store.commandCatalogError() ?? ""} 点“重试”后再发送。`,
+          });
+          return;
+        }
+        void store.loadCommands({ force: true });
+        store.flash({ tone: "info", text: "正在读取命令目录，稍后重试。" });
+        return;
+      }
+      const command = catalog.commands.find((candidate) => candidate.name === word.name);
+      if (!command) {
+        store.flash({ tone: "warn", text: `命令 /${word.name || "?"} 不在当前目录中。` });
+        return;
+      }
       if (!command.available) {
         store.flash({
           tone: "warn",
@@ -485,39 +508,39 @@ export function Composer(props: { view: ConversationView | null; compact?: boole
       }
       if (commandNeedsForm(command)) {
         openCommandForm(command);
+        if (word.rest) {
+          store.flash({ tone: "info", text: `/${command.name} 的参数请在表单中填写。` });
+        }
         return;
       }
-      sending.set(true);
-      setDraftText("");
-      let args: Record<string, unknown> = {};
-      if (commandUsesFreeText(command)) {
-        const field = commandFields(command)[0]!;
-        const value = drafted.rest.trim();
-        if (field.required && !value) {
-          sending.set(false);
-          setDraftText(raw);
-          store.flash({ tone: "warn", text: `/${command.name} 需要填写 ${field.name}。` });
+      const fields = commandFields(command);
+      if (fields.length === 0) {
+        if (word.rest) {
+          store.flash({ tone: "warn", text: `/${command.name} 不接受参数。` });
           return;
         }
-        if (value) args = { [field.name]: value };
+        sending.set(true);
+        setDraftText("");
+        const outcome = await submitCommand(command, {});
+        sending.set(false);
+        if (outcome?.status === "error") setDraftText(raw);
+        return;
       }
+      // The sole schema property is `text`: the rest of the line is that
+      // argument. A bare name with a REQUIRED text puts the command in the
+      // input for the writer to type; an optional one may run empty.
+      const field = fields[0]!;
+      if (!word.rest && field.required) {
+        setDraftText(`/${command.name} `);
+        focusComposer();
+        return;
+      }
+      const args: Record<string, unknown> = word.rest ? { [field.name]: word.rest } : {};
+      sending.set(true);
+      setDraftText("");
       const outcome = await submitCommand(command, args);
       sending.set(false);
       if (outcome?.status === "error") setDraftText(raw);
-      return;
-    }
-    if (drafted?.kind === "menu") {
-      // The first token is still a command word: Enter must not send it as a
-      // message. An exact name runs; a prefix waits for a row choice.
-      const exact = catalogCommands().find((command) => `/${command.name}` === trimmed);
-      if (exact) {
-        activateCommand(exact);
-        return;
-      }
-      if (!store.commandCatalog() && !store.commandCatalogLoading()) {
-        void store.loadCommands({ force: true });
-        store.flash({ tone: "info", text: "正在读取命令目录，稍后再发送一次。" });
-      }
       return;
     }
     // `/learn` is one message that asks the agent for a skills.manage create;

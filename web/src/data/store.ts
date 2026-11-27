@@ -114,6 +114,51 @@ export interface PendingAttachment {
   file?: Blob;
 }
 
+/** One durable command waiting on its destructive decision. The server keeps
+ * the invocation row but never the arguments (audit rule), so the client that
+ * issued it is the only holder of the argument document: it persists that
+ * document for the decision window, and replays the same requestId when the
+ * decision is answered/times out (including after a reload or another
+ * client's answer). */
+interface PendingCommandRecord {
+  sessionId: string;
+  requestId: string;
+  name: string;
+  args: Record<string, unknown>;
+  /** Empty while a lost 202 is being resent; the decision id arrives with it. */
+  decisionId: string;
+  /** The server's decision window in ms (0 until the 202 tells us). */
+  timeoutMs: number;
+  /** Epoch ms after which the decision is settled server-side. */
+  deadline: number;
+  createdAt: number;
+}
+
+interface PendingCommandTimers {
+  poll?: number;
+  deadline?: number;
+  resend?: number;
+}
+
+/** The slice of Storage this store needs; nsh's TS lib has no DOM globals. */
+interface PendingStorage {
+  getItem(key: string): string | null;
+  setItem(key: string, value: string): void;
+  removeItem(key: string): void;
+}
+
+/** sessionStorage is a per-tab store: closing the tab drops the arguments.
+ * The server has no argument document to resume from by design, so a closed
+ * initiating tab is the one case that cannot self-heal. */
+const COMMAND_PENDING_STORAGE_KEY = "keel.commands.pending.v1";
+const COMMAND_PENDING_TTL_MS = 30 * 60 * 1000;
+/** The decision journal poll (another client may answer). */
+const COMMAND_DECISION_POLL_MS = 1_000;
+/** A lost/5xx command answer is replayed with the same requestId. */
+const COMMAND_RESEND_MS = 1_500;
+const COMMAND_MAX_RESEND_ATTEMPTS = 3;
+const COMMAND_MAX_BUSY_RETRIES = 5;
+
 /** Everything the store's transport must answer. The identity/access surface
  * (A4.3/A4.4a) is optional: a transport that predates it answers nothing, and
  * the identity pages say so instead of inventing rows. */
@@ -524,15 +569,15 @@ class KeelStore {
   /** Test/host seam for the command surface (the states harness answers the
    * catalog/execution in memory). `null` uses the app's transport. */
   private commandClient: CommandTransport | null = null;
-  /** The argument document of every requestId still able to run (a destructive
-   * command awaiting its decision). Never logged; dropped at terminal state. */
-  private commandRequests = new Map<string, { name: string; args: Record<string, unknown> }>();
-  /** decisionId → the requestId whose replay it authorizes. Answering the
-   * decision resumes the same command with the same requestId. */
-  private commandDecisionRequests = new Map<string, string>();
-  /** decisionId → busy-replay attempts (a turn started while the question was
-   * open; approval never bypasses the idle rule). */
-  private commandReplayAttempts = new Map<string, number>();
+  /** Destructive invocations whose decision is still open, keyed by
+   * `<session>/<requestId>`. Persisted to sessionStorage (web) so a session
+   * switch or a reload still executes the command exactly once after its
+   * approval; dropped at terminal state or after the decision window. */
+  private pendingCommands = new Map<string, PendingCommandRecord>();
+  private pendingTimers = new Map<string, PendingCommandTimers>();
+  private pendingReplayAttempts = new Map<string, number>();
+  private pendingResendAttempts = new Map<string, number>();
+  private pendingReplayInFlight = new Set<string>();
   /** The catalog read generation: a late answer for a previous session/target
    * must not draw into the current menu. */
   private commandCatalogToken = 0;
@@ -934,6 +979,7 @@ class KeelStore {
   /** Drop everything scoped to the signed-in account, so a login page never
    * shows the previous account's rows behind it. */
   private clearSessionState() {
+    this.clearPendingCommands();
     this.identityStreamCloser?.();
     this.closeStream();
     this.sessions.set([]);
@@ -1659,7 +1705,8 @@ class KeelStore {
     const catalog = client.commandCatalog?.bind(client);
     const execute = client.executeCommand?.bind(client);
     if (!catalog || !execute) return null;
-    return { commandCatalog: catalog, executeCommand: execute };
+    const decisions = client.decisions?.bind(client);
+    return { commandCatalog: catalog, executeCommand: execute, ...(decisions ? { decisions } : {}) };
   }
 
   /** The target this client renders: web, terminal or a native host. */
@@ -1672,7 +1719,8 @@ class KeelStore {
    * `force` re-reads after a lifecycle change (a plugin installed/disabled,
    * a terminal failure that may have changed availability). A cached catalog
    * stays visible while a refresh is in flight, so the menu never flashes
-   * empty on its own.
+   * empty on its own; a failed refresh keeps the last good rows beside the
+   * error.
    */
   async loadCommands(options: { force?: boolean } = {}): Promise<void> {
     const sessionId = this.activeId();
@@ -1729,7 +1777,9 @@ class KeelStore {
     }
   }
 
-  /** Reset the catalog when the session boundary moves. */
+  /** Reset the catalog when the session boundary moves. Pending destructive
+   * commands survive: their arguments are the only copy and the decision may
+   * still be answered after the reader switches sessions. */
   private resetCommands(): void {
     this.commandCatalogToken += 1;
     this.commandCatalog.set(null);
@@ -1738,16 +1788,285 @@ class KeelStore {
     this.commandCatalogErrorStatus.set(null);
     this.commandCatalogLoading.set(false);
     this.commandExecuting.set(null);
-    this.commandRequests.clear();
-    this.commandDecisionRequests.clear();
-    this.commandReplayAttempts.clear();
+  }
+
+  // ---- pending destructive commands -------------------------------------
+
+  private pendingKey(sessionId: string, requestId: string): string {
+    return `${sessionId}/${requestId}`;
+  }
+
+  private pendingStorage(): PendingStorage | null {
+    try {
+      return (globalThis as { sessionStorage?: PendingStorage }).sessionStorage ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** The persisted pending records, defensively parsed. A malformed row is
+   * dropped rather than resuming a command with invented arguments. */
+  private readPendingStorage(): PendingCommandRecord[] {
+    const storage = this.pendingStorage();
+    if (!storage) return [];
+    try {
+      const raw = storage.getItem(COMMAND_PENDING_STORAGE_KEY);
+      if (!raw) return [];
+      const parsed: unknown = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return [];
+      const rows: PendingCommandRecord[] = [];
+      for (const value of parsed) {
+        if (!value || typeof value !== "object") continue;
+        const row = value as Record<string, unknown>;
+        const args = row.args;
+        if (
+          typeof row.sessionId !== "string" ||
+          typeof row.requestId !== "string" ||
+          typeof row.name !== "string" ||
+          !args ||
+          typeof args !== "object" ||
+          Array.isArray(args)
+        ) {
+          continue;
+        }
+        rows.push({
+          sessionId: row.sessionId,
+          requestId: row.requestId,
+          name: row.name,
+          args: args as Record<string, unknown>,
+          decisionId: typeof row.decisionId === "string" ? row.decisionId : "",
+          timeoutMs: typeof row.timeoutMs === "number" && row.timeoutMs > 0 ? row.timeoutMs : 0,
+          deadline: typeof row.deadline === "number" && row.deadline > 0 ? row.deadline : 0,
+          createdAt: typeof row.createdAt === "number" ? row.createdAt : Date.now(),
+        });
+      }
+      return rows;
+    } catch {
+      return [];
+    }
+  }
+
+  /** Write every pending record (the argument document included) for this tab.
+   * The server deliberately never stores args, so this per-tab copy is what
+   * makes a reload able to replay the same requestId; it is cleared at the
+   * terminal state and on logout. */
+  private persistPending(): void {
+    const storage = this.pendingStorage();
+    if (!storage) return;
+    try {
+      if (this.pendingCommands.size === 0) {
+        storage.removeItem(COMMAND_PENDING_STORAGE_KEY);
+        return;
+      }
+      storage.setItem(
+        COMMAND_PENDING_STORAGE_KEY,
+        JSON.stringify([...this.pendingCommands.values()]),
+      );
+    } catch {
+      /* storage full or denied: the in-memory copy still works */
+    }
+  }
+
+  private rememberPending(record: PendingCommandRecord): void {
+    this.pendingCommands.set(this.pendingKey(record.sessionId, record.requestId), record);
+    this.persistPending();
+    this.watchPending(record);
+  }
+
+  /** Restore this tab's pending commands for a session (a reload, or a
+   * session switched back to). Expired decision windows are dropped instead of
+   * executing an old approval late. */
+  private restorePendingCommands(sessionId: string): void {
+    const rows = this.readPendingStorage();
+    let dirtied = false;
+    for (const row of rows) {
+      if (row.sessionId !== sessionId) continue;
+      const key = this.pendingKey(row.sessionId, row.requestId);
+      if (this.pendingCommands.has(key)) continue;
+      if (row.deadline > 0 && Date.now() > row.deadline + COMMAND_PENDING_TTL_MS) {
+        dirtied = true;
+        continue;
+      }
+      this.pendingCommands.set(key, row);
+      this.watchPending(row);
+    }
+    if (dirtied) this.persistPending();
+  }
+
+  private findPending(decisionId: string): PendingCommandRecord | null {
+    for (const record of this.pendingCommands.values()) {
+      if (record.decisionId === decisionId) return record;
+    }
+    return null;
+  }
+
+  private stopPendingTimers(key: string): void {
+    const timers = this.pendingTimers.get(key);
+    if (!timers) return;
+    if (timers.poll !== undefined) clearTimeout(timers.poll);
+    if (timers.deadline !== undefined) clearTimeout(timers.deadline);
+    if (timers.resend !== undefined) clearTimeout(timers.resend);
+    this.pendingTimers.delete(key);
+  }
+
+  private forgetPending(record: PendingCommandRecord): void {
+    const key = this.pendingKey(record.sessionId, record.requestId);
+    this.stopPendingTimers(key);
+    this.pendingCommands.delete(key);
+    this.pendingReplayAttempts.delete(key);
+    this.pendingResendAttempts.delete(key);
+    this.pendingReplayInFlight.delete(key);
+    this.persistPending();
+  }
+
+  private schedulePendingResend(record: PendingCommandRecord, delay: number): void {
+    const key = this.pendingKey(record.sessionId, record.requestId);
+    const timers = this.pendingTimers.get(key) ?? {};
+    if (timers.resend !== undefined) clearTimeout(timers.resend);
+    timers.resend = setTimeout(() => {
+      timers.resend = undefined;
+      const current = this.pendingCommands.get(key);
+      if (current) void this.replayPending(current, "resend");
+    }, delay) as unknown as number;
+    this.pendingTimers.set(key, timers);
+  }
+
+  /**
+   * Watch one pending destructive command:
+   *   - poll the durable decision journal (another client may answer it; the
+   *     approval card and the command row both update), and
+   *   - replay at the decision deadline as a fallback (a lost poll must not
+   *     leave the invocation pending forever; the server answers 408 for a
+   *     timed-out decision and records the terminal state).
+   * A record without a decision id (a lost 202) is resent with the same
+   * requestId instead.
+   */
+  private watchPending(record: PendingCommandRecord): void {
+    const key = this.pendingKey(record.sessionId, record.requestId);
+    this.stopPendingTimers(key);
+    const api = this.commandApi();
+    const read = api?.decisions;
+    if (!record.decisionId || !read) {
+      if (!record.decisionId) this.schedulePendingResend(record, COMMAND_RESEND_MS);
+      return;
+    }
+    const timers: PendingCommandTimers = {};
+    const tick = async () => {
+      if (!this.pendingCommands.has(key)) return;
+      try {
+        const rows = await read(record.sessionId);
+        const decision = rows.find((row) => row.decisionId === record.decisionId);
+        if (decision && decision.status !== "open") {
+          void this.syncDecisions(record.sessionId);
+          const current = this.pendingCommands.get(key);
+          if (current) void this.replayPending(current, "decision");
+          return;
+        }
+      } catch {
+        /* a read failure is transient; the deadline timer still settles it */
+      }
+      if (!this.pendingCommands.has(key)) return;
+      timers.poll = setTimeout(tick, COMMAND_DECISION_POLL_MS) as unknown as number;
+      this.pendingTimers.set(key, timers);
+    };
+    timers.poll = setTimeout(tick, COMMAND_DECISION_POLL_MS) as unknown as number;
+    const deadline = record.deadline > 0 ? record.deadline : Date.now() + (record.timeoutMs || 5 * 60 * 1000);
+    timers.deadline = setTimeout(() => {
+      timers.deadline = undefined;
+      const current = this.pendingCommands.get(key);
+      if (current) void this.replayPending(current, "deadline");
+    }, Math.max(250, deadline - Date.now() + 750)) as unknown as number;
+    this.pendingTimers.set(key, timers);
+  }
+
+  /** Replay one pending requestId exactly as the first call did. Background
+   * safe: it never touches the foreground `commandExecuting` guard, so a
+   * decision answered while another command runs still settles this one. */
+  private async replayPending(record: PendingCommandRecord, reason: string): Promise<void> {
+    const key = this.pendingKey(record.sessionId, record.requestId);
+    if (!this.pendingCommands.has(key) || this.pendingReplayInFlight.has(key)) return;
+    const api = this.commandApi();
+    if (!api) return;
+    this.pendingReplayInFlight.add(key);
+    const attempts = (this.pendingReplayAttempts.get(key) ?? 0) + 1;
+    this.pendingReplayAttempts.set(key, attempts);
+    try {
+      const result = await api.executeCommand(record.sessionId, record.name, record.args, record.requestId);
+      if (!this.pendingCommands.has(key)) return;
+      if (result.status === "pending_decision" || result.pending) {
+        const updated: PendingCommandRecord = {
+          ...record,
+          decisionId: result.decisionId || record.decisionId,
+          timeoutMs: result.timeoutMs || record.timeoutMs,
+          deadline: Date.now() + (result.timeoutMs || record.timeoutMs || 5 * 60 * 1000),
+        };
+        this.pendingCommands.set(key, updated);
+        this.persistPending();
+        this.watchPending(updated);
+        return;
+      }
+      this.forgetPending(record);
+      if (this.activeId() === record.sessionId) {
+        // The durable command.invoked row is the feedback; a second toast would
+        // outlive an approval and read as a second outcome.
+        void this.loadCommands({ force: true });
+      }
+    } catch (error) {
+      if (!this.pendingCommands.has(key)) return;
+      const status = error instanceof KeelApiError ? error.status : undefined;
+      const code = error instanceof KeelApiError ? error.code : undefined;
+      const retryableTransport = status === undefined || status === 500 || status === 504;
+      if (retryableTransport) {
+        const resend = (this.pendingResendAttempts.get(key) ?? 0) + 1;
+        if (resend <= COMMAND_MAX_RESEND_ATTEMPTS) {
+          this.pendingResendAttempts.set(key, resend);
+          this.schedulePendingResend(record, COMMAND_RESEND_MS);
+          return;
+        }
+      }
+      if ((code === "session_busy" || code === "command_in_progress") && attempts <= COMMAND_MAX_BUSY_RETRIES) {
+        this.schedulePendingResend(record, 2_000 * attempts);
+        return;
+      }
+      this.forgetPending(record);
+      // A typed 4xx is already a durable command.invoked row (refused,
+      // timed_out, cancelled); only an untyped transport/5xx failure with no
+      // row left needs a notice.
+      const typedTerminal = status !== undefined && status >= 400 && status < 500;
+      if (!typedTerminal && this.activeId() === record.sessionId) {
+        this.flash({
+          tone: "danger",
+          text: this.commandErrorMessage(record.name, error, status, code, false),
+        });
+      }
+    } finally {
+      this.pendingReplayInFlight.delete(key);
+    }
+  }
+
+  private replayPendingForDecision(decisionId: string): void {
+    const record = this.findPending(decisionId);
+    if (record) void this.replayPending(record, "answer");
+  }
+
+  /** Drop every pending command (logout / account switch). The server rows
+   * stay as the audit truth; this client no longer holds their arguments. */
+  private clearPendingCommands(): void {
+    for (const key of [...this.pendingTimers.keys()]) this.stopPendingTimers(key);
+    this.pendingCommands.clear();
+    this.pendingReplayAttempts.clear();
+    this.pendingResendAttempts.clear();
+    this.pendingReplayInFlight.clear();
+    this.persistPending();
   }
 
   /**
    * Execute one command. The requestId is the idempotency identity: a
    * destructive command's 202 is replayed with the SAME id after its decision
-   * is answered (`resumeCommandDecision`), which is what makes the host execute
-   * it once. Field-level 400s are returned as `fields` for the form.
+   * is answered (`replayPending`), which is what makes the host execute it
+   * once. Field-level 400s are returned as `fields` for the form; a lost
+   * answer is retried with the same id (the row, when it exists, replays its
+   * first result instead of executing again).
    */
   async runCommand(
     name: string,
@@ -1767,20 +2086,29 @@ class KeelStore {
       return { status: "error", requestId, message: "当前传输不支持命令执行。" };
     }
     this.commandExecuting.set(requestId);
-    this.commandRequests.set(requestId, { name, args });
     try {
       const result = await api.executeCommand(sessionId, name, args, requestId);
-      if (this.activeId() !== sessionId) {
-        return { status: "ok", requestId, result };
-      }
       if (result.status === "pending_decision" || result.pending) {
-        if (result.decisionId) this.commandDecisionRequests.set(result.decisionId, requestId);
+        const timeoutMs = result.timeoutMs || 5 * 60 * 1000;
+        const record: PendingCommandRecord = {
+          sessionId,
+          requestId,
+          name,
+          args,
+          decisionId: result.decisionId ?? "",
+          timeoutMs,
+          deadline: Date.now() + timeoutMs,
+          createdAt: Date.now(),
+        };
+        this.rememberPending(record);
         // The durable journal is where the approval card comes from; the
         // command's own streamed row already says 等待审批.
         void this.syncDecisions(sessionId);
         return { status: "pending", requestId, result };
       }
-      this.finishCommandRequest(requestId);
+      this.forgetPending(this.pendingCommands.get(this.pendingKey(sessionId, requestId)) ?? {
+        sessionId, requestId, name, args, decisionId: "", timeoutMs: 0, deadline: 0, createdAt: 0,
+      });
       if (result.status !== "ok") {
         return {
           status: "error",
@@ -1800,20 +2128,33 @@ class KeelStore {
       const fields = commandFieldErrors(issues);
       const code = error instanceof KeelApiError ? error.code : undefined;
       const message = this.commandErrorMessage(name, error, status, code, Object.keys(fields).length > 0);
-      // A 202 decision may be answered later only while the row is pending; a
-      // terminal refusal/timeout/cancel means this requestId is done. A busy
-      // replay is the one 409 that can settle: the decision is answered and
-      // the same requestId may run once the active turn settles, so it keeps
-      // its argument document (bounded retries live in resumeCommandDecision).
-      const awaitingDecision = [...this.commandDecisionRequests.values()].includes(requestId);
-      const busyReplay = awaitingDecision && (code === "session_busy" || code === "command_in_progress");
-      if (
-        status !== undefined &&
-        [403, 408, 409, 404, 503, 502, 500].includes(status) &&
-        !busyReplay
-      ) {
-        this.finishCommandRequest(requestId);
+      const retryableTransport = status === undefined || status === 500 || status === 504;
+      if (retryableTransport) {
+        // The answer (possibly a 202) was lost: keep the same requestId and
+        // replay it. The server either opens the same decision or returns the
+        // first result; it never executes a second time.
+        const record: PendingCommandRecord = {
+          sessionId,
+          requestId,
+          name,
+          args,
+          decisionId: "",
+          timeoutMs: 0,
+          deadline: 0,
+          createdAt: Date.now(),
+        };
+        this.rememberPending(record);
+        this.flash({ tone: "info", text: "命令响应中断，正在用同一 requestId 重试…" });
+        return { status: "pending", requestId, message };
       }
+      const pending = this.pendingCommands.get(this.pendingKey(sessionId, requestId));
+      if (pending && (code === "session_busy" || code === "command_in_progress")) {
+        this.schedulePendingResend(pending, 2_000);
+        return { status: "error", requestId, message, code, fields, statusCode: status };
+      }
+      this.forgetPending(pending ?? {
+        sessionId, requestId, name, args, decisionId: "", timeoutMs: 0, deadline: 0, createdAt: 0,
+      });
       if (code === "plugin_unavailable" || status === 502 || status === 503) {
         void this.loadCommands({ force: true });
       }
@@ -1829,17 +2170,7 @@ class KeelStore {
           : {}),
       };
     } finally {
-      if (this.commandExecuting() === requestId) {
-        this.commandExecuting.set(null);
-      }
-    }
-  }
-
-  /** Forget a terminal requestId's stored document and decision link. */
-  private finishCommandRequest(requestId: string): void {
-    this.commandRequests.delete(requestId);
-    for (const [decisionId, linked] of this.commandDecisionRequests) {
-      if (linked === requestId) this.commandDecisionRequests.delete(decisionId);
+      if (this.commandExecuting() === requestId) this.commandExecuting.set(null);
     }
   }
 
@@ -1892,35 +2223,6 @@ class KeelStore {
     }
     if (status === 409) return `命令冲突：${errorMessageOf(error)}`;
     return `命令执行失败：${errorMessageOf(error)}`;
-  }
-
-  /**
-   * The replay a destructive command's answered decision authorizes: the same
-   * requestId, the same arguments, exactly one execution. Called after the
-   * answer was accepted; a denied answer replays too (the host answers 403 and
-   * records the refusal), so the row is terminal either way.
-   */
-  private resumeCommandDecision(decisionId: string): void {
-    const requestId = this.commandDecisionRequests.get(decisionId);
-    if (!requestId) return;
-    const request = this.commandRequests.get(requestId);
-    if (!request) {
-      this.commandDecisionRequests.delete(decisionId);
-      return;
-    }
-    void this.runCommand(request.name, request.args, { requestId }).then((outcome) => {
-      if (outcome.status === "pending") return;
-      if (outcome.status === "error" && outcome.code === "session_busy") {
-        const attempts = (this.commandReplayAttempts.get(decisionId) ?? 0) + 1;
-        if (attempts <= 5) {
-          this.commandReplayAttempts.set(decisionId, attempts);
-          setTimeout(() => this.resumeCommandDecision(decisionId), 2_000 * attempts) as unknown as number;
-          return;
-        }
-      }
-      this.commandReplayAttempts.delete(decisionId);
-      this.commandDecisionRequests.delete(decisionId);
-    });
   }
 
   // ---- plugins & triggers -------------------------------------------------
@@ -2134,6 +2436,24 @@ class KeelStore {
     this.commandClient = client;
   }
 
+  /** Test/host seam: clear pending destructive commands and their timers
+   * (sessionStorage included). */
+  resetCommandStateForTest(): void {
+    this.clearPendingCommands();
+    this.commandExecuting.set(null);
+  }
+
+  /** Test/host seam: the reload path — drop the in-memory pending set and
+   * timers, keep sessionStorage, restore this session from it. */
+  simulateCommandReloadForTest(sessionId: string): void {
+    for (const key of [...this.pendingTimers.keys()]) this.stopPendingTimers(key);
+    this.pendingCommands.clear();
+    this.pendingReplayAttempts.clear();
+    this.pendingResendAttempts.clear();
+    this.pendingReplayInFlight.clear();
+    this.restorePendingCommands(sessionId);
+  }
+
   /** The super-agent board transport in force, or null when this transport
    * does not serve the surface (the page then says so instead of rendering
    * invented rows). The fixture and `KeelHttp` both implement it. */
@@ -2291,6 +2611,10 @@ class KeelStore {
     this.closeStream();
     this.resetCommands();
     this.activeId.set(sessionId);
+    // A reload / a switch back to this session restores the destructive
+    // commands this tab still owes an answer to (their args never reach the
+    // server's audit row, so this copy is the only one able to replay).
+    this.restorePendingCommands(sessionId);
     // The session's own model selection (kept in memory while the app runs).
     this.sessionSelection.set(this.sessionSelections.get(sessionId) ?? null);
     // The header's model chip shows the session's choice against the tenant
@@ -2677,7 +3001,7 @@ class KeelStore {
       this.engine?.answerDecisionLocal(decisionId, answer);
       // A destructive command's question is answered: replay the SAME
       // requestId so the host executes it once (or records the refusal).
-      this.resumeCommandDecision(decisionId);
+      this.replayPendingForDecision(decisionId);
     } catch (error) {
       this.answered.delete(decisionId);
       this.notice.set({ tone: "danger", text: `提交答案失败：${messageOf(error)}` });

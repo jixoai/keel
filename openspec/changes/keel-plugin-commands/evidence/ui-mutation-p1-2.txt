@@ -1,0 +1,8 @@
+✓ src/data/commands.pending.test.ts › pending: 切走后另一客户端允许审批 → 同 requestId 只执行一次 (2.3s)
+✓ src/data/commands.pending.test.ts › pending: 决策超时自动重放一次 → timed_out，不会永久 pending (1.7s)
+✓ src/data/commands.pending.test.ts › pending: 丢掉 202 响应 → 同 requestId 重发并接回审批 (2.6s)
+✗ src/data/commands.pending.test.ts › pending: 本客户端点击允许 → answerDecision 立即用原 requestId 重放 (3.1s)
+    condition did not settle in time
+    at waitFor (src/data/commands.pending.test.ts:65:13)
+✓ src/data/commands.pending.test.ts › pending: 重载后从 sessionStorage 恢复并用原参数重放 (1.0s)
+error 5 tests: 4 passed, 1 failed (10.7s)

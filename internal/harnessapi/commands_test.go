@@ -191,9 +191,12 @@ func commandAccess() *fakeAccess {
 
 type fakeCommandPlugins struct {
 	registry harnessext.CommandRegistry
+	tenantID uuid.UUID
 }
 
 func (f *fakeCommandPlugins) ListCommands() harnessext.CommandRegistry { return f.registry }
+
+func (f *fakeCommandPlugins) TenantID() uuid.UUID { return f.tenantID }
 
 type fakeCommandTools struct {
 	mu     sync.Mutex
@@ -339,6 +342,7 @@ func newCommandHarness(t *testing.T, mutate func(*Config)) *commandHarness {
 	if mutate != nil {
 		mutate(&cfg)
 	}
+	plugins.tenantID = harness.tenant
 	harness.server = httptest.NewServer(New(cfg))
 	t.Cleanup(harness.server.Close)
 	return harness
@@ -821,6 +825,26 @@ func TestCommandSessionWriteRequired(t *testing.T) {
 	}
 }
 
+func TestCommandPluginRegistryIsTenantBound(t *testing.T) {
+	harness := newCommandHarness(t, nil)
+	harness.addPluginCommands(pluginCommandFixture("vendor.one", "refresh", pluginpkg.DangerWrite, true, ""))
+	// The same server answering tenant A must not expose a manager bound to B.
+	harness.plugins.tenantID = uuid.New()
+	code, catalog := harness.catalog(t, "")
+	if code != http.StatusOK {
+		t.Fatalf("catalog status = %d", code)
+	}
+	for _, command := range catalog.Commands {
+		if command.Source == "plugin" {
+			t.Fatalf("foreign-tenant plugin command leaked: %+v", command)
+		}
+	}
+	code, _ = harness.do(t, http.MethodPost, harness.commandPath("vendor.one:refresh"), map[string]any{"requestId": "r1"})
+	if code != http.StatusNotFound {
+		t.Fatalf("foreign-tenant plugin execution = %d, want 404", code)
+	}
+}
+
 func TestCommandResultTruncatesAtBound(t *testing.T) {
 	harness := newCommandHarness(t, nil)
 	harness.addPluginCommands(pluginCommandFixture("vendor.one", "refresh", pluginpkg.DangerWrite, true, ""))
@@ -832,6 +856,10 @@ func TestCommandResultTruncatesAtBound(t *testing.T) {
 	data, _ := body["data"].(map[string]any)
 	if data["truncated"] != true {
 		t.Fatalf("oversized result data = %v", body["data"])
+	}
+	events := harness.store.eventsOfKind(store.EventCommandInvoked)
+	if len(events) == 0 || events[len(events)-1]["truncated"] != true {
+		t.Fatalf("command.invoked projection truncated = %v", events)
 	}
 }
 

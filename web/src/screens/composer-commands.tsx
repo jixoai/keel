@@ -145,6 +145,19 @@ export function CommandMenu(props: {
             当前会话没有可用命令。
           </Text>
         </If>
+        <If
+          when={
+            !menuBusy() &&
+            !menuError() &&
+            !!menuCatalog() &&
+            menuCatalog()!.commands.length > 0 &&
+            total() === 0
+          }
+        >
+          <Text testID="composer-commands-nomatch" style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>
+            没有匹配的命令。
+          </Text>
+        </If>
         <If when={warnings().length > 0}>
           <Text testID="composer-commands-warning" style={{ fontSize: typeScale.xs, color: color.warning }}>
             {`目录不完整：${warnings().join("、")}`}

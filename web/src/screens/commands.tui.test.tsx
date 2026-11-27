@@ -46,6 +46,11 @@ test("TUI: 命令目录——同序、来源分组与不可用原因", async () 
   await view.type("id:composer-input", "/pl");
   await view.waitFor("text:/demo\\.workflow:plan/");
   expect(joined(view)).not.toContain("/compact");
+
+  await view.clear("id:composer-input");
+  await view.type("id:composer-input", "/zzz");
+  await view.waitFor("id:composer-commands-nomatch");
+  expect(joined(view)).toContain("没有匹配的命令");
 });
 
 test("TUI: 内置 /compact——选中即执行，结果行与压缩分隔线都在", async () => {
@@ -87,6 +92,9 @@ test("TUI: 参数表单——字段级校验、执行与结构化结果", async 
   const text = joined(view);
   expect(text).toContain("/demo.workflow:plan");
   expect(text).toContain("depth");
+  // The result row folds open to its full document; TUI gets the same text.
+  await view.press("text:展开详情");
+  await view.waitFor("text:收起详情");
 });
 
 test("TUI: 单 text 属性——剩余文本作为 args.text，不套表单", async () => {
@@ -109,7 +117,7 @@ test("TUI: destructive——审批卡拒绝后命令行显示已拒绝，不产�
   await view.waitFor("label:执行命令 /demo.workflow:purge");
   await view.press("label:发送");
   await view.waitFor("text:/demo\\.workflow:purge/");
-  await view.waitFor("text:/等待审批|Run the destructive command/");
+  await view.waitFor("text:/等待审批|是否执行破坏性命令/");
   await view.press("text:取消");
   await view.waitFor("text:/已拒绝|审批被拒绝/");
   const text = joined(view);
@@ -117,7 +125,7 @@ test("TUI: destructive——审批卡拒绝后命令行显示已拒绝，不产�
   expect(text).toContain("decision_refused");
   // The refusal is a command row, not an assistant message: the command's
   // own result stays visible beside the answered approval card.
-  expect(text).toContain("the destructive command was refused");
+  expect(text).toContain("审批被拒绝，命令没有执行。");
 });
 
 test("TUI: destructive——审批允许后只执行一次并给出结果行", async () => {
@@ -125,7 +133,7 @@ test("TUI: destructive——审批允许后只执行一次并给出结果行", a
   await view.type("id:composer-input", "/demo.workflow:purge");
   await view.waitFor("label:执行命令 /demo.workflow:purge");
   await view.press("label:发送");
-  await view.waitFor("text:/Run the destructive command/");
+  await view.waitFor("text:/是否执行破坏性命令/");
   await view.press("text:执行");
   await view.waitFor("text:/\"ok\":true/");
   await view.waitFor("text:/成功/");

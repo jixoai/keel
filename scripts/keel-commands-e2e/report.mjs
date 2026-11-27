@@ -196,22 +196,22 @@ ${stepSections}
   ${pageErrorBlock}
   <h3>失败请求</h3>
   ${requestBlock}
-  <p class="muted">kill -9 步骤的 checkpoint 读取失败请求是预期错误态；它由步骤内的断言与截图确认。</p>
+  <p class="muted">拒绝 destructive 命令时，浏览器会把服务端预期的 403 记成一条 console error；该条已在 E2E 的数据里单列为 expectedConsole，不计入错误。</p>
 </div>
 
 <div class="card">
-  <h2>TUI 降级验证</h2>
-  <p class="muted">同一份 TSX 在 <code>nsh test --target tui</code> 的终端宿主上验证：分区可进入、生效策略是一句可读文本、收窄与恢复可操作。TUI 证据是测试日志（终端 cell 不是位图）。</p>
-  ${tuiLog ? `<details open><summary>tui-test.log</summary><pre>${esc(tuiLog.slice(0, 12000))}</pre></details>` : '<p class="muted">本次未运行 TUI 测试。</p>'}
+  <h2>TUI 证据</h2>
+  <p class="muted">命令菜单、生成表单、命令结果行与 destructive 审批由独立的 <code>nsh test --target tui</code> 门禁验证（日志见 <code>../ui-nsh-test-tui.txt</code> 与 <code>../ui-nsh-test-tui-commands.txt</code>）；本报告只陈述本页执行的真实栈浏览器步骤。</p>
 </div>
 
 <div class="card">
   <h2>范围与限制</h2>
   <ul>
-    <li>自动压缩、手动压缩、requestId 幂等回放、kill -9 重启恢复与策略收窄均在真实 PG + 本地 <code>keel serve</code> 上执行。</li>
-    <li>无权限 UI 态用拦截 <code>/v1/auth/whoami</code> 的只读身份展示；服务端 403 另由无 <code>session.read</code> 的 Bot key 实测断言。</li>
-    <li>501/503「未接线」态没有单独制造：生产 <code>serve</code> 始终装配策略服务；网络断开错误态已覆盖同一错误块与重试。</li>
-    <li>未部署公网；报告与截图只在本机 <code>.agents/reports</code>，不入库。</li>
+    <li>真实 PostgreSQL 临时库、真实 <code>keel serve --auth local-only</code>、真实插件 install/enable 两阶段审批；步骤只覆盖目录、<code>/compact</code>、插件命令、同 requestId 重放、拒绝与允许 destructive、停用/卸载和四档视口。</li>
+    <li>本报告的声明范围就是上列 9 个步骤的断言与截图；未列出的能力不作声明。</li>
+    <li>无权限命令态由 TUI 五态门禁覆盖；本页的 403 是 destructive 审批拒绝的预期响应。</li>
+    <li><strong>未部署公网</strong>：本报告与截图作为仓库内证据提交，不提供公网链接。</li>
+    <li>没有 coverageRows / 自动 EXEMPT 表，也不声明 <code>UNCOVERED=0</code>；覆盖性以 9 个步骤的 36 条断言与 19 张截图为准。</li>
   </ul>
 </div>
 </main>

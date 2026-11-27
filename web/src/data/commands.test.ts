@@ -25,6 +25,9 @@ import {
   matchingCommands,
   parseCommandCatalog,
   parseCommand,
+  cleanDisplayText,
+  commandErrorText,
+  localizeDecision,
 } from "./commands";
 
 const command = (patch: Partial<CommandView> & { name: string }): CommandView => ({
@@ -240,6 +243,24 @@ test("buildCommandArgs: 数组项类型与原始 JSON 字段", () => {
   expect(good.args).toEqual({ nums: [1, 2], doc: { a: 1 } });
 });
 
+test("buildCommandArgs: enum 保留 schema 的原始类型（数字/布尔）", () => {
+  const fields = commandFields(
+    command({
+      name: "x:y",
+      argsSchema: {
+        type: "object",
+        properties: {
+          count: { type: "integer", enum: [1, 2] },
+          flag: { type: "boolean", enum: [true, false] },
+        },
+      },
+    }),
+  );
+  const built = buildCommandArgs(fields, { count: "2", flag: "true" });
+  expect(built.errors).toEqual({});
+  expect(built.args).toEqual({ count: 2, flag: true });
+});
+
 test("自由文本映射：只有单个 text 字符串属性时把剩余文本当 args.text", () => {
   const textOnly = command({
     name: "vendor.notes:add",
@@ -256,9 +277,56 @@ test("自由文本映射：只有单个 text 字符串属性时把剩余文本�
   expect(commandNeedsForm(command({ name: "compact" }))).toBe(false);
 });
 
+test("控制字符/ANSI：目录与结果展示前净化，不伪造终端行", () => {
+  const parsed = parseCommandCatalog({
+    commands: [
+      command({ name: "vendor.one:run", summary: "\u001b[31mRed\u001b[0m\u0007 summary" }),
+      command({ name: "bad\u0007name" }),
+    ],
+    warnings: ["skills\u001b[2Junavailable"],
+  });
+  expect(parsed.commands).toHaveLength(1);
+  expect(parsed.commands[0]!.summary).toBe("Red summary");
+  expect(parsed.warnings).toEqual(["skillsunavailable"]);
+  expect(commandResultSummary("\u001b[2Jresult\u0000ok")).toBe("result ok");
+  expect(cleanDisplayText("a\nb")).toBe("a b");
+  expect(cleanDisplayText("a\nb", true)).toBe("a\nb");
+});
+
+test("破坏性命令审批与错误文案中文化，参数预览保留", () => {
+  const localized = localizeDecision({
+    decisionId: "d1",
+    seq: 1,
+    question:
+      'Run the destructive command /e2e.commands:purge? It is declared danger=destructive; approving it will execute the command once.\nArguments: {"confirm":true}',
+    options: [
+      { optionId: "allow", label: "Run" },
+      { optionId: "deny", label: "Cancel" },
+    ],
+    status: "open",
+  });
+  expect(localized.question).toContain("是否执行破坏性命令 /e2e.commands:purge");
+  expect(localized.question).toContain('参数：{"confirm":true}');
+  expect(localized.options.map((option) => option.label)).toEqual(["执行", "取消"]);
+  // A non-command decision keeps the server's question and labels.
+  const other = localizeDecision({
+    decisionId: "d2",
+    seq: 2,
+    question: "继续导出吗？",
+    options: [{ optionId: "yes", label: "继续" }],
+    status: "open",
+  });
+  expect(other.question).toBe("继续导出吗？");
+  expect(commandErrorText("decision_refused", "the destructive command was refused")).toBe(
+    "审批被拒绝，命令没有执行。",
+  );
+  expect(commandErrorText("custom", "custom failure")).toBe("custom failure");
+});
+
 test("服务端 400 字段路径映射到表单字段", () => {
   expect(commandFieldName("args.path")).toBe("path");
-  expect(commandFieldName("args.tags[0]")).toBe("tags[0]");
+  expect(commandFieldName("args.tags[0]")).toBe("tags");
+  expect(commandFieldName("args.nested.a")).toBe("nested");
   expect(commandFieldName("args")).toBe("");
   expect(commandFieldErrors([{ field: "args.path", message: "is required" }])).toEqual({
     path: "is required",

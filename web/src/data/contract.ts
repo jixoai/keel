@@ -25,7 +25,7 @@ export type {
   WorkSegment,
 } from "../../../packages/chat-surface/src/types";
 
-import type { Delivery, SurfaceCommands, WireEvent } from "../../../packages/chat-surface/src/types";
+import type { DecisionView, Delivery, SurfaceCommands, WireEvent } from "../../../packages/chat-surface/src/types";
 
 /** The queue block a 202 admission carries (POST input/retry/run). position is
  * 1-based; etaSeconds is null when there is no observed history. */
@@ -265,6 +265,11 @@ export interface CommandApi {
     args: Record<string, unknown>,
     requestId: string,
   ): Promise<CommandExecutionView>;
+  /** The durable decision journal, when the transport serves it (KeelHttp
+   * does; the fixture delivers decisions as events). A pending destructive
+   * command watches its own decision here so an approval from another client
+   * or after a reload still executes once. */
+  decisions?(sessionId: string): Promise<DecisionView[]>;
 }
 
 // ---- settings face (change keel-model-settings) --------------------------

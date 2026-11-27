@@ -338,8 +338,8 @@ func (s *Server) commandCatalog(ctx context.Context, principal access.Principal,
 	catalog.Commands = append(catalog.Commands, s.builtinCommandViews(keys, wired, target)...)
 
 	// 2. Plugin commands: plugin id order, declaration order inside a plugin.
-	if s.cfg.CommandPlugins != nil {
-		registry := s.cfg.CommandPlugins.ListCommands()
+	if plugins := s.commandPluginsForTenant(tenantID); plugins != nil {
+		registry := plugins.ListCommands()
 		catalog.Generation = registry.Generation
 		pluginWired := wired && s.cfg.CommandTools != nil
 		for _, command := range registry.Commands {
@@ -528,12 +528,31 @@ func commandSchemaJSON(schema map[string]any) json.RawMessage {
 	return raw
 }
 
+// commandPluginsForTenant returns the plugin command registry only when the
+// manager is bound to the request's tenant. One process serves one tenant
+// today, but the boundary is enforced here rather than left to the deployment:
+// a manager for tenant B must never leak a command into tenant A's catalog or
+// resolve an execution for it.
+func (s *Server) commandPluginsForTenant(tenantID uuid.UUID) CommandPluginRegistry {
+	registry := s.cfg.CommandPlugins
+	if registry == nil {
+		return nil
+	}
+	if bound, ok := registry.(interface{ TenantID() uuid.UUID }); ok {
+		if bound.TenantID() != tenantID {
+			return nil
+		}
+	}
+	return registry
+}
+
 // resolveCommand finds the executable entry for a published command name. The
 // catalog and the execution route share the same registry, so a name that is
-// not in the catalog is a 404 here.
+// not in the catalog is a 404 here. The execution route deliberately takes no
+// client target: `targets` is a catalog presentation filter (a client must not
+// run an unavailable row), not an authorization boundary.
 func (s *Server) resolveCommand(ctx context.Context, tenantID, sessionID uuid.UUID, name string) (resolvedCommand, bool, error) {
-	switch {
-	case name == "compact":
+	if name == "compact" {
 		return resolvedCommand{
 			name:       "compact",
 			source:     "builtin",
@@ -544,7 +563,8 @@ func (s *Server) resolveCommand(ctx context.Context, tenantID, sessionID uuid.UU
 			targets:    slotTargetStrings(pluginpkg.DefaultCommandTargets()),
 			available:  s.cfg.CompactSession != nil,
 		}, true, nil
-	case strings.HasPrefix(name, "skill:"):
+	}
+	if strings.HasPrefix(name, "skill:") {
 		skill := strings.TrimPrefix(name, "skill:")
 		if !validSkillCommandName(skill) {
 			return resolvedCommand{}, false, nil
@@ -560,8 +580,11 @@ func (s *Server) resolveCommand(ctx context.Context, tenantID, sessionID uuid.UU
 			skill:      skill,
 			available:  s.cfg.CommandSkills != nil,
 		}, true, nil
-	case s.cfg.CommandPlugins != nil:
-		for _, candidate := range s.cfg.CommandPlugins.ListCommands().Commands {
+	}
+	// Plugin commands: a manager bound to another tenant contributes neither
+	// catalog entries nor an execution entry.
+	if plugins := s.commandPluginsForTenant(tenantID); plugins != nil {
+		for _, candidate := range plugins.ListCommands().Commands {
 			if candidate.Published != name {
 				continue
 			}
@@ -1250,10 +1273,11 @@ func (s *Server) finishCommandFrom(ctx context.Context, invocation *store.Comman
 // finishCommandDataFrom is finishCommandFrom for a successful result.
 func (s *Server) finishCommandDataFrom(ctx context.Context, invocation *store.CommandInvocation, from, status, code, message string, data json.RawMessage, started time.Time, decisionID string) bool {
 	bounded, truncated := boundCommandResult(data)
+	// The projection carries the same truncation fact as the ledger row.
+	invocation.Truncated = truncated
 	eventSeq := s.recordCommandEvent(ctx, *invocation, status, code, message, bounded, time.Since(started).Milliseconds(), decisionID)
 	invocation.Status = status
 	invocation.Result = bounded
-	invocation.Truncated = truncated
 	invocation.EventSeq = eventSeq
 	invocation.DurationMs = time.Since(started).Milliseconds()
 	if decisionID != "" {
@@ -1289,6 +1313,7 @@ func (s *Server) recordCommandEvent(ctx context.Context, invocation store.Comman
 		ArgsBytes:  invocation.ArgsBytes,
 		DurationMs: durationMs,
 		Data:       data,
+		Truncated:  invocation.Truncated,
 		ErrorCode:  code,
 		Error:      message,
 	}
@@ -1334,6 +1359,7 @@ type commandInvokedPayload struct {
 	ArgsBytes  int             `json:"argsBytes"`
 	DurationMs int64           `json:"durationMs"`
 	Data       json.RawMessage `json:"data,omitempty"`
+	Truncated  bool            `json:"truncated,omitempty"`
 	ErrorCode  string          `json:"errorCode,omitempty"`
 	Error      string          `json:"error,omitempty"`
 }

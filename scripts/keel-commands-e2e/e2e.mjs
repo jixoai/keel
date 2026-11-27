@@ -436,6 +436,14 @@ const overflow = async (page, label) => {
 
 const bodyText = async (page) => (await page.evaluate(() => document.body.innerText || '')).replace(/\s+/g, ' ');
 
+/** The conversation scrolls inside the list, so a target below the internal
+ * viewport would be absent from a full-page screenshot. Bring it into view
+ * before the shot (best effort: the following wait/screenshot still asserts). */
+const scrollToText = async (page, text) => {
+  await page.getByText(text, { exact: false }).last().scrollIntoViewIfNeeded().catch(() => {});
+  await page.waitForTimeout(350);
+};
+
 const waitText = async (page, text, timeout = 15000) => {
   const deadline = Date.now() + timeout;
   while (Date.now() < deadline) {
@@ -625,6 +633,7 @@ async function main() {
   await page.click('[data-testid="composer-command-execute"]');
   await waitText(page, '"indexed":7', 30000);
   await waitText(page, '/e2e.commands:refresh', 10000);
+  await scrollToText(page, '"indexed":7');
   const refreshEvents = await waitEvents(
     sessionId,
     (all) => all.some((event) => event.kind === 'command.invoked' && event.payload?.command === 'e2e.commands:refresh' && event.payload?.status === 'ok'),
@@ -659,6 +668,7 @@ async function main() {
     psql(`select count(*) from command_invocations where tenant_id='${TENANT}' and session_id='${sessionId}' and request_id='${refreshRequestId.replace(/'/g, "''")}'`),
   );
   check('one durable invocation row for the requestId', rowCount === 1, rowCount, 1);
+  await scrollToText(page, '/e2e.commands:refresh');
   await shot(page, 'replay-row.png', '重放后的对话（仍只有一行）');
   finishStep();
 
@@ -668,12 +678,14 @@ async function main() {
   await typeDraft(page, '/e2e.commands:purge');
   await page.waitForSelector('[data-testid="composer-commands-pick-e2e.commands:purge"]', { timeout: 15000 });
   await page.click('[data-testid="composer-commands-pick-e2e.commands:purge"]');
-  await waitText(page, 'Run the destructive command', 20000);
+  await waitText(page, '是否执行破坏性命令', 20000);
   await waitText(page, '等待审批', 20000);
+  await scrollToText(page, '是否执行破坏性命令');
   await shot(page, 'destructive-pending.png', '破坏性命令等待审批');
-  await page.getByText('Cancel', { exact: true }).click();
+  await page.getByText('取消', { exact: true }).click();
   await waitText(page, '已拒绝', 30000);
   await waitText(page, 'decision_refused', 15000);
+  await scrollToText(page, '已拒绝');
   const refusedEvents = await waitEvents(
     sessionId,
     (all) => all.some((event) => event.kind === 'command.invoked' && event.payload?.command === 'e2e.commands:purge' && event.payload?.status === 'refused'),
@@ -689,10 +701,11 @@ async function main() {
   await typeDraft(page, '/e2e.commands:purge');
   await page.waitForSelector('[data-testid="composer-commands-pick-e2e.commands:purge"]', { timeout: 15000 });
   await page.click('[data-testid="composer-commands-pick-e2e.commands:purge"]');
-  await waitText(page, 'Run the destructive command', 20000);
-  await page.getByText('Run', { exact: true }).click();
+  await waitText(page, '是否执行破坏性命令', 20000);
+  await page.getByText('执行', { exact: true }).click();
   await waitText(page, '"purged":7', 30000);
   await waitText(page, '/e2e.commands:purge', 10000);
+  await scrollToText(page, '"purged":7');
   check('approved command executed exactly once', sidecarCalls().filter((call) => call.tool === 'purge').length === 1, sidecarCalls().filter((call) => call.tool === 'purge').length, 1);
   await shot(page, 'destructive-result.png', '审批允许后的结果行');
   finishStep();
