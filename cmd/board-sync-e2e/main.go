@@ -86,19 +86,21 @@ func main() {
 // --- environment ---------------------------------------------------------
 
 type env struct {
-	ctx     context.Context
-	dsn     string
-	schema  string
-	logger  *slog.Logger
-	store   *keelstore.Store
-	bridge  *accesswire.Bridge
-	box     *keelstore.SecretBox
-	tenant  uuid.UUID
-	other   uuid.UUID
-	alice   keelstore.AccountRecord
-	carol   keelstore.AccountRecord
-	dave    keelstore.AccountRecord
-	surface *boardintegration.Surface
+	ctx      context.Context
+	dsn      string
+	schema   string
+	logger   *slog.Logger
+	store    *keelstore.Store
+	bridge   *accesswire.Bridge
+	box      *keelstore.SecretBox
+	tenant   uuid.UUID
+	other    uuid.UUID
+	alice    keelstore.AccountRecord
+	bob      keelstore.AccountRecord
+	operator keelstore.AccountRecord
+	carol    keelstore.AccountRecord
+	dave     keelstore.AccountRecord
+	surface  *boardintegration.Surface
 
 	api     *httptest.Server
 	webhook *httptest.Server
@@ -146,6 +148,12 @@ func newEnv(ctx context.Context, dsn string, logger *slog.Logger) (*env, error) 
 	if e.carol, err = e.account(e.tenant, "carol", false); err != nil {
 		return nil, err
 	}
+	if e.bob, err = e.account(e.tenant, "bob", false); err != nil {
+		return nil, err
+	}
+	if e.operator, err = e.account(e.tenant, "operator", false); err != nil {
+		return nil, err
+	}
 	if e.dave, err = e.account(e.other, "dave", true); err != nil {
 		return nil, err
 	}
@@ -156,6 +164,14 @@ func newEnv(ctx context.Context, dsn string, logger *slog.Logger) (*env, error) 
 	}
 	if err := e.grant(e.tenant, e.carol.ID, access.KeyBoardRead); err != nil {
 		return nil, err
+	}
+	// Bob writes boards, but has no relation on the superagent channel: the
+	// bridge's channel check must refuse him. The operator's authority comes
+	// from the tenant-admin builtin group alone.
+	for _, key := range []string{access.KeyBoardRead, access.KeyBoardWrite} {
+		if err := e.grant(e.tenant, e.bob.ID, key); err != nil {
+			return nil, err
+		}
 	}
 	for _, key := range []string{access.KeyBoardRead, access.KeyBoardWrite, access.KeyBoardManage} {
 		if err := e.grant(e.other, e.dave.ID, key); err != nil {
@@ -170,6 +186,14 @@ func newEnv(ctx context.Context, dsn string, logger *slog.Logger) (*env, error) 
 		Kind: auth.PrincipalHuman, TenantID: e.tenant, AccountID: e.carol.ID,
 		Username: e.carol.Username, DisplayName: e.carol.DisplayName,
 	}
+	e.principals["bob"] = auth.Principal{
+		Kind: auth.PrincipalHuman, TenantID: e.tenant, AccountID: e.bob.ID,
+		Username: e.bob.Username, DisplayName: e.bob.DisplayName,
+	}
+	e.principals["operator"] = auth.Principal{
+		Kind: auth.PrincipalHuman, TenantID: e.tenant, AccountID: e.operator.ID,
+		Username: e.operator.Username, DisplayName: e.operator.DisplayName,
+	}
 	e.principals["dave"] = auth.Principal{
 		Kind: auth.PrincipalHuman, TenantID: e.other, AccountID: e.dave.ID,
 		Username: e.dave.Username, DisplayName: e.dave.DisplayName,
@@ -183,7 +207,9 @@ func newEnv(ctx context.Context, dsn string, logger *slog.Logger) (*env, error) 
 		DSN: dsn, Schema: e.schema, Access: bridge, Store: st, TenantID: e.tenant,
 		Logger: logger, Heartbeat: 60 * time.Millisecond, StreamLifetime: -1,
 		ChannelScanInterval: -1, SecretBox: box, BlobDir: "",
+		FileHosts:      []string{"acme.slack.com"},
 		TenantFlagsTTL: -1, DisableAutomation: true,
+		SyncMonitorInterval: 20 * time.Millisecond, SyncWorkerPollInterval: 50 * time.Millisecond,
 		SyncStoreConfig: boardsyncstore.Config{
 			OutboundRetry: boardsync.RetryPolicy{MaxAttempts: 3, BaseDelay: 20 * time.Millisecond, MaxDelay: 60 * time.Millisecond},
 			InboundRetry:  boardsync.RetryPolicy{MaxAttempts: 3, BaseDelay: 20 * time.Millisecond, MaxDelay: 60 * time.Millisecond},
@@ -354,7 +380,10 @@ type messageView struct {
 	Channel string `json:"channel"`
 	Text    string `json:"text"`
 	Deleted bool   `json:"deleted"`
-	By      *struct {
+	Links   []struct {
+		URL string `json:"url"`
+	} `json:"links"`
+	By *struct {
 		ID   string `json:"id"`
 		Kind string `json:"kind"`
 	} `json:"by"`
@@ -592,6 +621,12 @@ type fakeBridge struct {
 	key    boardsync.Key
 	mu     sync.Mutex
 	calls  []chatsdk.DeliverRequest
+	// failDeliveries answers 500 for that many attempts.
+	failDeliveries int
+	// garbageDeliveries answers 200 with a malformed body for that many
+	// attempts (a transport/protocol failure the client must retry).
+	garbageDeliveries int
+	attempts          int
 }
 
 func newFakeBridge(secret boardsync.Secret, key boardsync.Key) *fakeBridge {
@@ -613,6 +648,20 @@ func newFakeBridge(secret boardsync.Secret, key boardsync.Key) *fakeBridge {
 				return
 			}
 			fake.mu.Lock()
+			fake.attempts++
+			if fake.failDeliveries > 0 {
+				fake.failDeliveries--
+				fake.mu.Unlock()
+				w.WriteHeader(http.StatusInternalServerError)
+				_, _ = w.Write([]byte(`{"error":"sidecar unavailable"}`))
+				return
+			}
+			if fake.garbageDeliveries > 0 {
+				fake.garbageDeliveries--
+				fake.mu.Unlock()
+				_, _ = w.Write([]byte(`not-json`))
+				return
+			}
 			fake.calls = append(fake.calls, request)
 			fake.mu.Unlock()
 			_, _ = w.Write([]byte(`{"thread":"-100:t1","message":"tg-out-1"}`))
@@ -632,6 +681,24 @@ func (f *fakeBridge) deliveries() []chatsdk.DeliverRequest {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([]chatsdk.DeliverRequest(nil), f.calls...)
+}
+
+func (f *fakeBridge) deliveryAttempts() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.attempts
+}
+
+func (f *fakeBridge) setFailDeliveries(count int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.failDeliveries = count
+}
+
+func (f *fakeBridge) setGarbageDeliveries(count int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.garbageDeliveries = count
 }
 
 // --- report --------------------------------------------------------------
@@ -753,16 +820,27 @@ func run(ctx context.Context, dsn string, report *Report) error {
 	bridgeSecret := boardsync.Secret("bridge-e2e-secret")
 	e.bridgeSDK = newFakeBridge(bridgeSecret, "telegram")
 	defer e.bridgeSDK.Close()
-	if err := e.configureSync(bridgeSecret); err != nil {
+	if err := e.configureSecrets(bridgeSecret); err != nil {
 		return err
 	}
+	// P0-1 ordering: the board and its channels exist before any sync entry is
+	// written. A channel created through the API records its creator as owner;
+	// only then can an entry name it as a route target.
 	if err := e.startSurface(); err != nil {
 		return err
 	}
-	for _, channel := range []string{"support", "prs", "dev", "telegram", "flaky", "dead"} {
+	for _, channel := range []string{"support", "prs", "dev", "telegram", "flaky", "dead", "superagent"} {
 		if err := e.createChannel(channel); err != nil {
 			return err
 		}
+	}
+	if err := e.createSyncEntries(bridgeSecret); err != nil {
+		return err
+	}
+	// The entries are persisted but this process loaded none of them; the
+	// restart is the adoption boundary (new entries stay disabled meanwhile).
+	if err := e.restartSurface(); err != nil {
+		return err
 	}
 
 	report.Scenario("slack: webhook → inbox → board → outbox → Slack receipt", e.scenarioSlack)
@@ -772,11 +850,13 @@ func run(ctx context.Context, dsn string, report *Report) error {
 	report.Scenario("chatsdk bridge: signed events in, deliver out, replay refusal", e.scenarioBridge)
 	report.Scenario("failures: retry then success, and dead letter visibility", e.scenarioFailures)
 	report.Scenario("permissions and cross-tenant isolation", e.scenarioPermissions)
+	report.Scenario("superagent bridge: HTTP chain, board_disabled, timeout/5xx/retry", e.scenarioSuperagentBridge)
+	report.Scenario("fresh channel: entry requires an owned board channel (P0-1)", e.scenarioFreshChannel)
 	report.Scenario("restart: pending inbox survives and a new process imports it", e.scenarioRestart)
 	return nil
 }
 
-func (e *env) configureSync(bridgeSecret boardsync.Secret) error {
+func (e *env) configureSecrets(bridgeSecret boardsync.Secret) error {
 	secrets := map[string]string{
 		"SLACK_SIGNING": "slack-signing-e2e", "SLACK_BOT": "xoxb-slack-e2e",
 		"GITHUB_WEBHOOK": "github-webhook-e2e", "GITHUB_TOKEN": "ghp-token-e2e",
@@ -788,55 +868,69 @@ func (e *env) configureSync(bridgeSecret boardsync.Secret) error {
 			return fmt.Errorf("secret %s: %w", name, err)
 		}
 	}
-	entries := []keelstore.BoardSyncEntryRecord{
+	return nil
+}
+
+// createSyncEntries writes every connection through the real admin route
+// (board.manage + secret.write). The route ACL precondition is therefore part of
+// the main E2E path, not bypassed by a direct store write.
+func (e *env) createSyncEntries(bridgeSecret boardsync.Secret) error {
+	entries := []map[string]any{
 		{
-			TenantID: e.tenant, Key: "slack", Platform: "slack", Enabled: true,
-			SecretRef:     map[string]string{"signingSecret": "SLACK_SIGNING", "botToken": "SLACK_BOT"},
-			Settings:      mustJSON(map[string]any{"botUserId": "U_APP", "botId": "B_APP", "apiBaseUrl": e.slack.URL()}),
-			Routes:        map[string]string{"C0SUPPORT": "support"},
-			StartChannels: []string{"C0SUPPORT"},
+			"key": "slack", "platform": "slack", "enabled": true,
+			"secretRef":     map[string]string{"signingSecret": "SLACK_SIGNING", "botToken": "SLACK_BOT"},
+			"settings":      mustJSON(map[string]any{"botUserId": "U_APP", "botId": "B_APP", "apiBaseUrl": e.slack.URL()}),
+			"routes":        map[string]string{"C0SUPPORT": "support"},
+			"startChannels": []string{"C0SUPPORT"},
 		},
 		{
-			TenantID: e.tenant, Key: "flaky", Platform: "slack", Enabled: true,
-			SecretRef:     map[string]string{"signingSecret": "SLACK_SIGNING", "botToken": "SLACK_BOT"},
-			Settings:      mustJSON(map[string]any{"botUserId": "U_APP", "botId": "B_APP", "apiBaseUrl": e.slack.URL()}),
-			Routes:        map[string]string{"C0FLAKY": "flaky"},
-			StartChannels: []string{"C0FLAKY"},
+			"key": "flaky", "platform": "slack", "enabled": true,
+			"secretRef":     map[string]string{"signingSecret": "SLACK_SIGNING", "botToken": "SLACK_BOT"},
+			"settings":      mustJSON(map[string]any{"botUserId": "U_APP", "botId": "B_APP", "apiBaseUrl": e.slack.URL()}),
+			"routes":        map[string]string{"C0FLAKY": "flaky"},
+			"startChannels": []string{"C0FLAKY"},
 		},
 		{
-			TenantID: e.tenant, Key: "dead", Platform: "slack", Enabled: true,
-			SecretRef:     map[string]string{"signingSecret": "SLACK_SIGNING", "botToken": "SLACK_BOT"},
-			Settings:      mustJSON(map[string]any{"botUserId": "U_APP", "botId": "B_APP", "apiBaseUrl": e.slack.URL()}),
-			Routes:        map[string]string{"C0DEAD": "dead"},
-			StartChannels: []string{"C0DEAD"},
+			"key": "dead", "platform": "slack", "enabled": true,
+			"secretRef":     map[string]string{"signingSecret": "SLACK_SIGNING", "botToken": "SLACK_BOT"},
+			"settings":      mustJSON(map[string]any{"botUserId": "U_APP", "botId": "B_APP", "apiBaseUrl": e.slack.URL()}),
+			"routes":        map[string]string{"C0DEAD": "dead"},
+			"startChannels": []string{"C0DEAD"},
 		},
 		{
-			TenantID: e.tenant, Key: "github", Platform: "github", Enabled: true,
-			SecretRef: map[string]string{"webhookSecret": "GITHUB_WEBHOOK", "token": "GITHUB_TOKEN"},
-			Settings:  mustJSON(map[string]any{"botLogin": "keel-bot", "repos": []string{"acme/web"}, "writeRepos": []string{"acme/web"}, "apiBaseUrl": e.github.URL()}),
-			Routes:    map[string]string{"acme/web:issues": "prs"},
+			"key": "github", "platform": "github", "enabled": true,
+			"secretRef": map[string]string{"webhookSecret": "GITHUB_WEBHOOK", "token": "GITHUB_TOKEN"},
+			"settings":  mustJSON(map[string]any{"botLogin": "keel-bot", "repos": []string{"acme/web"}, "writeRepos": []string{"acme/web"}, "apiBaseUrl": e.github.URL()}),
+			"routes":    map[string]string{"acme/web:issues": "prs"},
 		},
 		{
-			TenantID: e.tenant, Key: "linear", Platform: "linear", Enabled: true,
-			SecretRef:     map[string]string{"webhookSecret": "LINEAR_WEBHOOK", "apiToken": "LINEAR_TOKEN"},
-			Settings:      mustJSON(map[string]any{"botUserId": "user-app", "teamKeys": []string{"ENG"}, "apiBaseUrl": e.linear.URL()}),
-			Routes:        map[string]string{"ENG": "dev"},
-			StartChannels: []string{"ENG"},
+			"key": "linear", "platform": "linear", "enabled": true,
+			"secretRef":     map[string]string{"webhookSecret": "LINEAR_WEBHOOK", "apiToken": "LINEAR_TOKEN"},
+			"settings":      mustJSON(map[string]any{"botUserId": "user-app", "teamKeys": []string{"ENG"}, "apiBaseUrl": e.linear.URL()}),
+			"routes":        map[string]string{"ENG": "dev"},
+			"startChannels": []string{"ENG"},
 		},
 		{
-			TenantID: e.tenant, Key: "telegram", Platform: "chatsdk", Enabled: true,
-			SecretRef:     map[string]string{"bridgeSecret": "BRIDGE_SECRET"},
-			Settings:      mustJSON(map[string]any{"platform": "telegram", "bridgeUrl": e.bridgeSDK.URL(), "selfIds": []string{"bot-1"}}),
-			Routes:        map[string]string{"-100": "telegram"},
-			StartChannels: []string{"-100"},
+			"key": "telegram", "platform": "chatsdk", "enabled": true,
+			"secretRef":     map[string]string{"bridgeSecret": "BRIDGE_SECRET"},
+			"settings":      mustJSON(map[string]any{"platform": "telegram", "bridgeUrl": e.bridgeSDK.URL(), "selfIds": []string{"bot-1"}}),
+			"routes":        map[string]string{"-100": "telegram"},
+			"startChannels": []string{"-100"},
 		},
 	}
 	for _, entry := range entries {
-		if _, err := e.store.CreateBoardSyncEntry(e.ctx, entry); err != nil {
-			return fmt.Errorf("entry %s: %w", entry.Key, err)
+		resp := e.apiDo("alice", http.MethodPost, "/v1/board/sync/entries", entry)
+		if resp.status != http.StatusCreated {
+			return fmt.Errorf("entry %v: %d %s", entry["key"], resp.status, resp.body)
 		}
 	}
+	_ = bridgeSecret
 	return nil
+}
+
+func (e *env) restartSurface() error {
+	e.stopSurface()
+	return e.startSurface()
 }
 
 func mustJSON(value any) json.RawMessage {
@@ -1069,6 +1163,28 @@ func (e *env) scenarioSlackSafety(scenario *Scenario) error {
 		return "source read 200 with normalized message", nil
 	}) {
 		return errors.New("source read failed")
+	}
+	if !scenario.Step("a Slack permalink in message text is preserved as a board link", func() (string, error) {
+		const permalink = "https://acme.slack.com/archives/C0SUPPORT/p1700000100000001"
+		body := slackMessage("C0SUPPORT", "U_HUMAN", "see "+permalink, "1700000103.000001", "")
+		if resp := e.postSlack(body); resp.status != http.StatusOK {
+			return "", fmt.Errorf("webhook = %d %s", resp.status, resp.body)
+		}
+		found, err := e.waitMessage("support", permalink)
+		if err != nil {
+			return "", err
+		}
+		if len(found.Links) == 0 || found.Links[0].URL != permalink {
+			return "", fmt.Errorf("links = %+v, want %s", found.Links, permalink)
+		}
+		// The read is alice's session through the board authorizer; a 200 with
+		// content proves the permalink is part of normal channel content.
+		if _, err := e.messages("support"); err != nil {
+			return "", err
+		}
+		return "board links[0].url = " + found.Links[0].URL, nil
+	}) {
+		return errors.New("permalink E2E failed")
 	}
 	return nil
 }
@@ -1327,6 +1443,50 @@ func (e *env) scenarioBridge(scenario *Scenario) error {
 	}) {
 		return errors.New("bridge outbound failed")
 	}
+	if !scenario.Step("a sidecar 5xx is retried and a later attempt succeeds", func() (string, error) {
+		before := e.bridgeSDK.deliveryAttempts()
+		e.bridgeSDK.setFailDeliveries(2)
+		if _, err := e.postReply(root.ID, "sidecar 5xx reply"); err != nil {
+			return "", err
+		}
+		err := e.waitFor(10*time.Second, "sidecar retry", func() (bool, error) {
+			for _, delivery := range e.bridgeSDK.deliveries() {
+				if strings.Contains(delivery.Body.Markdown, "sidecar 5xx reply") {
+					return true, nil
+				}
+			}
+			return false, nil
+		})
+		if err != nil {
+			return "", fmt.Errorf("%w (attempts=%d deliveries=%d)", err, e.bridgeSDK.deliveryAttempts(), len(e.bridgeSDK.deliveries()))
+		}
+		attempts := e.bridgeSDK.deliveryAttempts() - before
+		return fmt.Sprintf("2 x HTTP 500 then success; attempts=%d", attempts), nil
+	}) {
+		return errors.New("sidecar 5xx retry failed")
+	}
+	if !scenario.Step("a malformed sidecar answer is retried", func() (string, error) {
+		before := e.bridgeSDK.deliveryAttempts()
+		e.bridgeSDK.setGarbageDeliveries(1)
+		if _, err := e.postReply(root.ID, "sidecar malformed reply"); err != nil {
+			return "", err
+		}
+		err := e.waitFor(10*time.Second, "sidecar retry after malformed answer", func() (bool, error) {
+			for _, delivery := range e.bridgeSDK.deliveries() {
+				if strings.Contains(delivery.Body.Markdown, "sidecar malformed reply") {
+					return true, nil
+				}
+			}
+			return false, nil
+		})
+		if err != nil {
+			return "", err
+		}
+		attempts := e.bridgeSDK.deliveryAttempts() - before
+		return fmt.Sprintf("malformed 200 then success; attempts=%d", attempts), nil
+	}) {
+		return errors.New("sidecar malformed retry failed")
+	}
 	return nil
 }
 
@@ -1431,6 +1591,68 @@ func (e *env) scenarioPermissions(scenario *Scenario) error {
 		return "tenant B sees an empty entry list", nil
 	}) {
 		return errors.New("cross-tenant isolation failed")
+	}
+	return nil
+}
+
+func (e *env) scenarioFreshChannel(scenario *Scenario) error {
+	entry := map[string]any{
+		"key": "fresh", "platform": "slack", "enabled": true,
+		"secretRef":     map[string]string{"signingSecret": "SLACK_SIGNING", "botToken": "SLACK_BOT"},
+		"settings":      mustJSON(map[string]any{"botUserId": "U_APP", "botId": "B_APP", "apiBaseUrl": e.slack.URL()}),
+		"routes":        map[string]string{"C0FRESH": "fresh"},
+		"startChannels": []string{"C0FRESH"},
+	}
+	if !scenario.Step("an entry for a channel that does not exist is refused (400)", func() (string, error) {
+		resp := e.apiDo("alice", http.MethodPost, "/v1/board/sync/entries", entry)
+		if resp.status != http.StatusBadRequest {
+			return "", fmt.Errorf("status = %d %s", resp.status, resp.body)
+		}
+		if !strings.Contains(string(resp.body), "does not exist") {
+			return "", fmt.Errorf("error is not actionable: %s", resp.body)
+		}
+		return "400 names the missing channel and the create call", nil
+	}) {
+		return errors.New("missing-channel entry was accepted")
+	}
+	if !scenario.Step("POST /v1/board/channels provisions the fresh channel", func() (string, error) {
+		resp := e.apiDo("alice", http.MethodPost, "/v1/board/channels", map[string]string{"path": "fresh"})
+		if resp.status != http.StatusCreated {
+			return "", fmt.Errorf("status = %d %s", resp.status, resp.body)
+		}
+		return "201 created; alice is the owner", nil
+	}) {
+		return errors.New("fresh channel creation failed")
+	}
+	if !scenario.Step("the same entry is accepted after the channel is owned", func() (string, error) {
+		resp := e.apiDo("alice", http.MethodPost, "/v1/board/sync/entries", entry)
+		if resp.status != http.StatusCreated {
+			return "", fmt.Errorf("status = %d %s", resp.status, resp.body)
+		}
+		return "201 created; pending adoption (restart required)", nil
+	}) {
+		return errors.New("entry was not accepted after provisioning")
+	}
+	if !scenario.Step("webhook imports into fresh and alice reads it over HTTP", func() (string, error) {
+		if err := e.restartSurface(); err != nil {
+			return "", err
+		}
+		body := slackMessage("C0FRESH", "U_HUMAN", "fresh channel import", "1700000500.000001", "")
+		if resp := e.postSlackKey("fresh", body); resp.status != http.StatusOK {
+			return "", fmt.Errorf("webhook = %d %s", resp.status, resp.body)
+		}
+		found, err := e.waitMessage("fresh", "fresh channel import")
+		if err != nil {
+			return "", err
+		}
+		// e.messages uses alice's session and fails on a non-200, proving the
+		// channel is readable through the board authorizer, not just imported.
+		if _, err := e.messages("fresh"); err != nil {
+			return "", err
+		}
+		return "webhook 200; alice GET /messages?channel=fresh 200; message #" + found.ID, nil
+	}) {
+		return errors.New("fresh channel import failed")
 	}
 	return nil
 }
