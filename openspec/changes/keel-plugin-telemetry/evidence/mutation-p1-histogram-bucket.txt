@@ -1,0 +1,7 @@
+$ MUTATION P1-3b: always place histogram observations in the +Inf bucket
+$ go test ./internal/telemetry -run TestOTLPExporterMetricShapeIsDeltaWithCorrectBuckets
+--- FAIL: TestOTLPExporterMetricShapeIsDeltaWithCorrectBuckets (0.00s)
+    otlp_test.go:661: keel.agent.run.duration bucketCounts = [0 0 1] (value 3 belongs in [1,5))
+FAIL
+FAIL	github.com/jixoai/keel/internal/telemetry	0.368s
+FAIL

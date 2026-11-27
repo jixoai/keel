@@ -1,0 +1,12 @@
+$ MUTATION P0: ignore the stored tenant document in tenantTelemetryLoader.Load
+$ go test ./cmd/keel -run "TestTenantTelemetryLoaderMerges|TestServeTelemetryConfigReachesApprovalAndCollector"
+--- FAIL: TestTenantTelemetryLoaderMergesStoredDocumentOverDefaults (0.00s)
+    telemetry_config_test.go:64: config = telemetry.Config{Adapter:"none", Endpoint:"", Headers:map[string]string(nil), ServiceName:"boot-name", Signals:[]string(nil), SampleRatio:(*float64)(nil), LogRatio:(*float64)(nil), LogMinLevel:"", TenantID:"054496f0-3259-4d1d-a5d4-8da1ed813d21"}
+2026/11/27 13:24:10 INFO creation plugin started tools=5 template=webview-react-solidglass
+2026/11/27 13:24:10 INFO example plugin started plugin=keel.example tools=2 hooks=3 triggers=0
+2026/11/27 13:24:10 INFO plugin assembly generation=1 plugins=11 active=11 pending=0
+--- FAIL: TestServeTelemetryConfigReachesApprovalAndCollector (0.02s)
+    telemetry_config_test.go:228: approval lines = exporter=none;signals=;sampleRatio=1;logRatio=1
+FAIL
+FAIL	github.com/jixoai/keel/cmd/keel	0.584s
+FAIL

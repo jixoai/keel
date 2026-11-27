@@ -1,0 +1,7 @@
+$ MUTATION P1-2: trust a caller deadline instead of min(5s, remaining)
+$ go test ./internal/harnessext -run TestTelemetryStopContextCapsLongerCallerDeadline
+--- FAIL: TestTelemetryStopContextCapsLongerCallerDeadline (0.00s)
+    telemetry_plugin_test.go:601: stop deadline = 9.999796291s, want <= 50ms
+FAIL
+FAIL	github.com/jixoai/keel/internal/harnessext	0.753s
+FAIL

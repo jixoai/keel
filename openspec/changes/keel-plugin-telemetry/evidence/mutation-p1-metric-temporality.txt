@@ -1,0 +1,7 @@
+$ MUTATION P1-3a: declare CUMULATIVE(2) while emitting per-measurement deltas
+$ go test ./internal/telemetry -run TestOTLPExporterMetricShapeIsDeltaWithCorrectBuckets
+--- FAIL: TestOTLPExporterMetricShapeIsDeltaWithCorrectBuckets (0.00s)
+    otlp_test.go:653: keel.agent.runs sum temporality = 2, want DELTA(1)
+FAIL
+FAIL	github.com/jixoai/keel/internal/telemetry	0.462s
+FAIL

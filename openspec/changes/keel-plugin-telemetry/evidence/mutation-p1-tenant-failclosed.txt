@@ -1,0 +1,12 @@
+$ MUTATION P1-1: restore the conditional tenant check (empty tenant passes)
+$ go test ./internal/harnessext -run TestTelemetryPluginEmptyTenantFailsClosed
+--- FAIL: TestTelemetryPluginEmptyTenantFailsClosed (0.00s)
+    --- FAIL: TestTelemetryPluginEmptyTenantFailsClosed/hub_unbound (0.00s)
+        telemetry_plugin_test.go:531: an unbound tenant was accepted
+    --- FAIL: TestTelemetryPluginEmptyTenantFailsClosed/plugin_unbound (0.00s)
+        telemetry_plugin_test.go:531: an unbound tenant was accepted
+    --- FAIL: TestTelemetryPluginEmptyTenantFailsClosed/both_unbound (0.00s)
+        telemetry_plugin_test.go:531: an unbound tenant was accepted
+FAIL
+FAIL	github.com/jixoai/keel/internal/harnessext	0.584s
+FAIL

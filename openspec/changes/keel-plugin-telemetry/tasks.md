@@ -39,10 +39,9 @@
   5 次失败熔断 30s，半开单探针；其它 4xx 丢弃批次并计数；补假 collector 测试
   （500/429/timeout/400）。
 - [x] 3.4 关机：5s deadline flush；未发出计数；不阻塞进程退出；补 SIGTERM/超时测试。
-- [ ] 3.5 依赖门：不引入 OpenTelemetry SDK；`scripts/binary-size.sh` 增量在预算内；
-  > 实测：`go.mod` 未新增依赖；`cmd/keel` linux/amd64 +188 KiB（arm64 +128 KiB）超过默认 128 KiB
-  > 预算，`--budget-kb 256` 通过。属新子系统代码体积，非依赖膨胀；预算调整待 Owner 决策。
-  > 证据：`evidence/binary-size.txt`。
+- [x] 3.5 依赖门：不引入 OpenTelemetry SDK；`scripts/binary-size.sh` 增量在预算内；
+  > 实测：`go.mod` 未新增依赖；`cmd/keel` linux/amd64 +212 KiB（arm64 +192 KiB），
+  > 在复审指定的 256 KiB 预算内通过。证据：`evidence/binary-size.txt`。
   `go.mod` 不新增 OTel 依赖。
 
 ## 4. 采样、脱敏、基数
