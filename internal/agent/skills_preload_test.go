@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jixoai/keel/internal/agentcore"
 	"github.com/jixoai/keel/internal/store"
 )
 
@@ -101,5 +102,42 @@ func TestCommandFactsStayOutOfTheModelContext(t *testing.T) {
 	messages, _ := DecodeMessages(events, nil)
 	if len(messages) != 0 {
 		t.Fatalf("command facts entered the model transcript: %+v", messages)
+	}
+}
+
+func TestSkillPreloadSurvivesFailedOrAbortedAttempts(t *testing.T) {
+	for _, stopReason := range []string{agentcore.StopReasonError, agentcore.StopReasonAborted} {
+		t.Run(stopReason, func(t *testing.T) {
+			payload, _ := json.Marshal(map[string]any{"stopReason": stopReason})
+			events := []store.Event{
+				skillLoadedEvent(1, "checklist", "", "do it"),
+				{Seq: 2, Kind: store.EventAssistantMessage, Payload: payload},
+			}
+			if section := skillPreloadSection(events); section == "" {
+				t.Fatalf("skill pin was consumed by a %s attempt", stopReason)
+			}
+			// A normal terminal answer consumes it.
+			events = append(events, store.Event{Seq: 3, Kind: store.EventAssistantMessage, Payload: json.RawMessage(`{"stopReason":"end_turn"}`)})
+			if section := skillPreloadSection(events); section != "" {
+				t.Fatalf("skill pin survived a successful answer: %q", section)
+			}
+		})
+	}
+}
+
+func TestPromptSummaryHashCoversPreload(t *testing.T) {
+	surface := RunSurface{Prompt: "BINDING", PromptHash: digestPrompt("BINDING")}
+	without := promptSummaryHash(surface, "HOST PROMPT", false)
+	with := promptSummaryHash(surface, "HOST PROMPT\n\n<loaded_skills>do it</loaded_skills>", true)
+	if without == with {
+		t.Fatal("prompt hash ignores the loaded-skill preload")
+	}
+	// A binding with no host renderer and no preload keeps the binding digest.
+	bare := RunSurface{Prompt: "BINDING"}
+	if got := promptSummaryHash(bare, "BINDING", false); got != digestPrompt("BINDING") {
+		t.Fatalf("bare binding hash = %q", got)
+	}
+	if got := promptSummaryHash(bare, "BINDING\n\n<loaded_skills>x</loaded_skills>", true); got == digestPrompt("BINDING") {
+		t.Fatal("a preloaded bare binding reused the binding digest")
 	}
 }

@@ -26,6 +26,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/jixoai/keel/internal/agentcore"
 	"github.com/jixoai/keel/internal/store"
 )
 
@@ -46,9 +47,22 @@ type loadedSkill struct {
 func pendingLoadedSkills(events []store.Event) []loadedSkill {
 	lastAnswer := int64(0)
 	for _, event := range events {
-		if event.Kind == store.EventAssistantMessage && event.Seq > lastAnswer {
-			lastAnswer = event.Seq
+		if event.Kind != store.EventAssistantMessage || event.Seq <= lastAnswer {
+			continue
 		}
+		// Only a terminal SUCCESS consumes the pin. A failed or aborted
+		// assistant.message is a record of an attempt that did not deliver the
+		// turn; the next successful turn must still see the explicitly loaded
+		// skill.
+		var outcome struct {
+			StopReason string `json:"stopReason"`
+		}
+		if err := json.Unmarshal(event.Payload, &outcome); err == nil {
+			if outcome.StopReason == agentcore.StopReasonError || outcome.StopReason == agentcore.StopReasonAborted {
+				continue
+			}
+		}
+		lastAnswer = event.Seq
 	}
 	order := make([]string, 0)
 	byName := make(map[string]loadedSkill)
@@ -88,6 +102,22 @@ func applySkillPreload(systemPrompt string, events []store.Event) string {
 		return section
 	}
 	return systemPrompt + "\n\n" + section
+}
+
+// promptSummaryHash digests the prompt the attempt actually sends. A pending
+// skill preload changes the wire prompt even when the binding carries its own
+// PromptHash, so it must be part of the digest; taking the binding text alone
+// would hide the preload from run.finished readers.
+func promptSummaryHash(surface RunSurface, systemPrompt string, preloaded bool) string {
+	if !preloaded && surface.PromptHash == "" && strings.TrimSpace(surface.Prompt) != "" {
+		// No host renderer contributed sections and no preload: the wire prompt
+		// IS the binding text, so its digest is the binding's.
+		return digestPrompt(surface.Prompt)
+	}
+	if strings.TrimSpace(surface.Prompt) != "" || strings.TrimSpace(systemPrompt) != "" {
+		return digestPrompt(systemPrompt)
+	}
+	return ""
 }
 
 // skillPreloadSection renders the loaded-skill section of one attempt. It

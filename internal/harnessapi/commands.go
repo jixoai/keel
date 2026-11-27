@@ -34,6 +34,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -53,18 +54,21 @@ import (
 // Catalog bounds. The order is builtin → plugin (plugin id) → skill, and the
 // total is capped; skills alone may occupy at most half the catalog.
 const (
-	commandCatalogMax        = 256
-	commandSkillCatalogMax   = 128
-	commandRequestIDMax      = 200
-	commandNameMax           = 256
-	commandArgsMaxBytes      = 64 << 10
-	commandResultMaxBytes    = 64 << 10
-	commandWaitDefault       = 30 * time.Second
-	commandDecisionDefault   = 5 * time.Minute
-	commandDecisionKind      = "command.invoke"
-	commandDecisionOptionOK  = "allow"
-	commandDecisionOptionNo  = "deny"
-	commandDecisionRequestID = "command:"
+	commandCatalogMax         = 256
+	commandSkillCatalogMax    = 128
+	commandRequestIDMax       = 200
+	commandNameMax            = 256
+	commandArgsMaxBytes       = 64 << 10
+	commandResultMaxBytes     = 64 << 10
+	commandWaitDefault        = 30 * time.Second
+	commandDecisionDefault    = 5 * time.Minute
+	commandLeaseDefault       = 2 * time.Minute
+	commandSkillBodyMax       = 256 << 10
+	commandDecisionPreviewMax = 512
+	commandDecisionKind       = "command.invoke"
+	commandDecisionOptionOK   = "allow"
+	commandDecisionOptionNo   = "deny"
+	commandDecisionRequestID  = "command:"
 )
 
 // Command availability reasons beyond the plugin registry's own.
@@ -95,6 +99,7 @@ const (
 	CommandCodeDecisionRefused   = "decision_refused"
 	CommandCodeDecisionTimeout   = "decision_timeout"
 	CommandCodeDecisionCancelled = "decision_cancelled"
+	CommandCodeDecisionConflict  = "decision_conflict"
 	CommandCodeCompactDisabled   = "compaction_disabled"
 	CommandCodeCompactConflict   = "compaction_conflict"
 	CommandCodeQuota             = "quota_exceeded"
@@ -104,9 +109,17 @@ const (
 // CommandInvocationStore is the durable requestId state machine. The
 // production implementation is *store.Store; tests use an in-memory double.
 type CommandInvocationStore interface {
-	ClaimCommandInvocation(ctx context.Context, row store.CommandInvocation) (store.CommandInvocation, bool, error)
+	// ClaimCommandInvocation inserts the running row or reclaims an expired
+	// running lease. owned=true means this caller must execute.
+	ClaimCommandInvocation(ctx context.Context, row store.CommandInvocation, lease time.Duration) (store.CommandInvocation, bool, error)
+	// ClaimDecisionResult is the pending_decision -> running CAS: exactly one
+	// replay of an approved destructive command may execute.
+	ClaimDecisionResult(ctx context.Context, tenantID, sessionID uuid.UUID, requestID string, lease time.Duration) (store.CommandInvocation, bool, error)
+	// RenewCommandInvocation renews a live execution's lease.
+	RenewCommandInvocation(ctx context.Context, tenantID, sessionID uuid.UUID, requestID string, lease time.Duration) (bool, error)
+	// TransitionCommandInvocation writes a state only if it is still `from`.
+	TransitionCommandInvocation(ctx context.Context, row store.CommandInvocation, from string) (bool, error)
 	GetCommandInvocation(ctx context.Context, tenantID, sessionID uuid.UUID, requestID string) (store.CommandInvocation, bool, error)
-	UpdateCommandInvocation(ctx context.Context, row store.CommandInvocation) error
 }
 
 // CommandPluginRegistry is the live plugin command surface. Nil means this
@@ -162,6 +175,10 @@ type CommandCatalog struct {
 	Truncated bool          `json:"truncated"`
 	// Generation is the plugin runtime generation the plugin entries came from.
 	Generation int64 `json:"generation"`
+	// Warnings are stable degradation codes (for example skills_unavailable).
+	// They are codes, never raw error text: a catalog read must not leak a
+	// library failure into the client.
+	Warnings []string `json:"warnings,omitempty"`
 }
 
 // CommandResult is the 200 body of a command execution.
@@ -238,12 +255,7 @@ func (s *Server) listSessionCommands(w http.ResponseWriter, r *http.Request) {
 		writeIdentityError(w, http.StatusUnauthorized, "invalid_session", "authentication required")
 		return
 	}
-	grants, err := s.cfg.Access.Effective(r.Context(), principal)
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err)
-		return
-	}
-	catalog, err := s.commandCatalog(r.Context(), tenantID, sessionID, target, grants)
+	catalog, err := s.commandCatalog(r.Context(), principal, tenantID, sessionID, target)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
@@ -262,22 +274,81 @@ func commandTarget(w http.ResponseWriter, r *http.Request) (string, bool) {
 	return "", false
 }
 
+// commandKeyChecker decides each command key once per catalog request against
+// the actual session resource. A key grant alone is not enough: the relation
+// (owner/viewer/editor) is what the execution gate will require, so the
+// catalog must not promise a command the execution route would refuse. One
+// decision per distinct key also bounds the denial-audit rows a catalog read
+// can produce.
+type commandKeyChecker struct {
+	ctx       context.Context
+	server    *Server
+	principal access.Principal
+	tenantID  uuid.UUID
+	sessionID uuid.UUID
+	cache     map[string]bool
+	err       error
+}
+
+func newCommandKeyChecker(ctx context.Context, server *Server, principal access.Principal, tenantID, sessionID uuid.UUID) *commandKeyChecker {
+	return &commandKeyChecker{
+		ctx: ctx, server: server, principal: principal,
+		tenantID: tenantID, sessionID: sessionID, cache: map[string]bool{},
+	}
+}
+
+func (c *commandKeyChecker) allowed(key string) bool {
+	if c.err != nil {
+		return false
+	}
+	if allowed, seen := c.cache[key]; seen {
+		return allowed
+	}
+	decision, err := c.server.cfg.Access.Authorize(c.ctx, c.principal, key, access.Resource{
+		TenantID: c.tenantID, Type: "session", ID: c.sessionID.String(),
+	})
+	if err != nil {
+		c.err = err
+		return false
+	}
+	allowed := !decision.Denied()
+	c.cache[key] = allowed
+	return allowed
+}
+
+func (c *commandKeyChecker) missing(required []string) []string {
+	missing := make([]string, 0)
+	for _, key := range required {
+		if !c.allowed(key) {
+			missing = append(missing, key)
+		}
+	}
+	return missing
+}
+
 // commandCatalog aggregates builtins, plugin commands and skills in the fixed
 // order and applies availability without hiding an entry.
-func (s *Server) commandCatalog(ctx context.Context, tenantID, sessionID uuid.UUID, target string, grants access.Grants) (CommandCatalog, error) {
+func (s *Server) commandCatalog(ctx context.Context, principal access.Principal, tenantID, sessionID uuid.UUID, target string) (CommandCatalog, error) {
 	catalog := CommandCatalog{Commands: []CommandView{}, Generation: 0}
 	dropped := false
+	keys := newCommandKeyChecker(ctx, s, principal, tenantID, sessionID)
+	wired := s.commandWired()
 
 	// 1. Builtins, in declaration order.
-	catalog.Commands = append(catalog.Commands, s.builtinCommandViews(grants, target)...)
+	catalog.Commands = append(catalog.Commands, s.builtinCommandViews(keys, wired, target)...)
 
 	// 2. Plugin commands: plugin id order, declaration order inside a plugin.
 	if s.cfg.CommandPlugins != nil {
 		registry := s.cfg.CommandPlugins.ListCommands()
 		catalog.Generation = registry.Generation
+		pluginWired := wired && s.cfg.CommandTools != nil
 		for _, command := range registry.Commands {
 			schema := command.Decl.EffectiveArgsSchema()
 			required := pluginCommandPermissions(command)
+			commandWired := pluginWired
+			if strings.EqualFold(string(command.Decl.Danger), string(pluginpkg.DangerDestructive)) && s.cfg.Decisions == nil {
+				commandWired = false
+			}
 			view := CommandView{
 				Name:                command.Published,
 				Source:              "plugin",
@@ -288,8 +359,11 @@ func (s *Server) commandCatalog(ctx context.Context, tenantID, sessionID uuid.UU
 				Targets:             slotTargetStrings(command.Decl.EffectiveTargets()),
 				RequiredPermissions: required,
 			}
-			missing := missingKeys(grants, required)
+			missing := keys.missing(required)
 			switch {
+			case !commandWired:
+				view.Available = false
+				view.Reason = CommandReasonNotWired
 			case !command.Available:
 				view.Available = false
 				view.Reason = command.Reason
@@ -310,46 +384,60 @@ func (s *Server) commandCatalog(ctx context.Context, tenantID, sessionID uuid.UU
 		}
 	}
 
-	// 3. Skills, sorted by name, at most half the catalog.
+	// 3. Skills, sorted by name, at most half the catalog. A failing skill
+	// library degrades the catalog (the builtins/plugins still answer) instead
+	// of failing the whole page.
 	if s.cfg.CommandSkills != nil {
 		snapshot, err := s.cfg.CommandSkills.List(tenantID, false)
 		if err != nil {
-			return CommandCatalog{}, err
-		}
-		names := make([]string, 0, len(snapshot.Skills))
-		for _, record := range snapshot.Skills {
-			names = append(names, record.Name)
-		}
-		sort.Strings(names)
-		if len(names) > commandSkillCatalogMax {
-			names = names[:commandSkillCatalogMax]
-			dropped = true
-		}
-		for _, name := range names {
-			view := CommandView{
-				Name:                "skill:" + name,
-				Source:              "skill",
-				Summary:             "Load skill " + name + " for the next turn.",
-				ArgsSchema:          commandSchemaJSON(pluginpkg.CommandDecl{}.EffectiveArgsSchema()),
-				Danger:              string(pluginpkg.DangerRead),
-				Idempotent:          true,
-				Targets:             slotTargetStrings(pluginpkg.DefaultCommandTargets()),
-				RequiredPermissions: []string{access.KeySessionWrite, access.KeySkillRead},
+			s.cfg.Logger.Warn("command catalog: skill library unavailable",
+				"tenant_id", tenantID, "err", err)
+			catalog.Warnings = append(catalog.Warnings, "skills_unavailable")
+		} else {
+			names := make([]string, 0, len(snapshot.Skills))
+			for _, record := range snapshot.Skills {
+				names = append(names, record.Name)
 			}
-			missing := missingKeys(grants, view.RequiredPermissions)
-			switch {
-			case len(missing) > 0:
-				view.Available = false
-				view.Reason = CommandReasonMissingPermissions
-				view.MissingPermissions = missing
-			case target != "" && !targetIn(view.Targets, target):
-				view.Available = false
-				view.Reason = CommandReasonTargetUnsupported
-			default:
-				view.Available = true
+			sort.Strings(names)
+			if len(names) > commandSkillCatalogMax {
+				names = names[:commandSkillCatalogMax]
+				dropped = true
 			}
-			catalog.Commands = append(catalog.Commands, view)
+			for _, name := range names {
+				view := CommandView{
+					Name:                "skill:" + name,
+					Source:              "skill",
+					Summary:             "Load skill " + name + " for the next turn.",
+					ArgsSchema:          commandSchemaJSON(pluginpkg.CommandDecl{}.EffectiveArgsSchema()),
+					Danger:              string(pluginpkg.DangerRead),
+					Idempotent:          true,
+					Targets:             slotTargetStrings(pluginpkg.DefaultCommandTargets()),
+					RequiredPermissions: []string{access.KeySessionWrite, access.KeySkillRead},
+				}
+				missing := keys.missing(view.RequiredPermissions)
+				switch {
+				case !wired:
+					view.Available = false
+					view.Reason = CommandReasonNotWired
+				case len(missing) > 0:
+					view.Available = false
+					view.Reason = CommandReasonMissingPermissions
+					view.MissingPermissions = missing
+				case target != "" && !targetIn(view.Targets, target):
+					view.Available = false
+					view.Reason = CommandReasonTargetUnsupported
+				default:
+					view.Available = true
+				}
+				if len(missing) > 0 && view.MissingPermissions == nil {
+					view.MissingPermissions = missing
+				}
+				catalog.Commands = append(catalog.Commands, view)
+			}
 		}
+	}
+	if keys.err != nil {
+		return CommandCatalog{}, keys.err
 	}
 
 	if len(catalog.Commands) > commandCatalogMax {
@@ -360,9 +448,9 @@ func (s *Server) commandCatalog(ctx context.Context, tenantID, sessionID uuid.UU
 	return catalog, nil
 }
 
-// builtinCommandViews renders the two builtin commands. They are always listed
-// (a client must be able to explain why one is unavailable), never learn.
-func (s *Server) builtinCommandViews(grants access.Grants, target string) []CommandView {
+// builtinCommandViews renders the builtin commands. They are always listed (a
+// client must be able to explain why one is unavailable), never learn.
+func (s *Server) builtinCommandViews(keys *commandKeyChecker, wired bool, target string) []CommandView {
 	compact := CommandView{
 		Name:                "compact",
 		Source:              "builtin",
@@ -373,8 +461,11 @@ func (s *Server) builtinCommandViews(grants access.Grants, target string) []Comm
 		Targets:             slotTargetStrings(pluginpkg.DefaultCommandTargets()),
 		RequiredPermissions: []string{access.KeySessionWrite, access.KeyModelInvoke},
 	}
-	missing := missingKeys(grants, compact.RequiredPermissions)
+	missing := keys.missing(compact.RequiredPermissions)
 	switch {
+	case !wired:
+		compact.Available = false
+		compact.Reason = CommandReasonNotWired
 	case s.cfg.CompactSession == nil:
 		compact.Available = false
 		compact.Reason = CommandReasonNotWired
@@ -406,17 +497,6 @@ func pluginCommandPermissions(command harnessext.PluginCommand) []string {
 		keys = append(keys, derived)
 	}
 	return keys
-}
-
-// missingKeys returns the required keys the principal does not hold.
-func missingKeys(grants access.Grants, required []string) []string {
-	missing := make([]string, 0)
-	for _, key := range required {
-		if _, held := grants.ScopeOf(key); !held {
-			missing = append(missing, key)
-		}
-	}
-	return missing
 }
 
 func containsString(values []string, want string) bool {
@@ -559,6 +639,23 @@ func (s *Server) executeSessionCommand(w http.ResponseWriter, r *http.Request) {
 		writeCommandError(w, http.StatusNotFound, CommandCodeUnknown, "unknown command")
 		return
 	}
+	// Permissions run before the body is read: an unauthorized caller learns
+	// nothing about the command's argument contract (and the requestId cannot be
+	// probed). The session.write gate above already ran; this adds the command's
+	// own keys.
+	principal, err := s.cfg.Access.Principal(r.Context(), tenantID)
+	if err != nil {
+		writeIdentityError(w, http.StatusUnauthorized, "invalid_session", "authentication required")
+		return
+	}
+	for _, need := range commandRequiredKeys(resolved) {
+		if need == access.KeySessionWrite {
+			continue
+		}
+		if !s.authorizeSessionResource(w, r, tenantID, sessionID, need) {
+			return
+		}
+	}
 	var body commandExecuteRequest
 	if err := decodeBody(w, r, s.cfg.MaxBody, &body); err != nil {
 		writeCommandError(w, http.StatusBadRequest, CommandCodeInvalidArgs, err.Error())
@@ -573,7 +670,7 @@ func (s *Server) executeSessionCommand(w http.ResponseWriter, r *http.Request) {
 		writeCommandError(w, http.StatusBadRequest, CommandCodeInvalidArgs, "requestId is too long")
 		return
 	}
-	args, normalized, fieldErrors := normalizeCommandArgs(resolved.argsSchema, body.Args)
+	_, normalized, fieldErrors := normalizeCommandArgs(resolved.argsSchema, body.Args)
 	if len(fieldErrors) > 0 {
 		writeCommandFieldErrors(w, CommandCodeInvalidArgs, fieldErrors)
 		return
@@ -584,26 +681,17 @@ func (s *Server) executeSessionCommand(w http.ResponseWriter, r *http.Request) {
 		}})
 		return
 	}
-	principal, err := s.cfg.Access.Principal(r.Context(), tenantID)
-	if err != nil {
-		writeIdentityError(w, http.StatusUnauthorized, "invalid_session", "authentication required")
-		return
-	}
-	for _, need := range commandRequiredKeys(resolved) {
-		if need == access.KeySessionWrite {
-			continue // the route gate above already decided it
-		}
-		if !s.authorizeSessionResource(w, r, tenantID, sessionID, need) {
-			return
-		}
-	}
+	// Execute the canonical encoding: the idempotency hash, the plugin tool
+	// arguments and the destructive approval preview then describe the same
+	// document even when the client reserialized it with different whitespace.
+	args := json.RawMessage(normalized)
 	hash := sha256Hex(normalized)
 	started := time.Now()
 	invocation, inserted, err := s.cfg.CommandStore.ClaimCommandInvocation(r.Context(), store.CommandInvocation{
 		TenantID: tenantID, SessionID: sessionID, RequestID: requestID,
 		Command: resolved.name, Source: resolved.source, Actor: commandActor(principal),
 		Status: store.CommandStatusRunning, ArgsHash: hash, ArgsBytes: len(normalized),
-	})
+	}, s.commandLease())
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
@@ -616,19 +704,22 @@ func (s *Server) executeSessionCommand(w http.ResponseWriter, r *http.Request) {
 	// 409 without touching a tool.
 	idle, err := s.cfg.SessionIdle(r.Context(), tenantID, sessionID)
 	if err != nil {
-		s.finishCommand(r.Context(), &invocation, store.CommandStatusError, CommandCodeState,
-			"the session idle check failed", nil, started, "")
+		s.finishCommandFrom(r.Context(), &invocation, store.CommandStatusRunning, store.CommandStatusError,
+			CommandCodeState, "the session idle check failed", nil, started, "")
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
 	if !idle {
-		s.finishCommand(r.Context(), &invocation, store.CommandStatusRefused, CommandCodeBusy,
-			"session is busy", nil, started, "")
-		writeCommandError(w, http.StatusConflict, CommandCodeBusy, "session is busy; retry after the active turn settles")
+		if s.finishCommandFrom(r.Context(), &invocation, store.CommandStatusRunning, store.CommandStatusRefused,
+			CommandCodeBusy, "session is busy", nil, started, "") {
+			writeCommandError(w, http.StatusConflict, CommandCodeBusy, "session is busy; retry after the active turn settles")
+		} else {
+			s.writeCommandRow(w, r, invocation)
+		}
 		return
 	}
 	if strings.EqualFold(resolved.danger, string(pluginpkg.DangerDestructive)) {
-		s.openCommandDecision(w, r, invocation, resolved, started)
+		s.openCommandDecision(w, r, invocation, resolved, args, started)
 		return
 	}
 	s.runCommand(w, r, &invocation, resolved, args, started, "")
@@ -678,9 +769,29 @@ func (s *Server) replayCommand(w http.ResponseWriter, r *http.Request, invocatio
 	}
 }
 
+// commandDecisionGrants reports whether an answered decision is the question
+// this command asked. Matching only the option would let a decision opened
+// under the derived requestId with a different kind/prompt authorize a
+// command, so both identity fields are part of the grant.
+func commandDecisionGrants(decision harnessext.Decision, invocation store.CommandInvocation) bool {
+	return decision.Kind == commandDecisionKind &&
+		decision.RequestID == commandDecisionRequestID+invocation.RequestID &&
+		strings.HasPrefix(decision.Prompt, commandDecisionPromptPrefix(invocation.Command)) &&
+		decision.Status == harnessext.DecisionAnswered &&
+		decision.Answer != nil && decision.Answer.OptionID == commandDecisionOptionOK
+}
+
+// commandDecisionPromptPrefix is the stable opening of the destructive
+// question. The grant check requires it, so a decision opened under the derived
+// requestId with an unrelated prompt cannot authorize the command even when the
+// kind and requestId were reproduced.
+func commandDecisionPromptPrefix(command string) string {
+	return "Run the destructive command /" + command + "?"
+}
+
 // resumeCommandDecision inspects the durable decision a pending destructive
 // command opened: still open → 202 with the same decision id; answered allow →
-// execute once; any other terminal state → its error.
+// exactly one CAS claim executes; any other terminal state → its error.
 func (s *Server) resumeCommandDecision(w http.ResponseWriter, r *http.Request, invocation store.CommandInvocation, resolved resolvedCommand, args json.RawMessage, started time.Time) {
 	if s.cfg.Decisions == nil {
 		writeCommandError(w, http.StatusServiceUnavailable, CommandCodeNotWired,
@@ -701,44 +812,95 @@ func (s *Server) resumeCommandDecision(w http.ResponseWriter, r *http.Request, i
 	case harnessext.DecisionOpen:
 		writeJSON(w, http.StatusAccepted, commandPendingResult(invocation, decision.DecisionID, s.commandDecisionTimeout()))
 	case harnessext.DecisionAnswered:
-		// The answer alone is not enough: the stored row must be the question
-		// this command asked (kind and derived requestId), so a generic decision
-		// opened under a chosen requestId cannot authorize the command.
-		grant := decision.Kind == commandDecisionKind &&
-			decision.RequestID == commandDecisionRequestID+invocation.RequestID &&
-			decision.Answer != nil && decision.Answer.OptionID == commandDecisionOptionOK
-		if grant {
-			s.runCommand(w, r, &invocation, resolved, args, started, decision.DecisionID)
+		if !commandDecisionGrants(decision, invocation) {
+			s.finishDecisionFailure(w, r, invocation, store.CommandStatusRefused,
+				CommandCodeDecisionRefused, "the destructive command was refused",
+				http.StatusForbidden, decision.DecisionID, started)
 			return
 		}
-		s.finishCommand(r.Context(), &invocation, store.CommandStatusRefused, CommandCodeDecisionRefused,
-			"the destructive command was refused", nil, started, decision.DecisionID)
-		writeCommandErrorWithDecision(w, http.StatusForbidden, CommandCodeDecisionRefused,
-			"the destructive command was refused", decision.DecisionID, invocation.EventSeq)
+		// Approval does not bypass the idle rule: if a turn started while the
+		// question was open, leave the pending row untouched so the same
+		// requestId can execute after the turn settles.
+		idle, err := s.cfg.SessionIdle(r.Context(), invocation.TenantID, invocation.SessionID)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, err)
+			return
+		}
+		if !idle {
+			writeCommandError(w, http.StatusConflict, CommandCodeBusy,
+				"session is busy; retry after the active turn settles")
+			return
+		}
+		claimed, owned, err := s.cfg.CommandStore.ClaimDecisionResult(
+			r.Context(), invocation.TenantID, invocation.SessionID, invocation.RequestID, s.commandLease())
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, err)
+			return
+		}
+		if !owned {
+			s.waitForCommand(w, r, claimed, resolved, args, started)
+			return
+		}
+		s.runCommand(w, r, &claimed, resolved, args, started, decision.DecisionID)
 	case harnessext.DecisionTimedOut:
-		s.finishCommand(r.Context(), &invocation, store.CommandStatusTimedOut, CommandCodeDecisionTimeout,
-			"the destructive command's decision timed out", nil, started, decision.DecisionID)
-		writeCommandErrorWithDecision(w, http.StatusRequestTimeout, CommandCodeDecisionTimeout,
-			"the destructive command's decision timed out", decision.DecisionID, invocation.EventSeq)
+		s.finishDecisionFailure(w, r, invocation, store.CommandStatusTimedOut,
+			CommandCodeDecisionTimeout, "the destructive command's decision timed out",
+			http.StatusRequestTimeout, decision.DecisionID, started)
 	case harnessext.DecisionCancelled:
-		s.finishCommand(r.Context(), &invocation, store.CommandStatusCancelled, CommandCodeDecisionCancelled,
-			"the destructive command's decision was cancelled", nil, started, decision.DecisionID)
-		writeCommandErrorWithDecision(w, http.StatusConflict, CommandCodeDecisionCancelled,
-			"the destructive command's decision was cancelled", decision.DecisionID, invocation.EventSeq)
+		s.finishDecisionFailure(w, r, invocation, store.CommandStatusCancelled,
+			CommandCodeDecisionCancelled, "the destructive command's decision was cancelled",
+			http.StatusConflict, decision.DecisionID, started)
 	default:
 		writeCommandError(w, http.StatusConflict, CommandCodeState, "the stored decision is in an unknown state")
+	}
+}
+
+// finishDecisionFailure records the first decision outcome once (conditional
+// from pending_decision). A concurrent replay that lost the transition answers
+// the stored terminal state instead of overwriting it.
+func (s *Server) finishDecisionFailure(w http.ResponseWriter, r *http.Request, invocation store.CommandInvocation, status, code, message string, httpStatus int, decisionID string, started time.Time) {
+	if s.finishCommandFrom(r.Context(), &invocation, store.CommandStatusPendingDecision,
+		status, code, message, nil, started, decisionID) {
+		writeCommandErrorWithDecision(w, httpStatus, code, message, decisionID, invocation.EventSeq)
+		return
+	}
+	s.writeCommandRow(w, r, invocation)
+}
+
+// writeCommandRow renders the current durable state after a lost transition.
+func (s *Server) writeCommandRow(w http.ResponseWriter, r *http.Request, invocation store.CommandInvocation) {
+	current, found, err := s.cfg.CommandStore.GetCommandInvocation(r.Context(),
+		invocation.TenantID, invocation.SessionID, invocation.RequestID)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	if !found {
+		writeCommandError(w, http.StatusConflict, CommandCodeState, "the command invocation disappeared")
+		return
+	}
+	switch {
+	case current.Status == store.CommandStatusOK:
+		writeJSON(w, http.StatusOK, commandResultFromRow(current))
+	case current.Terminal():
+		writeStoredCommandError(w, current)
+	case current.Status == store.CommandStatusPendingDecision:
+		writeJSON(w, http.StatusAccepted, commandPendingResult(current, current.DecisionID, s.commandDecisionTimeout()))
+	default:
+		writeCommandError(w, http.StatusConflict, CommandCodeInProgress,
+			"another request with this requestId is still running")
 	}
 }
 
 // openCommandDecision opens the durable question of a destructive command. The
 // decision's requestId is derived from the command requestId, so a repeated
 // open returns the same row (no second question).
-func (s *Server) openCommandDecision(w http.ResponseWriter, r *http.Request, invocation store.CommandInvocation, resolved resolvedCommand, started time.Time) {
+func (s *Server) openCommandDecision(w http.ResponseWriter, r *http.Request, invocation store.CommandInvocation, resolved resolvedCommand, args json.RawMessage, started time.Time) {
 	if s.cfg.Decisions == nil {
 		// Fail closed: a deployment without the decision primitive must not run a
 		// destructive command.
-		s.finishCommand(r.Context(), &invocation, store.CommandStatusError, CommandCodeNotWired,
-			"destructive commands need the durable decision primitive", nil, started, "")
+		s.finishCommandFrom(r.Context(), &invocation, store.CommandStatusRunning, store.CommandStatusError,
+			CommandCodeNotWired, "destructive commands need the durable decision primitive", nil, started, "")
 		writeCommandError(w, http.StatusServiceUnavailable, CommandCodeNotWired,
 			"destructive commands need the durable decision primitive, which is not wired")
 		return
@@ -748,8 +910,7 @@ func (s *Server) openCommandDecision(w http.ResponseWriter, r *http.Request, inv
 		SessionID: invocation.SessionID,
 		RequestID: commandDecisionRequestID + invocation.RequestID,
 		Kind:      commandDecisionKind,
-		Prompt: fmt.Sprintf("Run the destructive command /%s? It is declared danger=destructive; approving it will execute the command once.",
-			resolved.name),
+		Prompt:    commandDecisionPrompt(resolved.name, args),
 		Options: []harnessext.DecisionOption{
 			{ID: commandDecisionOptionOK, Label: "Run"},
 			{ID: commandDecisionOptionNo, Label: "Cancel"},
@@ -757,43 +918,202 @@ func (s *Server) openCommandDecision(w http.ResponseWriter, r *http.Request, inv
 		Timeout: s.commandDecisionTimeout(),
 	})
 	if err != nil {
-		s.finishCommand(r.Context(), &invocation, store.CommandStatusError, CommandCodeState,
-			"the command decision could not be opened", nil, started, "")
-		if errors.Is(err, harnessext.ErrInvalidDecision) {
-			writeCommandError(w, http.StatusBadRequest, CommandCodeInvalidArgs, err.Error())
-			return
-		}
-		writeErr(w, http.StatusInternalServerError, err)
+		s.openCommandDecisionError(w, r, invocation, err, started)
+		return
+	}
+	switch {
+	case decision.Status == harnessext.DecisionAnswered && commandDecisionGrants(decision, invocation):
+		// An earlier attempt crashed between the answer and the pending
+		// transition: this execution claim is still ours, so run once.
+		s.runCommand(w, r, &invocation, resolved, args, started, decision.DecisionID)
+		return
+	case decision.Status == harnessext.DecisionAnswered:
+		s.finishCommandFrom(r.Context(), &invocation, store.CommandStatusRunning, store.CommandStatusRefused,
+			CommandCodeDecisionRefused, "the destructive command was refused", nil, started, decision.DecisionID)
+		writeCommandErrorWithDecision(w, http.StatusForbidden, CommandCodeDecisionRefused,
+			"the destructive command was refused", decision.DecisionID, invocation.EventSeq)
+		return
+	case decision.Status == harnessext.DecisionTimedOut:
+		s.finishCommandFrom(r.Context(), &invocation, store.CommandStatusRunning, store.CommandStatusTimedOut,
+			CommandCodeDecisionTimeout, "the destructive command's decision timed out", nil, started, decision.DecisionID)
+		writeCommandErrorWithDecision(w, http.StatusRequestTimeout, CommandCodeDecisionTimeout,
+			"the destructive command's decision timed out", decision.DecisionID, invocation.EventSeq)
+		return
+	case decision.Status == harnessext.DecisionCancelled:
+		s.finishCommandFrom(r.Context(), &invocation, store.CommandStatusRunning, store.CommandStatusCancelled,
+			CommandCodeDecisionCancelled, "the destructive command's decision was cancelled", nil, started, decision.DecisionID)
+		writeCommandErrorWithDecision(w, http.StatusConflict, CommandCodeDecisionCancelled,
+			"the destructive command's decision was cancelled", decision.DecisionID, invocation.EventSeq)
 		return
 	}
 	eventSeq := s.recordCommandEvent(r.Context(), invocation, store.CommandStatusPendingDecision,
-		CommandCodeState, "", nil, 0, decision.DecisionID)
+		"", "", nil, 0, decision.DecisionID)
 	invocation.Status = store.CommandStatusPendingDecision
 	invocation.DecisionID = decision.DecisionID
 	invocation.EventSeq = eventSeq
 	invocation.DurationMs = time.Since(started).Milliseconds()
-	if err := s.cfg.CommandStore.UpdateCommandInvocation(r.Context(), invocation); err != nil {
-		s.cfg.Logger.Error("command invocation decision state not persisted",
-			"tenant_id", invocation.TenantID, "session_id", invocation.SessionID,
-			"request_id", invocation.RequestID, "err", err)
+	if ok, err := s.cfg.CommandStore.TransitionCommandInvocation(r.Context(), invocation, store.CommandStatusRunning); err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	} else if !ok {
+		s.writeCommandRow(w, r, invocation)
+		return
 	}
 	writeJSON(w, http.StatusAccepted, commandPendingResult(invocation, decision.DecisionID, s.commandDecisionTimeout()))
 }
 
-// runCommand executes the resolved command and records its terminal state.
+// openCommandDecisionError maps a refused Open. A conflicting question on the
+// derived requestId is never a grant: an answered allow under a different
+// kind/prompt is refused (403), any other conflict is 409, and only an invalid
+// request is 400.
+func (s *Server) openCommandDecisionError(w http.ResponseWriter, r *http.Request, invocation store.CommandInvocation, err error, started time.Time) {
+	expectedID := harnessext.DecisionIDFor(invocation.TenantID, invocation.SessionID,
+		commandDecisionRequestID+invocation.RequestID)
+	if existing, found := s.cfg.Decisions.Get(r.Context(), invocation.TenantID, invocation.SessionID, expectedID); found {
+		switch existing.Status {
+		case harnessext.DecisionAnswered:
+			// The answer alone is never a grant: the stored question must be this
+			// command's question. A mismatched (including forged) allow is a
+			// refusal, not a conflict.
+			code := CommandCodeDecisionRefused
+			message := "the destructive command was refused"
+			if commandDecisionGrants(existing, invocation) {
+				// Open only reports a conflict when kind/prompt/options differ, so
+				// a matching grant here means the stored question was mutated
+				// after the answer; fail closed rather than execute without proof.
+				message = "the destructive command's stored question was mutated"
+			}
+			s.finishCommandFrom(r.Context(), &invocation, store.CommandStatusRunning, store.CommandStatusRefused,
+				code, message, nil, started, existing.DecisionID)
+			writeCommandErrorWithDecision(w, http.StatusForbidden, code, message, existing.DecisionID, invocation.EventSeq)
+			return
+		case harnessext.DecisionTimedOut:
+			s.finishCommandFrom(r.Context(), &invocation, store.CommandStatusRunning, store.CommandStatusTimedOut,
+				CommandCodeDecisionTimeout, "the destructive command's decision timed out", nil, started, existing.DecisionID)
+			writeCommandErrorWithDecision(w, http.StatusRequestTimeout, CommandCodeDecisionTimeout,
+				"the destructive command's decision timed out", existing.DecisionID, invocation.EventSeq)
+			return
+		case harnessext.DecisionCancelled:
+			s.finishCommandFrom(r.Context(), &invocation, store.CommandStatusRunning, store.CommandStatusCancelled,
+				CommandCodeDecisionCancelled, "the destructive command's decision was cancelled", nil, started, existing.DecisionID)
+			writeCommandErrorWithDecision(w, http.StatusConflict, CommandCodeDecisionCancelled,
+				"the destructive command's decision was cancelled", existing.DecisionID, invocation.EventSeq)
+			return
+		}
+		if errors.Is(err, harnessext.ErrDecisionConflict) {
+			s.finishCommandFrom(r.Context(), &invocation, store.CommandStatusRunning, store.CommandStatusRefused,
+				CommandCodeDecisionConflict, "the command's decision conflicts with an existing question", nil, started, "")
+			writeCommandError(w, http.StatusConflict, CommandCodeDecisionConflict,
+				"the command's decision conflicts with an existing question")
+			return
+		}
+	}
+	s.finishCommandFrom(r.Context(), &invocation, store.CommandStatusRunning, store.CommandStatusError,
+		CommandCodeState, "the command decision could not be opened", nil, started, "")
+	if errors.Is(err, harnessext.ErrInvalidDecision) {
+		writeCommandError(w, http.StatusBadRequest, CommandCodeInvalidArgs, err.Error())
+		return
+	}
+	if errors.Is(err, harnessext.ErrDecisionConflict) || errors.Is(err, harnessext.ErrDecisionClosed) {
+		writeCommandError(w, http.StatusConflict, CommandCodeState, "the command decision is already terminal")
+		return
+	}
+	writeErr(w, http.StatusInternalServerError, err)
+}
+
+// commandDecisionPrompt is the human-facing destructive question. It carries a
+// bounded argument preview so the approver sees what will run; the preview is
+// never stored as audit (the invocation row keeps only the hash/length).
+func commandDecisionPrompt(command string, args json.RawMessage) string {
+	prompt := commandDecisionPromptPrefix(command) + " It is declared danger=destructive; approving it will execute the command once."
+	preview := commandArgumentPreview(args)
+	if preview == "" {
+		return prompt
+	}
+	return prompt + "\nArguments: " + preview
+}
+
+// commandArgumentPreview bounds the arguments shown to an approver. The raw
+// JSON is the caller's own input; the bound keeps a pathological argument
+// document from flooding the decision UI.
+func commandArgumentPreview(args json.RawMessage) string {
+	trimmed := strings.TrimSpace(string(args))
+	if trimmed == "" || trimmed == "{}" || trimmed == "null" {
+		return ""
+	}
+	if len(trimmed) <= commandDecisionPreviewMax {
+		return trimmed
+	}
+	cut := trimmed[:commandDecisionPreviewMax]
+	for len(cut) > 0 && !utf8.RuneStart(cut[len(cut)-1]) {
+		cut = cut[:len(cut)-1]
+	}
+	return cut + "…[truncated]"
+}
+
+// runCommand executes the resolved command and records its terminal state. The
+// execution holds a renewable lease; a concurrent replay cannot execute the
+// same requestId.
 func (s *Server) runCommand(w http.ResponseWriter, r *http.Request, invocation *store.CommandInvocation, resolved resolvedCommand, args json.RawMessage, started time.Time, decisionID string) {
+	stop := s.keepCommandLease(r.Context(), *invocation)
+	defer stop()
 	status, code, message, data := s.dispatchCommand(r.Context(), invocation, resolved, args)
 	if decisionID != "" {
 		invocation.DecisionID = decisionID
 	}
+	var transitioned bool
 	if status == store.CommandStatusOK {
-		s.finishCommandData(r.Context(), invocation, status, "", "", data, started, decisionID)
+		transitioned = s.finishCommandDataFrom(r.Context(), invocation, store.CommandStatusRunning,
+			status, "", "", data, started, decisionID)
+		if !transitioned {
+			s.writeCommandRow(w, r, *invocation)
+			return
+		}
 		writeJSON(w, http.StatusOK, commandResultFromRow(*invocation))
 		return
 	}
-	s.finishCommand(r.Context(), invocation, status, code, message, data, started, decisionID)
-	statusCode := commandErrorStatus(code)
-	writeCommandErrorWithDecision(w, statusCode, code, message, decisionID, invocation.EventSeq)
+	transitioned = s.finishCommandFrom(r.Context(), invocation, store.CommandStatusRunning,
+		status, code, message, data, started, decisionID)
+	if !transitioned {
+		s.writeCommandRow(w, r, *invocation)
+		return
+	}
+	writeCommandErrorWithDecision(w, commandErrorStatus(code), code, message, decisionID, invocation.EventSeq)
+}
+
+// keepCommandLease renews a running owner's lease until the returned stop
+// function is called. A lease that stops advancing is what lets a replay
+// reclaim a crashed executor.
+func (s *Server) keepCommandLease(ctx context.Context, invocation store.CommandInvocation) func() {
+	lease := s.commandLease()
+	interval := lease / 3
+	if interval < 10*time.Millisecond {
+		interval = 10 * time.Millisecond
+	}
+	done := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				renewCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+				_, err := s.cfg.CommandStore.RenewCommandInvocation(renewCtx,
+					invocation.TenantID, invocation.SessionID, invocation.RequestID, lease)
+				cancel()
+				if err != nil {
+					s.cfg.Logger.Warn("command invocation lease renewal failed",
+						"tenant_id", invocation.TenantID, "session_id", invocation.SessionID,
+						"request_id", invocation.RequestID, "err", err)
+				}
+			}
+		}
+	}()
+	return func() { close(done) }
 }
 
 // dispatchCommand runs the seam and maps its failure onto a command outcome.
@@ -846,17 +1166,21 @@ func (s *Server) dispatchCommand(ctx context.Context, invocation *store.CommandI
 				"session_id", invocation.SessionID, "skill", resolved.skill, "err", err)
 			return store.CommandStatusError, CommandCodeToolError, "the skill library failed", nil
 		}
+		// The durable pin is a reference (name/hash/logical location) plus a
+		// BOUNDED body: a skill bundle is not copied whole into the event log.
 		payload := map[string]any{
 			"name":        detail.Name,
-			"description": detail.Description,
+			"description": boundText(detail.Description, 1024),
 			"hash":        detail.CurrentHash,
-			"body":        detail.Body,
+			"location":    detail.Path,
+			"body":        boundUTF8Text(detail.Body, commandSkillBodyMax),
 		}
 		if _, _, err := s.appendSessionEvent(ctx, *invocation, store.EventSkillLoaded, payload, commandEventKey(*invocation, "skill")); err != nil {
 			return store.CommandStatusError, CommandCodeToolError, "the skill load could not be recorded", nil
 		}
 		data, _ := json.Marshal(map[string]any{
-			"skill": detail.Name, "hash": detail.CurrentHash, "loadedFor": "next-turn",
+			"skill": detail.Name, "hash": detail.CurrentHash, "location": detail.Path,
+			"loadedFor": "next-turn",
 		})
 		return store.CommandStatusOK, "", "", data
 	case "plugin":
@@ -888,13 +1212,22 @@ func (s *Server) dispatchCommand(ctx context.Context, invocation *store.CommandI
 		if !json.Valid(result) {
 			return store.CommandStatusError, CommandCodeToolError, "the plugin tool returned invalid JSON", nil
 		}
+		var envelope struct {
+			IsError *bool `json:"isError"`
+		}
+		if err := json.Unmarshal(result, &envelope); err == nil && envelope.IsError != nil && *envelope.IsError {
+			// A plugin tool's own error is a typed command failure (502), not a
+			// successful 200 that hides the failure in the body.
+			return store.CommandStatusError, CommandCodeToolError, "the plugin tool reported an error", nil
+		}
 		return store.CommandStatusOK, "", "", result
 	}
 	return store.CommandStatusError, CommandCodeState, "the command source is unknown", nil
 }
 
-// finishCommand records a failed/refused terminal state and its projection.
-func (s *Server) finishCommand(ctx context.Context, invocation *store.CommandInvocation, status, code, message string, _ json.RawMessage, started time.Time, decisionID string) {
+// finishCommandFrom records a failed/refused terminal state and its projection,
+// only if the row is still in `from`. The bool reports whether this caller won.
+func (s *Server) finishCommandFrom(ctx context.Context, invocation *store.CommandInvocation, from, status, code, message string, _ json.RawMessage, started time.Time, decisionID string) bool {
 	eventSeq := s.recordCommandEvent(ctx, *invocation, status, code, message, nil, time.Since(started).Milliseconds(), decisionID)
 	invocation.Status = status
 	invocation.ErrorCode = code
@@ -904,15 +1237,18 @@ func (s *Server) finishCommand(ctx context.Context, invocation *store.CommandInv
 	if decisionID != "" {
 		invocation.DecisionID = decisionID
 	}
-	if err := s.cfg.CommandStore.UpdateCommandInvocation(ctx, *invocation); err != nil {
+	ok, err := s.cfg.CommandStore.TransitionCommandInvocation(ctx, *invocation, from)
+	if err != nil {
 		s.cfg.Logger.Error("command invocation state not persisted",
 			"tenant_id", invocation.TenantID, "session_id", invocation.SessionID,
 			"request_id", invocation.RequestID, "err", err)
+		return false
 	}
+	return ok
 }
 
-// finishCommandData records a successful terminal state and its projection.
-func (s *Server) finishCommandData(ctx context.Context, invocation *store.CommandInvocation, status, code, message string, data json.RawMessage, started time.Time, decisionID string) {
+// finishCommandDataFrom is finishCommandFrom for a successful result.
+func (s *Server) finishCommandDataFrom(ctx context.Context, invocation *store.CommandInvocation, from, status, code, message string, data json.RawMessage, started time.Time, decisionID string) bool {
 	bounded, truncated := boundCommandResult(data)
 	eventSeq := s.recordCommandEvent(ctx, *invocation, status, code, message, bounded, time.Since(started).Milliseconds(), decisionID)
 	invocation.Status = status
@@ -923,16 +1259,20 @@ func (s *Server) finishCommandData(ctx context.Context, invocation *store.Comman
 	if decisionID != "" {
 		invocation.DecisionID = decisionID
 	}
-	if err := s.cfg.CommandStore.UpdateCommandInvocation(ctx, *invocation); err != nil {
+	ok, err := s.cfg.CommandStore.TransitionCommandInvocation(ctx, *invocation, from)
+	if err != nil {
 		s.cfg.Logger.Error("command invocation state not persisted",
 			"tenant_id", invocation.TenantID, "session_id", invocation.SessionID,
 			"request_id", invocation.RequestID, "err", err)
+		return false
 	}
+	return ok
 }
 
 // recordCommandEvent appends the command.invoked projection beside the row. The
-// payload never carries the argument document or a secret; Data is the bounded
-// command result.
+// projection carries the same identity fields as the invocation ledger; the
+// ledger is the audit/idempotency truth, the event is what a chat renders. It
+// never carries the argument document or a secret; Data is the bounded result.
 func (s *Server) recordCommandEvent(ctx context.Context, invocation store.CommandInvocation, status, code, message string, data json.RawMessage, durationMs int64, decisionID string) int64 {
 	phase := "result"
 	if status == store.CommandStatusPendingDecision {
@@ -981,8 +1321,8 @@ func commandEventKey(invocation store.CommandInvocation, phase string) string {
 	return "command:" + invocation.RequestID + ":" + phase
 }
 
-// commandInvokedPayload is the durable command.invoked line. It never carries
-// the argument document: only its hash and byte length.
+// commandInvokedPayload is the durable command.invoked projection. It never
+// carries the argument document: only its hash and byte length.
 type commandInvokedPayload struct {
 	RequestID  string          `json:"requestId"`
 	Command    string          `json:"command"`
@@ -998,22 +1338,52 @@ type commandInvokedPayload struct {
 	Error      string          `json:"error,omitempty"`
 }
 
-// waitForCommand polls the claimed row until it settles. A same-process caller
-// holding a mutex would be faster, but the row is the authority across
-// processes; polling for the short execution window is the honest serialization.
+// waitForCommand polls the claimed row until it settles. A duplicate requestId
+// never executes: it waits for the owner, reclaims an expired lease once, and
+// otherwise answers the stored state.
 func (s *Server) waitForCommand(w http.ResponseWriter, r *http.Request, invocation store.CommandInvocation, resolved resolvedCommand, args json.RawMessage, started time.Time) {
 	deadline := time.Now().Add(s.commandWaitTimeout())
 	ticker := time.NewTicker(50 * time.Millisecond)
 	defer ticker.Stop()
 	for {
-		current, found, err := s.cfg.CommandStore.GetCommandInvocation(r.Context(), invocation.TenantID, invocation.SessionID, invocation.RequestID)
+		current, found, err := s.cfg.CommandStore.GetCommandInvocation(r.Context(),
+			invocation.TenantID, invocation.SessionID, invocation.RequestID)
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, err)
 			return
 		}
-		if found && current.Status != store.CommandStatusRunning {
+		if !found {
+			writeCommandError(w, http.StatusConflict, CommandCodeState, "the command invocation disappeared")
+			return
+		}
+		switch current.Status {
+		case store.CommandStatusOK, store.CommandStatusError, store.CommandStatusRefused,
+			store.CommandStatusTimedOut, store.CommandStatusCancelled:
 			s.replayCommand(w, r, current, resolved, args, current.ArgsHash, started)
 			return
+		case store.CommandStatusPendingDecision:
+			// The owner (or the next replay) will claim it after an approval.
+		case store.CommandStatusRunning:
+			// An expired lease means the owner died; one waiter reclaims it.
+			claimed, owned, err := s.cfg.CommandStore.ClaimCommandInvocation(r.Context(), current, s.commandLease())
+			if err != nil {
+				writeErr(w, http.StatusInternalServerError, err)
+				return
+			}
+			if owned {
+				idle, err := s.cfg.SessionIdle(r.Context(), claimed.TenantID, claimed.SessionID)
+				if err != nil {
+					writeErr(w, http.StatusInternalServerError, err)
+					return
+				}
+				if !idle {
+					writeCommandError(w, http.StatusConflict, CommandCodeBusy,
+						"session is busy; retry after the active turn settles")
+					return
+				}
+				s.runCommand(w, r, &claimed, resolved, args, started, claimed.DecisionID)
+				return
+			}
 		}
 		if time.Now().After(deadline) {
 			writeCommandError(w, http.StatusConflict, CommandCodeInProgress,
@@ -1080,7 +1450,8 @@ func commandErrorStatus(code string) int {
 	case CommandCodeDecisionTimeout:
 		return http.StatusRequestTimeout
 	case CommandCodeBusy, CommandCodeRequestConflict, CommandCodeInProgress,
-		CommandCodeDecisionCancelled, CommandCodeCompactDisabled, CommandCodeCompactConflict:
+		CommandCodeDecisionCancelled, CommandCodeDecisionConflict,
+		CommandCodeCompactDisabled, CommandCodeCompactConflict:
 		return http.StatusConflict
 	case CommandCodeQuota:
 		return http.StatusTooManyRequests
@@ -1200,21 +1571,92 @@ func validateCommandValue(schema map[string]any, value any, path string, depth i
 			return []pluginpkg.FieldError{{Field: path, Message: "is not one of the allowed values"}}
 		}
 	}
+	var fields []pluginpkg.FieldError
 	switch typed := value.(type) {
-	case map[string]any:
-		return validateCommandArgs(schema, typed, path, depth)
-	case []any:
-		items, _ := schema["items"].(map[string]any)
-		if items == nil {
-			return nil
+	case string:
+		if minimum, ok := commandSchemaInt(schema["minLength"]); ok && utf8.RuneCountInString(typed) < minimum {
+			fields = append(fields, pluginpkg.FieldError{Field: path, Message: fmt.Sprintf("must be at least %d characters", minimum)})
 		}
-		var fields []pluginpkg.FieldError
-		for index, item := range typed {
-			fields = append(fields, validateCommandValue(items, item, fmt.Sprintf("%s[%d]", path, index), depth+1)...)
+		if maximum, ok := commandSchemaInt(schema["maxLength"]); ok && utf8.RuneCountInString(typed) > maximum {
+			fields = append(fields, pluginpkg.FieldError{Field: path, Message: fmt.Sprintf("must be at most %d characters", maximum)})
+		}
+		if pattern, ok := schema["pattern"].(string); ok && pattern != "" {
+			if compiled, err := regexp.Compile(pattern); err == nil && !compiled.MatchString(typed) {
+				fields = append(fields, pluginpkg.FieldError{Field: path, Message: "does not match the declared pattern"})
+			}
+		}
+	case map[string]any:
+		return append(fields, validateCommandArgs(schema, typed, path, depth)...)
+	case []any:
+		if minimum, ok := commandSchemaInt(schema["minItems"]); ok && len(typed) < minimum {
+			fields = append(fields, pluginpkg.FieldError{Field: path, Message: fmt.Sprintf("must contain at least %d items", minimum)})
+		}
+		if maximum, ok := commandSchemaInt(schema["maxItems"]); ok && len(typed) > maximum {
+			fields = append(fields, pluginpkg.FieldError{Field: path, Message: fmt.Sprintf("must contain at most %d items", maximum)})
+		}
+		if unique, _ := schema["uniqueItems"].(bool); unique {
+			seen := map[string]bool{}
+			for _, item := range typed {
+				raw, _ := json.Marshal(item)
+				if seen[string(raw)] {
+					fields = append(fields, pluginpkg.FieldError{Field: path, Message: "must not contain duplicate items"})
+					break
+				}
+				seen[string(raw)] = true
+			}
+		}
+		items, _ := schema["items"].(map[string]any)
+		if items != nil {
+			for index, item := range typed {
+				fields = append(fields, validateCommandValue(items, item, fmt.Sprintf("%s[%d]", path, index), depth+1)...)
+			}
 		}
 		return fields
+	default:
+		if number, ok := commandSchemaNumber(value); ok {
+			if minimum, ok := commandSchemaNumber(schema["minimum"]); ok && number < minimum {
+				fields = append(fields, pluginpkg.FieldError{Field: path, Message: fmt.Sprintf("must be at least %v", minimum)})
+			}
+			if maximum, ok := commandSchemaNumber(schema["maximum"]); ok && number > maximum {
+				fields = append(fields, pluginpkg.FieldError{Field: path, Message: fmt.Sprintf("must be at most %v", maximum)})
+			}
+		}
 	}
-	return nil
+	return fields
+}
+
+func commandSchemaInt(value any) (int, bool) {
+	switch typed := value.(type) {
+	case int:
+		return typed, true
+	case int64:
+		return int(typed), true
+	case float64:
+		if typed == float64(int(typed)) {
+			return int(typed), true
+		}
+	case json.Number:
+		if parsed, err := typed.Int64(); err == nil {
+			return int(parsed), true
+		}
+	}
+	return 0, false
+}
+
+func commandSchemaNumber(value any) (float64, bool) {
+	switch typed := value.(type) {
+	case int:
+		return float64(typed), true
+	case int64:
+		return float64(typed), true
+	case float64:
+		return typed, true
+	case json.Number:
+		if parsed, err := typed.Float64(); err == nil {
+			return parsed, true
+		}
+	}
+	return 0, false
 }
 
 func valueMatchesCommandType(kind string, value any) bool {
@@ -1262,14 +1704,37 @@ func boundCommandResult(data json.RawMessage) (json.RawMessage, bool) {
 }
 
 func commandActor(principal access.Principal) string {
-	switch {
-	case principal.AccountID != uuid.Nil:
-		return principal.AccountID.String()
-	case principal.BotID != "":
+	// A bot principal is the BOT, not its owner account: the audit line must
+	// name the actor that invoked the command, and a Bot key is the credential
+	// that did.
+	if principal.BotID != "" {
 		return principal.BotID
-	default:
-		return ""
 	}
+	if principal.AccountID != uuid.Nil {
+		return principal.AccountID.String()
+	}
+	return ""
+}
+
+// boundUTF8Text cuts text to max bytes without splitting a UTF-8 rune and marks
+// the cut. It is used for event payload copies (skill descriptions/bodies).
+func boundUTF8Text(value string, max int) string {
+	if len(value) <= max {
+		return value
+	}
+	cut := value[:max]
+	for len(cut) > 0 && !utf8.RuneStart(cut[len(cut)-1]) {
+		cut = cut[:len(cut)-1]
+	}
+	return cut + "\n[truncated]"
+}
+
+// boundText is boundUTF8Text without a newline marker (short metadata).
+func boundText(value string, max int) string {
+	if len(value) <= max {
+		return value
+	}
+	return boundUTF8Text(value, max)
 }
 
 func sha256Hex(raw []byte) string {
@@ -1289,4 +1754,11 @@ func (s *Server) commandWaitTimeout() time.Duration {
 		return s.cfg.CommandWaitTimeout
 	}
 	return commandWaitDefault
+}
+
+func (s *Server) commandLease() time.Duration {
+	if s.cfg.CommandLease > 0 {
+		return s.cfg.CommandLease
+	}
+	return commandLeaseDefault
 }

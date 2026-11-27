@@ -1735,6 +1735,7 @@ CREATE TABLE IF NOT EXISTS command_invocations (
     args_bytes    int  NOT NULL DEFAULT 0,
     duration_ms   bigint NOT NULL DEFAULT 0,
     event_seq     bigint NOT NULL DEFAULT 0,
+    lease_until   timestamptz,
     result        jsonb,
     truncated     boolean NOT NULL DEFAULT false,
     error_code    text NOT NULL DEFAULT '',
@@ -1743,6 +1744,10 @@ CREATE TABLE IF NOT EXISTS command_invocations (
     updated_at    timestamptz NOT NULL DEFAULT now(),
     PRIMARY KEY (tenant_id, session_id, request_id)
 );
+
+-- Idempotent upgrade for a database that already carries the table from an
+-- earlier build of this change.
+ALTER TABLE command_invocations ADD COLUMN IF NOT EXISTS lease_until timestamptz;
 
 CREATE INDEX IF NOT EXISTS command_invocations_session
     ON command_invocations (tenant_id, session_id, created_at DESC);

@@ -276,6 +276,9 @@ type Config struct {
 	// CommandWaitTimeout bounds how long a duplicate requestId waits for the
 	// in-flight execution it collided with (default 30s).
 	CommandWaitTimeout time.Duration
+	// CommandLease bounds one execution's ownership. A live executor renews it;
+	// a replay that finds an expired lease reclaims the orphaned run. Default 2m.
+	CommandLease time.Duration
 	// Provisioner is the tenant provisioning surface (POST /v1/admin/tenants).
 	// Nil answers 501: a deployment without it has no operator path, which is a
 	// configuration choice, not a bug.

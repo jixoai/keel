@@ -140,6 +140,22 @@ func ReservedCommandNames() []string {
 	return []string{"compact", "learn", "skill"}
 }
 
+// ReservedPluginIDs are plugin ids whose published command namespace would
+// collide with a builtin family. `skill` is reserved: its commands would be
+// published as `skill:<name>`, exactly the builtin `/skill:<name>` spelling.
+func ReservedPluginIDs() []string { return []string{"skill"} }
+
+// ReservedPluginID reports whether a plugin id is reserved by the command
+// contract.
+func ReservedPluginID(id string) bool {
+	for _, reserved := range ReservedPluginIDs() {
+		if id == reserved {
+			return true
+		}
+	}
+	return false
+}
+
 // ReservedCommandName reports whether name collides with a builtin command name
 // or the `skill:` family. A plugin's local name is what is checked; the
 // published name is always namespaced.
@@ -164,6 +180,8 @@ func (m *Manifest) validateCommands(errs *fieldSet, declaredTools map[string]boo
 		switch {
 		case name == "":
 			errs.add(prefix+".name", "name is required")
+		case command.Name != name:
+			errs.add(prefix+".name", "name must not carry leading or trailing whitespace")
 		case !commandNamePattern.MatchString(name):
 			errs.add(prefix+".name", "name %q must match %s", command.Name, commandNamePattern.String())
 		case ReservedCommandName(name):
@@ -188,6 +206,8 @@ func (m *Manifest) validateCommands(errs *fieldSet, declaredTools map[string]boo
 		switch {
 		case tool == "":
 			errs.add(prefix+".tool", "tool is required: a command is a named entrance to a tool this plugin declares")
+		case command.Tool != tool:
+			errs.add(prefix+".tool", "tool must not carry leading or trailing whitespace")
 		case !declaredTools[tool]:
 			errs.add(prefix+".tool", "tool %q is not declared by this manifest's provides.tools", tool)
 		}
@@ -213,6 +233,8 @@ func (m *Manifest) validateCommands(errs *fieldSet, declaredTools map[string]boo
 					errs.add(prefix+".args_schema", "args_schema is not a JSON object schema: %v", err)
 				} else if kind, _ := schema.Type.(string); kind != "object" {
 					errs.add(prefix+".args_schema", "args_schema must be a JSON object schema (top-level type: object)")
+				} else {
+					validateCommandSchemaKeywords(errs, prefix+".args_schema", command.ArgsSchema, 0)
 				}
 			}
 		}
@@ -237,6 +259,160 @@ func (m *Manifest) validateCommands(errs *fieldSet, declaredTools map[string]boo
 			continue
 		}
 	}
+}
+
+// commandSchemaKeywords is the closed set of JSON-schema keywords a command
+// args schema may use. The execution validator implements every one of them;
+// anything else (oneOf/anyOf/allOf/$ref/format/const/...) is refused at install
+// instead of being silently ignored.
+var commandSchemaKeywords = map[string]bool{
+	"type": true, "description": true, "title": true, "default": true,
+	"enum": true, "examples": true,
+	"properties": true, "required": true, "additionalProperties": true,
+	"items": true, "minItems": true, "maxItems": true, "uniqueItems": true,
+	"minLength": true, "maxLength": true, "pattern": true,
+	"minimum": true, "maximum": true,
+}
+
+// commandSchemaTypes is the closed set of JSON types a command schema may name.
+var commandSchemaTypes = map[string]bool{
+	"object": true, "array": true, "string": true, "number": true, "integer": true, "boolean": true,
+}
+
+// validateCommandSchemaKeywords walks the schema recursively and rejects an
+// unsupported keyword or a keyword value that the runtime cannot enforce. The
+// field path is the manifest's own snake_case path
+// (provides.commands[0].args_schema.properties.path.pattern).
+func validateCommandSchemaKeywords(errs *fieldSet, prefix string, schema map[string]any, depth int) {
+	if depth > 8 {
+		errs.add(prefix, "args_schema is nested too deeply")
+		return
+	}
+	var properties map[string]any
+	for keyword, value := range schema {
+		path := prefix + "." + keyword
+		if !commandSchemaKeywords[keyword] {
+			errs.add(path, "keyword %q is not supported by command args schemas", keyword)
+			continue
+		}
+		switch keyword {
+		case "type":
+			kind, ok := value.(string)
+			if !ok || !commandSchemaTypes[kind] {
+				errs.add(path, "type must be one of object|array|string|number|integer|boolean")
+			}
+		case "properties":
+			props, ok := value.(map[string]any)
+			if !ok {
+				errs.add(path, "properties must be an object")
+				continue
+			}
+			properties = props
+			for name, raw := range props {
+				property, ok := raw.(map[string]any)
+				if !ok {
+					errs.add(path+"."+name, "a property schema must be an object")
+					continue
+				}
+				validateCommandSchemaKeywords(errs, path+"."+name, property, depth+1)
+			}
+		case "required":
+			names := schemaStringList(value)
+			if names == nil {
+				errs.add(path, "required must be an array of strings")
+			}
+		case "items":
+			item, ok := value.(map[string]any)
+			if !ok {
+				errs.add(path, "items must be an object schema")
+				continue
+			}
+			validateCommandSchemaKeywords(errs, path, item, depth+1)
+		case "additionalProperties":
+			allowed, ok := value.(bool)
+			if !ok {
+				errs.add(path, "additionalProperties must be a boolean")
+			} else if allowed {
+				errs.add(path, "additionalProperties: true is not supported: undeclared command arguments are always refused")
+			}
+		case "pattern":
+			pattern, ok := value.(string)
+			if !ok {
+				errs.add(path, "pattern must be a string")
+				continue
+			}
+			if _, err := regexp.Compile(pattern); err != nil {
+				errs.add(path, "pattern is not a valid regular expression: %v", err)
+			}
+		case "minLength", "maxLength", "minItems", "maxItems":
+			if number, ok := schemaInteger(value); !ok || number < 0 {
+				errs.add(path, "%s must be a non-negative integer", keyword)
+			}
+		case "minimum", "maximum":
+			if _, ok := schemaNumber(value); !ok {
+				errs.add(path, "%s must be a number", keyword)
+			}
+		case "uniqueItems":
+			if _, ok := value.(bool); !ok {
+				errs.add(path, "uniqueItems must be a boolean")
+			}
+		case "enum":
+			if _, ok := value.([]any); !ok {
+				errs.add(path, "enum must be an array")
+			}
+		}
+	}
+	if names := schemaStringList(schema["required"]); len(names) > 0 {
+		for _, name := range names {
+			if _, declared := properties[name]; !declared {
+				errs.add(prefix+".required", "required argument %q is not declared in properties", name)
+			}
+		}
+	}
+}
+
+func schemaStringList(value any) []string {
+	switch typed := value.(type) {
+	case []string:
+		return typed
+	case []any:
+		out := make([]string, 0, len(typed))
+		for _, item := range typed {
+			name, ok := item.(string)
+			if !ok {
+				return nil
+			}
+			out = append(out, name)
+		}
+		return out
+	}
+	return nil
+}
+
+func schemaInteger(value any) (int, bool) {
+	switch typed := value.(type) {
+	case int:
+		return typed, true
+	case int64:
+		return int(typed), true
+	case float64:
+		if typed == float64(int(typed)) {
+			return int(typed), true
+		}
+	}
+	return 0, false
+}
+
+func schemaNumber(value any) (float64, bool) {
+	switch typed := value.(type) {
+	case int:
+		return float64(typed), true
+	case int64:
+		return float64(typed), true
+	case float64:
+		return typed, true
+	}
+	return 0, false
 }
 
 // CommandByName returns the declaration with the given local name.

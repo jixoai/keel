@@ -115,6 +115,8 @@ var rlsTenantTables = []string{
 	"collab_source_events",
 	"collab_outbox",
 	"collab_session_index",
+	// Commands (keel-plugin-commands): the requestId ledger is tenant-scoped.
+	"command_invocations",
 }
 
 // ApplyRLS applies the RLS migration. It is safe to run on every boot, on a

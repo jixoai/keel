@@ -1124,14 +1124,9 @@ func (r *Runner) run(ctx context.Context, lease kernel.Lease, span telemetry.Spa
 	// A `/skill:<name>` command pins the skill for the NEXT turn by appending a
 	// durable skill.loaded event. The attempt projects pending pins into the
 	// system prompt by reference; no user/assistant event is fabricated.
+	preloadedSection := skillPreloadSection(events)
 	systemPrompt := applySkillPreload(r.systemPromptFor(surface), events)
-	if surface.PromptHash == "" && strings.TrimSpace(surface.Prompt) != "" {
-		// No host renderer contributed sections: the wire prompt IS the binding
-		// text, so its digest is the binding's.
-		res.Summary.PromptHash = digestPrompt(surface.Prompt)
-	} else if strings.TrimSpace(surface.Prompt) != "" || strings.TrimSpace(systemPrompt) != "" {
-		res.Summary.PromptHash = digestPrompt(systemPrompt)
-	}
+	res.Summary.PromptHash = promptSummaryHash(surface, systemPrompt, preloadedSection != "")
 	if r.Hooks != nil && promptCount > 0 {
 		beforePrompt := systemPrompt
 		systemPrompt = r.applyBeforeAgentStart(ctx, systemPrompt, trailingUserText(msgs))

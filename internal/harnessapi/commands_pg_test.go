@@ -33,7 +33,7 @@ type commandPGHarness struct {
 	tools   *fakeCommandTools
 }
 
-func newCommandPGHarness(t *testing.T) *commandPGHarness {
+func newCommandPGHarness(t *testing.T, mutate ...func(*Config)) *commandPGHarness {
 	t.Helper()
 	dsn := os.Getenv("KEEL_TEST_DSN")
 	if dsn == "" {
@@ -64,7 +64,7 @@ func newCommandPGHarness(t *testing.T) *commandPGHarness {
 	t.Cleanup(broker.Close)
 	plugins := &fakeCommandPlugins{}
 	tools := &fakeCommandTools{result: json.RawMessage(`{"ok":true}`)}
-	server := httptest.NewServer(New(Config{
+	cfg := Config{
 		Access: commandAccess(),
 		Logger: testLogger(),
 		SessionExists: func(ctx context.Context, tenantID, sessionID uuid.UUID) (bool, error) {
@@ -77,7 +77,11 @@ func newCommandPGHarness(t *testing.T) *commandPGHarness {
 		CommandStore:   st,
 		CommandPlugins: plugins,
 		CommandTools:   tools,
-	}))
+	}
+	for _, apply := range mutate {
+		apply(&cfg)
+	}
+	server := httptest.NewServer(New(cfg))
 	t.Cleanup(server.Close)
 	return &commandPGHarness{st: st, server: server, tenant: tenant, session: session,
 		compact: compact, broker: broker, plugins: plugins, tools: tools}
@@ -91,13 +95,13 @@ func (h *commandPGHarness) do(t *testing.T, tenant uuid.UUID, body any) (int, ma
 	return code, out
 }
 
-func (h *commandPGHarness) postAsync(tenant uuid.UUID, body any) (int, error) {
+func (h *commandPGHarness) postAsync(tenant uuid.UUID, name string, body any) (int, error) {
 	raw, err := json.Marshal(body)
 	if err != nil {
 		return 0, err
 	}
 	request, err := http.NewRequest(http.MethodPost,
-		h.server.URL+"/v1/sessions/"+h.session.String()+"/commands/compact", strings.NewReader(string(raw)))
+		h.server.URL+"/v1/sessions/"+h.session.String()+"/commands/"+name, strings.NewReader(string(raw)))
 	if err != nil {
 		return 0, err
 	}
@@ -187,7 +191,7 @@ func TestCommandPGConcurrentRequestID(t *testing.T) {
 		wg.Add(1)
 		go func(slot int) {
 			defer wg.Done()
-			code, err := harness.postAsync(harness.tenant, map[string]any{"requestId": "req-concurrent"})
+			code, err := harness.postAsync(harness.tenant, "compact", map[string]any{"requestId": "req-concurrent"})
 			if err != nil {
 				codes[slot] = -1
 				return
@@ -240,4 +244,103 @@ func TestCommandPGDestructiveRowPersistsDecision(t *testing.T) {
 	if harness.tools.callCount() != 1 {
 		t.Fatalf("destructive tool calls = %d", harness.tools.callCount())
 	}
+}
+
+func TestCommandPGDestructiveApprovedConcurrentReplay(t *testing.T) {
+	harness := newCommandPGHarness(t, func(cfg *Config) {
+		cfg.CommandStore = newBarrierCommandStore(cfg.CommandStore.(*store.Store), 4)
+	})
+	harness.plugins.registry.Commands = []harnessext.PluginCommand{
+		pluginCommandFixture("vendor.one", "purge", pluginpkg.DangerDestructive, true, ""),
+	}
+	harness.tools.delay = 150 * time.Millisecond
+	path := "/v1/sessions/" + harness.session.String() + "/commands/vendor.one:purge"
+	var first map[string]any
+	if code := doJSON(t, harness.server.Client(), http.MethodPost, harness.server.URL+path,
+		harness.tenant, map[string]any{"requestId": "req-pg-cas", "args": map[string]any{}}, &first); code != http.StatusAccepted {
+		t.Fatalf("destructive open = %d %v", code, first)
+	}
+	if _, _, err := harness.broker.Answer(context.Background(), harnessext.AnswerDecisionRequest{
+		TenantID: harness.tenant, SessionID: harness.session,
+		DecisionID: uuid.MustParse(first["decisionId"].(string)), OptionID: commandDecisionOptionOK,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var wg sync.WaitGroup
+	codes := make([]int, 4)
+	for index := range codes {
+		wg.Add(1)
+		go func(slot int) {
+			defer wg.Done()
+			code, err := harness.postAsync(harness.tenant, "vendor.one:purge",
+				map[string]any{"requestId": "req-pg-cas", "args": map[string]any{}})
+			if err != nil {
+				codes[slot] = -1
+				return
+			}
+			codes[slot] = code
+		}(index)
+	}
+	wg.Wait()
+	for index, code := range codes {
+		if code != http.StatusOK {
+			t.Fatalf("approved replay[%d] = %d, want 200", index, code)
+		}
+	}
+	if harness.tools.callCount() != 1 {
+		t.Fatalf("PG approved concurrent replays executed the tool %d times, want 1", harness.tools.callCount())
+	}
+	row, found, err := harness.st.GetCommandInvocation(context.Background(), harness.tenant, harness.session, "req-pg-cas")
+	if err != nil || !found || row.Status != store.CommandStatusOK {
+		t.Fatalf("terminal row = %+v found=%v err=%v", row, found, err)
+	}
+}
+
+func TestCommandPGReclaimsExpiredRunningLease(t *testing.T) {
+	harness := newCommandPGHarness(t)
+	if _, owned, err := harness.st.ClaimCommandInvocation(context.Background(), store.CommandInvocation{
+		TenantID: harness.tenant, SessionID: harness.session, RequestID: "req-orphan",
+		Command: "compact", Source: "builtin", Status: store.CommandStatusRunning,
+		ArgsHash: sha256Hex([]byte("{}")), ArgsBytes: 2,
+	}, 40*time.Millisecond); err != nil || !owned {
+		t.Fatalf("seed orphan = owned=%v err=%v", owned, err)
+	}
+	time.Sleep(120 * time.Millisecond)
+	code, body := harness.do(t, harness.tenant, map[string]any{"requestId": "req-orphan", "args": map[string]any{}})
+	if code != http.StatusOK || body["status"] != store.CommandStatusOK {
+		t.Fatalf("orphan reclaim = %d %v", code, body)
+	}
+	if harness.compact.callCount() != 1 {
+		t.Fatalf("orphan executions = %d", harness.compact.callCount())
+	}
+}
+
+// barrierCommandStore forces every concurrent replay into ClaimDecisionResult
+// before any of them can win, so the pending_decision CAS test deterministically
+// exercises the P0 race instead of depending on scheduling.
+type barrierCommandStore struct {
+	*store.Store
+	mu      sync.Mutex
+	waiting int
+	target  int
+	release chan struct{}
+}
+
+func newBarrierCommandStore(st *store.Store, target int) *barrierCommandStore {
+	return &barrierCommandStore{Store: st, target: target, release: make(chan struct{})}
+}
+
+func (b *barrierCommandStore) ClaimDecisionResult(ctx context.Context, tenantID, sessionID uuid.UUID, requestID string, lease time.Duration) (store.CommandInvocation, bool, error) {
+	b.mu.Lock()
+	b.waiting++
+	if b.waiting == b.target {
+		close(b.release)
+	}
+	b.mu.Unlock()
+	select {
+	case <-b.release:
+	case <-ctx.Done():
+		return store.CommandInvocation{}, false, ctx.Err()
+	}
+	return b.Store.ClaimDecisionResult(ctx, tenantID, sessionID, requestID, lease)
 }

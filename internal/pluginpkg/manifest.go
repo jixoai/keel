@@ -778,6 +778,8 @@ func (m *Manifest) validateIdentity(errs *fieldSet) (validID, validVersion, vali
 		errs.add("id", "id is required")
 	case !idPattern.MatchString(m.ID):
 		errs.add("id", "id %q must match ^[a-z][a-z0-9._-]{1,63}$", m.ID)
+	case ReservedPluginID(m.ID):
+		errs.add("id", "id %q is reserved: /skill:<name> is the builtin skill command family", m.ID)
 	default:
 		validID = true
 	}

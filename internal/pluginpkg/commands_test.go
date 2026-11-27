@@ -82,6 +82,7 @@ func TestManifestCommandFieldErrors(t *testing.T) {
 	}{
 		{"name missing", func(m *Manifest) { m.Provides.Commands[0].Name = "" }, "provides.commands[0].name"},
 		{"name uppercase", func(m *Manifest) { m.Provides.Commands[0].Name = "Reindex" }, "provides.commands[0].name"},
+		{"name whitespace", func(m *Manifest) { m.Provides.Commands[0].Name = " reindex" }, "provides.commands[0].name"},
 		{"name starts with digit", func(m *Manifest) { m.Provides.Commands[0].Name = "1reindex" }, "provides.commands[0].name"},
 		{"name too long", func(m *Manifest) { m.Provides.Commands[0].Name = "a" + strings.Repeat("b", 32) }, "provides.commands[0].name"},
 		{"name duplicate", func(m *Manifest) {
@@ -94,11 +95,43 @@ func TestManifestCommandFieldErrors(t *testing.T) {
 		{"description too long", func(m *Manifest) { m.Provides.Commands[0].Description = strings.Repeat("x", 2049) }, "provides.commands[0].description"},
 		{"tool missing", func(m *Manifest) { m.Provides.Commands[0].Tool = "" }, "provides.commands[0].tool"},
 		{"tool foreign", func(m *Manifest) { m.Provides.Commands[0].Tool = "other_run" }, "provides.commands[0].tool"},
+		{"tool whitespace", func(m *Manifest) { m.Provides.Commands[0].Tool = " thing_run" }, "provides.commands[0].tool"},
 		{"danger missing", func(m *Manifest) { m.Provides.Commands[0].Danger = "" }, "provides.commands[0].danger"},
 		{"danger unknown", func(m *Manifest) { m.Provides.Commands[0].Danger = "nuclear" }, "provides.commands[0].danger"},
 		{"schema explicitly empty", func(m *Manifest) {
 			m.Provides.Commands[0].ArgsSchema = map[string]any{}
 		}, "provides.commands[0].args_schema"},
+		{"schema unsupported keyword", func(m *Manifest) {
+			m.Provides.Commands[0].ArgsSchema = map[string]any{
+				"type": "object", "oneOf": []any{map[string]any{"type": "object"}},
+			}
+		}, "provides.commands[0].args_schema.oneOf"},
+		{"schema format keyword", func(m *Manifest) {
+			m.Provides.Commands[0].ArgsSchema = map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"when": map[string]any{"type": "string", "format": "date-time"},
+				},
+			}
+		}, "provides.commands[0].args_schema.properties.when.format"},
+		{"schema additionalProperties true", func(m *Manifest) {
+			m.Provides.Commands[0].ArgsSchema = map[string]any{
+				"type": "object", "additionalProperties": true,
+			}
+		}, "provides.commands[0].args_schema.additionalProperties"},
+		{"schema bad pattern", func(m *Manifest) {
+			m.Provides.Commands[0].ArgsSchema = map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"name": map[string]any{"type": "string", "pattern": "("},
+				},
+			}
+		}, "provides.commands[0].args_schema.properties.name.pattern"},
+		{"schema required undeclared", func(m *Manifest) {
+			m.Provides.Commands[0].ArgsSchema = map[string]any{
+				"type": "object", "required": []any{"missing"},
+			}
+		}, "provides.commands[0].args_schema.required"},
 		{"schema not object", func(m *Manifest) {
 			m.Provides.Commands[0].ArgsSchema = map[string]any{"type": "string"}
 		}, "provides.commands[0].args_schema"},
@@ -226,5 +259,15 @@ func TestCommandManifestFixture(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, PluginFileName)); err != nil {
 		t.Fatalf("fixture manifest: %v", err)
+	}
+}
+
+func TestManifestReservedPluginID(t *testing.T) {
+	manifest := commandManifest()
+	manifest.ID = "skill"
+	err := manifest.Validate(testEnv())
+	requireField(t, err, "id")
+	if !ReservedPluginID("skill") || ReservedPluginID("skills") {
+		t.Fatal("reserved plugin id grammar is wrong")
 	}
 }

@@ -3,14 +3,30 @@ package store
 // Command invocation records (change keel-plugin-commands).
 //
 // One chat command call is one row keyed by (tenant, session, requestId). The
-// row is the durable idempotency fact and the audit account of the call:
+// row is the durable idempotency/audit ledger of the call:
 // command/source/actor/status/decisionId/duration, the argument hash and length
 // (never the argument document), and the bounded result the first call
 // produced. A replay reads this row instead of executing the command again.
 //
-// The event log carries the user-facing `command.invoked` projection; this table
-// carries the requestId state machine, including the phase where a destructive
-// command waits for its durable decision.
+// The event log carries the user-facing `command.invoked` projection (the row
+// the chat renders); THIS TABLE is the audit/idempotency truth. The two carry
+// the same identity fields; only the table owns the running/pending phase and
+// the conditional transitions that make one requestId execute exactly once.
+//
+// State machine:
+//
+//	          insert (owner)
+//	                v
+//	            running --idle/plugin/permission failure--> terminal
+//	                |
+//	                +--danger=destructive--> pending_decision
+//	                                            |
+//	                        answered allow ---> running (ClaimDecisionResult)
+//	                        deny/timeout/cancel -> terminal (conditional)
+//
+// A `running` row carries a lease. A replay that finds an expired lease may
+// reclaim the execution (ClaimCommandInvocation); a live executor renews its
+// lease (RenewCommandInvocation), so a healthy long command is never stolen.
 
 import (
 	"context"
@@ -54,7 +70,8 @@ type CommandInvocation struct {
 	Command string
 	// Source is builtin|plugin|skill.
 	Source string
-	// Actor is the calling principal label (account or bot id).
+	// Actor is the calling principal label (a Bot id for a bot principal, else
+	// an account id).
 	Actor string
 	// Status is one of the CommandStatus* values.
 	Status string
@@ -77,8 +94,11 @@ type CommandInvocation struct {
 	// is a stable, argument-free description.
 	ErrorCode    string
 	ErrorMessage string
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
+	// LeaseUntil is the running owner's lease (nil for a terminal state or a
+	// pending decision).
+	LeaseUntil *time.Time
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
 }
 
 // Terminal reports whether the row reached a final state (a replay answers it
@@ -91,36 +111,54 @@ func (c CommandInvocation) Terminal() bool {
 	return false
 }
 
-// ClaimCommandInvocation inserts the running row, or returns the existing row
-// when the requestId was already used. inserted reports that this caller owns
-// the execution; a false value means the caller must replay the stored state.
-func (s *Store) ClaimCommandInvocation(ctx context.Context, row CommandInvocation) (CommandInvocation, bool, error) {
+// commandInvocationColumns is the one projection every read/write returns, so a
+// new column cannot be forgotten in one of them.
+const commandInvocationColumns = `tenant_id, session_id, request_id, command, source, actor, status,
+	COALESCE(decision_id::text, ''), args_hash, args_bytes, duration_ms, event_seq,
+	result, truncated, error_code, error_message, lease_until, created_at, updated_at`
+
+func scanCommandInvocation(row interface{ Scan(...any) error }) (CommandInvocation, error) {
+	var invitation CommandInvocation
+	var result []byte
+	err := row.Scan(
+		&invitation.TenantID, &invitation.SessionID, &invitation.RequestID,
+		&invitation.Command, &invitation.Source, &invitation.Actor, &invitation.Status,
+		&invitation.DecisionID, &invitation.ArgsHash, &invitation.ArgsBytes,
+		&invitation.DurationMs, &invitation.EventSeq, &result, &invitation.Truncated,
+		&invitation.ErrorCode, &invitation.ErrorMessage, &invitation.LeaseUntil,
+		&invitation.CreatedAt, &invitation.UpdatedAt,
+	)
+	if err != nil {
+		return CommandInvocation{}, err
+	}
+	if len(result) > 0 {
+		invitation.Result = json.RawMessage(result)
+	}
+	return invitation, nil
+}
+
+// ClaimCommandInvocation inserts the running row, reclaims an expired running
+// lease, or returns the existing row. owned reports that this caller must
+// execute; false means the caller replays or waits for the stored state.
+func (s *Store) ClaimCommandInvocation(ctx context.Context, row CommandInvocation, lease time.Duration) (CommandInvocation, bool, error) {
 	if row.TenantID == uuid.Nil || row.SessionID == uuid.Nil || row.RequestID == "" {
 		return CommandInvocation{}, false, errors.New("store: command invocation needs tenant, session and requestId")
 	}
 	if row.Status == "" {
 		row.Status = CommandStatusRunning
 	}
-	var result []byte
-	err := s.pool.QueryRow(ctx,
+	created, err := scanCommandInvocation(s.pool.QueryRow(ctx,
 		`INSERT INTO command_invocations
 		    (tenant_id, session_id, request_id, command, source, actor, status,
-		     decision_id, args_hash, args_bytes)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, NULLIF($8, '')::uuid, $9, $10)
+		     decision_id, args_hash, args_bytes, lease_until)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, NULLIF($8, '')::uuid, $9, $10,
+		         now() + make_interval(secs => $11))
 		 ON CONFLICT (tenant_id, session_id, request_id) DO NOTHING
-		 RETURNING tenant_id, session_id, request_id, command, source, actor, status,
-		           COALESCE(decision_id::text, ''), args_hash, args_bytes, duration_ms, event_seq,
-		           result, truncated, error_code, error_message, created_at, updated_at`,
+		 RETURNING `+commandInvocationColumns,
 		row.TenantID, row.SessionID, row.RequestID, row.Command, row.Source, row.Actor, row.Status,
-		row.DecisionID, row.ArgsHash, row.ArgsBytes).Scan(
-		&row.TenantID, &row.SessionID, &row.RequestID, &row.Command, &row.Source, &row.Actor, &row.Status,
-		&row.DecisionID, &row.ArgsHash, &row.ArgsBytes, &row.DurationMs, &row.EventSeq,
-		&result, &row.Truncated, &row.ErrorCode, &row.ErrorMessage, &row.CreatedAt, &row.UpdatedAt)
+		row.DecisionID, row.ArgsHash, row.ArgsBytes, leaseSeconds(lease)))
 	if err == nil {
-		if len(result) > 0 {
-			row.Result = json.RawMessage(result)
-		}
-		return row, true, nil
+		return created, true, nil
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
 		return CommandInvocation{}, false, fmt.Errorf("store: claim command invocation: %w", err)
@@ -132,54 +170,132 @@ func (s *Store) ClaimCommandInvocation(ctx context.Context, row CommandInvocatio
 	if !found {
 		return CommandInvocation{}, false, fmt.Errorf("store: command invocation %q vanished after a conflict", row.RequestID)
 	}
+	if existing.Status == CommandStatusRunning {
+		// An expired lease belongs to a crashed/abandoned executor. The
+		// conditional UPDATE is the CAS: exactly one replay reclaims it.
+		reclaimed, err := scanCommandInvocation(s.pool.QueryRow(ctx,
+			`UPDATE command_invocations
+			    SET status = 'running',
+			        lease_until = now() + make_interval(secs => $4),
+			        updated_at = now()
+			  WHERE tenant_id = $1 AND session_id = $2 AND request_id = $3
+			    AND status = 'running'
+			    AND (lease_until IS NULL OR lease_until <= now())
+			  RETURNING `+commandInvocationColumns,
+			row.TenantID, row.SessionID, row.RequestID, leaseSeconds(lease)))
+		if err == nil {
+			return reclaimed, true, nil
+		}
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return CommandInvocation{}, false, fmt.Errorf("store: reclaim command invocation: %w", err)
+		}
+		// A live lease: read the row again (the winner may have advanced it).
+		existing, found, err = s.GetCommandInvocation(ctx, row.TenantID, row.SessionID, row.RequestID)
+		if err != nil {
+			return CommandInvocation{}, false, err
+		}
+		if !found {
+			return CommandInvocation{}, false, fmt.Errorf("store: command invocation %q disappeared", row.RequestID)
+		}
+	}
 	return existing, false, nil
+}
+
+// ClaimDecisionResult is the CAS that turns one pending destructive decision's
+// approval into exactly one execution: pending_decision -> running. Only the
+// caller that gets owned=true may call the tool; every other replay waits for
+// the terminal row.
+func (s *Store) ClaimDecisionResult(ctx context.Context, tenantID, sessionID uuid.UUID, requestID string, lease time.Duration) (CommandInvocation, bool, error) {
+	claimed, err := scanCommandInvocation(s.pool.QueryRow(ctx,
+		`UPDATE command_invocations
+		    SET status = 'running',
+		        lease_until = now() + make_interval(secs => $4),
+		        updated_at = now()
+		  WHERE tenant_id = $1 AND session_id = $2 AND request_id = $3
+		    AND status = 'pending_decision'
+		  RETURNING `+commandInvocationColumns,
+		tenantID, sessionID, requestID, leaseSeconds(lease)))
+	if err == nil {
+		return claimed, true, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return CommandInvocation{}, false, fmt.Errorf("store: claim command decision result: %w", err)
+	}
+	existing, found, err := s.GetCommandInvocation(ctx, tenantID, sessionID, requestID)
+	if err != nil {
+		return CommandInvocation{}, false, err
+	}
+	if !found {
+		return CommandInvocation{}, false, fmt.Errorf("store: command invocation %q not found", requestID)
+	}
+	return existing, false, nil
+}
+
+// RenewCommandInvocation renews a live execution's lease.
+func (s *Store) RenewCommandInvocation(ctx context.Context, tenantID, sessionID uuid.UUID, requestID string, lease time.Duration) (bool, error) {
+	tag, err := s.pool.Exec(ctx,
+		`UPDATE command_invocations
+		    SET lease_until = now() + make_interval(secs => $4),
+		        updated_at = now()
+		  WHERE tenant_id = $1 AND session_id = $2 AND request_id = $3
+		    AND status = 'running'`,
+		tenantID, sessionID, requestID, leaseSeconds(lease))
+	if err != nil {
+		return false, fmt.Errorf("store: renew command invocation: %w", err)
+	}
+	return tag.RowsAffected() == 1, nil
+}
+
+// TransitionCommandInvocation persists a state transition only from the status
+// the caller observed. It is the guard that keeps a terminal write from
+// overwriting a concurrent one; false means the row moved and the caller must
+// read the current state.
+func (s *Store) TransitionCommandInvocation(ctx context.Context, row CommandInvocation, from string) (bool, error) {
+	if row.TenantID == uuid.Nil || row.SessionID == uuid.Nil || row.RequestID == "" {
+		return false, errors.New("store: command invocation needs tenant, session and requestId")
+	}
+	tag, err := s.pool.Exec(ctx,
+		`UPDATE command_invocations
+		    SET status = $5, decision_id = NULLIF($6, '')::uuid, duration_ms = $7,
+		        event_seq = $8, result = $9, truncated = $10, error_code = $11, error_message = $12,
+		        lease_until = CASE WHEN $5 = 'running' THEN lease_until ELSE NULL END,
+		        updated_at = now()
+		  WHERE tenant_id = $1 AND session_id = $2 AND request_id = $3 AND status = $4`,
+		row.TenantID, row.SessionID, row.RequestID, from, row.Status, row.DecisionID,
+		row.DurationMs, row.EventSeq, nullableJSON(row.Result), row.Truncated,
+		row.ErrorCode, row.ErrorMessage)
+	if err != nil {
+		return false, fmt.Errorf("store: transition command invocation: %w", err)
+	}
+	return tag.RowsAffected() == 1, nil
 }
 
 // GetCommandInvocation reads one row. A foreign tenant/session answers found
 // false, never another row.
 func (s *Store) GetCommandInvocation(ctx context.Context, tenantID, sessionID uuid.UUID, requestID string) (CommandInvocation, bool, error) {
-	var row CommandInvocation
-	var result []byte
-	err := s.pool.QueryRow(ctx,
-		`SELECT tenant_id, session_id, request_id, command, source, actor, status,
-		        COALESCE(decision_id::text, ''), args_hash, args_bytes, duration_ms, event_seq,
-		        result, truncated, error_code, error_message, created_at, updated_at
+	row, err := scanCommandInvocation(s.pool.QueryRow(ctx,
+		`SELECT `+commandInvocationColumns+`
 		   FROM command_invocations
 		  WHERE tenant_id = $1 AND session_id = $2 AND request_id = $3`,
-		tenantID, sessionID, requestID).Scan(
-		&row.TenantID, &row.SessionID, &row.RequestID, &row.Command, &row.Source, &row.Actor, &row.Status,
-		&row.DecisionID, &row.ArgsHash, &row.ArgsBytes, &row.DurationMs, &row.EventSeq,
-		&result, &row.Truncated, &row.ErrorCode, &row.ErrorMessage, &row.CreatedAt, &row.UpdatedAt)
+		tenantID, sessionID, requestID))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return CommandInvocation{}, false, nil
 	}
 	if err != nil {
 		return CommandInvocation{}, false, fmt.Errorf("store: get command invocation: %w", err)
 	}
-	if len(result) > 0 {
-		row.Result = json.RawMessage(result)
-	}
 	return row, true, nil
 }
 
-// UpdateCommandInvocation persists a state transition (decision open, terminal
-// result). The identity columns are immutable; updated_at advances.
-func (s *Store) UpdateCommandInvocation(ctx context.Context, row CommandInvocation) error {
-	if row.TenantID == uuid.Nil || row.SessionID == uuid.Nil || row.RequestID == "" {
-		return errors.New("store: command invocation needs tenant, session and requestId")
+// leaseSeconds renders a lease for make_interval(secs => ...). A non-positive
+// lease still gets a small positive value so a claim never inserts an
+// immediately expired row by accident.
+func leaseSeconds(lease time.Duration) float64 {
+	seconds := lease.Seconds()
+	if seconds <= 0 {
+		seconds = 1
 	}
-	_, err := s.pool.Exec(ctx,
-		`UPDATE command_invocations
-		    SET status = $4, decision_id = NULLIF($5, '')::uuid, duration_ms = $6,
-		        event_seq = $7, result = $8, truncated = $9, error_code = $10, error_message = $11,
-		        updated_at = now()
-		  WHERE tenant_id = $1 AND session_id = $2 AND request_id = $3`,
-		row.TenantID, row.SessionID, row.RequestID, row.Status, row.DecisionID, row.DurationMs,
-		row.EventSeq, nullableJSON(row.Result), row.Truncated, row.ErrorCode, row.ErrorMessage)
-	if err != nil {
-		return fmt.Errorf("store: update command invocation: %w", err)
-	}
-	return nil
+	return seconds
 }
 
 // nullableJSON maps an empty result onto SQL NULL.

@@ -3,6 +3,7 @@ package harnessapi
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -47,17 +48,80 @@ func commandRowKey(tenantID, sessionID uuid.UUID, requestID string) string {
 	return tenantID.String() + "|" + sessionID.String() + "|" + requestID
 }
 
-func (m *memoryCommandStore) ClaimCommandInvocation(_ context.Context, row store.CommandInvocation) (store.CommandInvocation, bool, error) {
+func (m *memoryCommandStore) ClaimCommandInvocation(_ context.Context, row store.CommandInvocation, lease time.Duration) (store.CommandInvocation, bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	key := commandRowKey(row.TenantID, row.SessionID, row.RequestID)
+	now := time.Now().UTC()
 	if existing, ok := m.rows[key]; ok {
+		if existing.Status == store.CommandStatusRunning &&
+			(existing.LeaseUntil == nil || !existing.LeaseUntil.After(now)) {
+			expires := now.Add(lease)
+			existing.LeaseUntil = &expires
+			existing.UpdatedAt = now
+			m.rows[key] = existing
+			return existing, true, nil
+		}
 		return existing, false, nil
 	}
-	row.CreatedAt = time.Now().UTC()
-	row.UpdatedAt = row.CreatedAt
+	expires := now.Add(lease)
+	row.CreatedAt = now
+	row.UpdatedAt = now
+	row.LeaseUntil = &expires
 	m.rows[key] = row
 	return row, true, nil
+}
+
+func (m *memoryCommandStore) ClaimDecisionResult(_ context.Context, tenantID, sessionID uuid.UUID, requestID string, lease time.Duration) (store.CommandInvocation, bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	key := commandRowKey(tenantID, sessionID, requestID)
+	row, ok := m.rows[key]
+	if !ok {
+		return store.CommandInvocation{}, false, nil
+	}
+	if row.Status != store.CommandStatusPendingDecision {
+		return row, false, nil
+	}
+	now := time.Now().UTC()
+	expires := now.Add(lease)
+	row.Status = store.CommandStatusRunning
+	row.LeaseUntil = &expires
+	row.UpdatedAt = now
+	m.rows[key] = row
+	return row, true, nil
+}
+
+func (m *memoryCommandStore) RenewCommandInvocation(_ context.Context, tenantID, sessionID uuid.UUID, requestID string, lease time.Duration) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	key := commandRowKey(tenantID, sessionID, requestID)
+	row, ok := m.rows[key]
+	if !ok || row.Status != store.CommandStatusRunning {
+		return false, nil
+	}
+	now := time.Now().UTC()
+	expires := now.Add(lease)
+	row.LeaseUntil = &expires
+	row.UpdatedAt = now
+	m.rows[key] = row
+	return true, nil
+}
+
+func (m *memoryCommandStore) TransitionCommandInvocation(_ context.Context, row store.CommandInvocation, from string) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	key := commandRowKey(row.TenantID, row.SessionID, row.RequestID)
+	existing, ok := m.rows[key]
+	if !ok || existing.Status != from {
+		return false, nil
+	}
+	row.UpdatedAt = time.Now().UTC()
+	if row.Terminal() {
+		row.LeaseUntil = nil
+	}
+	m.rows[key] = row
+	return true, nil
 }
 
 func (m *memoryCommandStore) GetCommandInvocation(_ context.Context, tenantID, sessionID uuid.UUID, requestID string) (store.CommandInvocation, bool, error) {
@@ -65,14 +129,6 @@ func (m *memoryCommandStore) GetCommandInvocation(_ context.Context, tenantID, s
 	defer m.mu.Unlock()
 	row, ok := m.rows[commandRowKey(tenantID, sessionID, requestID)]
 	return row, ok, nil
-}
-
-func (m *memoryCommandStore) UpdateCommandInvocation(_ context.Context, row store.CommandInvocation) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	row.UpdatedAt = time.Now().UTC()
-	m.rows[commandRowKey(row.TenantID, row.SessionID, row.RequestID)] = row
-	return nil
 }
 
 func (m *memoryCommandStore) AppendEventDedup(_ context.Context, _, _ uuid.UUID, kind string, payload any, dedupeKey string) (int64, bool, error) {
@@ -414,12 +470,17 @@ func TestCommandCatalogOrderAndAvailability(t *testing.T) {
 
 func TestCommandCatalogMarksMissingPermissions(t *testing.T) {
 	harness := newCommandHarness(t, func(cfg *Config) {
-		cfg.Access = &fakeAccess{grants: access.Grants{
-			access.KeySessionRead:  access.ScopeTenant,
-			access.KeySessionWrite: access.ScopeTenant,
-			access.KeyPluginInvoke: access.ScopeTenant,
-			access.KeySkillRead:    access.ScopeTenant,
-		}}
+		cfg.Access = &fakeAccess{
+			grants: access.Grants{
+				access.KeySessionRead:  access.ScopeTenant,
+				access.KeySessionWrite: access.ScopeTenant,
+				access.KeyPluginInvoke: access.ScopeTenant,
+				access.KeySkillRead:    access.ScopeTenant,
+			},
+			decisions: map[string]access.Decision{
+				access.KeyModelInvoke: {Allow: false, Key: access.KeyModelInvoke, Reason: access.ReasonMissingGrant},
+			},
+		}
 	})
 	harness.addPluginCommands(pluginCommandFixture("vendor.one", "refresh", pluginpkg.DangerWrite, true, ""))
 	_, catalog := harness.catalog(t, "")
@@ -872,5 +933,485 @@ func TestCommandDestructiveDecisionCancelled(t *testing.T) {
 	}
 	if harness.tools.callCount() != 0 {
 		t.Fatal("a cancelled command executed the tool")
+	}
+}
+
+func TestCommandDestructiveApprovedConcurrentReplaysExecuteOnce(t *testing.T) {
+	harness := newCommandHarness(t, nil)
+	harness.addPluginCommands(pluginCommandFixture("vendor.one", "purge", pluginpkg.DangerDestructive, true, ""))
+	harness.tools.delay = 120 * time.Millisecond
+	_, first := harness.do(t, http.MethodPost, harness.commandPath("vendor.one:purge"), map[string]any{"requestId": "rd-concurrent"})
+	decisionID := uuid.MustParse(first["decisionId"].(string))
+	if _, _, err := harness.broker.Answer(context.Background(), harnessext.AnswerDecisionRequest{
+		TenantID: harness.tenant, SessionID: harness.session,
+		DecisionID: decisionID, OptionID: commandDecisionOptionOK,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var wg sync.WaitGroup
+	codes := make([]int, 4)
+	for index := range codes {
+		wg.Add(1)
+		go func(slot int) {
+			defer wg.Done()
+			code, err := harness.postAsync(harness.commandPath("vendor.one:purge"), map[string]any{"requestId": "rd-concurrent"})
+			if err != nil {
+				codes[slot] = -1
+				return
+			}
+			codes[slot] = code
+		}(index)
+	}
+	wg.Wait()
+	for index, code := range codes {
+		if code != http.StatusOK {
+			t.Fatalf("approved replay[%d] = %d, want 200", index, code)
+		}
+	}
+	if harness.tools.callCount() != 1 {
+		t.Fatalf("approved concurrent replays executed the tool %d times", harness.tools.callCount())
+	}
+	if events := harness.store.eventsOfKind(store.EventCommandInvoked); len(events) != 2 {
+		t.Fatalf("command.invoked events = %v, want one pending + one result", events)
+	}
+}
+
+func TestCommandDecisionIdentityNegativeControls(t *testing.T) {
+	cases := []struct {
+		name   string
+		kind   string
+		prompt string
+	}{
+		{"different kind, same prompt", "other.kind", commandDecisionPromptPrefix("vendor.one:purge") + " forged"},
+		{"same kind, different prompt", commandDecisionKind, "Approve something else entirely"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			harness := newCommandHarness(t, nil)
+			harness.addPluginCommands(pluginCommandFixture("vendor.one", "purge", pluginpkg.DangerDestructive, true, ""))
+			requestID := "forged-" + strings.ReplaceAll(tc.name, " ", "-")
+			forged, _, err := harness.broker.Open(context.Background(), harnessext.OpenDecisionRequest{
+				TenantID: harness.tenant, SessionID: harness.session,
+				RequestID: commandDecisionRequestID + requestID,
+				Kind:      tc.kind,
+				Prompt:    tc.prompt,
+				Options: []harnessext.DecisionOption{
+					{ID: commandDecisionOptionOK, Label: "Run"},
+					{ID: commandDecisionOptionNo, Label: "Cancel"},
+				},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, _, err := harness.broker.Answer(context.Background(), harnessext.AnswerDecisionRequest{
+				TenantID: harness.tenant, SessionID: harness.session,
+				DecisionID: uuid.MustParse(forged.DecisionID), OptionID: commandDecisionOptionOK,
+			}); err != nil {
+				t.Fatal(err)
+			}
+			code, body := harness.do(t, http.MethodPost, harness.commandPath("vendor.one:purge"), map[string]any{"requestId": requestID})
+			if code != http.StatusForbidden || body["code"] != CommandCodeDecisionRefused {
+				t.Fatalf("forged grant = %d %v", code, body)
+			}
+			if harness.tools.callCount() != 0 {
+				t.Fatal("a forged decision executed the tool")
+			}
+			row, found, err := harness.store.GetCommandInvocation(context.Background(), harness.tenant, harness.session, requestID)
+			if err != nil || !found || row.Status != store.CommandStatusRefused {
+				t.Fatalf("forged row = %+v found=%v err=%v", row, found, err)
+			}
+		})
+	}
+}
+
+func TestCommandDecisionOpenConflictIs409(t *testing.T) {
+	harness := newCommandHarness(t, nil)
+	harness.addPluginCommands(pluginCommandFixture("vendor.one", "purge", pluginpkg.DangerDestructive, true, ""))
+	requestID := "conflict"
+	if _, _, err := harness.broker.Open(context.Background(), harnessext.OpenDecisionRequest{
+		TenantID: harness.tenant, SessionID: harness.session,
+		RequestID: commandDecisionRequestID + requestID,
+		Kind:      "other.kind",
+		Prompt:    "another question",
+		Options:   []harnessext.DecisionOption{{ID: "ok"}, {ID: "no"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	code, body := harness.do(t, http.MethodPost, harness.commandPath("vendor.one:purge"), map[string]any{"requestId": requestID})
+	if code != http.StatusConflict {
+		t.Fatalf("decision conflict = %d %v, want 409", code, body)
+	}
+	if harness.tools.callCount() != 0 {
+		t.Fatal("a conflicting decision executed the tool")
+	}
+}
+
+// TestCommandResumeDecisionIdentityMutationGuards is the mutation-sensitive
+// guard test: a pending row whose stored decision was answered allow under a
+// different kind (but the derived requestId) or under a different requestId
+// (but the command kind) must NOT execute. Deleting either the Kind or the
+// RequestID check turns this test red.
+func TestCommandResumeDecisionIdentityMutationGuards(t *testing.T) {
+	cases := []struct {
+		name       string
+		decisionID func(t *testing.T, harness *commandHarness, requestID string) string
+	}{
+		{
+			name: "forged kind on the derived requestId",
+			decisionID: func(t *testing.T, harness *commandHarness, requestID string) string {
+				decision, _, err := harness.broker.Open(context.Background(), harnessext.OpenDecisionRequest{
+					TenantID: harness.tenant, SessionID: harness.session,
+					RequestID: commandDecisionRequestID + requestID,
+					Kind:      "other.kind",
+					Prompt:    commandDecisionPromptPrefix("vendor.one:purge") + " forged kind",
+					Options: []harnessext.DecisionOption{
+						{ID: commandDecisionOptionOK, Label: "Run"},
+						{ID: commandDecisionOptionNo, Label: "Cancel"},
+					},
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				return decision.DecisionID
+			},
+		},
+		{
+			name: "forged requestId with the command kind",
+			decisionID: func(t *testing.T, harness *commandHarness, _ string) string {
+				decision, _, err := harness.broker.Open(context.Background(), harnessext.OpenDecisionRequest{
+					TenantID: harness.tenant, SessionID: harness.session,
+					RequestID: "some-other-decision-" + uuid.NewString(),
+					Kind:      commandDecisionKind,
+					Prompt:    commandDecisionPromptPrefix("vendor.one:purge") + " forged request",
+					Options: []harnessext.DecisionOption{
+						{ID: commandDecisionOptionOK, Label: "Run"},
+						{ID: commandDecisionOptionNo, Label: "Cancel"},
+					},
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				return decision.DecisionID
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			harness := newCommandHarness(t, nil)
+			harness.addPluginCommands(pluginCommandFixture("vendor.one", "purge", pluginpkg.DangerDestructive, true, ""))
+			requestID := "mutation-" + strings.ReplaceAll(tc.name, " ", "-")
+			decisionID := tc.decisionID(t, harness, requestID)
+			if _, _, err := harness.broker.Answer(context.Background(), harnessext.AnswerDecisionRequest{
+				TenantID: harness.tenant, SessionID: harness.session,
+				DecisionID: uuid.MustParse(decisionID), OptionID: commandDecisionOptionOK,
+			}); err != nil {
+				t.Fatal(err)
+			}
+			// Seed the pending row as if the decision had been opened, then the
+			// decision was replaced by the forged one. This is the resume path.
+			invocation, _, err := harness.store.ClaimCommandInvocation(context.Background(), store.CommandInvocation{
+				TenantID: harness.tenant, SessionID: harness.session, RequestID: requestID,
+				Command: "vendor.one:purge", Source: "plugin", Status: store.CommandStatusRunning,
+				ArgsHash: sha256Hex([]byte("{}")), ArgsBytes: 2,
+			}, time.Minute)
+			if err != nil {
+				t.Fatal(err)
+			}
+			invocation.Status = store.CommandStatusPendingDecision
+			invocation.DecisionID = decisionID
+			if ok, err := harness.store.TransitionCommandInvocation(context.Background(), invocation, store.CommandStatusRunning); err != nil || !ok {
+				t.Fatalf("seed pending = %v err=%v", ok, err)
+			}
+			code, body := harness.do(t, http.MethodPost, harness.commandPath("vendor.one:purge"), map[string]any{"requestId": requestID})
+			if code != http.StatusForbidden || body["code"] != CommandCodeDecisionRefused {
+				t.Fatalf("forged resume = %d %v", code, body)
+			}
+			if harness.tools.callCount() != 0 {
+				t.Fatalf("a forged decision executed the tool %d times", harness.tools.callCount())
+			}
+		})
+	}
+}
+
+func TestCommandSchemaConstraintsEnforced(t *testing.T) {
+	harness := newCommandHarness(t, nil)
+	command := pluginCommandFixture("vendor.one", "refresh", pluginpkg.DangerWrite, true, "")
+	command.Decl.ArgsSchema = map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"slug":   map[string]any{"type": "string", "minLength": 3, "maxLength": 8, "pattern": "^[a-z]+$"},
+			"count":  map[string]any{"type": "integer", "minimum": 1, "maximum": 5},
+			"labels": map[string]any{"type": "array", "minItems": 1, "maxItems": 2, "uniqueItems": true, "items": map[string]any{"type": "string"}},
+		},
+	}
+	harness.addPluginCommands(command)
+
+	cases := []struct {
+		name string
+		args map[string]any
+		want int
+	}{
+		{"valid", map[string]any{"slug": "abc", "count": 2, "labels": []any{"a", "b"}}, http.StatusOK},
+		{"too short", map[string]any{"slug": "ab"}, http.StatusBadRequest},
+		{"pattern", map[string]any{"slug": "ABC"}, http.StatusBadRequest},
+		{"too long", map[string]any{"slug": "abcdefghi"}, http.StatusBadRequest},
+		{"below minimum", map[string]any{"count": 0}, http.StatusBadRequest},
+		{"above maximum", map[string]any{"count": 6}, http.StatusBadRequest},
+		{"too few items", map[string]any{"labels": []any{}}, http.StatusBadRequest},
+		{"too many items", map[string]any{"labels": []any{"a", "b", "c"}}, http.StatusBadRequest},
+		{"duplicate items", map[string]any{"labels": []any{"a", "a"}}, http.StatusBadRequest},
+	}
+	for index, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			code, _ := harness.do(t, http.MethodPost, harness.commandPath("vendor.one:refresh"), map[string]any{
+				"requestId": fmt.Sprintf("constraint-%d", index),
+				"args":      tc.args,
+			})
+			if code != tc.want {
+				t.Fatalf("status = %d, want %d", code, tc.want)
+			}
+		})
+	}
+}
+
+func TestCommandAuditActorUsesBotID(t *testing.T) {
+	harness := newCommandHarness(t, nil)
+	harness.access.principal = access.Principal{
+		TenantID: harness.tenant, AccountID: uuid.New(), BotID: "support-1",
+	}
+	if code, body := harness.do(t, http.MethodPost, harness.commandPath("compact"), map[string]any{"requestId": "rbot"}); code != http.StatusOK {
+		t.Fatalf("bot command = %d %v", code, body)
+	}
+	events := harness.store.eventsOfKind(store.EventCommandInvoked)
+	if len(events) != 1 || events[0]["actor"] != "support-1" {
+		t.Fatalf("bot audit actor = %v, want support-1", events)
+	}
+}
+
+func TestCommandCatalogMarksNotWired(t *testing.T) {
+	harness := newCommandHarness(t, func(cfg *Config) {
+		cfg.CommandStore = nil
+		cfg.SessionIdle = nil
+	})
+	harness.addPluginCommands(pluginCommandFixture("vendor.one", "refresh", pluginpkg.DangerWrite, true, ""))
+	code, catalog := harness.catalog(t, "")
+	if code != http.StatusOK {
+		t.Fatalf("catalog status = %d", code)
+	}
+	for _, command := range catalog.Commands {
+		if command.Available || command.Reason != CommandReasonNotWired {
+			t.Fatalf("unwired command = %+v", command)
+		}
+	}
+}
+
+func TestCommandCatalogDegradesWhenSkillLibraryFails(t *testing.T) {
+	harness := newCommandHarness(t, nil)
+	harness.addPluginCommands(pluginCommandFixture("vendor.one", "refresh", pluginpkg.DangerWrite, true, ""))
+	harness.skills.err = errors.New("skill library down")
+	code, catalog := harness.catalog(t, "")
+	if code != http.StatusOK {
+		t.Fatalf("catalog status = %d, want 200", code)
+	}
+	if len(catalog.Commands) != 2 || catalog.Commands[0].Name != "compact" || catalog.Commands[1].Name != "vendor.one:refresh" {
+		t.Fatalf("degraded catalog = %+v", catalog.Commands)
+	}
+	found := false
+	for _, warning := range catalog.Warnings {
+		if warning == "skills_unavailable" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("warnings = %v", catalog.Warnings)
+	}
+}
+
+func TestCommandSkillEventIsBoundedAndReferenced(t *testing.T) {
+	harness := newCommandHarness(t, nil)
+	body := strings.Repeat("x", commandSkillBodyMax+1024)
+	harness.skills.details["big"] = skilllib.Detail{
+		Record: skilllib.Record{Name: "big", Description: strings.Repeat("d", 2048), CurrentHash: "sha256:big", Path: "active/big"},
+		Body:   body,
+	}
+	if code, _ := harness.do(t, http.MethodPost, harness.commandPath("skill:big"), map[string]any{"requestId": "rbig"}); code != http.StatusOK {
+		t.Fatalf("big skill status = %d", code)
+	}
+	events := harness.store.eventsOfKind(store.EventSkillLoaded)
+	if len(events) != 1 {
+		t.Fatalf("events = %v", events)
+	}
+	storedBody, _ := events[0]["body"].(string)
+	if len(storedBody) > commandSkillBodyMax+len("\n[truncated]") {
+		t.Fatalf("stored skill body = %d bytes", len(storedBody))
+	}
+	if !strings.Contains(storedBody, "[truncated]") {
+		t.Fatal("bounded skill body is not marked")
+	}
+	if events[0]["location"] != "active/big" || events[0]["hash"] != "sha256:big" {
+		t.Fatalf("skill reference = %v", events[0])
+	}
+}
+
+func TestCommandDestructivePromptShowsBoundedArguments(t *testing.T) {
+	harness := newCommandHarness(t, nil)
+	harness.addPluginCommands(pluginCommandFixture("vendor.one", "purge", pluginpkg.DangerDestructive, true, ""))
+	_, first := harness.do(t, http.MethodPost, harness.commandPath("vendor.one:purge"), map[string]any{
+		"requestId": "rpreview", "args": map[string]any{"secret": "value"},
+	})
+	decision, found := harness.broker.Get(context.Background(), harness.tenant, harness.session,
+		uuid.MustParse(first["decisionId"].(string)))
+	if !found {
+		t.Fatal("decision not found")
+	}
+	if !strings.Contains(decision.Prompt, `"secret":"value"`) {
+		t.Fatalf("prompt lacks the bounded argument preview: %q", decision.Prompt)
+	}
+	long := strings.Repeat("x", commandDecisionPreviewMax*2)
+	_, second := harness.do(t, http.MethodPost, harness.commandPath("vendor.one:purge"), map[string]any{
+		"requestId": "rpreview2", "args": map[string]any{"secret": long},
+	})
+	decision, _ = harness.broker.Get(context.Background(), harness.tenant, harness.session,
+		uuid.MustParse(second["decisionId"].(string)))
+	if len(decision.Prompt) > len(commandDecisionPromptPrefix("vendor.one:purge"))+commandDecisionPreviewMax+4096 {
+		t.Fatalf("prompt preview is not bounded: %d bytes", len(decision.Prompt))
+	}
+}
+
+func TestCommandPluginIsErrorIs502(t *testing.T) {
+	harness := newCommandHarness(t, nil)
+	harness.addPluginCommands(pluginCommandFixture("vendor.one", "refresh", pluginpkg.DangerWrite, true, ""))
+	harness.tools.result = json.RawMessage(`{"content":[{"type":"text","text":"boom"}],"isError":true}`)
+	code, body := harness.do(t, http.MethodPost, harness.commandPath("vendor.one:refresh"), map[string]any{"requestId": "riserror"})
+	if code != http.StatusBadGateway || body["code"] != CommandCodeToolError {
+		t.Fatalf("plugin isError = %d %v", code, body)
+	}
+	row, found, err := harness.store.GetCommandInvocation(context.Background(), harness.tenant, harness.session, "riserror")
+	if err != nil || !found || row.Status != store.CommandStatusError || row.ErrorCode != CommandCodeToolError {
+		t.Fatalf("isError row = %+v found=%v err=%v", row, found, err)
+	}
+}
+
+func TestCommandPermissionRunsBeforeBody(t *testing.T) {
+	harness := newCommandHarness(t, func(cfg *Config) {
+		cfg.Access = &fakeAccess{
+			grants: access.Grants{access.KeySessionRead: access.ScopeTenant, access.KeySessionWrite: access.ScopeTenant},
+			decisions: map[string]access.Decision{
+				access.KeyModelInvoke: {Allow: false, Key: access.KeyModelInvoke, Reason: access.ReasonMissingGrant},
+			},
+		}
+	})
+	// The unknown field would be a 400 if the body were read first.
+	code, _ := harness.do(t, http.MethodPost, harness.commandPath("compact"), map[string]any{
+		"requestId": "rperm", "bogus": true,
+	})
+	if code != http.StatusForbidden {
+		t.Fatalf("unauthorized malformed body = %d, want 403", code)
+	}
+	if harness.compact.callCount() != 0 {
+		t.Fatal("denied command reached the seam")
+	}
+}
+
+func TestCommandOrphanRunningLeaseIsReclaimed(t *testing.T) {
+	harness := newCommandHarness(t, nil)
+	past := time.Now().Add(-time.Minute)
+	harness.store.rows[commandRowKey(harness.tenant, harness.session, "rorphan")] = store.CommandInvocation{
+		TenantID: harness.tenant, SessionID: harness.session, RequestID: "rorphan",
+		Command: "compact", Source: "builtin", Status: store.CommandStatusRunning,
+		ArgsHash: sha256Hex([]byte("{}")), ArgsBytes: 2, LeaseUntil: &past,
+	}
+	code, body := harness.do(t, http.MethodPost, harness.commandPath("compact"), map[string]any{"requestId": "rorphan"})
+	if code != http.StatusOK || body["status"] != store.CommandStatusOK {
+		t.Fatalf("orphan reclaim = %d %v", code, body)
+	}
+	if harness.compact.callCount() != 1 {
+		t.Fatalf("orphan executions = %d", harness.compact.callCount())
+	}
+}
+
+func TestCommandLiveLeaseIsNotStolen(t *testing.T) {
+	harness := newCommandHarness(t, func(cfg *Config) {
+		cfg.CommandWaitTimeout = 40 * time.Millisecond
+	})
+	future := time.Now().Add(time.Minute)
+	harness.store.rows[commandRowKey(harness.tenant, harness.session, "rlive")] = store.CommandInvocation{
+		TenantID: harness.tenant, SessionID: harness.session, RequestID: "rlive",
+		Command: "compact", Source: "builtin", Status: store.CommandStatusRunning,
+		ArgsHash: sha256Hex([]byte("{}")), ArgsBytes: 2, LeaseUntil: &future,
+	}
+	code, body := harness.do(t, http.MethodPost, harness.commandPath("compact"), map[string]any{"requestId": "rlive"})
+	if code != http.StatusConflict || body["code"] != CommandCodeInProgress {
+		t.Fatalf("live lease = %d %v", code, body)
+	}
+	if harness.compact.callCount() != 0 {
+		t.Fatal("a live lease was stolen")
+	}
+}
+
+func TestCommandCatalogUsesSessionRelationForAvailability(t *testing.T) {
+	harness := newCommandHarness(t, nil)
+	harness.access.decisions = map[string]access.Decision{
+		access.KeySessionWrite: {Allow: false, Key: access.KeySessionWrite, Reason: access.ReasonMissingRelation},
+	}
+	_, catalog := harness.catalog(t, "")
+	compact := catalog.Commands[0]
+	if compact.Available || compact.Reason != CommandReasonMissingPermissions ||
+		len(compact.MissingPermissions) == 0 || compact.MissingPermissions[0] != access.KeySessionWrite {
+		t.Fatalf("relation-denied catalog entry = %+v", compact)
+	}
+}
+
+func TestCommandCatalogMarksPluginSeamsNotWired(t *testing.T) {
+	t.Run("no tool dispatch", func(t *testing.T) {
+		harness := newCommandHarness(t, func(cfg *Config) { cfg.CommandTools = nil })
+		harness.addPluginCommands(pluginCommandFixture("vendor.one", "refresh", pluginpkg.DangerWrite, true, ""))
+		_, catalog := harness.catalog(t, "")
+		for _, command := range catalog.Commands {
+			if command.Source == "plugin" && (command.Available || command.Reason != CommandReasonNotWired) {
+				t.Fatalf("plugin without dispatch = %+v", command)
+			}
+		}
+	})
+	t.Run("no decisions for destructive", func(t *testing.T) {
+		harness := newCommandHarness(t, func(cfg *Config) { cfg.Decisions = nil })
+		harness.addPluginCommands(pluginCommandFixture("vendor.one", "purge", pluginpkg.DangerDestructive, true, ""))
+		_, catalog := harness.catalog(t, "")
+		for _, command := range catalog.Commands {
+			if command.Source == "plugin" && (command.Available || command.Reason != CommandReasonNotWired) {
+				t.Fatalf("destructive without decisions = %+v", command)
+			}
+		}
+	})
+}
+
+func TestCommandApprovedReplayWaitsForIdle(t *testing.T) {
+	harness := newCommandHarness(t, nil)
+	harness.addPluginCommands(pluginCommandFixture("vendor.one", "purge", pluginpkg.DangerDestructive, true, ""))
+	_, first := harness.do(t, http.MethodPost, harness.commandPath("vendor.one:purge"), map[string]any{"requestId": "ridle"})
+	if _, _, err := harness.broker.Answer(context.Background(), harnessext.AnswerDecisionRequest{
+		TenantID: harness.tenant, SessionID: harness.session,
+		DecisionID: uuid.MustParse(first["decisionId"].(string)), OptionID: commandDecisionOptionOK,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	harness.idle = func() bool { return false }
+	code, body := harness.do(t, http.MethodPost, harness.commandPath("vendor.one:purge"), map[string]any{"requestId": "ridle"})
+	if code != http.StatusConflict || body["code"] != CommandCodeBusy {
+		t.Fatalf("approved while busy = %d %v", code, body)
+	}
+	if harness.tools.callCount() != 0 {
+		t.Fatal("approved command ran while the session was busy")
+	}
+	row, found, err := harness.store.GetCommandInvocation(context.Background(), harness.tenant, harness.session, "ridle")
+	if err != nil || !found || row.Status != store.CommandStatusPendingDecision {
+		t.Fatalf("busy left the row = %+v found=%v err=%v", row, found, err)
+	}
+	harness.idle = func() bool { return true }
+	if code, _ := harness.do(t, http.MethodPost, harness.commandPath("vendor.one:purge"), map[string]any{"requestId": "ridle"}); code != http.StatusOK {
+		t.Fatalf("idle retry = %d", code)
+	}
+	if harness.tools.callCount() != 1 {
+		t.Fatalf("idle retry tool calls = %d", harness.tools.callCount())
 	}
 }
