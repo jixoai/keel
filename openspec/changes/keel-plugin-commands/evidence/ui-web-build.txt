@@ -1,5 +1,5 @@
 warn nsh.json schemes: a web page opens from its address, so the schemes are left out
-✓ built App.tsx (1.2 MB js, 1.7 MB bytecode, 2 chunks, 1.3s)
-✓ ran wasm-bindgen 0.2.129 on the web runtime (2.5s)
-✓ packaged /tmp/keel-commands-e2e-web/Keel, 16.6 MB (44.4s)
+✓ built App.tsx (1.2 MB js, 1.7 MB bytecode, 2 chunks, 620ms)
+✓ ran wasm-bindgen 0.2.129 on the web runtime (1.5s)
+✓ packaged /tmp/keel-commands-e2e-web/Keel, 16.6 MB (31.9s)
   under a Content-Security-Policy it needs script-src 'self' 'wasm-unsafe-eval'; img-src 'self' blob: data:

@@ -1,4 +1,4 @@
-creating database keel_commands_e2e_1795762581
+creating database keel_commands_e2e_1795767221
 starting fake provider on 127.0.0.1:13758
 starting keel serve…
   ok   keel serve healthy
@@ -6,7 +6,7 @@ starting keel serve…
   ok   bot-owned session created
   ok   three settled turns before compact
   ok   session retain budget narrowed to 1
-session c2d65adc-4778-4317-bdaa-e91d79ea7fa0 warmed up
+session fddd51a7-9c7c-4bb7-b8f0-0388b6cbec21 warmed up
 
 == catalog-builtin · 打开目录：内置命令可发现，顺序来自服务端
   ok   builtin catalog has compact

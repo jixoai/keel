@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>keel-plugin-commands E2E — 2026-11-27T06:56:22.750Z</title>
+<title>keel-plugin-commands E2E — 2026-11-27T08:13:41.799Z</title>
 <style>
 :root { color-scheme: light dark; --bg:#f7f8fa; --card:#fff; --ink:#16181d; --muted:#626b7a; --line:#e3e6ec; --ok:#0a7a3d; --bad:#b42318; --warn:#8a5a00; --accent:#0b5ed7; }
 @media (prefers-color-scheme: dark) { :root { --bg:#111318; --card:#181b22; --ink:#e8ebf1; --muted:#9aa4b2; --line:#2a2f39; --ok:#4ade80; --bad:#f87171; --warn:#fbbf24; --accent:#60a5fa; } }
@@ -44,7 +44,7 @@ a { color:var(--accent); }
 <body>
 <main>
 <h1>keel-plugin-commands · 真实栈 E2E 报告</h1>
-<p class="meta">生成于 2026-11-27T06:56:22.750Z → 2026-11-27T06:56:43.278Z · 耗时 21s · commit <code>891639382bf0956cab224436f1f99db17f07ec42-dirty</code></p>
+<p class="meta">生成于 2026-11-27T08:13:41.799Z → 2026-11-27T08:14:05.856Z · 耗时 24s · commit <code>921c3f21811165b263781c01f2b8d224c705ec3a</code></p>
 <div class="banner">公网：<strong>未部署</strong>：本报告只来自本地 <code>127.0.0.1</code> 真实栈，没有公网链接。</div>
 <div class="grid">
   <div class="kpi"><b>PASS</b>总结果</div>
@@ -57,7 +57,7 @@ a { color:var(--accent); }
 
 <div class="card">
   <h2>环境</h2>
-  <table><tbody><tr><th>database</th><td>keel_commands_e2e_1795762581</td></tr>
+  <table><tbody><tr><th>database</th><td>keel_commands_e2e_1795767221</td></tr>
 <tr><th>postgres</th><td>psql (PostgreSQL) 18.7 (Homebrew)</td></tr>
 <tr><th>node</th><td>v22.23.3</td></tr>
 <tr><th>chrome</th><td>/Applications/Google Chrome.app/Contents/MacOS/Google Chrome</td></tr>
@@ -65,7 +65,7 @@ a { color:var(--accent); }
 <tr><th>plugin</th><td>/Users/kzf/Development/GitHub/jixoai/fde2e/.worktrees/keel-plugin-commands-ui/scripts/keel-commands-e2e/plugin</td></tr>
 <tr><th>databaseRowProbe</th><td>command_invocations (tenant, session, request_id)</td></tr>
 <tr><th>publicDeployment</th><td>未部署（仅本地 127.0.0.1 证据）</td></tr>
-<tr><th>durationSeconds</th><td>21</td></tr></tbody></table>
+<tr><th>durationSeconds</th><td>24</td></tr></tbody></table>
   <p class="muted">真实 PostgreSQL 临时库 + 真实 <code>keel serve --auth local-only</code>（13600–13799 临时端口）+ 真实插件安装/审批；无 Docker、无夹具命令。数据库与临时密钥已由 cleanup 删除。</p>
   
 </div>
@@ -73,7 +73,7 @@ a { color:var(--accent); }
 <div class="card">
   <h2>进程回收验证 <span class="badge ok">CLEAN</span></h2>
   <p class="muted">由 <code>run.sh</code> 在报告生成前写入 <code>residue.txt</code>：serve/model 端口必须 free，sidecar 与 fake provider 必须 gone。这里的标记同时参与总结果（STILL_* 即失败）。</p>
-  <pre>run=keel_commands_e2e_1795762581
+  <pre>run=keel_commands_e2e_1795767221
 serve_port=13757
 model_port=13758
 serve_port=free
@@ -100,7 +100,7 @@ fake_provider=gone
 
 <section class="step" id="step-catalog-builtin">
   <h2>01 · 打开目录：内置命令可发现，顺序来自服务端 <span class="badge ok">PASS</span></h2>
-  <p class="meta">catalog-builtin · 1719 ms · 4 条断言 · 1 张图</p>
+  <p class="meta">catalog-builtin · 1699 ms · 4 条断言 · 1 张图</p>
   
   <table><thead><tr><th>断言</th><th>结果</th><th>实际</th><th>期望</th></tr></thead><tbody>
 <tr class="">
@@ -139,7 +139,7 @@ fake_provider=gone
 </section>
 <section class="step" id="step-compact">
   <h2>02 · 执行内置 /compact：命令行 + 既有压缩分隔线 <span class="badge ok">PASS</span></h2>
-  <p class="meta">compact · 778 ms · 4 条断言 · 1 张图</p>
+  <p class="meta">compact · 775 ms · 4 条断言 · 1 张图</p>
   
   <table><thead><tr><th>断言</th><th>结果</th><th>实际</th><th>期望</th></tr></thead><tbody>
 <tr class="">
@@ -172,7 +172,7 @@ fake_provider=gone
 </section>
 <section class="step" id="step-install-plugin">
   <h2>03 · 安装插件命令：真实两阶段审批（install + enable） <span class="badge ok">PASS</span></h2>
-  <p class="meta">install-plugin · 481 ms · 6 条断言 · 1 张图</p>
+  <p class="meta">install-plugin · 1110 ms · 6 条断言 · 1 张图</p>
   
   <table><thead><tr><th>断言</th><th>结果</th><th>实际</th><th>期望</th></tr></thead><tbody>
 <tr class="">
@@ -223,7 +223,7 @@ fake_provider=gone
 </section>
 <section class="step" id="step-plugin-form">
   <h2>04 · 执行插件命令：args_schema 生成表单 → 结构化结果 <span class="badge ok">PASS</span></h2>
-  <p class="meta">plugin-form · 611 ms · 3 条断言 · 1 张图</p>
+  <p class="meta">plugin-form · 1223 ms · 3 条断言 · 1 张图</p>
   
   <table><thead><tr><th>断言</th><th>结果</th><th>实际</th><th>期望</th></tr></thead><tbody>
 <tr class="">
@@ -235,7 +235,7 @@ fake_provider=gone
 <tr class="">
   <td>result row carries a requestId</td>
   <td>PASS</td>
-  <td><code>cmd_3bf1c0fa-d2f7-4098-a987-3af19f54b4d7</code></td>
+  <td><code>cmd_1ac282a4-21ec-4a8d-b1bf-d3d9f358c720</code></td>
   <td></td>
 </tr>
 <tr class="">
@@ -250,7 +250,7 @@ fake_provider=gone
 </section>
 <section class="step" id="step-replay">
   <h2>05 · 重放同 requestId：同结果、不二次执行 <span class="badge ok">PASS</span></h2>
-  <p class="meta">replay · 402 ms · 4 条断言 · 1 张图</p>
+  <p class="meta">replay · 1160 ms · 4 条断言 · 1 张图</p>
   
   <table><thead><tr><th>断言</th><th>结果</th><th>实际</th><th>期望</th></tr></thead><tbody>
 <tr class="">
@@ -263,7 +263,7 @@ fake_provider=gone
   <td>replay result is the first result</td>
   <td>PASS</td>
   <td><code>[object Object]</code></td>
-  <td><code>{&quot;indexed&quot;:7,&quot;requestId&quot;:&quot;cmd_3bf1c0fa-d2f7-4098-a987-3af19f54b4d7&quot;}</code></td>
+  <td><code>{&quot;indexed&quot;:7,&quot;requestId&quot;:&quot;cmd_1ac282a4-21ec-4a8d-b1bf-d3d9f358c720&quot;}</code></td>
 </tr>
 <tr class="">
   <td>replay did not execute the tool again</td>
@@ -283,7 +283,7 @@ fake_provider=gone
 </section>
 <section class="step" id="step-destructive-denied">
   <h2>06 · 破坏性命令：审批拒绝 → 已拒绝行，无副作用 <span class="badge ok">PASS</span></h2>
-  <p class="meta">destructive-denied · 1855 ms · 2 条断言 · 2 张图</p>
+  <p class="meta">destructive-denied · 2501 ms · 2 条断言 · 2 张图</p>
   
   <table><thead><tr><th>断言</th><th>结果</th><th>实际</th><th>期望</th></tr></thead><tbody>
 <tr class="">
@@ -309,7 +309,7 @@ fake_provider=gone
 </section>
 <section class="step" id="step-destructive-approved">
   <h2>07 · 破坏性命令：审批允许 → 只执行一次并给出结果 <span class="badge ok">PASS</span></h2>
-  <p class="meta">destructive-approved · 1285 ms · 1 条断言 · 1 张图</p>
+  <p class="meta">destructive-approved · 1884 ms · 1 条断言 · 1 张图</p>
   
   <table><thead><tr><th>断言</th><th>结果</th><th>实际</th><th>期望</th></tr></thead><tbody>
 <tr class="">
@@ -324,7 +324,7 @@ fake_provider=gone
 </section>
 <section class="step" id="step-viewports">
   <h2>08 · 4.5 视觉：390/768/1024/1440 目录与表单无横向溢出 <span class="badge ok">PASS</span></h2>
-  <p class="meta">viewports · 8135 ms · 8 条断言 · 9 张图</p>
+  <p class="meta">viewports · 8836 ms · 8 条断言 · 9 张图</p>
   
   <table><thead><tr><th>断言</th><th>结果</th><th>实际</th><th>期望</th></tr></thead><tbody>
 <tr class="">
@@ -430,7 +430,7 @@ fake_provider=gone
 </section>
 <section class="step" id="step-disable-uninstall">
   <h2>09 · 停用/卸载插件：目录与执行入口一起撤销 <span class="badge ok">PASS</span></h2>
-  <p class="meta">disable-uninstall · 1340 ms · 4 条断言 · 2 张图</p>
+  <p class="meta">disable-uninstall · 1442 ms · 4 条断言 · 2 张图</p>
   
   <table><thead><tr><th>断言</th><th>结果</th><th>实际</th><th>期望</th></tr></thead><tbody>
 <tr class="">
@@ -471,22 +471,22 @@ fake_provider=gone
   <p class="muted">无 page error。</p>
   <h3>失败请求</h3>
   <p class="muted">无失败请求（favicon 除外）。</p>
-  <p class="muted">kill -9 步骤的 checkpoint 读取失败请求是预期错误态；它由步骤内的断言与截图确认。</p>
+  <p class="muted">拒绝 destructive 命令时，浏览器会把服务端预期的 403 记成一条 console error；该条已在 E2E 的数据里单列为 expectedConsole，不计入错误。</p>
 </div>
 
 <div class="card">
-  <h2>TUI 降级验证</h2>
-  <p class="muted">同一份 TSX 在 <code>nsh test --target tui</code> 的终端宿主上验证：分区可进入、生效策略是一句可读文本、收窄与恢复可操作。TUI 证据是测试日志（终端 cell 不是位图）。</p>
-  <p class="muted">本次未运行 TUI 测试。</p>
+  <h2>TUI 证据</h2>
+  <p class="muted">命令菜单、生成表单、命令结果行与 destructive 审批由独立的 <code>nsh test --target tui</code> 门禁验证（日志见 <code>../ui-nsh-test-tui.txt</code> 与 <code>../ui-nsh-test-tui-commands.txt</code>）；本报告只陈述本页执行的真实栈浏览器步骤。</p>
 </div>
 
 <div class="card">
   <h2>范围与限制</h2>
   <ul>
-    <li>自动压缩、手动压缩、requestId 幂等回放、kill -9 重启恢复与策略收窄均在真实 PG + 本地 <code>keel serve</code> 上执行。</li>
-    <li>无权限 UI 态用拦截 <code>/v1/auth/whoami</code> 的只读身份展示；服务端 403 另由无 <code>session.read</code> 的 Bot key 实测断言。</li>
-    <li>501/503「未接线」态没有单独制造：生产 <code>serve</code> 始终装配策略服务；网络断开错误态已覆盖同一错误块与重试。</li>
-    <li>未部署公网；报告与截图只在本机 <code>.agents/reports</code>，不入库。</li>
+    <li>真实 PostgreSQL 临时库、真实 <code>keel serve --auth local-only</code>、真实插件 install/enable 两阶段审批；步骤只覆盖目录、<code>/compact</code>、插件命令、同 requestId 重放、拒绝与允许 destructive、停用/卸载和四档视口。</li>
+    <li>本报告的声明范围就是上列 9 个步骤的断言与截图；未列出的能力不作声明。</li>
+    <li>无权限命令态由 TUI 五态门禁覆盖；本页的 403 是 destructive 审批拒绝的预期响应。</li>
+    <li><strong>未部署公网</strong>：本报告与截图作为仓库内证据提交，不提供公网链接。</li>
+    <li>没有 coverageRows / 自动 EXEMPT 表，也不声明 <code>UNCOVERED=0</code>；覆盖性以 9 个步骤的 36 条断言与 19 张截图为准。</li>
   </ul>
 </div>
 </main>

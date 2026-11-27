@@ -2,11 +2,11 @@
   "lane": "keel-plugin-commands-e2e",
   "base": "http://127.0.0.1:13757",
   "publicUrl": "",
-  "startedAt": "2026-11-27T06:56:22.750Z",
-  "finishedAt": "2026-11-27T06:56:43.278Z",
-  "commit": "891639382bf0956cab224436f1f99db17f07ec42-dirty",
+  "startedAt": "2026-11-27T08:13:41.799Z",
+  "finishedAt": "2026-11-27T08:14:05.856Z",
+  "commit": "921c3f21811165b263781c01f2b8d224c705ec3a",
   "environment": {
-    "database": "keel_commands_e2e_1795762581",
+    "database": "keel_commands_e2e_1795767221",
     "postgres": "psql (PostgreSQL) 18.7 (Homebrew)",
     "node": "v22.23.3",
     "chrome": "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
@@ -14,13 +14,13 @@
     "plugin": "/Users/kzf/Development/GitHub/jixoai/fde2e/.worktrees/keel-plugin-commands-ui/scripts/keel-commands-e2e/plugin",
     "databaseRowProbe": "command_invocations (tenant, session, request_id)",
     "publicDeployment": "未部署（仅本地 127.0.0.1 证据）",
-    "durationSeconds": 21
+    "durationSeconds": 24
   },
   "steps": [
     {
       "id": "catalog-builtin",
       "title": "打开目录：内置命令可发现，顺序来自服务端",
-      "startedAt": "2026-11-27T06:56:26.672Z",
+      "startedAt": "2026-11-27T08:13:45.224Z",
       "status": "passed",
       "checks": [
         {
@@ -72,12 +72,12 @@
           "bodyScrollWidth": 1440
         }
       },
-      "durationMs": 1719
+      "durationMs": 1699
     },
     {
       "id": "compact",
       "title": "执行内置 /compact：命令行 + 既有压缩分隔线",
-      "startedAt": "2026-11-27T06:56:28.391Z",
+      "startedAt": "2026-11-27T08:13:46.923Z",
       "status": "passed",
       "checks": [
         {
@@ -93,8 +93,8 @@
             "reason": "compacted",
             "replayed": false,
             "performed": true,
-            "requestId": "cmd_8316e639-4bcc-45df-96bd-75d1bf266b67",
-            "sessionId": "c2d65adc-4778-4317-bdaa-e91d79ea7fa0",
+            "requestId": "cmd_157ca569-6e79-4c8a-9ca6-82f26217755a",
+            "sessionId": "fddd51a7-9c7c-4bb7-b8f0-0388b6cbec21",
             "keptFromSeq": 8,
             "tokensAfter": 141,
             "checkpointId": 10,
@@ -122,12 +122,12 @@
         "shots/02-compact-result.png"
       ],
       "details": {},
-      "durationMs": 778
+      "durationMs": 775
     },
     {
       "id": "install-plugin",
       "title": "安装插件命令：真实两阶段审批（install + enable）",
-      "startedAt": "2026-11-27T06:56:29.169Z",
+      "startedAt": "2026-11-27T08:13:47.699Z",
       "status": "passed",
       "checks": [
         {
@@ -211,12 +211,12 @@
           "bodyScrollWidth": 1440
         }
       },
-      "durationMs": 481
+      "durationMs": 1110
     },
     {
       "id": "plugin-form",
       "title": "执行插件命令：args_schema 生成表单 → 结构化结果",
-      "startedAt": "2026-11-27T06:56:29.650Z",
+      "startedAt": "2026-11-27T08:13:48.809Z",
       "status": "passed",
       "checks": [
         {
@@ -228,7 +228,7 @@
         {
           "label": "result row carries a requestId",
           "ok": true,
-          "actual": "cmd_3bf1c0fa-d2f7-4098-a987-3af19f54b4d7"
+          "actual": "cmd_1ac282a4-21ec-4a8d-b1bf-d3d9f358c720"
         },
         {
           "label": "sidecar executed refresh once",
@@ -245,12 +245,12 @@
         "shots/04-plugin-result.png"
       ],
       "details": {},
-      "durationMs": 611
+      "durationMs": 1223
     },
     {
       "id": "replay",
       "title": "重放同 requestId：同结果、不二次执行",
-      "startedAt": "2026-11-27T06:56:30.261Z",
+      "startedAt": "2026-11-27T08:13:50.032Z",
       "status": "passed",
       "checks": [
         {
@@ -264,11 +264,11 @@
           "ok": true,
           "actual": {
             "indexed": 7,
-            "requestId": "cmd_3bf1c0fa-d2f7-4098-a987-3af19f54b4d7"
+            "requestId": "cmd_1ac282a4-21ec-4a8d-b1bf-d3d9f358c720"
           },
           "expected": {
             "indexed": 7,
-            "requestId": "cmd_3bf1c0fa-d2f7-4098-a987-3af19f54b4d7"
+            "requestId": "cmd_1ac282a4-21ec-4a8d-b1bf-d3d9f358c720"
           }
         },
         {
@@ -288,12 +288,12 @@
         "shots/05-replay-row.png"
       ],
       "details": {},
-      "durationMs": 402
+      "durationMs": 1160
     },
     {
       "id": "destructive-denied",
       "title": "破坏性命令：审批拒绝 → 已拒绝行，无副作用",
-      "startedAt": "2026-11-27T06:56:30.663Z",
+      "startedAt": "2026-11-27T08:13:51.192Z",
       "status": "passed",
       "checks": [
         {
@@ -318,12 +318,12 @@
           "Failed to load resource: the server responded with a status of 403 (Forbidden)"
         ]
       },
-      "durationMs": 1855
+      "durationMs": 2501
     },
     {
       "id": "destructive-approved",
       "title": "破坏性命令：审批允许 → 只执行一次并给出结果",
-      "startedAt": "2026-11-27T06:56:32.518Z",
+      "startedAt": "2026-11-27T08:13:53.693Z",
       "status": "passed",
       "checks": [
         {
@@ -337,12 +337,12 @@
         "shots/08-destructive-result.png"
       ],
       "details": {},
-      "durationMs": 1285
+      "durationMs": 1884
     },
     {
       "id": "viewports",
       "title": "4.5 视觉：390/768/1024/1440 目录与表单无横向溢出",
-      "startedAt": "2026-11-27T06:56:33.803Z",
+      "startedAt": "2026-11-27T08:13:55.577Z",
       "status": "passed",
       "checks": [
         {
@@ -495,12 +495,12 @@
           "bodyScrollWidth": 1440
         }
       },
-      "durationMs": 8135
+      "durationMs": 8836
     },
     {
       "id": "disable-uninstall",
       "title": "停用/卸载插件：目录与执行入口一起撤销",
-      "startedAt": "2026-11-27T06:56:41.938Z",
+      "startedAt": "2026-11-27T08:14:04.413Z",
       "status": "passed",
       "checks": [
         {
@@ -539,7 +539,7 @@
         "shots/19-after-uninstall.png"
       ],
       "details": {},
-      "durationMs": 1340
+      "durationMs": 1442
     }
   ],
   "console": [],
