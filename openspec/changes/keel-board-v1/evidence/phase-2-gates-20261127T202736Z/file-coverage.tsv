@@ -1,0 +1,108 @@
+file	status	coverage
+.github/workflows/ci.yml	COVERED	CI parity: `go test -p 1 ./...` + `nsh check`
+README.md	COVERED	docs pin scan + `openspec validate --strict`
+cmd/board-sync-e2e/main.go	COVERED	`go test -p 1 ./...` (compile) + sync route tests
+cmd/board-sync-e2e/superagent.go	COVERED	`go test -p 1 ./...` (compile) + sync route tests
+cmd/keel/board.go	COVERED	`go test -p 1 ./...` (cmd/keel mount/serve)
+cmd/keel/board_serve_options_test.go	COVERED	`go test -p 1 ./...` (cmd/keel mount options)
+cmd/keel/board_superagent.go	COVERED	`go test` cmd/keel gate + board 404 TUI
+cmd/keel/board_superagent_test.go	COVERED	`go test` cmd/keel gate + board 404 TUI
+cmd/keel/serve.go	COVERED	`go test -p 1 ./...` (cmd/keel mount/serve)
+docs/HARNESS.md	COVERED	docs pin scan + `go test` harnessapi 404/report/ask
+docs/RUNBOOK.md	COVERED	docs pin scan + `openspec validate --strict`
+internal/access/builtin.go	COVERED	`go test` access/builtin + permission screenshots
+internal/access/builtin_test.go	COVERED	`go test` access/builtin + permission screenshots
+internal/accessgate/matrix.go	COVERED	`go test` accessgate (report/ask only) + 404 TUI
+internal/boardintegration/augment.go	COVERED	`go test` boardintegration moves/me + SSE augment live
+internal/boardintegration/authorizer.go	COVERED	`go test` boardintegration authorization
+internal/boardintegration/channel_owners.go	COVERED	`go test` boardintegration channel-owner tests
+internal/boardintegration/flags_pg_test.go	COVERED	`go test` boardintegration flag matrix PG
+internal/boardintegration/me.go	COVERED	`go test` TestBoardMe + identity badge
+internal/boardintegration/moves_pg_test.go	COVERED	`go test` TestTaskMoves* / TestBoardMe / sync merge
+internal/boardintegration/pg_helpers_test.go	COVERED	`go test` boardintegration PG helpers
+internal/boardintegration/surface.go	COVERED	`go test` boardintegration HTTP/RBAC surface
+internal/boardintegration/sync_admin.go	COVERED	`go test` boardintegration sync/admin/runtime PG
+internal/boardintegration/sync_admin_pg_test.go	COVERED	`go test` boardintegration sync/admin/runtime PG
+internal/boardintegration/sync_config.go	COVERED	`go test` boardintegration sync/admin/runtime PG
+internal/boardintegration/sync_manager.go	COVERED	`go test` boardintegration sync/admin/runtime PG
+internal/boardintegration/sync_routes.go	COVERED	`go test` boardintegration sync/admin/runtime PG
+internal/boardintegration/sync_routes_pg_test.go	COVERED	`go test` boardintegration sync/admin/runtime PG
+internal/boardintegration/sync_runtime_pg_test.go	COVERED	`go test` boardintegration sync/admin/runtime PG
+internal/boardintegration/sync_workers.go	COVERED	`go test` boardintegration sync/admin/runtime PG
+internal/harnessapi/superagent.go	COVERED	`go test` harnessapi 404 + worker report/ask
+internal/harnessapi/superagent_test.go	COVERED	`go test` harnessapi 404 + worker report/ask
+internal/store/relations.go	COVERED	`go test` store relations/orphan PG
+internal/store/relations_orphan_pg_test.go	COVERED	`go test` store relations/orphan PG
+internal/superagentboard/board.go	COVERED	`go test` superagentboard bridge/commands/token
+internal/superagentboard/bridge.go	COVERED	`go test` superagentboard bridge/commands/token
+internal/superagentboard/bridge_test.go	COVERED	`go test` superagentboard bridge/commands/token
+internal/superagentboard/commands.go	COVERED	`go test` superagentboard bridge/commands/token
+internal/superagentboard/mirror.go	COVERED	`go test` mirror imports archived + screenshot 24
+internal/superagentboard/mirror_pg_test.go	COVERED	`go test` mirror imports archived + screenshot 24
+internal/superagentboard/mirror_test.go	COVERED	`go test` mirror imports archived + screenshot 24
+internal/superagentboard/token.go	COVERED	`go test` superagentboard bridge/commands/token
+openspec/changes/keel-board-v1/DISPOSITION.md	COVERED	documented Phase 2 limitations + `openspec validate --strict`
+openspec/changes/keel-board-v1/design.md	COVERED	`openspec validate --strict`
+openspec/changes/keel-board-v1/tasks.md	COVERED	`openspec validate --strict`
+scripts/archive/retired-superagent/README.md	COVERED	retired-surface check + `openspec validate`
+scripts/archive/retired-superagent/acceptance/main.go	COVERED	`go test -p 1 ./...` (archive package compile) + retired-surface check
+scripts/archive/retired-superagent/acceptance/page.html	COVERED	retired-surface check + board gone screenshot 36
+scripts/archive/retired-superagent/acceptance/product.mjs	COVERED	`node --check`/`bash -n` + retired-surface check
+scripts/archive/retired-superagent/acceptance/report.mjs	COVERED	`node --check`/`bash -n` + retired-surface check
+scripts/archive/retired-superagent/acceptance/serve.sh	COVERED	`node --check`/`bash -n` + retired-surface check
+scripts/archive/retired-superagent/acceptance/tui.mjs	COVERED	`node --check`/`bash -n` + retired-surface check
+scripts/archive/retired-superagent/live-github/README.md	COVERED	retired-surface check + `openspec validate`
+scripts/archive/retired-superagent/live-github/bootstrap.mjs	COVERED	`node --check`/`bash -n` + retired-surface check
+scripts/archive/retired-superagent/live-github/e2e.mjs	COVERED	`node --check`/`bash -n` + retired-surface check
+scripts/archive/retired-superagent/live-github/provider.mjs	COVERED	`node --check`/`bash -n` + retired-surface check
+scripts/archive/retired-superagent/live-github/run.sh	COVERED	`node --check`/`bash -n` + retired-surface check
+scripts/archive/retired-superagent/live-github/set-worker-tools.mjs	COVERED	`node --check`/`bash -n` + retired-surface check
+scripts/binary-size.sh	COVERED	`bash -n` + phase-1 evidence
+scripts/board-fake-sse-server.mjs	COVERED	SSE live fake-server test
+scripts/board-phase2-gates.sh	COVERED	this gate (`bash -n` + executed in this run)
+scripts/board-phase2-ui-evidence.mjs	COVERED	UI evidence (HTML / 53 shots / 26 matrix)
+scripts/keel-board-phase1-gate.sh	COVERED	`bash -n` + phase-1 evidence
+scripts/keel-board-phase1-pin.sh	COVERED	`bash -n` + phase-1 evidence
+scripts/keel-board-phase1-superagent-gate.sh	COVERED	`bash -n` + phase-1 evidence
+scripts/keel-board-phase1-sync-gate.sh	COVERED	`bash -n` + phase-1 evidence
+scripts/keel-creation-e2e/e2e.mjs	COVERED	`node --check`
+web/App.tsx	COVERED	board TUI + screenshots + full TUI
+web/README.md	COVERED	docs pin scan + `openspec validate --strict`
+web/evidence/board-capture.template.tsx	COVERED	UI screenshots (53)
+web/evidence/board-sse-live.template.tsx	COVERED	SSE live fake-server test
+web/src/data/board-sse.test.ts	COVERED	SSE tests (3)
+web/src/data/board-wire.ts	COVERED	board data tests + SSE tests + board TUI
+web/src/data/board.test.ts	COVERED	board data tests (22)
+web/src/data/board.ts	COVERED	board data tests + SSE tests + board TUI
+web/src/data/contract.ts	COVERED	`nsh check` + board data tests (old types removed)
+web/src/data/fixture-board.ts	COVERED	board data tests + board TUI + screenshots
+web/src/data/fixture-identity.ts	COVERED	board TUI permission/identity + screenshots
+web/src/data/fixture.ts	COVERED	board TUI permission/identity + screenshots
+web/src/data/http.ts	COVERED	board data tests + SSE tests (real `KeelHttp`)
+web/src/data/identity-stream.test.ts	COVERED	full TUI (identity/session suite)
+web/src/data/identity-stream.ts	COVERED	full TUI (identity/session suite)
+web/src/data/permission-catalog.ts	COVERED	board data tests + permission screenshots
+web/src/data/route.test.ts	COVERED	route tests: `/superagent*` -> gone
+web/src/data/route.ts	COVERED	route tests: `/superagent*` -> gone + board TUI
+web/src/data/store.ts	COVERED	route tests + board TUI
+web/src/data/superagent.test.ts	COVERED	deleted old suite; route tests + full TUI
+web/src/data/superagent.ts	COVERED	deleted old client; route tests + board TUI gone + screenshot 36
+web/src/screens/board/automation.tsx	COVERED	board TUI automation + screenshots 34-37
+web/src/screens/board/board.tui.test.tsx	COVERED	board TUI (12)
+web/src/screens/board/harness.tsx	COVERED	UI screenshots (53, all scenarios)
+web/src/screens/board/page.tsx	COVERED	board TUI + five-state screenshots
+web/src/screens/board/queue.tsx	COVERED	board TUI queue + screenshots 01-14
+web/src/screens/board/state.ts	COVERED	board TUI actions/dialogs
+web/src/screens/board/sync.tsx	COVERED	board TUI sync + screenshots 30-33
+web/src/screens/board/task.tsx	COVERED	board TUI task/lease/actions + screenshots 20-28
+web/src/screens/books/books.tui.test.tsx	COVERED	books TUI + board TUI + full TUI
+web/src/screens/books/chapters.tsx	COVERED	books TUI + board TUI + full TUI
+web/src/screens/books/management.ts	COVERED	books TUI + board TUI + full TUI
+web/src/screens/books/shell.tsx	COVERED	books TUI + board TUI + full TUI
+web/src/screens/books/superagent.harness.tsx	COVERED	deleted old board; route tests + screenshot 36 + full TUI
+web/src/screens/books/superagent.tsx	COVERED	deleted old board; route tests + screenshot 36 + full TUI
+web/src/screens/books/superagent.tui.test.tsx	COVERED	deleted old board; route tests + screenshot 36 + full TUI
+web/src/screens/command-palette.tsx	COVERED	board TUI + full TUI
+web/src/screens/commands-local-error.test.tsx	COVERED	full TUI (538)
+web/src/screens/settings-models.test.tsx	COVERED	full TUI (538)
+web/theme.json	COVERED	UI screenshots (theme tokens) + `nsh check`

@@ -1,0 +1,14 @@
+{
+  "command": "nsh test --target tui",
+  "exit": 0,
+  "tests": 538,
+  "passed": 538,
+  "failed": 0,
+  "skipped": 0,
+  "duration": "16m 19s",
+  "durationSeconds": 979,
+  "junitSeconds": 978.786,
+  "exclusive": true,
+  "head": "93096c4e5a87e55982ed3ab459af9fcbb91a330e",
+  "junit": "full-tui-junit.xml"
+}
