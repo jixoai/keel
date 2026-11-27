@@ -1,12 +1,12 @@
-$ KEEL_TEST_DSN=<real PG> go test -race -p 1 ./internal/harnessapi/ ./internal/store/ -run "TestCommand|TestPostgresCommandInvocations" -v -count=1
+$ KEEL_TEST_DSN=<real PG> go test -race -p 1 ./internal/harnessapi/ ./internal/harnessext/ ./internal/store/ -run "TestCommand|TestPostgresCommandInvocations|TestPluginCommandRegistry" -v -count=1
 === RUN   TestCommandPGTenantBoundaryAndAudit
---- PASS: TestCommandPGTenantBoundaryAndAudit (0.08s)
+--- PASS: TestCommandPGTenantBoundaryAndAudit (0.07s)
 === RUN   TestCommandPGConcurrentRequestID
---- PASS: TestCommandPGConcurrentRequestID (0.16s)
+--- PASS: TestCommandPGConcurrentRequestID (0.27s)
 === RUN   TestCommandPGDestructiveRowPersistsDecision
 --- PASS: TestCommandPGDestructiveRowPersistsDecision (0.07s)
 === RUN   TestCommandCatalogOrderAndAvailability
---- PASS: TestCommandCatalogOrderAndAvailability (0.00s)
+--- PASS: TestCommandCatalogOrderAndAvailability (0.01s)
 === RUN   TestCommandCatalogMarksMissingPermissions
 --- PASS: TestCommandCatalogMarksMissingPermissions (0.00s)
 === RUN   TestCommandCatalogCrossTenantAndPermission
@@ -28,21 +28,21 @@ $ KEEL_TEST_DSN=<real PG> go test -race -p 1 ./internal/harnessapi/ ./internal/s
 === RUN   TestCommandDestructiveDecisionTimeout
 --- PASS: TestCommandDestructiveDecisionTimeout (0.07s)
 === RUN   TestCommandSkillLoadsForNextTurnAndReplays
---- PASS: TestCommandSkillLoadsForNextTurnAndReplays (0.01s)
+--- PASS: TestCommandSkillLoadsForNextTurnAndReplays (0.00s)
 === RUN   TestCommandSkillRequiresSkillRead
 --- PASS: TestCommandSkillRequiresSkillRead (0.00s)
 === RUN   TestCommandConcurrentSameRequestIDSerializes
 --- PASS: TestCommandConcurrentSameRequestIDSerializes (0.11s)
 === RUN   TestCommandSessionWriteRequired
---- PASS: TestCommandSessionWriteRequired (0.01s)
+--- PASS: TestCommandSessionWriteRequired (0.00s)
 === RUN   TestCommandResultTruncatesAtBound
 --- PASS: TestCommandResultTruncatesAtBound (0.01s)
 === RUN   TestCommandPluginInvokePermissionIsRequired
---- PASS: TestCommandPluginInvokePermissionIsRequired (0.01s)
+--- PASS: TestCommandPluginInvokePermissionIsRequired (0.00s)
 === RUN   TestCommandCatalogTruncatesAtBounds
---- PASS: TestCommandCatalogTruncatesAtBounds (0.12s)
+--- PASS: TestCommandCatalogTruncatesAtBounds (0.04s)
 === RUN   TestCommandCatalogCapsSkillsAtHalf
---- PASS: TestCommandCatalogCapsSkillsAtHalf (0.02s)
+--- PASS: TestCommandCatalogCapsSkillsAtHalf (0.01s)
 === RUN   TestCommandSkillIgnoresDisableModelInvocation
 --- PASS: TestCommandSkillIgnoresDisableModelInvocation (0.01s)
 === RUN   TestCommandDestructiveDecisionCancelled
@@ -50,8 +50,12 @@ $ KEEL_TEST_DSN=<real PG> go test -race -p 1 ./internal/harnessapi/ ./internal/s
 === RUN   TestCommandApprovalPromptsFromViewIgnoresInvalidView
 --- PASS: TestCommandApprovalPromptsFromViewIgnoresInvalidView (0.00s)
 PASS
-ok  	github.com/jixoai/keel/internal/harnessapi	2.094s
-=== RUN   TestPostgresCommandInvocations
---- PASS: TestPostgresCommandInvocations (0.08s)
+ok  	github.com/jixoai/keel/internal/harnessapi	2.173s
+=== RUN   TestPluginCommandRegistryWithPostgresPersistence
+--- PASS: TestPluginCommandRegistryWithPostgresPersistence (0.06s)
 PASS
-ok  	github.com/jixoai/keel/internal/store	1.357s
+ok  	github.com/jixoai/keel/internal/harnessext	1.614s
+=== RUN   TestPostgresCommandInvocations
+--- PASS: TestPostgresCommandInvocations (0.06s)
+PASS
+ok  	github.com/jixoai/keel/internal/store	1.334s
