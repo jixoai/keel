@@ -1,42 +1,42 @@
 $ KEEL_TEST_DSN=<real PG> go test -race -p 1 ./internal/harnessapi/ ./internal/harnessext/ ./internal/store/ -run "TestCommand|TestPostgresCommand|TestPluginCommandRegistry|TestCommandInvocationsIsInRLS" -v -count=1
 === RUN   TestCommandPGTenantBoundaryAndAudit
---- PASS: TestCommandPGTenantBoundaryAndAudit (0.07s)
+--- PASS: TestCommandPGTenantBoundaryAndAudit (0.08s)
 === RUN   TestCommandPGConcurrentRequestID
---- PASS: TestCommandPGConcurrentRequestID (0.16s)
+--- PASS: TestCommandPGConcurrentRequestID (0.17s)
 === RUN   TestCommandPGDestructiveRowPersistsDecision
---- PASS: TestCommandPGDestructiveRowPersistsDecision (0.06s)
+--- PASS: TestCommandPGDestructiveRowPersistsDecision (0.07s)
 === RUN   TestCommandPGDestructiveApprovedConcurrentReplay
 --- PASS: TestCommandPGDestructiveApprovedConcurrentReplay (0.26s)
 === RUN   TestCommandPGReclaimsExpiredRunningLease
---- PASS: TestCommandPGReclaimsExpiredRunningLease (0.21s)
+--- PASS: TestCommandPGReclaimsExpiredRunningLease (0.31s)
 === RUN   TestCommandCatalogOrderAndAvailability
---- PASS: TestCommandCatalogOrderAndAvailability (0.01s)
+--- PASS: TestCommandCatalogOrderAndAvailability (0.02s)
 === RUN   TestCommandCatalogMarksMissingPermissions
---- PASS: TestCommandCatalogMarksMissingPermissions (0.01s)
+--- PASS: TestCommandCatalogMarksMissingPermissions (0.02s)
 === RUN   TestCommandCatalogCrossTenantAndPermission
---- PASS: TestCommandCatalogCrossTenantAndPermission (0.00s)
+--- PASS: TestCommandCatalogCrossTenantAndPermission (0.03s)
 === RUN   TestCommandExecuteCompactDelegatesAndReplays
---- PASS: TestCommandExecuteCompactDelegatesAndReplays (0.00s)
+--- PASS: TestCommandExecuteCompactDelegatesAndReplays (0.01s)
 === RUN   TestCommandExecuteRefusals
 --- PASS: TestCommandExecuteRefusals (0.01s)
 === RUN   TestCommandExecuteFailureReplaysFirstFailure
---- PASS: TestCommandExecuteFailureReplaysFirstFailure (0.00s)
+--- PASS: TestCommandExecuteFailureReplaysFirstFailure (0.01s)
 === RUN   TestCommandExecutePluginToolAndAudit
---- PASS: TestCommandExecutePluginToolAndAudit (0.00s)
+--- PASS: TestCommandExecutePluginToolAndAudit (0.01s)
 === RUN   TestCommandExecutePluginUnavailableAndToolErrors
---- PASS: TestCommandExecutePluginUnavailableAndToolErrors (0.00s)
+--- PASS: TestCommandExecutePluginUnavailableAndToolErrors (0.01s)
 === RUN   TestCommandDestructiveDecisionFlow
---- PASS: TestCommandDestructiveDecisionFlow (0.00s)
+--- PASS: TestCommandDestructiveDecisionFlow (0.01s)
 === RUN   TestCommandDestructiveDecisionRefused
---- PASS: TestCommandDestructiveDecisionRefused (0.00s)
+--- PASS: TestCommandDestructiveDecisionRefused (0.01s)
 === RUN   TestCommandDestructiveDecisionTimeout
---- PASS: TestCommandDestructiveDecisionTimeout (0.06s)
+--- PASS: TestCommandDestructiveDecisionTimeout (0.07s)
 === RUN   TestCommandSkillLoadsForNextTurnAndReplays
---- PASS: TestCommandSkillLoadsForNextTurnAndReplays (0.01s)
+--- PASS: TestCommandSkillLoadsForNextTurnAndReplays (0.00s)
 === RUN   TestCommandSkillRequiresSkillRead
 --- PASS: TestCommandSkillRequiresSkillRead (0.00s)
 === RUN   TestCommandConcurrentSameRequestIDSerializes
---- PASS: TestCommandConcurrentSameRequestIDSerializes (0.10s)
+--- PASS: TestCommandConcurrentSameRequestIDSerializes (0.11s)
 === RUN   TestCommandSessionWriteRequired
 --- PASS: TestCommandSessionWriteRequired (0.00s)
 === RUN   TestCommandResultTruncatesAtBound
@@ -44,7 +44,7 @@ $ KEEL_TEST_DSN=<real PG> go test -race -p 1 ./internal/harnessapi/ ./internal/h
 === RUN   TestCommandPluginInvokePermissionIsRequired
 --- PASS: TestCommandPluginInvokePermissionIsRequired (0.00s)
 === RUN   TestCommandCatalogTruncatesAtBounds
---- PASS: TestCommandCatalogTruncatesAtBounds (0.03s)
+--- PASS: TestCommandCatalogTruncatesAtBounds (0.02s)
 === RUN   TestCommandCatalogCapsSkillsAtHalf
 --- PASS: TestCommandCatalogCapsSkillsAtHalf (0.01s)
 === RUN   TestCommandSkillIgnoresDisableModelInvocation
@@ -52,21 +52,21 @@ $ KEEL_TEST_DSN=<real PG> go test -race -p 1 ./internal/harnessapi/ ./internal/h
 === RUN   TestCommandDestructiveDecisionCancelled
 --- PASS: TestCommandDestructiveDecisionCancelled (0.00s)
 === RUN   TestCommandDestructiveApprovedConcurrentReplaysExecuteOnce
---- PASS: TestCommandDestructiveApprovedConcurrentReplaysExecuteOnce (0.15s)
+--- PASS: TestCommandDestructiveApprovedConcurrentReplaysExecuteOnce (0.16s)
 === RUN   TestCommandDecisionIdentityNegativeControls
 === RUN   TestCommandDecisionIdentityNegativeControls/different_kind,_same_prompt
 === RUN   TestCommandDecisionIdentityNegativeControls/same_kind,_different_prompt
 --- PASS: TestCommandDecisionIdentityNegativeControls (0.01s)
-    --- PASS: TestCommandDecisionIdentityNegativeControls/different_kind,_same_prompt (0.00s)
-    --- PASS: TestCommandDecisionIdentityNegativeControls/same_kind,_different_prompt (0.00s)
+    --- PASS: TestCommandDecisionIdentityNegativeControls/different_kind,_same_prompt (0.01s)
+    --- PASS: TestCommandDecisionIdentityNegativeControls/same_kind,_different_prompt (0.01s)
 === RUN   TestCommandDecisionOpenConflictIs409
---- PASS: TestCommandDecisionOpenConflictIs409 (0.00s)
+--- PASS: TestCommandDecisionOpenConflictIs409 (0.01s)
 === RUN   TestCommandResumeDecisionIdentityMutationGuards
 === RUN   TestCommandResumeDecisionIdentityMutationGuards/forged_kind_on_the_derived_requestId
 === RUN   TestCommandResumeDecisionIdentityMutationGuards/forged_requestId_with_the_command_kind
 --- PASS: TestCommandResumeDecisionIdentityMutationGuards (0.01s)
-    --- PASS: TestCommandResumeDecisionIdentityMutationGuards/forged_kind_on_the_derived_requestId (0.00s)
-    --- PASS: TestCommandResumeDecisionIdentityMutationGuards/forged_requestId_with_the_command_kind (0.00s)
+    --- PASS: TestCommandResumeDecisionIdentityMutationGuards/forged_kind_on_the_derived_requestId (0.01s)
+    --- PASS: TestCommandResumeDecisionIdentityMutationGuards/forged_requestId_with_the_command_kind (0.01s)
 === RUN   TestCommandSchemaConstraintsEnforced
 === RUN   TestCommandSchemaConstraintsEnforced/valid
 === RUN   TestCommandSchemaConstraintsEnforced/too_short
@@ -90,11 +90,11 @@ $ KEEL_TEST_DSN=<real PG> go test -race -p 1 ./internal/harnessapi/ ./internal/h
 === RUN   TestCommandAuditActorUsesBotID
 --- PASS: TestCommandAuditActorUsesBotID (0.00s)
 === RUN   TestCommandCatalogMarksNotWired
---- PASS: TestCommandCatalogMarksNotWired (0.01s)
+--- PASS: TestCommandCatalogMarksNotWired (0.00s)
 === RUN   TestCommandCatalogDegradesWhenSkillLibraryFails
---- PASS: TestCommandCatalogDegradesWhenSkillLibraryFails (0.02s)
+--- PASS: TestCommandCatalogDegradesWhenSkillLibraryFails (0.00s)
 === RUN   TestCommandSkillEventIsBoundedAndReferenced
---- PASS: TestCommandSkillEventIsBoundedAndReferenced (0.11s)
+--- PASS: TestCommandSkillEventIsBoundedAndReferenced (0.03s)
 === RUN   TestCommandDestructivePromptShowsBoundedArguments
 --- PASS: TestCommandDestructivePromptShowsBoundedArguments (0.00s)
 === RUN   TestCommandPluginIsErrorIs502
@@ -104,7 +104,7 @@ $ KEEL_TEST_DSN=<real PG> go test -race -p 1 ./internal/harnessapi/ ./internal/h
 === RUN   TestCommandOrphanRunningLeaseIsReclaimed
 --- PASS: TestCommandOrphanRunningLeaseIsReclaimed (0.00s)
 === RUN   TestCommandLiveLeaseIsNotStolen
---- PASS: TestCommandLiveLeaseIsNotStolen (0.05s)
+--- PASS: TestCommandLiveLeaseIsNotStolen (0.06s)
 === RUN   TestCommandCatalogUsesSessionRelationForAvailability
 --- PASS: TestCommandCatalogUsesSessionRelationForAvailability (0.00s)
 === RUN   TestCommandCatalogMarksPluginSeamsNotWired
@@ -118,20 +118,20 @@ $ KEEL_TEST_DSN=<real PG> go test -race -p 1 ./internal/harnessapi/ ./internal/h
 === RUN   TestCommandApprovalPromptsFromViewIgnoresInvalidView
 --- PASS: TestCommandApprovalPromptsFromViewIgnoresInvalidView (0.00s)
 PASS
-ok  	github.com/jixoai/keel/internal/harnessapi	3.042s
+ok  	github.com/jixoai/keel/internal/harnessapi	3.208s
 === RUN   TestPluginCommandRegistryWithPostgresPersistence
---- PASS: TestPluginCommandRegistryWithPostgresPersistence (0.08s)
+--- PASS: TestPluginCommandRegistryWithPostgresPersistence (0.06s)
 PASS
-ok  	github.com/jixoai/keel/internal/harnessext	1.587s
+ok  	github.com/jixoai/keel/internal/harnessext	1.809s
 === RUN   TestPostgresCommandInvocations
---- PASS: TestPostgresCommandInvocations (0.07s)
+--- PASS: TestPostgresCommandInvocations (0.08s)
 === RUN   TestCommandInvocationsIsInRLS
 --- PASS: TestCommandInvocationsIsInRLS (0.00s)
 === RUN   TestPostgresCommandDecisionCAS
 --- PASS: TestPostgresCommandDecisionCAS (0.06s)
 === RUN   TestPostgresCommandLeaseReclaim
---- PASS: TestPostgresCommandLeaseReclaim (0.18s)
+--- PASS: TestPostgresCommandLeaseReclaim (0.19s)
 === RUN   TestPostgresCommandInvocationsRLSPolicy
---- PASS: TestPostgresCommandInvocationsRLSPolicy (0.05s)
+--- PASS: TestPostgresCommandInvocationsRLSPolicy (0.17s)
 PASS
-ok  	github.com/jixoai/keel/internal/store	1.665s
+ok  	github.com/jixoai/keel/internal/store	1.994s
