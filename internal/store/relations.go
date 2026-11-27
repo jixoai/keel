@@ -115,12 +115,14 @@ func (s *Store) DeleteResourceRelation(ctx context.Context, tenantID uuid.UUID, 
 	return identityRowsResult("delete resource relation", tag.RowsAffected())
 }
 
-// PutResourceRelationIfOrphan writes one relation only when the resource and
-// every ancestor in ancestorIDs have no relation tuples at all. It is the
-// explicit adoption path for a resource whose ACL was never written
-// (keel-board-v1 Phase 1 P0-1): a board.manage holder may claim a fully
-// relation-free board channel, but can never take over a channel whose own or
-// inherited ACL already authorizes somebody.
+// PutResourceRelationIfOrphan writes one relation only when the resource, every
+// ancestor in ancestorIDs, and every descendant path have no relation tuples at
+// all. It is the explicit adoption path for a resource whose ACL was never
+// written (keel-board-v1 Phase 1 P0-1): a board.manage holder may claim a fully
+// relation-free board channel, but can never take over a channel whose own,
+// inherited or descendant ACL already authorizes somebody. (Adopting a parent
+// must not implicitly reach a child that already has an exact relation through
+// the authorizer's ancestor walk.)
 //
 // The emptiness check and the insert share one transaction. Every checked id
 // takes a transaction-scoped advisory lock (sorted), so two concurrent adopters
@@ -151,11 +153,13 @@ func (s *Store) PutResourceRelationIfOrphan(ctx context.Context, relation Resour
 		}
 	}
 	var exists bool
+	prefix := relation.ResourceID + "/"
 	if err := tx.QueryRow(ctx,
 		`SELECT EXISTS (
 		   SELECT 1 FROM resource_relations
-		    WHERE tenant_id = $1 AND resource_type = $2 AND resource_id = ANY($3))`,
-		relation.TenantID, relation.ResourceType, ids).Scan(&exists); err != nil {
+		    WHERE tenant_id = $1 AND resource_type = $2
+		      AND (resource_id = ANY($3) OR starts_with(resource_id, $4)))`,
+		relation.TenantID, relation.ResourceType, ids, prefix).Scan(&exists); err != nil {
 		return false, identityWriteError("check orphan relation", err)
 	}
 	if exists {

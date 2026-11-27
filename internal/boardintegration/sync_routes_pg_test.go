@@ -305,3 +305,48 @@ func TestChannelCreateAdoptsOrphanForManager(t *testing.T) {
 		t.Fatalf("inherited channel relations = %+v/%v", relations, err)
 	}
 }
+
+// TestChannelCreateDoesNotAdoptParentOfOwnedChild covers the last adoption
+// boundary: a parent with a relation-bearing descendant is not an orphan, so a
+// tenant manager cannot inherit onto the child's content. A fully relation-free
+// leaf remains adoptable.
+func TestChannelCreateDoesNotAdoptParentOfOwnedChild(t *testing.T) {
+	env := newTestEnv(t, nil)
+	server := env.server()
+	ctx := context.Background()
+	for _, channel := range []string{"work", "work/production", "work/leaf"} {
+		if resp := env.ensureChannel(t, server, channel); resp.status != http.StatusCreated {
+			t.Fatalf("create %s: %d %s", channel, resp.status, resp.body)
+		}
+	}
+	deleteOwner := func(channel string) {
+		t.Helper()
+		if err := env.st.DeleteResourceRelation(ctx, env.tenant, BoardChannelResourceType, channel,
+			keelstore.RelationOwner, keelstore.RelationSubjectAccount, env.alice.record.ID.String()); err != nil {
+			t.Fatalf("delete owner %s: %v", channel, err)
+		}
+	}
+	for _, channel := range []string{"work", "work/production", "work/leaf"} {
+		deleteOwner(channel)
+	}
+	env.relation(env.tenant, "work/production", keelstore.RelationViewer, env.carol.record.ID)
+
+	if resp := env.do(t, server, http.MethodPost, "/v1/board/channels", "manager", map[string]any{"path": "work"}); resp.status != http.StatusOK {
+		t.Fatalf("manager create work = %d %s", resp.status, resp.body)
+	}
+	if relations, err := env.st.ListResourceRelations(ctx, env.tenant, BoardChannelResourceType, "work", 0); err != nil || len(relations) != 0 {
+		t.Fatalf("work relations = %+v/%v (parent of an owned child was adopted)", relations, err)
+	}
+
+	// The leaf has no relation on itself, its ancestors or its descendants.
+	if resp := env.do(t, server, http.MethodPost, "/v1/board/channels", "manager", map[string]any{"path": "work/leaf"}); resp.status != http.StatusOK {
+		t.Fatalf("manager create leaf = %d %s", resp.status, resp.body)
+	}
+	relations, err := env.st.ListResourceRelations(ctx, env.tenant, BoardChannelResourceType, "work/leaf", 0)
+	if err != nil {
+		t.Fatalf("leaf relations: %v", err)
+	}
+	if len(relations) != 1 || relations[0].SubjectID != env.manager.record.ID.String() || relations[0].Relation != keelstore.RelationOwner {
+		t.Fatalf("leaf relations = %+v", relations)
+	}
+}

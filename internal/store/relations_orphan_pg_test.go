@@ -112,4 +112,53 @@ func TestPutResourceRelationIfOrphan(t *testing.T) {
 	if relations, err := st.ListResourceRelations(ctx, tenant, "board_channel", "work/production", 0); err != nil || len(relations) != 0 {
 		t.Fatalf("descendant relations = %+v/%v", relations, err)
 	}
+
+	// A descendant's exact relation blocks adopting its parent: the child is
+	// already authorized, and parent ownership would inherit over it.
+	if err := st.DeleteResourceRelation(ctx, tenant, "board_channel", "work",
+		RelationEditor, RelationSubjectAccount, accounts[0].String()); err != nil {
+		t.Fatalf("delete ancestor relation: %v", err)
+	}
+	if _, err := st.PutResourceRelation(ctx, ResourceRelation{
+		TenantID: tenant, ResourceType: "board_channel", ResourceID: "work/production",
+		Relation: RelationViewer, SubjectType: RelationSubjectAccount,
+		SubjectID: accounts[1].String(), CreatedBy: accounts[1],
+	}); err != nil {
+		t.Fatalf("descendant relation: %v", err)
+	}
+	parent := relation(accounts[0])
+	parent.ResourceID = "work"
+	created, err = st.PutResourceRelationIfOrphan(ctx, parent, nil)
+	if err != nil {
+		t.Fatalf("parent adopt: %v", err)
+	}
+	if created {
+		t.Fatal("a descendant ACL did not block parent adoption")
+	}
+	if relations, err := st.ListResourceRelations(ctx, tenant, "board_channel", "work", 0); err != nil || len(relations) != 0 {
+		t.Fatalf("work relations = %+v/%v", relations, err)
+	}
+	if err := st.DeleteResourceRelation(ctx, tenant, "board_channel", "work/production",
+		RelationViewer, RelationSubjectAccount, accounts[1].String()); err != nil {
+		t.Fatalf("delete descendant relation: %v", err)
+	}
+
+	// A fully relation-free leaf is still adoptable, and that relation then
+	// blocks adopting its parent.
+	leaf := relation(accounts[1])
+	leaf.ResourceID = "work/leaf"
+	created, err = st.PutResourceRelationIfOrphan(ctx, leaf, []string{"work"})
+	if err != nil {
+		t.Fatalf("leaf adopt: %v", err)
+	}
+	if !created {
+		t.Fatal("a fully relation-free leaf was not adopted")
+	}
+	created, err = st.PutResourceRelationIfOrphan(ctx, parent, nil)
+	if err != nil {
+		t.Fatalf("parent adopt after leaf: %v", err)
+	}
+	if created {
+		t.Fatal("the adopted leaf did not block parent adoption")
+	}
 }

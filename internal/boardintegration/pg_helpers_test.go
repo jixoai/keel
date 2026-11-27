@@ -343,6 +343,23 @@ type response struct {
 	body   []byte
 }
 
+// waitWorkerGateClosed waits until the manager's durable gate rejects the key,
+// then lets one full worker poll finish. Without the settle, a worker pass that
+// already read allowed=true before the disable can still lease a row pushed
+// immediately afterwards.
+func (e *testEnv) waitWorkerGateClosed(t *testing.T, key string) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if !e.surf.manager.workerAllowed(context.Background(), boardsync.Key(key)) {
+			time.Sleep(2 * e.options.SyncWorkerPollInterval)
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatal("worker gate did not close")
+}
+
 // ensureChannel creates a channel or accepts an idempotent 200 for a channel a
 // fixture already seeded before boot.
 func (e *testEnv) ensureChannel(t *testing.T, server *httptest.Server, channel string) response {

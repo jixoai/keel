@@ -219,14 +219,13 @@ func TestSyncTenantFlagsPauseAndResumeWorkers(t *testing.T) {
 	server := env.server()
 	env.ensureChannel(t, server, "support")
 	env.setBoardFlags(t, `{"board":{"enabled":true,"sync":{"enabled":false}}}`)
-	time.Sleep(150 * time.Millisecond) // let the monitor pause the workers
+	env.waitWorkerGateClosed(t, "slack")
 	env.pushSlackInbox(t, "while sync is off", "1700000600.000001")
 	// More than one worker poll cycle: this fails if both the monitor stop and
 	// the durable lease gate are removed (the old 300ms window did not).
 	env.assertNoBoardMessage(t, server, "support", "while sync is off", 500*time.Millisecond)
 
 	env.setBoardFlags(t, `{"board":{"enabled":true,"sync":{"enabled":true}}}`)
-	time.Sleep(150 * time.Millisecond)
 	env.pushSlackInbox(t, "after sync is back", "1700000601.000001")
 	if _, err := env.waitSyncMessage(t, server, "support", "after sync is back"); err != nil {
 		t.Fatalf("worker did not resume: %v", err)
@@ -563,6 +562,7 @@ func TestSyncInboundWorkerGateBlocksLeases(t *testing.T) {
 	if _, err := env.surf.SyncStore().SetEntryEnabled(context.Background(), env.tenant.String(), "slack", false); err != nil {
 		t.Fatalf("disable board sync row: %v", err)
 	}
+	env.waitWorkerGateClosed(t, "slack")
 	env.pushSlackInbox(t, "blocked by the worker lease gate", "1700003000.000001")
 	env.assertNoBoardMessage(t, server, "support", "blocked by the worker lease gate", 500*time.Millisecond)
 }
@@ -600,6 +600,7 @@ func TestSyncOutboundWorkerGateBlocksLeases(t *testing.T) {
 	if _, err := env.surf.SyncStore().SetEntryEnabled(context.Background(), env.tenant.String(), "slack", false); err != nil {
 		t.Fatalf("disable board sync row: %v", err)
 	}
+	env.waitWorkerGateClosed(t, "slack")
 	requests.Store(0)
 	if resp := env.do(t, server, http.MethodPost, "/v1/board/messages", "alice", map[string]any{"re": root.ID, "text": "must not post"}); resp.status != 201 {
 		t.Fatalf("reply: %d %s", resp.status, resp.body)
