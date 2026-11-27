@@ -17,8 +17,8 @@ repo_root="$(git rev-parse --show-toplevel)"
 evidence_dir="$repo_root/openspec/changes/keel-board-v1/evidence"
 evidence="$evidence_dir/phase-1-sync.md"
 e2e_html="$evidence_dir/phase-1-sync-e2e.html"
-base_ref="${KEEL_BOARD_BASE:-8435b3dd}"
-budget_kb="${KEEL_BOARD_BINARY_BUDGET_KB:-2048}"
+base_ref="${KEEL_BOARD_BASE:-6ee7fe3}"
+budget_kb="${KEEL_BOARD_BINARY_BUDGET_KB:-4096}"
 if [ -z "${KEEL_TEST_DSN:-}" ]; then
   echo "keel-board-phase1-sync-gate: KEEL_TEST_DSN is required for the real-PostgreSQL suites" >&2
   exit 2

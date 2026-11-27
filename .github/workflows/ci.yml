@@ -76,11 +76,14 @@ jobs:
             ""|0000000000000000000000000000000000000000) base="HEAD~1" ;;
           esac
           # Phase 1 imports keel-board v0.1.1 plus the tenant sync/secrets
-          # wiring: together they add ~2.6 MiB to cmd/keel, a deliberate core
-          # capability rather than dependency drift. The 3 MiB ceiling is still
-          # a gate against further unbounded growth; cmd/runtime is unchanged.
-          # Commands previously raised this from 200 to 256 KiB.
-          ./scripts/binary-size.sh --base "$base" --budget-kb 3072
+          # wiring: together they add ~3.0 MiB to cmd/keel, a deliberate core
+          # capability rather than dependency drift. The Phase 1 hardening
+          # review measured only 132 KiB of headroom under the old 3 MiB
+          # ceiling, so keel's budget is 4 MiB: still a gate against unbounded
+          # growth (board is ~3.0 MiB), with room for the Phase 2 UI contract
+          # work. cmd/runtime adds no dependency and is unchanged; the script
+          # applies the same ceiling to both shipping commands.
+          ./scripts/binary-size.sh --base "$base" --budget-kb 4096
       # The catalog is the only machine-readable coverage truth; COVERAGE.md
       # §A/§B/§C are mapped onto it and §H is generated. A stale catalog or an
       # ungenerated §H fails here (docs/PLUGIN-CATALOG.md).

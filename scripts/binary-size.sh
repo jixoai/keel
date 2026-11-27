@@ -110,13 +110,15 @@ echo "bins:    ${bins[*]}"
 # worktree (which may be another worktree in the same repo) is never touched.
 mkdir -p "$work_dir/base" "$work_dir/current" "$work_dir/gotmp"
 git -C "$repo_root" archive "$base_sha" | tar -x -C "$work_dir/base"
-# The working tree copy excludes VCS metadata and client build outputs; only
-# the module inputs matter for a size measurement. The built binary at the repo
-# root is deliberately NOT excluded via a bare name pattern: bsdtar matches
-# every path component, which would also drop cmd/keel.
-tar -c -C "$repo_root" \
-  --exclude .git --exclude web/node_modules --exclude web/.nsh \
-  . | tar -x -C "$work_dir/current"
+# The current tree is copied by path, not with `tar -c .`: deployment artifacts
+# under cmd/keel/assets (pg.txz, web/, icon.png) are gitignored and must not be
+# measured as source. `git ls-files -co --exclude-standard` lists tracked files
+# plus new files a developer has not committed yet, but never ignored ones; it
+# reads their working-tree contents, so an uncommitted edit is still measured.
+# The result is identical in a clean checkout.
+git -C "$repo_root" ls-files -co --exclude-standard -z \
+  | tar -C "$repo_root" --null -T - -cf - \
+  | tar -xf - -C "$work_dir/current"
 
 failed=0
 measured=0

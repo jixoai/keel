@@ -97,7 +97,9 @@ export KEEL_BOARD_FILE_TIMEOUT=10s   # 可选；单个入站文件下载超时
   超级用户/`BYPASSRLS` 总是绕过 RLS）。`keel serve` 启动时会检查该角色并 warn（不阻断）。
   专用库/角色用 `KEEL_BOARD_DSN`；单库单租户可复用 `KEEL_DSN`。
 - 镜像/Dockerfile 只构建 `cmd/runtime`，**不含 board**。生产 board 入口是 `keel serve`
-  （`KEEL_BOARD_ENABLED=1`）；若要让 runtime 也提供 board，需要另一条接入 lane，且预算仍为 2048 KiB。
+  （`KEEL_BOARD_ENABLED=1`）；若要让 runtime 也提供 board，需要另一条接入 lane。keel 的
+  二进制预算为 **4096 KiB**（board + sync/secrets 约 3.0 MiB；`cmd/runtime` 未新增依赖，
+  仍受同一脚本的 4096 KiB 上限约束）。
 - 跨租户：HTTP 侧 tenant 只来自登录 principal（不读 header/path），A 租户读不到 B 的行；
   数据库侧见 `internal/boardintegration` 的 RLS 测试（restricted role + unset tenant）。
 
@@ -108,6 +110,11 @@ export KEEL_BOARD_FILE_TIMEOUT=10s   # 可选；单个入站文件下载超时
 {"board":{"enabled":true,"sync":{"enabled":true}}}
 ```
 
+- **route 前置条件（fail closed）**：`routes` 里每个 board channel 必须已经存在，并且在
+  `resource_relations` 中至少有一条 `resource_type=board_channel` 的关系；否则
+  `POST/PATCH /v1/board/sync/entries` 返回 400，提示先 `POST /v1/board/channels`
+  （创建者自动成为 owner）或走孤儿频道认领。boot 时历史 entry 也做同一校验：不合格的
+  entry 在 board sync store 停用、日志给出原因、不启动 worker，进程继续启动。
 - `board.enabled=false`：`/v1/board/*` 全部 404 `board_disabled`；`/webhooks/*` 同样 404 且
   不读 body、不写 inbox。`board.sync.enabled=false`：核心 board 可用，`/v1/board/sync/*`、
   `/v1/board/sources/*` 与 webhook/bridge 返回 404 `sync_disabled`。
@@ -150,6 +157,9 @@ export KEEL_BOARD_FILE_TIMEOUT=10s   # 可选；单个入站文件下载超时
   可收窄父级 editor）。
 - 创建频道（`POST /v1/board/channels`）成功 201 后，adapter 立即写创建者的 `owner` 关系；
   隐式子频道（父频道 editor 下 `POST /messages`/`/tasks` 首次出现）也在 201 后写。
+- **孤儿频道认领**：对已存在但**零 relation** 的频道，`board.manage`（tenant/all scope）
+  调用 `POST /v1/board/channels` 返回 200，并补写调用者 owner；已有任何 relation 时保持
+  现状，不会借该路径夺取 ACL。board.write 调用者对无关系频道仍 404（不能探测存在性）。
   **正式偏离 design §11.2 的“同一事务”**：board 模块与 keel 关系表不能共享事务，因此
   owner 写入是非原子的；启动与周期扫描按 `channel.created` 和每个频道最早的
   `message.posted` root 补偿（崩溃窗口可用测试复现）。
@@ -199,9 +209,16 @@ export KEEL_SECRET_KEY='…'     # 必填；缺失时 mirror/bridge 均 fail clo
   `HMAC-SHA256(KEEL_SECRET_KEY, "board-claim:v1:<tenant>:<assignment>:<session>")` 派生，服务端只存 hash。
 - 只读：镜像线程/消息写 `noSync`，统一 GitHub sync 不会二次回写；旧 `/superagent` 看板已
   冻结（Phase 2 15.7 删除），board 队列/线程承接工单、答复与完成旅程。
-- 命令桥：board 的 claim/complete/fail/block/unblock/assign/cancel 先调 supervisor 既有
-  API（ResumeTicket/Report/Ask/AnswerAttention/StopTicket），成功后才由 mirror 追加 board
-  事件；supervisor 拒绝/超时不会改变 board 状态（返回 4xx/5xx，board 头不变）。
+- 命令桥：board 的 claim/complete/fail/block/unblock/assign/cancel 先做 **频道级** 授权
+  （mirrored task 所在 channel 的 editor 关系 + board.write/manage；仅“别的频道有写权限”
+  不够），再调 supervisor 既有 API（ResumeTicket/Report/Ask/AnswerAttention/StopTicket），
+  成功后才由 mirror 追加 board 事件；supervisor 拒绝/超时不会改变 board 状态（返回 4xx/5xx，
+  board 头不变）。assign 的 board 落盘单独失败时返回 202 `{supervisorAccepted:true,
+  boardSynced:false}`，不伪装 200。
+- 运营组：mirror 对 `tenant-admin` 与 `bot-operator` 写 mirrored channel 的 `owner` 关系；
+  `bot-operator` 预设同时带 `board.read`/`board.write`（team scope），因此默认运营组成员
+  可以 claim/complete/block；没有该频道关系的 board.write 用户仍 404。`board.manage`
+  （sync entries 等）不在 `bot-operator` 预设内。
 - 验收：`KEEL_TEST_DSN='postgres://…' go test ./internal/superagentboard/ -v` 与
   `go test -race ./internal/superagentboard/ ./internal/store/`。
 
@@ -213,9 +230,11 @@ KEEL_TEST_DSN='postgres://…' go test ./internal/boardintegration/ -v
 KEEL_TEST_DSN='postgres://…' go test -race ./internal/boardintegration/
 KEEL_TEST_DSN='postgres://…' go test ./internal/boardintegration/ -run TestBoardStoreRLSUsesTenantSetting -v
 go test ./internal/access/ ./internal/accessgate/ ./cmd/keel/
-scripts/binary-size.sh --budget-kb 3072 --base 6ee7fe3
+scripts/binary-size.sh --budget-kb 4096 --base 6ee7fe3
 
-# 全量 + E2E（fake Slack/GitHub/Linear/Chat SDK bridge；生成 HTML 报告）
+# 全量 + E2E（fake Slack/GitHub/Linear/Chat SDK bridge + superagent 命令桥；
+# 生成 HTML 报告；含 fresh-channel 400/201/导入、board_disabled、supervisor
+# timeout/5xx/retry、频道级授权拒绝等步骤）
 KEEL_TEST_DSN='postgres://…' scripts/keel-board-phase1-sync-gate.sh
 KEEL_TEST_DSN='postgres://…' go run ./cmd/board-sync-e2e \
   -dsn 'postgres://…' -out /tmp/phase-1-sync-e2e.html

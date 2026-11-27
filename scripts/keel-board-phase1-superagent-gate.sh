@@ -12,7 +12,7 @@ set -euo pipefail
 
 repo_root="$(git rev-parse --show-toplevel)"
 evidence="$repo_root/openspec/changes/keel-board-v1/evidence/phase-1-superagent.md"
-base_ref="${KEEL_BOARD_BASE:-8435b3dd}"
+base_ref="${KEEL_BOARD_BASE:-6ee7fe3}"
 if [ -z "${KEEL_TEST_DSN:-}" ]; then
   echo "keel-board-phase1-superagent-gate: KEEL_TEST_DSN is required for the real-PostgreSQL suites" >&2
   exit 2
@@ -21,6 +21,10 @@ mkdir -p "$(dirname "$evidence")"
 cd "$repo_root"
 
 section() { printf '\n## %s\n\n' "$1" >>"$evidence"; }
+failures=0
+# block records a command's output and exit status without aborting the rest of
+# the evidence run. Any failing block makes the script exit non-zero: an
+# evidence generator that always returns 0 is not a gate.
 block() {
   local status
   {
@@ -32,14 +36,11 @@ block() {
     printf '```\n'
     printf 'exit=%d\n' "$status"
   } >>"$evidence" 2>&1
+  if [ "$status" -ne 0 ]; then
+    failures=$((failures + 1))
+  fi
+  return 0
 }
-
-tmpdir="$(mktemp -d)"
-cleanup() {
-  git worktree remove --force "$tmpdir/base" >/dev/null 2>&1 || true
-  rm -rf "$tmpdir"
-}
-trap cleanup EXIT
 
 cat >"$evidence" <<EOF
 # Phase 1 superagent evidence (keel-board-v1 11.1-11.6)
@@ -49,7 +50,7 @@ This file is script output, not hand-written.
 
 - board module: $(go list -m -f '{{.Path}} {{.Version}}' github.com/jixoai/keel-board)
 - go: $(go version)
-- binary-size baseline: \`$base_ref\` (2048 KiB budget for this lane's delta)
+- binary-size baseline: \`$base_ref\` (4096 KiB budget per binary and target)
 EOF
 
 section "11.1 board_links, tenant switches, switch matrix"
@@ -81,17 +82,11 @@ section "Format and vet"
 block sh -c 'test -z "$(gofmt -l internal cmd)" || { gofmt -l internal cmd; exit 1; }'
 block go vet ./internal/superagentboard/ ./internal/store/ ./internal/superagent/ ./cmd/keel/
 
-section "Binary size delta (2048 KiB budget)"
-block go build -o "$tmpdir/keel-new" ./cmd/keel
-block git worktree add --detach "$tmpdir/base" "$base_ref"
-block sh -c "cd '$tmpdir/base' && go build -o '$tmpdir/keel-base' ./cmd/keel"
-block sh -c "python3 - '$tmpdir/keel-base' '$tmpdir/keel-new' <<'PY'
-import os, sys
-base, new = os.path.getsize(sys.argv[1]), os.path.getsize(sys.argv[2])
-delta = new - base
-print(f'baseline bytes={base} KiB={base/1024:.1f}')
-print(f'new bytes={new} KiB={new/1024:.1f}')
-print(f'delta bytes={delta} KiB={delta/1024:.1f} budget_KiB=2048 headroom_KiB={2048-delta/1024:.1f}')
-PY"
+section "Binary size (keel + runtime, linux/amd64+arm64; budget 4096 KiB)"
+block scripts/binary-size.sh --budget-kb 4096 --base "$base_ref"
 
+if [ "$failures" -ne 0 ]; then
+  printf 'keel-board-phase1-superagent-gate: %d command(s) failed; see %s\n' "$failures" "$evidence" >&2
+  exit 1
+fi
 printf '\nEvidence written to %s\n' "$evidence"

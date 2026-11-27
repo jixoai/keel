@@ -179,6 +179,8 @@ env 文件路径：`FDE2E_ENV_PERSONAL`，默认取主仓根目录的 `.env.pers
   登录与 Bot key，不新增认证方式。
 - **权限**：`board.read` / `board.write` / `board.manage` 三个权限键 + 频道
   `resource_relations`（`resource_type=board_channel`，viewer/editor/owner，最近祖先继承）。
+  镜像任务动作按频道关系校验；默认运营组 `tenant-admin`/`bot-operator` 获得 mirrored
+  channel 的 owner（`bot-operator` 预设含 `board.read/write`，不含 `board.manage`）。
   创建频道者自动成为 owner；不可读频道返回 404，可读但无写权限返回 403。
 - **存储**：board 自己的迁移（`board_*`）在启动时幂等执行；RLS 读 `keel.tenant_id`，与 keel
   既有的 `app.tenant_id` 策略互不覆盖。默认复用 `KEEL_DSN`；`KEEL_BOARD_DSN` 可指向专用
@@ -195,8 +197,10 @@ env 文件路径：`FDE2E_ENV_PERSONAL`，默认取主仓根目录的 `.env.pers
   Chat SDK bridge `POST /v1/board/sync/bridge/{key}/events` 用 HMAC v1 + nonce，不经会话。
 - **Sync**：tenant 配置只存 `secret_ref`（tenant secret 名称），凭据在 keel 的
   `tenant_secrets`（`KEEL_SECRET_KEY`）加密存储。`POST/PATCH /v1/board/sync/entries`
-  （`board.manage` + `secret.write`）创建/启停/轮换/路由；启停即时生效，创建/轮换/路由变更
-  在重启后装载（变更期间 entry 在 board sync store 中停用，旧凭据不会继续服务）。
+  （`board.manage` + `secret.write`）创建/启停/轮换/路由；`routes` 目标频道必须已存在且
+  至少有一条 `board_channel` relation，否则 400（先 `POST /v1/board/channels` 创建/认领）；
+  启停即时生效，创建/轮换/路由变更在重启后装载（变更期间 entry 在 board sync store 中停用，
+  旧凭据不会继续服务）。
   inbox/outbox、board 事件订阅、watcher/schedule worker 随 `keel serve` 启动；
   每 5s 跟随 tenant flags、durable entry 与凭据指纹，关闭/停用/轮换即暂停，多副本由同一
   durable row 收敛。board 附件的字节走 keel blob store（真实读写，不再 501）。

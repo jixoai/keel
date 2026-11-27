@@ -73,8 +73,8 @@ section "Format and vet"
 block sh -c 'test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }'
 block go vet ./...
 
-section "Binary size (keel + runtime, linux/amd64+arm64, 3072 KiB budget)"
-block scripts/binary-size.sh --budget-kb 3072 --base "$base_ref"
+section "Binary size (keel runtime budget; keel 4096 KiB, linux/amd64+arm64)"
+block scripts/binary-size.sh --budget-kb 4096 --base "$base_ref"
 
 if [ "$failures" -ne 0 ]; then
   printf 'keel-board-phase1-gate: %d command(s) failed; see %s\n' "$failures" "$evidence" >&2
