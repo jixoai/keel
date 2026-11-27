@@ -155,9 +155,11 @@ type serveOptions struct {
 	// and receives the orchestrator after newSuperagentRuntime succeeds.
 	SuperagentWorkerTools *superagentToolBackend
 	// TelemetryConfig is the tenant telemetry section in the plugin vocabulary.
-	// It is snapshotted after the config.toml overlay and shared by the service
-	// factory, the plugin factory, the approval preview and the status hub.
-	TelemetryConfig telemetry.Config
+	// It is resolved from the stored tenant document and snapshotted for the
+	// boot status/approval preview; TelemetryConfigLoader re-reads it at plugin
+	// Start so a config write applies to the next enable without a restart.
+	TelemetryConfig       telemetry.Config
+	TelemetryConfigLoader func(context.Context) (telemetry.Config, error)
 }
 
 const (
@@ -650,8 +652,23 @@ func runServe(parent context.Context, opts serveOptions) error {
 	// GET /v1/telemetry/status read the same object the run path writes to. The
 	// configured values are recorded for status/approval but stay inert: the
 	// OTLP exporter only exists while keel.telemetry is enabled.
-	opts.TelemetryConfig = servicehost.TelemetryPluginConfig(tenantCfg)
-	opts.TelemetryConfig.TenantID = opts.TenantID.String()
+	//
+	// The telemetry section lives in the tenant document (PUT
+	// /v1/tenants/{id}/config), not in the flag/env document built above, so it
+	// must be resolved through the stored-document loader. A stored document
+	// that cannot be read/parsed does not brick the harness: the boot snapshot
+	// falls back to the flag/env + config.toml document, while the plugin Start
+	// re-read fails closed (FAILED) instead of exporting with unintended
+	// defaults.
+	telemetryLoader := newTenantTelemetryLoader(st, opts.TenantID, captureDefaults, configFile)
+	telemetryCfg, telemetryErr := telemetryLoader.LoadBounded(ctx)
+	if telemetryErr != nil {
+		log.Warn("stored tenant telemetry config is not usable; telemetry plugin enable will fail until it is fixed", "err", telemetryErr)
+		telemetryCfg = servicehost.TelemetryPluginConfig(tenantCfg)
+		telemetryCfg.TenantID = opts.TenantID.String()
+	}
+	opts.TelemetryConfig = telemetryCfg
+	opts.TelemetryConfigLoader = telemetryLoader.LoadBounded
 	telemetryHub := telemetry.NewHub(telemetry.HubOptions{
 		TenantID: opts.TenantID.String(),
 		Base:     telemetry.NoopContext,
@@ -1627,10 +1644,19 @@ func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, 
 		PluginAuditWriter: pluginAuditStore{store: st},
 		PluginTools:       &pluginToolBridge{index: toolIndex, manager: manager},
 		// Telemetry status and the enable question read the process hub and the
-		// snapshotted tenant section; the question never renders header values.
+		// tenant section; the question re-reads the stored document so it shows
+		// what the next enable will actually apply.
 		Telemetry: rt.TelemetryHub(),
 		TelemetryApproval: func() []string {
-			return telemetryApprovalLines(opts.TelemetryConfig)
+			config := opts.TelemetryConfig
+			if opts.TelemetryConfigLoader != nil {
+				ctx, cancel := context.WithTimeout(context.Background(), telemetryConfigLoadTimeout)
+				if loaded, err := opts.TelemetryConfigLoader(ctx); err == nil {
+					config = loaded
+				}
+				cancel()
+			}
+			return telemetryApprovalLines(config)
 		},
 		Theme: theme,
 		// Chat commands (change keel-plugin-commands): the durable invocation
@@ -1953,6 +1979,7 @@ func newPluginSurface(ctx context.Context, rt *servicehost.Runtime, persistence 
 			return harnessext.NewTelemetryPlugin(harnessext.TelemetryPluginOptions{
 				TenantID:     opts.TenantID.String(),
 				Config:       opts.TelemetryConfig,
+				ConfigLoader: opts.TelemetryConfigLoader,
 				LookupSecret: lookupSecret,
 				Logger:       log,
 			})

@@ -74,6 +74,15 @@ func TestTelemetryStatusRoute(t *testing.T) {
 	}
 }
 
+func TestTelemetryStatusUnboundHubIsUnavailable(t *testing.T) {
+	hub := telemetry.NewHub(telemetry.HubOptions{Logger: testLogger()})
+	harness := newPluginAPITest(t, &fakePluginManager{}, func(cfg *Config) { cfg.Telemetry = hub })
+	var body map[string]any
+	if code := harness.write(t, http.MethodGet, "/v1/telemetry/status", pluginTestTenant, nil, &body); code != http.StatusServiceUnavailable {
+		t.Fatalf("unbound hub status = %d, want 503", code)
+	}
+}
+
 func TestTelemetryStatusNotWired(t *testing.T) {
 	harness := newPluginAPITest(t, &fakePluginManager{})
 	var body map[string]any

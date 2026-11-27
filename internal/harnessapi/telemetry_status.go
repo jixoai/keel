@@ -15,8 +15,9 @@ import (
 )
 
 var (
-	errTelemetryNotWired = errors.New("telemetry status is not wired in this deployment")
-	errTelemetryNotFound = errors.New("telemetry is not available for this tenant")
+	errTelemetryNotWired      = errors.New("telemetry status is not wired in this deployment")
+	errTelemetryNotFound      = errors.New("telemetry is not available for this tenant")
+	errTelemetryTenantUnbound = errors.New("the telemetry hub is not bound to a tenant")
 )
 
 type telemetryStatusResponse struct {
@@ -34,6 +35,9 @@ type telemetryStatusResponse struct {
 	Dropped             uint64                     `json:"dropped"`
 	Exported            uint64                     `json:"exported"`
 	MetricSeriesDropped uint64                     `json:"metricSeriesDropped"`
+	AttributesDropped   uint64                     `json:"attributesDropped"`
+	EventsDropped       uint64                     `json:"eventsDropped"`
+	LinksDropped        uint64                     `json:"linksDropped"`
 	LastErrorClass      string                     `json:"lastErrorClass,omitempty"`
 	Configured          bool                       `json:"configured"`
 	Adapter             string                     `json:"adapter,omitempty"`
@@ -50,7 +54,14 @@ func (s *Server) telemetryStatus(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusServiceUnavailable, errTelemetryNotWired)
 		return
 	}
-	if hubTenant := s.cfg.Telemetry.TenantID(); hubTenant != "" && hubTenant != tenantID.String() {
+	hubTenant := s.cfg.Telemetry.TenantID()
+	if hubTenant == "" {
+		// An unbound hub cannot prove isolation: answer unavailable instead of
+		// rendering a status another tenant could have written.
+		writeErr(w, http.StatusServiceUnavailable, errTelemetryTenantUnbound)
+		return
+	}
+	if hubTenant != tenantID.String() {
 		// Cross-tenant read: never confirm that another tenant configured
 		// telemetry, and never render its endpoint or queue.
 		writeErr(w, http.StatusNotFound, errTelemetryNotFound)
@@ -72,6 +83,9 @@ func (s *Server) telemetryStatus(w http.ResponseWriter, r *http.Request) {
 		Dropped:             status.Dropped,
 		Exported:            status.Exported,
 		MetricSeriesDropped: status.MetricSeriesDropped,
+		AttributesDropped:   status.AttributesDropped,
+		EventsDropped:       status.EventsDropped,
+		LinksDropped:        status.LinksDropped,
 		LastErrorClass:      status.LastErrorClass,
 		Configured:          status.Config.Configured,
 		Adapter:             status.Config.Adapter,

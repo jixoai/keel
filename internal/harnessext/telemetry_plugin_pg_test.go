@@ -50,8 +50,20 @@ func TestTelemetryPluginPersistenceWithPostgres(t *testing.T) {
 			Signals:  []string{"traces", "metrics"},
 			TenantID: tenant.String(),
 		}
-		runtime := NewRuntime(RuntimeOptions{Telemetry: hub, Logger: testLogger()})
-		manager, err := NewPluginManager(ManagerOptions{
+		var manager *Manager
+		runtime := NewRuntime(RuntimeOptions{
+			Telemetry: hub,
+			Logger:    testLogger(),
+			Audit: func(ctx context.Context, pluginID, version, action, result string, detail map[string]any) {
+				if manager == nil {
+					return
+				}
+				tenantID := tenant
+				manager.RecordAudit(ctx, AuditContext{TenantID: &tenantID, Actor: "system:test"}, pluginID, version, action, result, detail)
+			},
+		})
+		var err error
+		manager, err = NewPluginManager(ManagerOptions{
 			TenantID: tenant, Runtime: runtime, Persistence: st,
 			Builtins: []Builtin{{
 				Manifest:       manifest,
@@ -101,6 +113,15 @@ func TestTelemetryPluginPersistenceWithPostgres(t *testing.T) {
 	detail := string(rows[len(rows)-1].Detail)
 	if !strings.Contains(detail, "endpointHost") || !strings.Contains(detail, "signals") {
 		t.Fatalf("audit detail = %s", detail)
+	}
+	var configureDetail string
+	for _, row := range rows {
+		if row.Action == store.PluginActionConfigure {
+			configureDetail = string(row.Detail)
+		}
+	}
+	if configureDetail == "" || !strings.Contains(configureDetail, "signals") || !strings.Contains(configureDetail, "sampleRatio") {
+		t.Fatalf("configure audit row = %q", configureDetail)
 	}
 	_ = hub.Close(context.Background())
 

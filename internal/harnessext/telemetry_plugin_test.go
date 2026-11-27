@@ -21,11 +21,12 @@ import (
 
 // telemetryCollector is the fake OTLP endpoint for plugin lifecycle tests.
 type telemetryCollector struct {
-	server *httptest.Server
-	mu     sync.Mutex
-	traces []string
-	paths  []string
-	status int
+	server  *httptest.Server
+	mu      sync.Mutex
+	traces  []string
+	paths   []string
+	headers []http.Header
+	status  int
 }
 
 func newTelemetryCollector(t *testing.T) *telemetryCollector {
@@ -35,6 +36,7 @@ func newTelemetryCollector(t *testing.T) *telemetryCollector {
 		body, _ := io.ReadAll(r.Body)
 		collector.mu.Lock()
 		collector.paths = append(collector.paths, r.URL.Path)
+		collector.headers = append(collector.headers, r.Header.Clone())
 		if r.URL.Path == "/v1/traces" {
 			collector.traces = append(collector.traces, string(body))
 		}
@@ -68,6 +70,15 @@ func (c *telemetryCollector) traceBodies() string {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return strings.Join(c.traces, "\n")
+}
+
+func (c *telemetryCollector) lastHeaders() http.Header {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if len(c.headers) == 0 {
+		return nil
+	}
+	return c.headers[len(c.headers)-1].Clone()
 }
 
 type telemetryHarness struct {
@@ -496,6 +507,115 @@ func TestTelemetryPluginStartStopCyclesReleaseResources(t *testing.T) {
 	if got := collector.count("/v1/traces"); got != before {
 		t.Fatalf("a stopped exporter still wrote: %d", got-before)
 	}
+}
+
+func TestTelemetryPluginEmptyTenantFailsClosed(t *testing.T) {
+	cases := []struct {
+		name         string
+		hubTenant    string
+		pluginTenant string
+	}{
+		{"hub unbound", "", "tenant-a"},
+		{"plugin unbound", "tenant-a", ""},
+		{"both unbound", "", ""},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			hub := telemetry.NewHub(telemetry.HubOptions{TenantID: test.hubTenant, Logger: testLogger()})
+			plugin := NewTelemetryPlugin(TelemetryPluginOptions{
+				TenantID: test.pluginTenant,
+				Config:   telemetry.Config{Adapter: "otlp", Endpoint: "https://collector.example"},
+				Logger:   testLogger(),
+			})
+			if err := plugin.Start(context.Background(), &PluginEnv{Telemetry: hub}); err == nil {
+				t.Fatal("an unbound tenant was accepted")
+			}
+			if hub.ExporterCount() != 0 {
+				t.Fatalf("exporter registered: %d", hub.ExporterCount())
+			}
+			if status := hub.Status(); status.State != telemetry.PluginFailed {
+				t.Fatalf("state = %s", status.State)
+			}
+		})
+	}
+}
+
+func TestTelemetryPluginDisableFlushesQueuedBatch(t *testing.T) {
+	collector := newTelemetryCollector(t)
+	harness := newTelemetryHarness(t, telemetryFixture{config: telemetry.Config{
+		Adapter:  "otlp",
+		Endpoint: collector.server.URL,
+	}})
+	if _, err := harness.manager.Enable(context.Background(), TelemetryPluginID, AuditContext{TenantID: &harness.tenant, Actor: "test"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := harness.hub.StartSpan(telemetry.SpanOptions{Name: "queued-before-disable"}, func(telemetry.Span) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	// No explicit Flush: Disable's Stop must drain the queue within its bound.
+	if _, err := harness.manager.Disable(context.Background(), TelemetryPluginID, AuditContext{TenantID: &harness.tenant, Actor: "test"}); err != nil {
+		t.Fatal(err)
+	}
+	if collector.count("/v1/traces") == 0 {
+		t.Fatal("disable did not flush the queued batch")
+	}
+	if !strings.Contains(collector.traceBodies(), "queued-before-disable") {
+		t.Fatalf("flushed body = %s", collector.traceBodies())
+	}
+}
+
+func TestTelemetryPluginSendsResolvedHeader(t *testing.T) {
+	collector := newTelemetryCollector(t)
+	harness := newTelemetryHarness(t, telemetryFixture{
+		config: telemetry.Config{
+			Adapter:  "otlp",
+			Endpoint: collector.server.URL,
+			Headers:  map[string]string{"Authorization": "secret:OTLP"},
+		},
+		lookup: func(name string) (string, bool) { return "Bearer plugin-token", name == "OTLP" },
+	})
+	if _, err := harness.manager.Enable(context.Background(), TelemetryPluginID, AuditContext{TenantID: &harness.tenant, Actor: "test"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := harness.hub.StartSpan(telemetry.SpanOptions{Name: "header-run"}, func(telemetry.Span) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if err := harness.hub.Flush(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := collector.lastHeaders().Get("Authorization"); got != "Bearer plugin-token" {
+		t.Fatalf("collector Authorization = %q", got)
+	}
+}
+
+func TestTelemetryStopContextCapsLongerCallerDeadline(t *testing.T) {
+	parent, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	ctx, stop := telemetryStopContext(parent, 50*time.Millisecond)
+	defer stop()
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		t.Fatal("stop context has no deadline")
+	}
+	if remaining := time.Until(deadline); remaining > 100*time.Millisecond {
+		t.Fatalf("stop deadline = %s, want <= 50ms", remaining)
+	}
+	short, cancelShort := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancelShort()
+	ctxShort, stopShort := telemetryStopContext(short, 5*time.Second)
+	defer stopShort()
+	if remaining := time.Until(mustDeadline(t, ctxShort)); remaining > 100*time.Millisecond {
+		t.Fatalf("short parent deadline = %s, want the caller's bound", remaining)
+	}
+}
+
+func mustDeadline(t *testing.T, ctx context.Context) time.Time {
+	t.Helper()
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		t.Fatal("context has no deadline")
+	}
+	return deadline
 }
 
 func TestTelemetryPluginTenantIsolation(t *testing.T) {

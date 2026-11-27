@@ -39,7 +39,12 @@ const (
 // TelemetryPluginOptions wires the plugin.
 type TelemetryPluginOptions struct {
 	TenantID string
-	Config   telemetry.Config
+	// Config is the boot snapshot. ConfigLoader, when set, re-reads the tenant
+	// document at Start (and approval preview) so a settings write applies to
+	// the next enable without a restart; a loader failure is a FAILED plugin,
+	// never a silent fallback.
+	Config       telemetry.Config
+	ConfigLoader func(ctx context.Context) (telemetry.Config, error)
 	// LookupSecret resolves `secret:NAME` header references. Nil fails closed
 	// when the config declares headers.
 	LookupSecret func(name string) (string, bool)
@@ -78,24 +83,38 @@ func (p *telemetryPlugin) start(ctx context.Context, env *PluginEnv) error {
 		return fmt.Errorf("telemetry: the host does not expose a telemetry hub")
 	}
 	tenant := strings.TrimSpace(p.options.TenantID)
-	if hubTenant := strings.TrimSpace(hub.TenantID()); hubTenant != "" && tenant != "" && hubTenant != tenant {
-		// Fail closed: a multi-tenant process must never share an exporter or an
-		// endpoint between tenants. The host wires one hub per tenant; a mismatch
-		// is a wiring bug and exporting would leak signals.
-		reason := "telemetry hub belongs to another tenant; refusing to export"
+	hubTenant := strings.TrimSpace(hub.TenantID())
+	// Fail closed on an unbound hub/plugin. "Either side empty" is not proof of
+	// isolation: an empty tenant would let one process serve several tenants
+	// through one exporter and endpoint.
+	if tenant == "" || hubTenant == "" || hubTenant != tenant {
+		reason := "telemetry hub and plugin must belong to the same non-empty tenant; refusing to export"
 		hub.SetPluginState(telemetry.PluginFailed, reason)
 		return fmt.Errorf("telemetry: %s", reason)
 	}
 
-	summary := telemetry.SummarizeConfig(p.options.Config)
+	config := p.options.Config
+	if p.options.ConfigLoader != nil {
+		loadCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
+		loaded, err := p.options.ConfigLoader(loadCtx)
+		cancel()
+		if err != nil {
+			summary := telemetry.SummarizeConfig(config)
+			hub.Configure(summary)
+			p.rememberHub(hub)
+			hub.SetPluginState(telemetry.PluginFailed, err.Error())
+			p.auditConfig(ctx, env, telemetry.PluginFailed, summary, err)
+			return fmt.Errorf("telemetry config: %w", err)
+		}
+		config = loaded
+	}
+	summary := telemetry.SummarizeConfig(config)
 	hub.Configure(summary)
-	p.mu.Lock()
-	p.hub = hub
-	p.mu.Unlock()
-	effective, err := telemetry.ParseConfig(p.options.Config)
+	p.rememberHub(hub)
+	effective, err := telemetry.ParseConfig(config)
 	if err != nil {
 		hub.SetPluginState(telemetry.PluginFailed, err.Error())
-		p.auditConfig(env, telemetry.PluginFailed, summary, err)
+		p.auditConfig(ctx, env, telemetry.PluginFailed, summary, err)
 		return fmt.Errorf("telemetry config: %w", err)
 	}
 	hub.SetSampleRatio(effective.SampleRatio)
@@ -106,14 +125,14 @@ func (p *telemetryPlugin) start(ctx context.Context, env *PluginEnv) error {
 		p.mu.Lock()
 		p.started = true
 		p.mu.Unlock()
-		p.auditConfig(env, telemetry.PluginInactive, summary, nil)
+		p.auditConfig(ctx, env, telemetry.PluginInactive, summary, nil)
 		return nil
 	}
 
 	headers, err := effective.ResolveHeaders(p.options.LookupSecret)
 	if err != nil {
 		hub.SetPluginState(telemetry.PluginFailed, err.Error())
-		p.auditConfig(env, telemetry.PluginFailed, summary, err)
+		p.auditConfig(ctx, env, telemetry.PluginFailed, summary, err)
 		return fmt.Errorf("telemetry headers: %w", err)
 	}
 	exporter, err := telemetry.NewOTLPExporter(telemetry.OTLPExporterOptions{
@@ -129,12 +148,12 @@ func (p *telemetryPlugin) start(ctx context.Context, env *PluginEnv) error {
 	})
 	if err != nil {
 		hub.SetPluginState(telemetry.PluginFailed, err.Error())
-		p.auditConfig(env, telemetry.PluginFailed, summary, err)
+		p.auditConfig(ctx, env, telemetry.PluginFailed, summary, err)
 		return fmt.Errorf("telemetry exporter: %w", err)
 	}
 	if err := hub.RegisterExporter(exporter); err != nil {
 		hub.SetPluginState(telemetry.PluginFailed, err.Error())
-		p.auditConfig(env, telemetry.PluginFailed, summary, err)
+		p.auditConfig(ctx, env, telemetry.PluginFailed, summary, err)
 		return fmt.Errorf("telemetry exporter: %w", err)
 	}
 	exporter.Start()
@@ -143,8 +162,14 @@ func (p *telemetryPlugin) start(ctx context.Context, env *PluginEnv) error {
 	p.started = true
 	p.mu.Unlock()
 	hub.SetPluginState(telemetry.PluginActive, "")
-	p.auditConfig(env, telemetry.PluginActive, summary, nil)
+	p.auditConfig(ctx, env, telemetry.PluginActive, summary, nil)
 	return nil
+}
+
+func (p *telemetryPlugin) rememberHub(hub *telemetry.Hub) {
+	p.mu.Lock()
+	p.hub = hub
+	p.mu.Unlock()
 }
 
 func (p *telemetryPlugin) stop(ctx context.Context) error {
@@ -173,14 +198,7 @@ func (p *telemetryPlugin) stop(ctx context.Context) error {
 	// The plugin's own registration is gone before the exporter closes: an
 	// in-flight span that captured the exporter may still enqueue, and the
 	// exporter contract says Close tolerates that.
-	stopCtx := ctx
-	if stopCtx == nil {
-		stopCtx = context.Background()
-	}
-	cancel := func() {}
-	if _, hasDeadline := stopCtx.Deadline(); !hasDeadline {
-		stopCtx, cancel = context.WithTimeout(context.WithoutCancel(stopCtx), telemetryStopTimeout)
-	}
+	stopCtx, cancel := telemetryStopContext(ctx, telemetryStopTimeout)
 	defer cancel()
 	if err := exporter.Close(stopCtx); err != nil && p.options.Logger != nil {
 		p.options.Logger.Warn("telemetry exporter shutdown flush incomplete", "err", err)
@@ -188,7 +206,26 @@ func (p *telemetryPlugin) stop(ctx context.Context) error {
 	return nil
 }
 
-func (p *telemetryPlugin) auditConfig(env *PluginEnv, state telemetry.PluginState, summary telemetry.ConfigSummary, configErr error) {
+// telemetryStopContext always bounds a plugin shutdown to max, even when the
+// caller carries a longer deadline. Without this a 10s serve shutdown would let
+// the exporter flush for 6s+, violating the documented 5s bound.
+func telemetryStopContext(parent context.Context, max time.Duration) (context.Context, context.CancelFunc) {
+	if parent == nil {
+		parent = context.Background()
+	}
+	timeout := max
+	if deadline, ok := parent.Deadline(); ok {
+		if remaining := time.Until(deadline); remaining < timeout {
+			timeout = remaining
+		}
+	}
+	if timeout <= 0 {
+		timeout = time.Nanosecond
+	}
+	return context.WithTimeout(context.WithoutCancel(parent), timeout)
+}
+
+func (p *telemetryPlugin) auditConfig(ctx context.Context, env *PluginEnv, state telemetry.PluginState, summary telemetry.ConfigSummary, configErr error) {
 	if env == nil || env.Audit == nil {
 		return
 	}
@@ -200,7 +237,9 @@ func (p *telemetryPlugin) auditConfig(env *PluginEnv, state telemetry.PluginStat
 	if state == telemetry.PluginFailed {
 		result = store.PluginResultFailed
 	}
-	env.Audit(context.Background(), store.PluginActionConfigure, result, detail)
+	auditCtx, cancel := telemetryStopContext(ctx, 3*time.Second)
+	defer cancel()
+	env.Audit(auditCtx, store.PluginActionConfigure, result, detail)
 }
 
 // telemetryConfigAudit memoizes the last applied config so a configure audit row
