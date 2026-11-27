@@ -160,3 +160,47 @@ entry:
 		t.Fatalf("uninstalled plugin lists commands: %+v", got)
 	}
 }
+
+func TestManagerListCommandsFollowsUpdate(t *testing.T) {
+	root := t.TempDir()
+	harness := newManagerHarness(t, root, nil)
+	manifest := func(version, commands string) string {
+		return fmt.Sprintf(`id: vendor.commands
+version: %s
+kind: webview
+description: command package
+provides:
+  tools: [vendor.commands.run]
+  commands:
+%s
+  ui:
+    entry: ui/index.html
+entry:
+  command: [node, backend.js]
+`, version, commands)
+	}
+	firstDir := writePluginPackage(t, root+"/pkg-v1", map[string]string{
+		"plugin.yaml":   manifest("1.0.0", "    - name: refresh\n      summary: Refresh.\n      tool: vendor.commands.run\n      danger: write\n"),
+		"ui/index.html": "<html></html>",
+	})
+	if _, err := harness.manager.Install(context.Background(), InstallRequest{Path: firstDir}, AuditContext{Actor: "test"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := harness.manager.Enable(context.Background(), "vendor.commands", AuditContext{Actor: "test"}); err != nil {
+		t.Fatal(err)
+	}
+	secondDir := writePluginPackage(t, root+"/pkg-v2", map[string]string{
+		"plugin.yaml":   manifest("1.0.1", "    - name: refresh\n      summary: Refresh.\n      tool: vendor.commands.run\n      danger: write\n    - name: prune\n      summary: Prune.\n      tool: vendor.commands.run\n      danger: destructive\n"),
+		"ui/index.html": "<html></html>",
+	})
+	if _, err := harness.manager.Update(context.Background(), "vendor.commands", UpdateRequest{Path: secondDir}, AuditContext{Actor: "test"}); err != nil {
+		t.Fatal(err)
+	}
+	registry := harness.manager.ListCommands()
+	if len(registry.Commands) != 2 {
+		t.Fatalf("updated commands = %+v", registry.Commands)
+	}
+	if registry.Commands[0].Published != "vendor.commands:refresh" || registry.Commands[1].Published != "vendor.commands:prune" {
+		t.Fatalf("updated commands = %+v", registry.Commands)
+	}
+}
