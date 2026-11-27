@@ -1,3 +1,3 @@
-✓ built App.tsx (1.2 MB js, 1.7 MB bytecode, 3 chunks, 772ms)
+✓ built App.tsx (1.2 MB js, 1.7 MB bytecode, 3 chunks, 931ms)
 ✓ ran wasm-bindgen 0.2.129 on the web runtime (1.6s)
-✓ packaged /Users/kzf/Development/GitHub/jixoai/fde2e/.worktrees/keel-plugin-attachment-ui/.agents/reports/keel/attachment-e2e-2026-11-27-152530/web/Keel, 16.6 MB (32.2s)
+✓ packaged /Users/kzf/Development/GitHub/jixoai/fde2e/.worktrees/keel-plugin-attachment-ui/.agents/reports/keel/attachment-e2e-2026-11-27-155209/web/Keel, 16.6 MB (35.5s)

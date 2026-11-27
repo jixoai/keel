@@ -4,7 +4,7 @@
   "date": "2026-11-27",
   "frozenBase": {
     "repo": "/Users/kzf/Development/GitHub/jixoai/fde2e/.worktrees/keel-plugin-attachment-ui",
-    "commit": "6b3833228a4c3936244f693e44bfd6353debf90a"
+    "commit": "3867e888b824fe93f9aa01e59107d99177eed8cf"
   },
   "conclusion": "9/9 步通过，116/116 条断言通过；P0/P1 = 0；UNCOVERED=0。",
   "assertions": {
@@ -18,7 +18,7 @@
       "action": "真实 HTTP 上传 PNG/PDF，提交带附件输入，读取 part 与模型请求",
       "expect": "原生 image_url + PDF 文本兜底，元数据无字节",
       "result": "PASS",
-      "startedAt": "2026-11-27T07:26:18.060Z",
+      "startedAt": "2026-11-27T07:53:13.775Z",
       "shots": [],
       "checks": [
         {
@@ -49,13 +49,13 @@
           "name": "上传 PNG 返回 fileId",
           "ok": true,
           "expected": "201 + fileId",
-          "actual": "201 6cba1e73-ce68-4455-affd-7e7a8084f55f"
+          "actual": "201 2dbb1aaf-c801-429b-8dab-b75d8045085c"
         },
         {
           "name": "上传 PDF 返回 fileId",
           "ok": true,
           "expected": "201 + fileId",
-          "actual": "201 f13386ec-2832-49c0-b749-0e5146cc3968"
+          "actual": "201 36f718b5-26ba-49c8-abf6-b8f9c669a5ec"
         },
         {
           "name": "创建 Bot 所有的会话",
@@ -97,7 +97,7 @@
           "name": "part 字段完整",
           "ok": true,
           "expected": "fileId/mime/kind/size/downloadUrl",
-          "actual": "{\"fileId\":\"6cba1e73-ce68-4455-affd-7e7a8084f55f\",\"mime\":\"image/png\",\"kind\":\"image\",\"size\":39037}"
+          "actual": "{\"fileId\":\"2dbb1aaf-c801-429b-8dab-b75d8045085c\",\"mime\":\"image/png\",\"kind\":\"image\",\"size\":39037}"
         },
         {
           "name": "part 含 thumbStatus 与 delivery",
@@ -148,8 +148,8 @@
           "actual": "no file_data"
         }
       ],
-      "log": "session=967d96c4-adb3-49a1-beeb-9aa7b59f68b5 seq=1 png=6cba1e73-ce68-4455-affd-7e7a8084f55f pdf=f13386ec-2832-49c0-b749-0e5146cc3968",
-      "finishedAt": "2026-11-27T07:26:18.571Z"
+      "log": "session=07edd9fe-116f-471f-aa23-25e271b32658 seq=1 png=2dbb1aaf-c801-429b-8dab-b75d8045085c pdf=36f718b5-26ba-49c8-abf6-b8f9c669a5ec",
+      "finishedAt": "2026-11-27T07:53:14.339Z"
     },
     {
       "n": 2,
@@ -157,7 +157,7 @@
       "action": "登录 → 打开会话，检查默认行、缩略图与下载入口",
       "expect": "名称/大小/MIME/缩略图/下载可见，无插件预览",
       "result": "PASS",
-      "startedAt": "2026-11-27T07:26:18.571Z",
+      "startedAt": "2026-11-27T07:53:14.339Z",
       "shots": [
         "screenshots/01-default-attachment-row.png"
       ],
@@ -190,7 +190,7 @@
           "name": "图片缩略图已绘制（naturalWidth > 0，无空白占位）",
           "ok": true,
           "expected": "complete + naturalWidth > 0",
-          "actual": "{\"complete\":true,\"naturalWidth\":320,\"src\":\"http://127.0.0.1:13730/v1/files/6cba1e73-ce68-4455-affd-7e7a8084f55f/thumbnail\"}"
+          "actual": "{\"complete\":true,\"naturalWidth\":320,\"src\":\"http://127.0.0.1:13730/v1/files/2dbb1aaf-c801-429b-8dab-b75d8045085c/thumbnail\"}"
         },
         {
           "name": "1440 无横向溢出",
@@ -200,7 +200,7 @@
         }
       ],
       "log": "",
-      "finishedAt": "2026-11-27T07:26:20.979Z"
+      "finishedAt": "2026-11-27T07:53:17.890Z"
     },
     {
       "n": 3,
@@ -208,7 +208,7 @@
       "action": "安装 + durabile 审批 + 启用，重载页面打开会话",
       "expect": "审批展示认领；chunk 渲染且默认事实仍在",
       "result": "PASS",
-      "startedAt": "2026-11-27T07:26:20.979Z",
+      "startedAt": "2026-11-27T07:53:17.891Z",
       "shots": [
         "screenshots/02-plugin-preview.png"
       ],
@@ -223,7 +223,7 @@
           "name": "审批文本展示附件认领",
           "ok": true,
           "expected": "slot + part + mime",
-          "actual": "Install the plugin package /Users/kzf/Development/GitHub/jixoai/fde2e/.worktrees/keel-plugin-attachment-ui/.agents/reports/keel/attachment-e2e-2026-11-27-152530/e2e-plugins/e2e.attachment-preview? Ins"
+          "actual": "Install the plugin package /Users/kzf/Development/GitHub/jixoai/fde2e/.worktrees/keel-plugin-attachment-ui/.agents/reports/keel/attachment-e2e-2026-11-27-155209/e2e-plugins/e2e.attachment-preview? Ins"
         },
         {
           "name": "启用返回 200",
@@ -257,7 +257,7 @@
         }
       ],
       "log": "",
-      "finishedAt": "2026-11-27T07:26:21.964Z"
+      "finishedAt": "2026-11-27T07:53:19.124Z"
     },
     {
       "n": 4,
@@ -265,7 +265,7 @@
       "action": "停用 + 重载，检查预览撤销与默认行恢复",
       "expect": "无预览、无失败面，默认行可用",
       "result": "PASS",
-      "startedAt": "2026-11-27T07:26:21.964Z",
+      "startedAt": "2026-11-27T07:53:19.124Z",
       "shots": [
         "screenshots/03-disabled-default-row.png"
       ],
@@ -308,7 +308,7 @@
         }
       ],
       "log": "",
-      "finishedAt": "2026-11-27T07:26:22.853Z"
+      "finishedAt": "2026-11-27T07:53:20.335Z"
     },
     {
       "n": 5,
@@ -316,7 +316,7 @@
       "action": "安装抛错插件，重载检查失败提示与默认行",
       "expect": "可解释失败；PDF 行不受影响",
       "result": "PASS",
-      "startedAt": "2026-11-27T07:26:22.853Z",
+      "startedAt": "2026-11-27T07:53:20.335Z",
       "shots": [
         "screenshots/04-preview-failure-fallback.png"
       ],
@@ -359,7 +359,7 @@
         }
       ],
       "log": "",
-      "finishedAt": "2026-11-27T07:26:23.794Z"
+      "finishedAt": "2026-11-27T07:53:21.470Z"
     },
     {
       "n": 6,
@@ -367,7 +367,7 @@
       "action": "建组/账号/会话，reader 打开会话并请求附件",
       "expect": "元数据可见；缩略图/下载 403；UI 无权限态",
       "result": "PASS",
-      "startedAt": "2026-11-27T07:26:23.795Z",
+      "startedAt": "2026-11-27T07:53:21.470Z",
       "shots": [
         "screenshots/05-reader-no-file-read.png"
       ],
@@ -530,7 +530,7 @@
         }
       ],
       "log": "",
-      "finishedAt": "2026-11-27T07:26:25.979Z"
+      "finishedAt": "2026-11-27T07:53:24.057Z"
     },
     {
       "n": 7,
@@ -538,7 +538,7 @@
       "action": "登录无权限账号，请求会话/附件/字节",
       "expect": "403；UI 不展示会话或附件内容",
       "result": "PASS",
-      "startedAt": "2026-11-27T07:26:25.979Z",
+      "startedAt": "2026-11-27T07:53:24.057Z",
       "shots": [
         "screenshots/06-outsider-no-session-read.png"
       ],
@@ -605,7 +605,7 @@
         }
       ],
       "log": "",
-      "finishedAt": "2026-11-27T07:26:30.140Z"
+      "finishedAt": "2026-11-27T07:53:28.219Z"
     },
     {
       "n": 8,
@@ -613,7 +613,7 @@
       "action": "租户 B 登录，读 A 的文件/缩略图/part，含伪造租户头",
       "expect": "全部 404；对称检查 A 读 B 也 404",
       "result": "PASS",
-      "startedAt": "2026-11-27T07:26:30.140Z",
+      "startedAt": "2026-11-27T07:53:28.219Z",
       "shots": [
         "screenshots/07-tenant-b-file-404.png",
         "screenshots/08-tenant-b-thumbnail-404.png"
@@ -622,8 +622,8 @@
         {
           "name": "租户 B 登录",
           "ok": true,
-          "expected": "200 tenantId=5a2ff606-fcc9-4012-9621-0765680a8609",
-          "actual": "200 5a2ff606-fcc9-4012-9621-0765680a8609"
+          "expected": "200 tenantId=d82bcb64-c4a4-44e8-ab33-65f0ee46c536",
+          "actual": "200 d82bcb64-c4a4-44e8-ab33-65f0ee46c536"
         },
         {
           "name": "租户 B 上传自己的文件",
@@ -699,7 +699,7 @@
         }
       ],
       "log": "",
-      "finishedAt": "2026-11-27T07:26:31.645Z"
+      "finishedAt": "2026-11-27T07:53:30.242Z"
     },
     {
       "n": 9,
@@ -707,7 +707,7 @@
       "action": "四个视口打开附件会话，测量溢出与行框",
       "expect": "无横向溢出，附件行在视口内",
       "result": "PASS",
-      "startedAt": "2026-11-27T07:26:31.645Z",
+      "startedAt": "2026-11-27T07:53:30.242Z",
       "shots": [
         "screenshots/09-layout-390.png",
         "screenshots/10-layout-768.png",
@@ -843,17 +843,31 @@
         }
       ],
       "log": "",
-      "finishedAt": "2026-11-27T07:26:37.530Z"
+      "finishedAt": "2026-11-27T07:53:37.878Z"
     }
   ],
   "findings": [],
   "coverage": {
     "baseline": "8916393",
-    "total": 46,
+    "total": 49,
     "covered": 26,
-    "exempt": 20,
+    "exempt": 23,
     "uncovered": 0,
     "rows": [
+      {
+        "file": "openspec/changes/keel-plugin-attachment/evidence/go-test-attachment-httpapi-race.txt",
+        "change": "changed",
+        "status": "EXEMPT",
+        "surface": "change 文档/证据",
+        "evidence": "EXEMPT：显式白名单"
+      },
+      {
+        "file": "openspec/changes/keel-plugin-attachment/evidence/mutation-attachment.txt",
+        "change": "changed",
+        "status": "EXEMPT",
+        "surface": "change 文档/证据",
+        "evidence": "EXEMPT：显式白名单"
+      },
       {
         "file": "openspec/changes/keel-plugin-attachment/evidence/nsh-check.txt",
         "change": "changed",
@@ -863,6 +877,13 @@
       },
       {
         "file": "openspec/changes/keel-plugin-attachment/evidence/nsh-test-tui.txt",
+        "change": "changed",
+        "status": "EXEMPT",
+        "surface": "change 文档/证据",
+        "evidence": "EXEMPT：显式白名单"
+      },
+      {
+        "file": "openspec/changes/keel-plugin-attachment/evidence/openspec-validate.txt",
         "change": "changed",
         "status": "EXEMPT",
         "surface": "change 文档/证据",
