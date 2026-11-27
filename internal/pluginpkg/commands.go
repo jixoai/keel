@@ -196,7 +196,9 @@ func (m *Manifest) validateCommands(errs *fieldSet, declaredTools map[string]boo
 			errs.add(prefix+".danger", "danger %q is not one of %s", command.Danger, dangerList())
 		}
 
-		if len(command.ArgsSchema) > 0 {
+		if command.ArgsSchema != nil && len(command.ArgsSchema) == 0 {
+			errs.add(prefix+".args_schema", "args_schema must declare a JSON object schema (top-level type: object)")
+		} else if len(command.ArgsSchema) > 0 {
 			raw, err := json.Marshal(command.ArgsSchema)
 			if err != nil {
 				errs.add(prefix+".args_schema", "args_schema is not JSON: %v", err)
@@ -215,6 +217,9 @@ func (m *Manifest) validateCommands(errs *fieldSet, declaredTools map[string]boo
 			}
 		}
 
+		if command.Targets != nil && len(command.Targets) == 0 {
+			errs.add(prefix+".targets", "targets must not be empty when declared; omit the field for web|native|tui")
+		}
 		targets := map[SlotTarget]bool{}
 		for targetIndex, target := range command.Targets {
 			path := fmt.Sprintf("%s.targets[%d]", prefix, targetIndex)

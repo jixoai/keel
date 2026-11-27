@@ -96,6 +96,9 @@ func TestManifestCommandFieldErrors(t *testing.T) {
 		{"tool foreign", func(m *Manifest) { m.Provides.Commands[0].Tool = "other_run" }, "provides.commands[0].tool"},
 		{"danger missing", func(m *Manifest) { m.Provides.Commands[0].Danger = "" }, "provides.commands[0].danger"},
 		{"danger unknown", func(m *Manifest) { m.Provides.Commands[0].Danger = "nuclear" }, "provides.commands[0].danger"},
+		{"schema explicitly empty", func(m *Manifest) {
+			m.Provides.Commands[0].ArgsSchema = map[string]any{}
+		}, "provides.commands[0].args_schema"},
 		{"schema not object", func(m *Manifest) {
 			m.Provides.Commands[0].ArgsSchema = map[string]any{"type": "string"}
 		}, "provides.commands[0].args_schema"},
@@ -108,6 +111,9 @@ func TestManifestCommandFieldErrors(t *testing.T) {
 		{"target unknown", func(m *Manifest) {
 			m.Provides.Commands[0].Targets = []SlotTarget{"web", "android"}
 		}, "provides.commands[0].targets[1]"},
+		{"targets explicitly empty", func(m *Manifest) {
+			m.Provides.Commands[0].Targets = []SlotTarget{}
+		}, "provides.commands[0].targets"},
 		{"target duplicate", func(m *Manifest) {
 			m.Provides.Commands[0].Targets = []SlotTarget{"web", "web"}
 		}, "provides.commands[0].targets[1]"},

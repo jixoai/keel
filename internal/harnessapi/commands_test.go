@@ -504,6 +504,10 @@ func TestCommandExecuteRefusals(t *testing.T) {
 	if harness.compact.callCount() != 0 {
 		t.Fatalf("busy executed the seam: %d", harness.compact.callCount())
 	}
+	events := harness.store.eventsOfKind(store.EventCommandInvoked)
+	if len(events) != 1 || events[0]["status"] != store.CommandStatusRefused || events[0]["errorCode"] != CommandCodeBusy {
+		t.Fatalf("busy audit = %v", events)
+	}
 }
 
 func TestCommandExecuteFailureReplaysFirstFailure(t *testing.T) {
@@ -633,6 +637,15 @@ func TestCommandDestructiveDecisionRefused(t *testing.T) {
 	}
 	if harness.tools.callCount() != 0 {
 		t.Fatal("a refused command executed the tool")
+	}
+	events := harness.store.eventsOfKind(store.EventCommandInvoked)
+	if len(events) != 2 || events[1]["status"] != store.CommandStatusRefused ||
+		events[1]["errorCode"] != CommandCodeDecisionRefused || events[1]["decisionId"] == nil {
+		t.Fatalf("refusal audit = %v", events)
+	}
+	raw, _ := json.Marshal(events[1])
+	if strings.Contains(string(raw), `"args":`) || strings.Contains(string(raw), "do-not-audit") {
+		t.Fatalf("refusal audit carries arguments: %s", raw)
 	}
 	// The refusal replays as the first failure.
 	if code, _ := harness.do(t, http.MethodPost, harness.commandPath("vendor.one:purge"), map[string]any{"requestId": "rd"}); code != http.StatusForbidden {
