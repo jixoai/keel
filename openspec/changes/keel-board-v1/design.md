@@ -102,13 +102,13 @@ Linear 与任意 Chat SDK adapter 的线程；否则“通用任务/线程标准
 | --- | --- | --- |
 | tenant | `tenant_id` | 所有 board 行带 tenant；RLS 强制；跨租户 404 |
 | board | tenant 的 `board_*` 表 | 一个 tenant 一个 board；不做多 board |
-| channel | `board_channels.path` | 路径文法相同；`work/` 是子树查询语法，不是另一个频道 |
-| thread | root message + `board_threads` | 线程只有一层；回复的 `re` 指向根 |
-| message | `board_messages` + `board_events` | 文本 ≤10,000 字符；ID 是 `message.posted` 的 board seq |
-| task | 同一线程根 + `board_tasks` | 任务不是新实体，是线程根上的状态 |
-| claim | `board_tasks.state=claimed` + `claim_*` | claim 是租约，不是永久锁 |
-| lease | `claim_until` | 默认 900s，范围 30–3600s |
-| epoch | `board_tasks.epoch` | 每次成功 claim +1；写操作必须匹配 |
+| channel | 投影 `channels[path]` | 路径文法相同；`work/` 是子树查询语法，不是另一个频道 |
+| thread | root message + 投影 `threads[root]` | 线程只有一层；回复的 `re` 指向根 |
+| message | 投影 `messages[id]` + `board_events` | 文本 ≤10,000 字符；ID 是 `message.posted` 的 board seq |
+| task | 同一线程根 + 投影 `tasks[root]` | 任务不是新实体，是线程根上的状态 |
+| claim | `tasks[root].state=claimed` + claim 字段 | claim 是租约，不是永久锁 |
+| lease | `claim.until` | 默认 900s，范围 30–3600s |
+| epoch | `tasks[root].epoch` | 每次成功 claim +1；写操作必须匹配 |
 | token | `claim_token_hash` | 只存 SHA-256；原文只在 claim 响应出现一次 |
 | needs | `board_task_needs` | 有界 DAG，最多 20 个前置 |
 | labels | `board_labels` | `board.*` 保留；`board.task` 是状态标签 |
@@ -116,7 +116,7 @@ Linear 与任意 Chat SDK adapter 的线程；否则“通用任务/线程标准
 | schedule | `board_schedules` + durable worker | phase 0 随标准交付；不用 Vercel timer |
 | sync entry | `board_sync_entries`（key/platform/secret ref） | 每个平台账号一个 key；凭据不落 board 日志 |
 | external target | `board_sync_threads.target` | `key:channel[:thread]`；目标与 board thread 的绑定 |
-| origin / copy | `board_messages.origin` + `board_sync_copies` | 消息来自哪个平台线程；出去了哪一份 |
+| origin / copy | `messages[id].origin` + `board_sync_copies` | 消息来自哪个平台线程；出去了哪一份 |
 | dedupe / delivery marker | `board_sync_inbox` / `board_sync_outbox` | 入站 occurrence ID；出站确定性 delivery ID；echo marker |
 | provider | `sync.Provider` Go 接口 | 原生 Slack/GitHub/Linear；Chat SDK 走 bridge |
 | webhook | `/v1/board/sync/webhooks/{key}` | adapter 验签，不走 board 会话认证 |
@@ -187,114 +187,36 @@ CREATE INDEX board_events_channel_seq
 - 不做 per-channel seq：board 级 tail、跨频道列表和“保持你的位置”都需要一个租户内游标；
   per-channel 序号会让跨频道 SSE 需要多游标。频道过滤在查询/投影层完成。
 
-### 4.2 投影表
+### 4.2 投影缓存（不使用 PG 投影表）
 
-投影不是第二真值：全部由 `board_events` 按序 fold 得到，可随时 truncate + replay。
+投影不是第二真值：全部由 `board_events` 按序 fold 得到，保存在进程内，可随时丢弃并
+replay。Phase 0 复审后固化如下实现选择：
+
+- **不建 `board_channels/messages/threads/tasks` 等 PG 投影表。** 单写锁已把同 tenant
+  的写串行化；board 的读是队列/线程/任务视图，写入目标 <100 writes/s/tenant，进程内 fold
+  足够。PG 只保存日志、幂等结果、sync/automation/audit 等有独立生命周期的表。
+- **避免第二真值与同事务双写。** 事件提交后同进程立即 fold 到缓存；崩溃只会丢缓存，
+  下一次读按 `board_heads.seq` 追平，`CheckProjection`/`Rebuild` 可从日志完整重建。
+- **多进程一致性。** 共享 PG 的进程每个 `Freshness`（默认 1s）检查一次 head；写用
+  expected-head CAS，输掉竞争的写追平后重新决策一次。读的是本进程缓存，因此同进程
+  读己写；跨进程读最多落后一个 freshness 窗口。SSE 开流时强制追平。
+- **投影内容（语义，不是 SQL schema）**：channels（path/created/last/messages/threads）、
+  messages（id/channel/thread/re/root text/labels/deleted/author/version/revision/at）、
+  threads（root/channel/replyCount/last/at）、tasks（state/owner/by/for/epoch/claim/blocked/
+  result/reason/updatedSeq）、needs、labels、actors、attachments、origin 与 sync facts。
+  `foldBoardEvent` 是纯函数；未知 kind 保留事件、fold 跳过，旧版本可读新日志。
+- **未来若出现跨进程 SQL 报表/大规模分页需求**，另立 change 增加物化投影（同事务或
+  outbox 维护），不在本 change 偷带。
+
+投影一致性检查与重建（`POST /v1/board/admin/projection/check|rebuild`、`board rebuild`）
+比较缓存 watermark、日志 head 与全量 replay 的 SHA-256 digest；不一致时报告并拒绝写入，
+由重建替换缓存。事件本身永不被重建改写。
+
+### 4.2a 幂等结果
+
+幂等结果不属于投影，仍在 PG 与日志写同事务：
 
 ```sql
-CREATE TABLE board_channels (
-    tenant_id   uuid NOT NULL,
-    path        text NOT NULL,
-    created_seq bigint NOT NULL,
-    last_seq    bigint NOT NULL,
-    messages    int NOT NULL DEFAULT 0,
-    threads     int NOT NULL DEFAULT 0,
-    PRIMARY KEY (tenant_id, path)
-);
-
-CREATE TABLE board_messages (
-    tenant_id  uuid NOT NULL,
-    id         bigint NOT NULL,              -- message.posted 的 seq
-    channel    text NOT NULL,
-    thread_id  bigint NOT NULL,              -- 根消息 ID；根自己的 thread_id = id
-    re         bigint,                       -- 回复的根；根为 NULL
-    reply_to   bigint,                       -- 被直接回复的消息；等于根时可省略
-    text       text NOT NULL DEFAULT '',
-    labels     jsonb NOT NULL DEFAULT '{}'::jsonb,
-    deleted    boolean NOT NULL DEFAULT false,
-    author_account_id uuid NOT NULL,
-    author_bot_id     uuid,
-    author_actor     text NOT NULL,
-    version    bigint NOT NULL,
-    revision   bigint NOT NULL,
-    created_at timestamptz NOT NULL DEFAULT now(),
-    edited_at  timestamptz,
-    PRIMARY KEY (tenant_id, id)
-);
-
-CREATE INDEX board_messages_channel
-    ON board_messages (tenant_id, channel, id DESC);
-CREATE INDEX board_messages_thread
-    ON board_messages (tenant_id, thread_id, id);
-CREATE INDEX board_messages_live
-    ON board_messages (tenant_id, channel, id)
-    WHERE deleted = false;
-
-CREATE TABLE board_threads (
-    tenant_id   uuid NOT NULL,
-    root_id     bigint NOT NULL,
-    channel     text NOT NULL,
-    reply_count int NOT NULL DEFAULT 0,
-    last_id     bigint NOT NULL,
-    last_at     timestamptz NOT NULL,
-    PRIMARY KEY (tenant_id, root_id)
-);
-
-CREATE INDEX board_threads_channel_last
-    ON board_threads (tenant_id, channel, last_at DESC, root_id DESC);
-
-CREATE TABLE board_tasks (
-    tenant_id        uuid NOT NULL,
-    root_id          bigint NOT NULL,
-    channel          text NOT NULL,
-    state            text NOT NULL,           -- waiting|ready|claimed|blocked|completed|failed|canceled
-    owner_account_id uuid NOT NULL,
-    owner_actor      text NOT NULL,           -- by：创建任务时的 Actor
-    for_actor        text,                    -- 指派给 owner 的某个 Actor；NULL 为池
-    epoch            bigint NOT NULL DEFAULT 0,
-    claim_actor      text,
-    claim_until      timestamptz,
-    claim_token_hash text,                    -- SHA-256 hex；永不返回
-    blocked_kind     text,
-    blocked_reason   text,
-    result           text,
-    reason           text,
-    updated_seq      bigint NOT NULL,
-    PRIMARY KEY (tenant_id, root_id)
-);
-
-CREATE INDEX board_tasks_queue
-    ON board_tasks (tenant_id, state, root_id);
-CREATE INDEX board_tasks_owner
-    ON board_tasks (tenant_id, owner_account_id, state, root_id);
-CREATE INDEX board_tasks_for
-    ON board_tasks (tenant_id, for_actor, state, root_id);
-CREATE INDEX board_tasks_claim_expiry
-    ON board_tasks (tenant_id, claim_until)
-    WHERE state = 'claimed';
-
-CREATE TABLE board_task_needs (
-    tenant_id uuid NOT NULL,
-    task_id   bigint NOT NULL,
-    need_id   bigint NOT NULL,
-    position  int NOT NULL,
-    PRIMARY KEY (tenant_id, task_id, need_id)
-);
-
-CREATE INDEX board_task_needs_reverse
-    ON board_task_needs (tenant_id, need_id, task_id);
-
-CREATE TABLE board_labels (
-    tenant_id  uuid NOT NULL,
-    message_id bigint NOT NULL,
-    key        text NOT NULL,
-    value      text NOT NULL,
-    PRIMARY KEY (tenant_id, message_id, key)
-);
-
-CREATE INDEX board_labels_key_value
-    ON board_labels (tenant_id, key, value, message_id);
-
 -- 幂等写的结果缓存；result 不含 claim token。
 CREATE TABLE board_requests (
     tenant_id      uuid NOT NULL,
@@ -474,7 +396,8 @@ CREATE TABLE board_sync_bridge_nonces (
 );
 ```
 
-所有 `board_*` 表（含 sync/watch/schedule）都带 `tenant_id` 并加入 RLS。
+所有持久化的 `board_*` 表（core log、sync、watch/schedule、audit）都带 `tenant_id` 并
+加入 RLS；投影是进程内缓存，不是表。`board_events` 与 `board_requests` 的 RLS 见 4.4。
 
 ### 4.3 为什么不用 Session 账本/task-log
 
@@ -484,22 +407,30 @@ CREATE TABLE board_sync_bridge_nonces (
   不应消耗 token 或改变模型输入。
 - **保留/配额**：Session 账本不可删；board 未来可能需要按 tenant 配置保留期。两者生命周期
   不同，混在一起会让任一侧的策略都难以执行。
-- **投影一致性**：board 需要跨频道/跨任务的队列查询与依赖传播；Session 账本没有这些索引。
+- **投影查询**：board 需要跨频道/跨任务的队列与依赖视图；Session 账本没有这些结构。
 
 ### 4.4 RLS 与租户隔离
 
-所有 `board_*` 表加入 `store.rlsTenantTables`，与既有表一样
-`ENABLE/FORCE ROW LEVEL SECURITY` + `tenant_isolation` policy。应用层仍显式带
-`tenant_id` 谓词（双保险）；跨租户 ID 一律 404，不返回“存在但无权”。
+所有持久化的 `board_*` 表（core log 的 `board_heads/board_events/board_requests`、sync、
+automation、audit）都 `ENABLE/FORCE ROW LEVEL SECURITY` + tenant policy：policy 允许
+`tenant_id = current_setting('keel.tenant_id', true)`，以及仅限 operator 读的
+`keel.bypass_rls='on'`。应用层仍显式带 `tenant_id` 谓词（双保险）；未设置 tenant 的语句
+匹配零行（fail closed），跨租户 ID 一律 404，不返回“存在但无权”。
+
+keel 导入时这些表同样注册到 `store.rlsTenantTables`，由 keel 启动迁移复核
+ENABLE/FORCE/policy；board 独立运行时由 `store` 自己的 0003/0006/0008/0009 迁移保证。
 
 ### 4.5 投影重建
 
-- `foldBoardEvent(state, event)` 是纯函数：输入当前投影行（只加载事件触及的行），输出新行。
-- 写事务内：追加事件后立即 fold 并更新投影；不做异步最终一致（board 写入量低，简单优先）。
-- 重建命令（内部/运维）在一个事务内按 `seq` 重放，最后比对投影哈希；重建幂等。
+- `foldBoardEvent(state, event)` 是纯函数：输入当前缓存状态，输出新状态；事件不依赖
+  未加载的 PG 投影行。
+- 写事务只追加事件与幂等结果；提交后同进程立即 fold 到缓存，随后唤醒 SSE/board feed。
+  崩溃在两者之间只会丢缓存，下一次读按 head 追平；不做异步最终一致。
+- 重建命令（内部/运维）按 `seq` 全量 replay 到新缓存，最后比对 watermark 与 SHA-256
+  digest；校验通过才原子替换，失败保留旧缓存。重建幂等，不改写事件。
 - 随机历史属性测试：同一组事件，增量 fold 与全量 replay 的投影逐字段相等。
 - 未知 `kind`：保留事件，fold 跳过；不阻塞旧版本读新日志。
-- 投影损坏：读取路径发现 `board_heads.next_seq` 与最大 seq 不一致时拒绝写入并告警，
+- 投影损坏：缓存 head 超过日志、或 `board_heads.seq` 与最大 seq 不一致时拒绝写入并告警，
   由重建修复；不静默覆盖。
 
 ## 5. 条件追加与并发
@@ -510,16 +441,15 @@ CREATE TABLE board_sync_bridge_nonces (
 
 ```text
 BEGIN
-  -- 1. 认证与租户已由 HTTP 层完成；Append 再次校验 tenant 归属
-  -- 2. 锁租户头，得到 next_seq；同 tenant 的 board 写串行化
-  SELECT next_seq FROM board_heads WHERE tenant_id = $1 FOR UPDATE
-  -- 3. 加载本次要校验的投影行（task/message/thread/needs）
-  -- 4. 纯校验：状态、epoch/token、owner/for、needs 环、保留标签、权限
-  -- 5. 逐事件分配 seq，INSERT board_events
-  -- 6. 调用 fold，UPDATE 投影（含 board_labels、board_task_needs）
-  -- 7. 如带 idempotencyKey，INSERT board_requests（digest + 脱敏 result）
+  -- 1. 认证与租户已由 HTTP 层完成；Append 再次校验 tenant 归属并 SET LOCAL keel.tenant_id
+  -- 2. 锁租户头；同 tenant 的 board 写串行化
+  SELECT seq FROM board_heads WHERE tenant_id = $1 FOR UPDATE
+  -- 3. 在本进程缓存上做纯校验：状态、epoch/token、owner/for、needs 环、保留标签、权限
+  -- 4. 逐事件分配 seq，INSERT board_events
+  -- 5. 如带 idempotencyKey，INSERT board_requests（digest + 脱敏 result）
 COMMIT
--- 8. 提交后 pg_notify('board_events', '<tenant>:<seq>')；进程内 hub 唤醒 SSE
+-- 6. 同进程把新事件 fold 进缓存；唤醒 board feed/SSE
+-- 7. 其他进程在 freshness 窗口内按 head 追平
 ```
 
 - **一个 tenant 一个写锁**是本设计的核心取舍。它让“并发 claim 只有一个成功”“完成时
@@ -529,21 +459,22 @@ COMMIT
   分片或改为 per-task 行锁；本 change 不做。
 - 替代方案（已否决）：per-task `SELECT FOR UPDATE` + advisory lock。它减少锁竞争，但
   跨任务的 needs 传播、依赖环检查、频道计数需要多行一致性，容易出现死锁与部分更新。
-- 读路径不取头锁；读投影 + `seq` 水位。列表读报告 `cursor`（当前最大 seq）；按 ID 读
-  等待投影追到该 ID（写事务内已同步，故通常无需等待）。
+- 读路径不取头锁；读本进程缓存 + watermark。列表读报告 `cursor`（当前最大 seq）；按 ID
+  读在前面的事务提交后已 fold，若缓存落后则先追平再读。
 
 ### 5.2 并发 claim
 
 1. 两个请求同时 `claim-ready` 同一任务。
 2. 第一个取得 `board_heads` 行锁，校验 `state=ready` 且 `for` 允许，写
-   `task.claimed`（`epoch+1`、`until`、`token_hash`），更新投影，提交。
+   `task.claimed`（`epoch+1`、`until`、`token_hash`），提交后 fold 到缓存。
 3. 第二个取得锁后读到 `state=claimed`，返回 409 `task_claimed`，不写事件。
 4. 若第一个在租约内崩溃，任务保持 `claimed` 直到 `claim_until`；之后任何任务请求按
    §5.4 先写 `task.expired` 再 claim。
 
 ### 5.3 崩溃与重试
 
-- 事件、投影、幂等结果在同一个事务；崩溃在 commit 前等于没发生，commit 后全部可见。
+- 事件与幂等结果在同一个事务；投影是提交后的进程内 fold。崩溃在 commit 前等于没发生，
+  commit 后事件全部可见；缓存缺失由下一次读/重启 replay 追平。
 - HTTP 重试带同一 `idempotencyKey`：同 digest 返回缓存结果（不含 token）；不同 digest
   返回 409 `duplicate_id`。
 - 无幂等键的写不保证重试安全；客户端应使用幂等键，尤其是 claim/complete。
@@ -553,9 +484,9 @@ COMMIT
 Board 不依赖后台定时器保证正确性：
 
 - **过期 claim**：任何读/写触达该任务时，若 `state=claimed AND claim_until <= now()`，
-  先按当前 epoch 追加 `task.expired`，置 `ready`，再继续。可选 sweeper 每 15s 扫描
-  `board_tasks_claim_expiry`，只是降低“没人访问时状态标签仍旧”的窗口；sweeper 与请求
-  竞争时由 head 锁与 epoch 条件保证只写一次。
+  先按当前 epoch 追加 `task.expired`，置 `ready`，再继续。可选 sweeper 扫描缓存中的
+  claim 到期集合，只是降低“没人访问时状态标签仍旧”的窗口；sweeper 与请求竞争时由 head
+  锁与 epoch 条件保证只写一次。Phase 0 不启用 sweeper（读修复已覆盖正确性）。
 - **等待中的任务已满足依赖**：任何 list/claim/读任务看到 `waiting` 且所有 needs 都
   `completed` 时，追加 `task.ready`。这修复“完成事务只 ready 了一部分依赖者”的中断场景。
 - **客户端显示**：`state=claimed` 且 `claim_until <= now` 时，视图按 `ready` 显示并标注
@@ -1193,12 +1124,15 @@ keel-board ◀─ POST /v1/board/sync/bridge/{key}/events ── sidecar（平�
 | POST | `/v1/board/sync/webhooks/{key}` | provider 验签（无 board token） | 平台 webhook 入口；先落 inbox 再 ack |
 | POST | `/v1/board/sync/bridge/{key}/events` | bridge HMAC | Chat SDK sidecar 推送归一化事件 |
 | GET | `/v1/board/sync/entries` | board.manage | 列出 entries/状态/平台 |
-| POST | `/v1/board/sync/entries` | board.manage + secret.write | 新建 entry（secret_ref，不传明文到日志） |
-| PATCH | `/v1/board/sync/entries/{key}` | board.manage + secret.write | 启停/轮换/路由 |
-| GET | `/v1/board/sync/entries/{key}/status` | board.manage | inbox/outbox lag、失败、dead letter、凭据状态 |
-| GET | `/v1/board/sync/inbox/{key}` | board.manage | 原始事件调试（脱敏） |
-| POST | `/v1/board/sync/inbox/{key}/{dedupe}/retry` | board.manage | 重试 dead letter |
-| GET | `/v1/board/sources/{key}/read` | board.manage | 按需读平台 channel/thread/issue |
+| GET | `/v1/board/sync/entries/{key}/status` | board.manage | 单 entry 的 inbox/outbox lag、失败、dead letter |
+| POST | `/v1/board/sync/entries` | board.manage + secret.write | Phase 1（接 tenant secret store 后）：新建 entry（只传 secret_ref） |
+| PATCH | `/v1/board/sync/entries/{key}` | board.manage + secret.write | Phase 1：启停/轮换/路由 |
+| GET | `/v1/board/sync/inbox?key=&state=dead` | board.manage | 死信调试（不含 raw body/正文） |
+| POST | `/v1/board/sync/inbox/{id}/retry?key=` | board.manage | 重试 dead letter |
+| GET | `/v1/board/sync/outbox/failures?key=` | board.manage | 出站失败/dead letter 列表 |
+| POST | `/v1/board/sync/outbox/{id}/retry` | board.manage | 重试出站死信 |
+| GET/POST | `/v1/board/sync/threads` | board.manage | 列出/attach 外部 thread 映射 |
+| GET | `/v1/board/sources/{key}/read?target=&limit=&after=` | board.manage | 按需读平台 channel/thread/issue |
 | POST | `/v1/board/sources/{key}/join` | board.manage | Slack 公共频道 join（opt-in） |
 
 - `GET /v1/board/sync/status` 可给 UI 汇总（entries、targets、失败数、last event）。
@@ -1206,8 +1140,10 @@ keel-board ◀─ POST /v1/board/sync/bridge/{key}/events ── sidecar（平�
   board 路由，由 board 用同一 HMAC 契约主动调用；sidecar 不暴露其他 board 管理能力。
 - 所有 sync 管理响应不含 token/secret/raw 敏感 body；raw inbox 只对 `board.manage` 开放且
   做字段脱敏。
-- phase 0 独立仓库可用配置文件/环境变量启用 entries；上述 HTTP 管理路由在 phase 0 即提供，
-  便于无 keel 运行与 conformance。
+- Phase 0 独立仓库用配置文件/环境变量构造 registry（`cmd/board`），因此 entry 的创建/轮换
+  没有安全的 secret 落点：只提供只读 entries/status 与 source read/join。Phase 1 接 tenant
+  secret store 后再提供 POST/PATCH entries（10.6），避免 Phase 0 在 board 日志或 flag 里
+  存明文 secret。
 
 ### 14.11 适配器配置与路由
 
@@ -1374,8 +1310,11 @@ sync:
 - `board_events` 本身是领域审计：每条状态变化都有 tenant、channel、seq、kind、actor、
   payload、时间。任务 claim/renew/complete 等可据此回答“谁在何时做了什么”。
 - Sync 审计：webhook 接收/拒绝、inbox 处理/死信、outbound 成功/失败、凭据轮换、source
-  read/join 都写有界审计（key/platform/target/delivery_id/status/attempts），不含 raw
-  body、消息正文、token 或 secret。
+  read/join 都写 `board_audit`（tenant_id、at、kind、key、platform、target、delivery_id、
+  status、attempts、bounded detail），不含 raw body、消息正文、token 或 secret。审计写失败
+  只记错误日志，不改变请求的原有结果（安全拒绝本身除外）。
+- `board_audit` 与其它 `board_*` 持久表一样 FORCE RLS；`GET /v1/board/admin/audit?limit=`
+  （board.manage）只读当前 tenant 的最近记录。
 - 权限拒绝、跨租户尝试写既有 `auth_events`（`permission.denied`），detail 只含
   action/channel/所需权限，不含正文与 token。
 - 适配器写 `board_links` 与事件；superagent 原审计不变。
@@ -1389,6 +1328,7 @@ sync:
   `board_sync_delivery_failures_total{key,platform}`、`board_sync_dead_letters_total{key}`、
   `board_sync_webhook_duration_ms{key,platform}`、`board_sync_dedupe_hits_total{key}`、
   `board_sync_bridge_errors_total{key}`。
+- `GET /metrics` 以 Prometheus text 暴露上述指标（根路径，运维面；不含 tenant/正文）。
 - 指标标签有界：kind/key/platform/status 不使用消息 ID、target 全量或任意用户文本；不在
   高基数标签放消息 ID、external message ID 或 secret。
 
@@ -1462,8 +1402,8 @@ sync:
 - **[Chat SDK bridge 成为隐藏运行时]** → bridge 是可选外部进程，不是 keel 依赖；契约固定、
   HMAC、nonce；原生 Slack/GitHub/Linear 不经过 bridge。
 - **[Claim token 泄露]** → 只存 hash、响应一次、读接口/SSE/审计/日志全脱敏；红队测试。
-- **[标签作为状态导致索引/漂移]** → `board.task` 只由任务写维护；投影与事件同事务；
-  重建校验。
+- **[标签作为状态导致索引/漂移]** → `board.task` 只由任务写维护；投影由事件确定性 fold
+  并可重建；事件是唯一真值。
 - **[租约僵尸]** → lazy expiry + sweeper + 客户端倒计时；owner 可 cancel；可选未来
   “unassigned claim 自动回到池”策略（Owner 决策）。
 - **[UI 复杂度]** → 服务端 `moves` 规则与客户端镜像共用同一份表驱动；只展示允许动作；

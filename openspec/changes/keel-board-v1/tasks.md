@@ -7,16 +7,16 @@
 
 ## 1. Phase 0：独立仓库与契约
 
-- [ ] 1.1 创建 `github.com/jixoai/keel-board`（Apache-2.0）：`LICENSE`、`NOTICE`（上游 `vercel/board@26428ed4…` 归属 + 独立实现声明）、README、CI、Go module、`cmd/keel-board`；`go test ./...` 通过。
+- [ ] 1.1 创建 `github.com/jixoai/keel-board`（Apache-2.0）：`LICENSE`、`NOTICE`（上游 `vercel/board@26428ed4…` 归属 + 独立实现声明）、README、CI、Go module、`cmd/board`；`go test ./...` 通过。
 - [ ] 1.2 实现 `board` 领域包：Channel/Message/Thread/Task/Claim/Needs/Label/Attachment/Block 类型、事件 kind 闭集、错误码、七态状态机；表驱动测试覆盖每条边与非法边。
 - [ ] 1.3 实现 token（32 字节 base64url/SHA-256/常量时间）、cursor、标签文法、needs 上限、文本/graph 校验；单测覆盖边界与非法输入。
 - [ ] 1.4 写 conformance 契约测试骨架：同一个测试套件可跑 in-memory store 与 PG store；fake auth/authorizer 可切换；`go test ./conformance` 通过。
 
 ## 2. Phase 0：核心日志与存储
 
-- [ ] 2.1 增加 core schema（`board_heads/events/requests/channels/messages/threads/tasks/task_needs/labels`）、索引、RLS 与幂等迁移；`go test ./store -run Board` 验证重复迁移。
-- [ ] 2.2 实现 `Append` 引擎：tenant head 锁、seq、事件插入、纯 fold、投影更新同事务；属性测试验证增量 fold 与全量 replay 一致。
-- [ ] 2.3 实现幂等缓存（digest、同 key 同结果、不同 digest 409 `duplicate_id`、result 脱敏）与 cursor 编解码；测试创建/claim/complete 重试。
+- [ ] 2.1 增加 core schema（`board_heads/board_events/board_requests`）、索引、FORCE RLS 与幂等迁移；投影为进程内确定性 fold（不建 PG 投影表，见 design §4.2）；`go test ./store -run 'Board|Postgres'` 验证重复迁移与 A/B 租户隔离。
+- [ ] 2.2 实现 `Append` 引擎：tenant head 锁、seq、事件与幂等结果同事务、提交后进程内 fold；属性测试验证增量 fold 与全量 replay 一致。
+- [ ] 2.3 实现幂等缓存（digest 定义幂等范围：post/task 的落点、batch 的 request key；同 key 同结果、不同 digest 409 `duplicate_id`、result 脱敏）与 cursor 编解码；测试创建/claim/complete 重试。
 - [ ] 2.4 实现频道/消息/线程：首帖建频道、幂等创建、根/回复、版本/修订、频道计数、线程汇总；集成测试读回与排序。
 - [ ] 2.5 实现任务创建/list/owner/by/for、channel 与 re 两种入口、重复 re 409 `already_a_task`；测试 owner Account/Bot 差异。
 - [ ] 2.6 实现 claim-ready 顺序、claim/renew/release、epoch/token 围栏、租约计算；PG 并发测试断言只有一个 claim 成功。
@@ -30,7 +30,7 @@
 - [ ] 3.1 实现消息 edit/delete/tombstone、`if-revision`、标签 API、批量任务/plan、threads 列表与 older 分页；测试 revision 冲突、根删除取消、非 owner 编辑阻塞。
 - [ ] 3.2 实现 attachments（blob lifecycle、4MB/10 per message、签名直传可选）、reactions、mentions、schema 校验的 JSON blocks；测试读权限、引用计数、删除隐藏、非法 block。
 - [ ] 3.3 实现 watchers（`board_watchers`/`board_watch_deliveries`，durable consumer、lease/ack、退避、死信）与 schedules（`board_schedules`、权限复检、幂等消息键）；测试失败隔离。
-- [ ] 3.4 实现 `/v1/board` core API、SSE（Last-Event-ID、过滤、隐藏事件、心跳）、权限矩阵、404/403、审计/指标；HTTP 与 SSE 集成测试通过。
+- [ ] 3.4 实现 `/v1/board` core API、SSE（Last-Event-ID、过滤、隐藏事件、心跳）、权限矩阵、404/403、审计/指标；`/metrics` 暴露 design §18.2 的核心指标，sync 审计写 `board_audit`（无正文/secret）；HTTP 与 SSE 集成测试通过。
 - [ ] 3.5 实现投影一致性检查与重建命令/测试；水位不一致拒绝写入，重建后哈希一致。
 
 ## 4. Phase 0：Sync 引擎
@@ -40,7 +40,7 @@
 - [ ] 4.3 实现 outbound：board 事件→outbox、每 thread lane 保序、确定性 delivery_id、receipt/copy、失败重试/`message.sync_failed`/后续继续；测试失败与清除。
 - [ ] 4.4 实现 thread mirror：root 起 thread、attach channel 的 root+backfill、thread target 只未来、subthread 归组与回复路由、`noSync`、来源 target/key 跳过；测试各路径。
 - [ ] 4.5 实现 echo 抑制：bot 身份、隐藏 marker、bridge/平台无身份时 fail closed；测试不自激、不重复。
-- [ ] 4.6 实现 sync 管理/源读取 API（entries/status/inbox/retry/sources read/join/webhooks/bridge events）与权限；测试 board.manage 与未知 key。
+- [ ] 4.6 实现 sync 管理/源读取 API（entries/status/inbox/retry/sources read/join/webhooks/bridge events）与权限；entries 的创建/轮换在 Phase 1 接 tenant secret store 后提供（10.6），Phase 0 由部署配置构造 registry；测试 board.manage 与未知 key。
 - [ ] 4.7 实现文件/链接/mentions/typing：入站文件抓取与降级、出站上传/说明行、link snapshot、native mention、typing ephemeral；测试大小/失败降级。
 
 ## 5. Phase 0：Slack 原生适配器
@@ -73,7 +73,7 @@
 
 ## 9. Phase 0：门禁与发布
 
-- [ ] 9.1 跑 `go test ./...`、`go test -race`、PG 集成、conformance；全绿并记录输出。
+- [ ] 9.1 跑 `go test ./...`、`go test -race`、PG 集成、conformance、`go test -count=10`（store/log/syncstore/automation/conformance）与 E2E；全绿并记录输出。
 - [ ] 9.2 E2E（独立仓库）：fake Slack/GitHub/Linear + fake Chat SDK bridge，覆盖双向镜像、edit/delete/reaction/file/typing、attach/backfill、失败/重试/dead letter、重启恢复；脚本生成 HTML 报告。
 - [ ] 9.3 独立子代理复核（禁 Codex）：并发/租约、sync 去重/回声、凭据/不可信输入、跨租户；P0/P1 清零并记录 findings。
 - [ ] 9.4 产出不可变 commit 与 `v0.1.0` tag；写 phase 0 evidence 与 pin 记录（module + commit + Apache-2.0）；完成阶段归档检查点并签收。
@@ -85,7 +85,7 @@
 - [ ] 10.3 实现 RBAC/ReBAC：`board.read/write/manage` 权限键、频道 `resource_relations` viewer/editor/owner、最近祖先继承；真实 PG 测试。
 - [ ] 10.4 接入 keel PG 与 RLS：keel-board migrations 在 keel 启动幂等执行，`tenant_id` 谓词 + RLS 双保险；A/B 租户测试。
 - [ ] 10.5 接入 SSE hub 与 Last-Event-ID；keel 的 tenant 鉴权、心跳、多副本 NOTIFY/poll；集成测试。
-- [ ] 10.6 接入 tenant secret store：`SecretResolver`、sync entries/凭据轮换、`board.sync.enabled`/`board.enabled` feature flag；测试关闭即 404/无 webhook。
+- [ ] 10.6 接入 tenant secret store：`SecretResolver`、sync entries 的 POST/PATCH（创建/启停/轮换/路由，只传 secret_ref）、`board.sync.enabled`/`board.enabled` feature flag；测试关闭即 404/无 webhook，日志/事件/响应无 secret。
 - [ ] 10.7 接入 telemetry/audit：board/sync 指标、permission.denied、credential 状态；测试无 secret/正文。
 
 ## 11. Phase 1：superagent 适配
