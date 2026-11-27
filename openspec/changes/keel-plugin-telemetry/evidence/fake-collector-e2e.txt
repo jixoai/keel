@@ -23,13 +23,13 @@ $ go test ./internal/harnessext -run "Telemetry|TurnTelemetry" -v (fake OTLP col
 === RUN   TestTelemetryPluginTenantMismatchFailsClosed
 --- PASS: TestTelemetryPluginTenantMismatchFailsClosed (0.00s)
 === RUN   TestTelemetryPluginBundledCannotBeUninstalled
---- PASS: TestTelemetryPluginBundledCannotBeUninstalled (0.00s)
+--- PASS: TestTelemetryPluginBundledCannotBeUninstalled (0.01s)
 === RUN   TestTelemetryPluginAudit
---- PASS: TestTelemetryPluginAudit (0.00s)
+--- PASS: TestTelemetryPluginAudit (0.01s)
 === RUN   TestTelemetryPluginSamplingZeroKeepsMetrics
---- PASS: TestTelemetryPluginSamplingZeroKeepsMetrics (0.00s)
+--- PASS: TestTelemetryPluginSamplingZeroKeepsMetrics (0.01s)
 === RUN   TestTelemetryPluginFailureDoesNotFailRuns
---- PASS: TestTelemetryPluginFailureDoesNotFailRuns (0.51s)
+--- PASS: TestTelemetryPluginFailureDoesNotFailRuns (0.50s)
 === RUN   TestTelemetryPluginStartStopCyclesReleaseResources
 --- PASS: TestTelemetryPluginStartStopCyclesReleaseResources (0.00s)
 === RUN   TestTelemetryPluginTenantIsolation
@@ -37,4 +37,4 @@ $ go test ./internal/harnessext -run "Telemetry|TurnTelemetry" -v (fake OTLP col
 === RUN   TestTurnTelemetryEmitsBoundedLog
 --- PASS: TestTurnTelemetryEmitsBoundedLog (0.00s)
 PASS
-ok  	github.com/jixoai/keel/internal/harnessext	1.084s
+ok  	github.com/jixoai/keel/internal/harnessext	0.980s
