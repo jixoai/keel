@@ -1,0 +1,2 @@
+$ openspec validate keel-plugin-telemetry --strict
+Change 'keel-plugin-telemetry' is valid

@@ -79,7 +79,7 @@ PI 的 MCP 是独立包 `@earendil-works/pi-mcp`，**不依赖官方 MCP SDK**�
 | 扩展 | `defineExtension`、`hook`、`section`、`wrapTool` | Go 接口 + 事件名对齐 | 同一 hook 语义 |
 | Skills | Agent Skills 规范 + `skills.ts` | 宿主层 loader | 真实 SKILL.md 零改动 |
 | MCP | `McpClient` + 两种传输 + 命名/裁剪 + OAuth（discovery/DCR/CIMD/PKCE/sign-in） | `internal/mcp`、`internal/mcp/oauth` | 真实 MCP server 零改动 |
-| 遥测 | `TelemetryContext`/`TelemetrySpan`/`TelemetryStore` + adapters | 同形接口 + Prometheus/OTLP adapter | 同一 span 树 |
+| 遥测 | `TelemetryContext`/`TelemetrySpan`/`TelemetryStore` + adapters | 同形接口 + Memory/Noop base；OTLP 导出由可选插件承载 | 同一 span 树；契约不变，导出插件化 |
 | Provider | `StreamFn`、`AssistantMessageEvent`、`ImageContent` | 已搬运 | 协议驱动器回放 |
 
 ## 4. 允许的差异（运行时替换，不是契约改变）

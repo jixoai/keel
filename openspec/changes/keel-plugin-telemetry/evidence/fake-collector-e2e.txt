@@ -1,0 +1,40 @@
+$ go test ./internal/harnessext -run "Telemetry|TurnTelemetry" -v (fake OTLP collector)
+=== RUN   TestTelemetryPathDoesNotImportMetricsRegistry
+--- PASS: TestTelemetryPathDoesNotImportMetricsRegistry (0.00s)
+=== RUN   TestTelemetryExportLeavesMetricsRegistryEmpty
+--- PASS: TestTelemetryExportLeavesMetricsRegistryEmpty (0.01s)
+=== RUN   TestTelemetryPluginPersistenceWithPostgres
+    telemetry_plugin_pg_test.go:23: KEEL_TEST_DSN not set
+--- SKIP: TestTelemetryPluginPersistenceWithPostgres (0.00s)
+=== RUN   TestTelemetryPluginDefaultDisabledAndLazy
+--- PASS: TestTelemetryPluginDefaultDisabledAndLazy (0.00s)
+=== RUN   TestTelemetryPluginEnableExportsThenDisableStops
+--- PASS: TestTelemetryPluginEnableExportsThenDisableStops (0.00s)
+=== RUN   TestTelemetryPluginConfigFailuresMarkFailed
+=== RUN   TestTelemetryPluginConfigFailuresMarkFailed/otlp_without_endpoint
+=== RUN   TestTelemetryPluginConfigFailuresMarkFailed/plaintext_header
+=== RUN   TestTelemetryPluginConfigFailuresMarkFailed/missing_secret
+--- PASS: TestTelemetryPluginConfigFailuresMarkFailed (0.01s)
+    --- PASS: TestTelemetryPluginConfigFailuresMarkFailed/otlp_without_endpoint (0.00s)
+    --- PASS: TestTelemetryPluginConfigFailuresMarkFailed/plaintext_header (0.00s)
+    --- PASS: TestTelemetryPluginConfigFailuresMarkFailed/missing_secret (0.00s)
+=== RUN   TestTelemetryPluginInactiveAdapter
+--- PASS: TestTelemetryPluginInactiveAdapter (0.00s)
+=== RUN   TestTelemetryPluginTenantMismatchFailsClosed
+--- PASS: TestTelemetryPluginTenantMismatchFailsClosed (0.00s)
+=== RUN   TestTelemetryPluginBundledCannotBeUninstalled
+--- PASS: TestTelemetryPluginBundledCannotBeUninstalled (0.00s)
+=== RUN   TestTelemetryPluginAudit
+--- PASS: TestTelemetryPluginAudit (0.00s)
+=== RUN   TestTelemetryPluginSamplingZeroKeepsMetrics
+--- PASS: TestTelemetryPluginSamplingZeroKeepsMetrics (0.00s)
+=== RUN   TestTelemetryPluginFailureDoesNotFailRuns
+--- PASS: TestTelemetryPluginFailureDoesNotFailRuns (0.51s)
+=== RUN   TestTelemetryPluginStartStopCyclesReleaseResources
+--- PASS: TestTelemetryPluginStartStopCyclesReleaseResources (0.00s)
+=== RUN   TestTelemetryPluginTenantIsolation
+--- PASS: TestTelemetryPluginTenantIsolation (0.01s)
+=== RUN   TestTurnTelemetryEmitsBoundedLog
+--- PASS: TestTurnTelemetryEmitsBoundedLog (0.00s)
+PASS
+ok  	github.com/jixoai/keel/internal/harnessext	1.084s

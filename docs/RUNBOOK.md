@@ -64,6 +64,54 @@ keel serve --addr 127.0.0.1:13750
 - **零兼容**：`KEEL_SERVE_PASSWORD`、旧 cookie、旧 `api_keys`、旧 `agents`/`agent_teams` schema
   全部失效；启动会拒绝旧 schema 并给出重建指令，不提供迁移。升级即重新初始化账号与 Bot。
 
+## 遥测导出插件（`keel.telemetry`）
+
+遥测是**默认关闭**的可选插件；配置 OTLP endpoint 不会自动出网。
+
+```yaml
+# tenant 文档（或 config.toml 覆盖）
+telemetry:
+  adapter: otlp                 # memory | none | otlp
+  endpoint: https://collector.example:4318
+  headers: { Authorization: "secret:OTLP_TOKEN" }  # 只允许 secret: 引用
+  serviceName: keel
+  signals: [traces, metrics]    # 省略=traces+metrics；logs 需显式开启
+  sampleRatio: 1.0              # 0 只停 traces
+  logRatio: 1.0                 # error 日志不受比例影响
+  logMinLevel: info
+```
+
+启用（必须走 durable 审批；问题文本会展示 exporter/signals/endpoint host/采样/header 名）：
+
+```bash
+# 1) 打开审批问题
+curl -sS -X POST "$KEEL_URL/v1/plugins/keel.telemetry/enable" \
+  -H "X-Tenant-ID: $TENANT" -H "X-Keel-Actor: $USER" | tee /tmp/ask.json
+# 2) 由持 plugin.lifecycle.enable 的人回答 allow（走 /v1/plugins/approvals/{decisionId}）
+# 3) 带 decisionId 重放 enable
+curl -sS -X POST "$KEEL_URL/v1/plugins/keel.telemetry/enable" \
+  -H "X-Tenant-ID: $TENANT" -H 'Content-Type: application/json' \
+  -d "{\"decisionId\":\"$(jq -r .decision.decisionId /tmp/ask.json)\"}"
+# 状态（plugin.read）
+curl -sS "$KEEL_URL/v1/telemetry/status" -H "X-Tenant-ID: $TENANT" | jq .
+```
+
+排障口径：
+
+- `state=plugin_disabled`：插件未启用，配置是惰性的，零出网。
+- `state=inactive`：插件已启用但 adapter 为 none/memory，无 exporter（合法）。
+- `state=failed`：endpoint 非法、header 不是 `secret:` 引用或 secret 缺失；修复配置后重新
+  enable，无需重启进程。`reason` 是字段级原因（不含 header 值）。
+- `state=degraded` + `lastErrorClass=http_5xx|http_429|timeout|network`：collector 不可用，
+  队列满会丢最旧并在 `dropped` 计数；run/tool 不受影响。恢复后熔断半开自动探测。
+- `metricSeriesDropped`：指标名未注册或 series 超过每族 1,000 / 全局 5,000；不是进程故障。
+- 停用：`POST /v1/plugins/keel.telemetry/disable`，先注销 exporter 再 5s 有界 flush；
+  bundled 插件不可卸载（409 `ErrPluginBundled`）。
+- 关机：5s flush 期限内尽力导出；超时记录 `dropped` 后退出。进程被 `kill -9` 时未确认批次
+  丢失，重启后可能重发确认游标之前的批次（at-least-once），collector 侧需按
+  (traceId, spanId) 去重。
+- 旧 `KEEL_TELEMETRY=memory` 仍只启用内存 recorder；OTLP 是否出网只取决于插件是否启用。
+
 ## 租户 provisioning
 
 `POST /v1/tenants` 是管理员操作，必须带 `Authorization: Bearer <KEEL_ADMIN_KEY>`。

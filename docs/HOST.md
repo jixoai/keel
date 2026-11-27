@@ -175,7 +175,7 @@ filesystem:
 | `KEEL_MCP_CONFIG` | 全局 `mcp.json` 路径（空 = 不启用 MCP） |
 | `KEEL_MCP_PROJECT` | 项目 `mcp.json` 路径（仅可信项目） |
 | `KEEL_MCP_APP_ORIGIN` | **仅 `keel serve`**：可选原生 WebView 文档基址（`/v1/capabilities` 的 `mcp.apps.sandboxOrigin`）；非法值保持关闭。`cmd/runtime` 没有 app 面，不读它 |
-| `KEEL_TELEMETRY` | `memory` 时启用内存 telemetry recorder |
+| `KEEL_TELEMETRY` | `memory` 时启用内存 telemetry recorder。OTLP 出网由 `keel.telemetry` 插件启用决定（见 `RUNBOOK.md`），不是这个变量的副作用 |
 | `KEEL_ADMIN_KEY` | 管理员 Bearer key（租户 provisioning、租户配置/用量 API、MCP OAuth sign-in）；空 = 管理员 API 关闭（503） |
 | `KEEL_MODEL` / `KEEL_BASE_URL` / `KEEL_PROTOCOL` / `KEEL_PROVIDER` / `KEEL_API_KEY` | provider 选择（空 = fake provider） |
 | `KEEL_CONFIG_FILE` | **仅 `keel serve`**：`config.toml` 路径（默认 `$KEEL_HOME/config.toml`）。缺失 = 空配置；非法文件启动失败；原子轮转/active version 见 §2 |

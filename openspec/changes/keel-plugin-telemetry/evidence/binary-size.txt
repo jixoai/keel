@@ -1,0 +1,26 @@
+$ scripts/binary-size.sh --base 1b10e35
+== binary-size gate ==
+base:    1b10e35 (1b10e358279182161db187a75d2efc4ec0cc1adb)
+budget:  128 KiB per binary and target
+targets: linux/amd64 linux/arm64
+bins:    ./cmd/keel ./cmd/runtime
+keel        linux/amd64      base=36618400 current=36810912 delta=+192512 bytes (+188 KiB)
+binary-size: keel (linux/amd64) grew 188 KiB over the 128 KiB budget
+keel        linux/arm64      base=33292448 current=33423520 delta=+131072 bytes (+128 KiB)
+runtime     linux/amd64      base=20644000 current=20684960 delta=+40960 bytes (+40 KiB)
+runtime     linux/arm64      base=19136672 current=19136672 delta=+0 bytes (+0 KiB)
+binary-size: FAIL (a dependency or generated code exceeded the budget)
+exit=1
+
+$ scripts/binary-size.sh --base 1b10e35 --budget-kb 256
+== binary-size gate ==
+base:    1b10e35 (1b10e358279182161db187a75d2efc4ec0cc1adb)
+budget:  256 KiB per binary and target
+targets: linux/amd64 linux/arm64
+bins:    ./cmd/keel ./cmd/runtime
+keel        linux/amd64      base=36618400 current=36810912 delta=+192512 bytes (+188 KiB)
+keel        linux/arm64      base=33292448 current=33423520 delta=+131072 bytes (+128 KiB)
+runtime     linux/amd64      base=20644000 current=20684960 delta=+40960 bytes (+40 KiB)
+runtime     linux/arm64      base=19136672 current=19136672 delta=+0 bytes (+0 KiB)
+binary-size: OK
+exit=0

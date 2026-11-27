@@ -303,6 +303,42 @@ Bot 只定义角色（身份 + 模型 + Harness）；「main-agent / sub-agent /
 - `WrapStream`/`WrapTelemetry`（`servicehost`）：partial 生产者与 turn 遥测，不碰内核。
 - 摘要/取消语义见 `docs/KERNEL.md` §2「运行摘要」。
 
+### 4.1 遥测插件（`keel.telemetry`，change keel-plugin-telemetry）
+
+PI telemetry 契约（`internal/telemetry`，见 `docs/PI-PARITY.md` §3）形状不变；OTLP 导出是
+**默认关闭**的官方插件，而不是第二个指标系统：
+
+- **Hub seam**：`servicehost` 为每个 tenant 建一个进程级 `telemetry.Hub`，包装
+  Memory/Noop 并向外注册的 exporter 有界扇出。插件在 `Start` 通过 `PluginEnv.Telemetry`
+  注册、`Stop` 注销；注册可晚于服务图，`Context()`/指标按记录时读取当前 exporter 集。
+- **默认不出网**：插件未启用（或 adapter 缺失/none）时，`telemetry` 配置只是惰性输入；
+  不创建 exporter、不发 collector 请求，`GET /v1/telemetry/status` 显示
+  `plugin_disabled` 或 `inactive`。
+- **启用需审批**：`POST /v1/plugins/keel.telemetry/enable` 走既有 durable 审批；问题文本展示
+  exporter、signals、endpoint host、采样和 header 名，不展示 header 值或 secret 引用。
+  bundled 插件只可停用、不可卸载（`ErrPluginBundled`）。
+- **有界导出**：每 tenant 独立队列（8192 spans / 4096 metrics / 2048 logs / 8 MiB），
+  512 spans 或 1 MiB 或 5s 批；单 POST ≤4 MiB 自动拆分；满时丢最旧并计数。5xx/429/网络
+  指数退避（429 优先 `Retry-After`，上限 60s），最多 5 次；连续 5 次失败熔断 30s，半开
+  单探针；其它 4xx 丢弃该批并计数。已 2xx 的批次在同一 exporter 生命周期内不重复导出；
+  崩溃重启可能重发游标之前的批次（at-least-once）。
+- **采样/脱敏/基数**：span 头采样按 trace id 确定性（子 span 继承，0 只停 traces）；metric
+  不采样；log 按级别 + 独立比例（error 不受比例影响）。首版无尾采样，错误 span 不保证被
+  采样。所有信号经 allowlist（见 `internal/telemetry/signals.go`），metric 标签只允许有界
+  枚举，每族 1,000 / 全局 5,000 series 上限，未注册指标名丢弃。
+- **故障隔离**：导出失败、队列溢出、熔断只进入计数与 `DEGRADED` 状态，绝不改变
+  run/tool 结果、SSE 或 HTTP 响应；插件初始化失败是插件 `FAILED`，harness 继续可用。
+- **与 `/metrics` 的边界**：`internal/metrics` 仍是固定基数 Prometheus 运维面；遥测插件
+  MUST NOT 写它、不新增第二个 Prometheus endpoint、不做 remote-write。每个指标族只有一个
+  owner：
+
+| 指标族 | Owner | 命名空间/标签 | 用途 |
+|---|---|---|---|
+| `keel_agent_*` | `internal/metrics` | Prometheus；固定枚举标签 | `/metrics` 运维抓取 |
+| `keel.agent.runs` / `keel.agent.run.duration` | `internal/telemetry`（插件导出） | OTLP；model/provider/outcome 等有界标签 | 租户内 tracing/metric |
+| `keel.agent.run` / `turn` / `tool` / `compaction` span | `internal/agent` + `internal/harnessext` | OTLP traces；可带 tenant/session/run | 追踪与诊断 |
+| `run.finished` / `compaction` 事件 | kernel 事件日志 | 业务事实 | 回放/汇总，不是遥测替代 |
+
 ## 5. 验收
 
 `internal/harnessapi`、`internal/harnessext`、`cmd/keel` 均有 PG 集成测试；扩展面 E2E 覆盖
