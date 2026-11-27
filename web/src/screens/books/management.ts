@@ -9,9 +9,11 @@ import { canAny } from "../../data/permissions";
 
 export type ManagementDoor = "identity" | "records" | "bots" | "teams";
 
-/** The key that opens the daily 任务 (super-agent board) chapter. Reads need
- * `task.read`; the page gates every write on `task.write` separately. */
-export const TASK_KEYS = ["task.read"];
+/** The keys that open the daily 任务 (board) chapter. `board.read` is the
+ * product key; `task.read` keeps the section visible through the migration
+ * window (the page then explains the one missing grant). Both are display
+ * gates only; the server decides every read and write. */
+export const TASK_KEYS = ["board.read", "task.read"];
 
 /** The keys that open each door, in the product's own vocabulary. */
 export const MANAGEMENT_KEYS: Record<ManagementDoor, string[]> = {

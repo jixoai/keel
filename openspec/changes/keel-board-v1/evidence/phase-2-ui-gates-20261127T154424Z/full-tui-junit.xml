@@ -1,0 +1,691 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites name="nsh test" tests="536" failures="0" errors="0" skipped="0" time="624.622">
+  <testsuite name="App.tui.test.tsx" tests="16" failures="0" errors="0" skipped="0" time="66.548">
+    <testcase classname="App.tui.test.tsx" name="TUI: 会话列表 → 打开会话 → 输入 → 显示回复" time="3.377"/>
+    <testcase classname="App.tui.test.tsx" name="TUI: 审批卡一键作答" time="1.623"/>
+    <testcase classname="App.tui.test.tsx" name="TUI: guide 等待与停止" time="3.139"/>
+    <testcase classname="App.tui.test.tsx" name="TUI: 逐字预览开关" time="2.669"/>
+    <testcase classname="App.tui.test.tsx" name="TUI: 设置页——模型分区两层结构（默认卡 + provider 卡片）与读写重置" time="16.753"/>
+    <testcase classname="App.tui.test.tsx" name="TUI: 本会话模型选择器——选择/恢复默认与租户默认分开" time="8.925"/>
+    <testcase classname="App.tui.test.tsx" name="TUI: 宽屏 header——chip 显示完整模型名，标题下不重复第二行" time="1.098"/>
+    <testcase classname="App.tui.test.tsx" name="TUI: 390px 单列——模型 chip 与标题下模型行都在，状态词让位" time="1.281"/>
+    <testcase classname="App.tui.test.tsx" name="TUI: 打磨——不落裸 id/等待确认不是思考/错误横幅与重试/空态只预填" time="8.118"/>
+    <testcase classname="App.tui.test.tsx" name="TUI: 命令面板——Mod+K 打开、焦点在搜索框、选中设置" time="4.408"/>
+    <testcase classname="App.tui.test.tsx" name="TUI: 命令面板——Esc 关闭" time="1.538"/>
+    <testcase classname="App.tui.test.tsx" name="TUI: MCP app 结果——不挂 iframe，文本兜底与能力提示" time="1.683"/>
+    <testcase classname="App.tui.test.tsx" name="TUI: 设置页——检查点策略读取、收窄与恢复租户默认" time="6.151"/>
+    <testcase classname="App.tui.test.tsx" name="TUI: 历史消息搜索——命中跨会话正文，点结果打开会话" time="1.947"/>
+    <testcase classname="App.tui.test.tsx" name="TUI: 交付物——清单里的路径/大小/哈希与一份预览" time="2.010"/>
+    <testcase classname="App.tui.test.tsx" name="TUI: 导出会话——一页有界消息复制到剪贴板" time="1.828"/>
+  </testsuite>
+  <testsuite name="kit/KitGallery.test.tsx" tests="1" failures="0" errors="0" skipped="0" time="0.342">
+    <testcase classname="kit/KitGallery.test.tsx" name="TUI: gallery renders the grid and every manifest entry is accounted for" time="0.342"/>
+  </testsuite>
+  <testsuite name="realtime.test.tsx" tests="12" failures="0" errors="0" skipped="0" time="11.770">
+    <testcase classname="realtime.test.tsx" name="实时语音：开始通话走 host 桥，流式转写只落一条 final" time="0.961"/>
+    <testcase classname="realtime.test.tsx" name="实时语音：连接中如实显示阶段，未连接就没有转写" time="0.873"/>
+    <testcase classname="realtime.test.tsx" name="实时语音：打断立即标记 interrupted，后续 done 不会补成完整回复" time="0.982"/>
+    <testcase classname="realtime.test.tsx" name="实时语音：手动打断后 cancelled done 不清守卫，迟到的完整回复不落行" time="0.992"/>
+    <testcase classname="realtime.test.tsx" name="实时语音：一个原因只落一条系统行（状态事件与请求回复不重复）" time="0.934"/>
+    <testcase classname="realtime.test.tsx" name="实时语音：结束通话调用 host.stop，麦克风状态回到未开启" time="0.993"/>
+    <testcase classname="realtime.test.tsx" name="实时语音：麦克风被拒 → 权限态，文字兜底仍发到同一个实时会话" time="0.960"/>
+    <testcase classname="realtime.test.tsx" name="实时语音：静音调用 host.mute，打断按钮发 response.cancel" time="1.049"/>
+    <testcase classname="realtime.test.tsx" name="实时语音：没有实时语音模型时主控禁用，配置入口可点且不静默失败" time="0.921"/>
+    <testcase classname="realtime.test.tsx" name="实时语音：没有打开会话时不会编造会话 id" time="1.038"/>
+    <testcase classname="realtime.test.tsx" name="实时语音：预检未配置时不开 WebSocket，直接落在配置态" time="0.942"/>
+    <testcase classname="realtime.test.tsx" name="实时语音：390px 下主控、静音/打断、文字兜底与电平都在" time="1.125"/>
+  </testsuite>
+  <testsuite name="speech.test.tsx" tests="12" failures="0" errors="0" skipped="0" time="20.779">
+    <testcase classname="speech.test.tsx" name="语音转写：空态文案诚实，未按麦克风不会开始收音" time="0.654"/>
+    <testcase classname="speech.test.tsx" name="语音转写：按下麦克风——headless 收音并转写；无识别器的宿主降级为文字" time="2.527"/>
+    <testcase classname="speech.test.tsx" name="语音转写：停止立即释放麦克风，已听到的内容仍入账" time="2.335"/>
+    <testcase classname="speech.test.tsx" name="语音转写：麦克风权限被拒绝时降级为文字输入" time="3.147"/>
+    <testcase classname="speech.test.tsx" name="语音转写：文字兜底直接入账，不会启动麦克风" time="1.964"/>
+    <testcase classname="speech.test.tsx" name="语音转写：390px 窄栏下语音与文字控件都在，切回语音收起文字输入" time="1.401"/>
+    <testcase classname="speech.test.tsx" name="语音合成：未配置 Provider——文本、音色与禁用的合成，配置 CTA 给出说明" time="1.835"/>
+    <testcase classname="speech.test.tsx" name="语音合成：Provider 已配置——合成走服务端语音端点并给出结果" time="2.287"/>
+    <testcase classname="speech.test.tsx" name="语音合成：请求带上会话选中的 TTS 模型（否则走部署默认，可能是付费厂商）" time="2.045"/>
+    <testcase classname="speech.test.tsx" name="语音合成：头部状态与卡片状态必须一致（不得一处写「未配置」一处写「已配置」）" time="0.884"/>
+    <testcase classname="speech.test.tsx" name="语音工作台：mode 变化必须切换工作台（STT 模型不得停在 TTS 面板）" time="0.811"/>
+    <testcase classname="speech.test.tsx" name="语音转写：文件输入走服务端转写端点（无需麦克风权限）" time="0.889"/>
+  </testsuite>
+  <testsuite name="src/data/attachment-link.test.ts" tests="2" failures="0" errors="0" skipped="0" time="0.002">
+    <testcase classname="src/data/attachment-link.test.ts" name="same-origin: a relative path resolves to the page origin" time="0.002"/>
+    <testcase classname="src/data/attachment-link.test.ts" name="same-origin: another origin, protocol downgrade, data: and javascript: are refused" time="0.000"/>
+  </testsuite>
+  <testsuite name="src/data/attachments.test.ts" tests="7" failures="0" errors="0" skipped="0" time="0.080">
+    <testcase classname="src/data/attachments.test.ts" name="local part: display facts only, with an explicit not-persisted reason" time="0.015"/>
+    <testcase classname="src/data/attachments.test.ts" name="kind and size: MIME authoritative, name only when the record has none" time="0.015"/>
+    <testcase classname="src/data/attachments.test.ts" name="projection states: loading → ready, forbidden, error, retry" time="0.013"/>
+    <testcase classname="src/data/attachments.test.ts" name="projection cache: a ready read is not repeated for the same identity" time="0.005"/>
+    <testcase classname="src/data/attachments.test.ts" name="refresh: a pending-thumbnail refresh never blanks a good projection" time="0.016"/>
+    <testcase classname="src/data/attachments.test.ts" name="dedupe: the same fileId (or the same local identity) renders once" time="0.008"/>
+    <testcase classname="src/data/attachments.test.ts" name="thumbnail source: only a ready thumbnail; pending/failed/none never fall back to the original" time="0.008"/>
+  </testsuite>
+  <testsuite name="src/data/board-sse.test.ts" tests="3" failures="0" errors="0" skipped="0" time="1.095">
+    <testcase classname="src/data/board-sse.test.ts" name="board SSE: an id-only frame advances the cursor and reconnects with Last-Event-ID" time="1.036"/>
+    <testcase classname="src/data/board-sse.test.ts" name="board store: an SSE task without moves invalidates and refetches the augmented view" time="0.031"/>
+    <testcase classname="src/data/board-sse.test.ts" name="board store: hidden advances but does not show activity; duplicate/out-of-order never overwrite" time="0.029"/>
+  </testsuite>
+  <testsuite name="src/data/board.test.ts" tests="22" failures="0" errors="0" skipped="0" time="0.074">
+    <testcase classname="src/data/board.test.ts" name="board：七态词表与租约到期按 ready 呈现" time="0.001"/>
+    <testcase classname="src/data/board.test.ts" name="board：租约倒计时在 60 秒内变警告、到点变危险，持有者归属不冒充" time="0.006"/>
+    <testcase classname="src/data/board.test.ts" name="board：队列按服务端顺序过滤，pool/archived/标签/频道都在客户端兜底" time="0.000"/>
+    <testcase classname="src/data/board.test.ts" name="board：筛选 search 往返一致，任务查询按 board 的 label=key=value 编码" time="0.010"/>
+    <testcase classname="src/data/board.test.ts" name="board：租约过期后 complete/renew/release 即使有 token 也不可用，claim 为首选" time="0.005"/>
+    <testcase classname="src/data/board.test.ts" name="board：moves 是唯一动作来源；缺失时只读，未知动作被忽略" time="0.012"/>
+    <testcase classname="src/data/board.test.ts" name="board：缓存按 id 合并，线程根更新不把自己塞进回复，回复追加一次" time="0.011"/>
+    <testcase classname="src/data/board.test.ts" name="board：SSE 帧有 data 是事件，无 data 是隐藏事件只推进游标" time="0.010"/>
+    <testcase classname="src/data/board.test.ts" name="board：needs 事实不把未加载的前置冒充完成" time="0.011"/>
+    <testcase classname="src/data/board.test.ts" name="board：错误分类与文案区分 404/403/board_disabled" time="0.000"/>
+    <testcase classname="src/data/board.test.ts" name="board：fixture 的读、写、claim token 与同步重试走同一套契约" time="0.001"/>
+    <testcase classname="src/data/board.test.ts" name="board store：打开、认领、完成；刷新/换标签页丢 token 后不再冒充持有者" time="0.002"/>
+    <testcase classname="src/data/board.test.ts" name="board store：响应丢失后同一草稿/表单重试只落一条" time="0.001"/>
+    <testcase classname="src/data/board.test.ts" name="board store：写失败回滚乐观状态并保留服务器错误码" time="0.001"/>
+    <testcase classname="src/data/board.test.ts" name="board HTTP：live schedule 走 DELETE，dead 走 clear" time="0.000"/>
+    <testcase classname="src/data/board.test.ts" name="board store：/me 缺失时身份未知但队列仍可用" time="0.000"/>
+    <testcase classname="src/data/board.test.ts" name="board store：新建任务携带 needs/指派/即时认领与租约" time="0.000"/>
+    <testcase classname="src/data/board.test.ts" name="board store：写失败时若实时事件已推进状态，回滚不覆盖新视图" time="0.001"/>
+    <testcase classname="src/data/board.test.ts" name="board store：schedule 取消按状态走 DELETE/clear，dead 行走 clear 并移除行" time="0.000"/>
+    <testcase classname="src/data/board.test.ts" name="board store：离开/回到任务面只回收并重连 SSE，不重建缓存" time="0.001"/>
+    <testcase classname="src/data/board.test.ts" name="board store：无 board.manage 时 sync/automation 直接给权限面，不发请求" time="0.000"/>
+    <testcase classname="src/data/board.test.ts" name="board store：watcher 开关失败时回滚到原值" time="0.000"/>
+  </testsuite>
+  <testsuite name="src/data/capabilities.test.ts" tests="6" failures="0" errors="0" skipped="0" time="0.009">
+    <testcase classname="src/data/capabilities.test.ts" name="can: 客户端未注册的特性一律 false（即使部署位为真）" time="0.001"/>
+    <testcase classname="src/data/capabilities.test.ts" name="can: 客户端显式为 false 时不回落到部署位" time="0.000"/>
+    <testcase classname="src/data/capabilities.test.ts" name="can: 未探测/离线时全部关闭" time="0.000"/>
+    <testcase classname="src/data/capabilities.test.ts" name="can: app 代理子能力随部署的 mcp.apps 派生；context 仍需显式部署位" time="0.000"/>
+    <testcase classname="src/data/capabilities.test.ts" name="发现文档：解析 features 与 mcpApps；非布尔/非字符串被丢弃" time="0.000"/>
+    <testcase classname="src/data/capabilities.test.ts" name="登录后刷新：成功即记录部署能力；失败/超时保留旧快照并报告" time="0.009"/>
+  </testsuite>
+  <testsuite name="src/data/commands.pending.test.ts" tests="10" failures="0" errors="0" skipped="0" time="13.629">
+    <testcase classname="src/data/commands.pending.test.ts" name="pending: 切走后另一客户端允许审批 → 同 requestId 只执行一次" time="2.251"/>
+    <testcase classname="src/data/commands.pending.test.ts" name="pending: 决策超时自动重放一次 → timed_out，不会永久 pending" time="1.710"/>
+    <testcase classname="src/data/commands.pending.test.ts" name="pending: 丢掉 202 响应 → 同 requestId 重发并接回审批" time="2.528"/>
+    <testcase classname="src/data/commands.pending.test.ts" name="pending: 本客户端点击允许 → answerDecision 立即用原 requestId 重放" time="0.001"/>
+    <testcase classname="src/data/commands.pending.test.ts" name="pending: 审批后 403 无审计行 → 本地错误可见，不静默丢弃" time="0.000"/>
+    <testcase classname="src/data/commands.pending.test.ts" name="pending: 插件卸载/未知命令 404 → 本地错误可见，不静默丢弃" time="0.000"/>
+    <testcase classname="src/data/commands.pending.test.ts" name="pending: 忙等重试耗尽 → 中文错误可见，可重新执行" time="6.059"/>
+    <testcase classname="src/data/commands.pending.test.ts" name="pending: durable busy（eventSeq）不标本地记录" time="0.000"/>
+    <testcase classname="src/data/commands.pending.test.ts" name="pending: 初始 403（未产生审计行）也留下本地错误" time="0.000"/>
+    <testcase classname="src/data/commands.pending.test.ts" name="pending: 重载后从 sessionStorage 恢复并用原参数重放" time="1.079"/>
+  </testsuite>
+  <testsuite name="src/data/commands.test.ts" tests="14" failures="0" errors="0" skipped="0" time="0.001">
+    <testcase classname="src/data/commands.test.ts" name="parseCommandCatalog: 保持服务端顺序，缺省安全，未知来源不隐藏" time="0.000"/>
+    <testcase classname="src/data/commands.test.ts" name="applyTargetAvailability: 只降级不升级，也不重排" time="0.000"/>
+    <testcase classname="src/data/commands.test.ts" name="commandDraft: 只有首 token `/` 是命令；未知名字/正文里的斜杠不是" time="0.000"/>
+    <testcase classname="src/data/commands.test.ts" name="matchingCommands/commandGroups: 同一顺序，按来源分组，空组不画" time="0.000"/>
+    <testcase classname="src/data/commands.test.ts" name="可用性/状态文案：每种稳定原因都有一句话" time="0.000"/>
+    <testcase classname="src/data/commands.test.ts" name="commandFields: 受控子集（字符串/数字/布尔/枚举/数组/JSON）与默认值" time="0.000"/>
+    <testcase classname="src/data/commands.test.ts" name="buildCommandArgs: 空可选项不发送，必填/类型/范围是字段级错误" time="0.000"/>
+    <testcase classname="src/data/commands.test.ts" name="buildCommandArgs: 数组项类型与原始 JSON 字段" time="0.000"/>
+    <testcase classname="src/data/commands.test.ts" name="buildCommandArgs: enum 保留 schema 的原始类型（数字/布尔）" time="0.000"/>
+    <testcase classname="src/data/commands.test.ts" name="自由文本映射：只有单个 text 字符串属性时把剩余文本当 args.text" time="0.000"/>
+    <testcase classname="src/data/commands.test.ts" name="控制字符/ANSI：目录与结果展示前净化，不伪造终端行" time="0.000"/>
+    <testcase classname="src/data/commands.test.ts" name="破坏性命令审批与错误文案中文化，参数预览保留" time="0.000"/>
+    <testcase classname="src/data/commands.test.ts" name="服务端 400 字段路径映射到表单字段" time="0.000"/>
+    <testcase classname="src/data/commands.test.ts" name="commandResultSummary: 有界、插件信封取结构化结果、不编造空结果" time="0.000"/>
+  </testsuite>
+  <testsuite name="src/data/deliverables.test.ts" tests="2" failures="0" errors="0" skipped="0" time="0.001">
+    <testcase classname="src/data/deliverables.test.ts" name="deliverables: 哈希只在显示层截断，完整值仍是清单的那一份" time="0.000"/>
+    <testcase classname="src/data/deliverables.test.ts" name="deliverables: 大小按清单字节数排版" time="0.000"/>
+  </testsuite>
+  <testsuite name="src/data/fixture-identity.test.ts" tests="3" failures="0" errors="0" skipped="0" time="0.002">
+    <testcase classname="src/data/fixture-identity.test.ts" name="fixture taskPanel: 成员只认本会话卡的子卡，事件流不抄别的会话" time="0.001"/>
+    <testcase classname="src/data/fixture-identity.test.ts" name="fixture taskPanel: 祖先与 parentTaskId 跟投影一致" time="0.000"/>
+    <testcase classname="src/data/fixture-identity.test.ts" name="fixture taskPanel: 事件页保留最新 N 条并说明截断" time="0.000"/>
+  </testsuite>
+  <testsuite name="src/data/http.identity.test.ts" tests="11" failures="0" errors="0" skipped="0" time="0.002">
+    <testcase classname="src/data/http.identity.test.ts" name="auth: the anonymous session token authorizes the login POST; the session&apos;s token authorizes writes" time="0.000"/>
+    <testcase classname="src/data/http.identity.test.ts" name="auth: login without a prior session read fetches the anonymous CSRF token first" time="0.000"/>
+    <testcase classname="src/data/http.identity.test.ts" name="auth: a 401 is one shape for an unknown account and a wrong password" time="0.000"/>
+    <testcase classname="src/data/http.identity.test.ts" name="403 keeps the engine&apos;s reason and required key" time="0.000"/>
+    <testcase classname="src/data/http.identity.test.ts" name="shares: the three families use the same trio; add/revoke keep the tuple body" time="0.000"/>
+    <testcase classname="src/data/http.identity.test.ts" name="429 carries Retry-After as whole seconds" time="0.000"/>
+    <testcase classname="src/data/http.identity.test.ts" name="listings: the limit is clamped to the API&apos;s 1..500 and includeArchived is explicit" time="0.000"/>
+    <testcase classname="src/data/http.identity.test.ts" name="listings: a full page reports hasMore as a lower bound" time="0.000"/>
+    <testcase classname="src/data/http.identity.test.ts" name="writes: team roster CAS, grant scope query and one-time bot key plaintext" time="0.000"/>
+    <testcase classname="src/data/http.identity.test.ts" name="whoami: parsed identity is the can() source" time="0.000"/>
+    <testcase classname="src/data/http.identity.test.ts" name="decisions: the answer POST carries only optionId (unknown fields are a 400)" time="0.000"/>
+  </testsuite>
+  <testsuite name="src/data/identity-access.test.ts" tests="3" failures="0" errors="0" skipped="0" time="0.000">
+    <testcase classname="src/data/identity-access.test.ts" name="范围上限：超过自己持有的范围禁用并给原因" time="0.000"/>
+    <testcase classname="src/data/identity-access.test.ts" name="退出/换号：不把上一个会话的账号与筛选留在内存里" time="0.000"/>
+    <testcase classname="src/data/identity-access.test.ts" name="变更集：新增 / 提升 / 收窄 / 撤销，高危只在放宽时要求确认" time="0.000"/>
+  </testsuite>
+  <testsuite name="src/data/identity-stream.test.ts" tests="6" failures="0" errors="0" skipped="0" time="2.095">
+    <testcase classname="src/data/identity-stream.test.ts" name="identity stream: an accounts fact re-reads accounts within 2s, once per burst" time="0.222"/>
+    <testcase classname="src/data/identity-stream.test.ts" name="identity stream: a permissions fact re-reads whoami and revokes the local capability" time="0.049"/>
+    <testcase classname="src/data/identity-stream.test.ts" name="identity stream: a sessions fact refreshes the session list; heartbeats do nothing" time="0.340"/>
+    <testcase classname="src/data/identity-stream.test.ts" name="identity stream: a reconnect re-reads loaded projections (facts are not replayed)" time="0.562"/>
+    <testcase classname="src/data/identity-stream.test.ts" name="identity stream: a 401 closes it, never reconnects, and returns to the login gate" time="0.914"/>
+    <testcase classname="src/data/identity-stream.test.ts" name="identity stream: logout closes the transport before the next account" time="0.008"/>
+  </testsuite>
+  <testsuite name="src/data/identity.test.ts" tests="10" failures="0" errors="0" skipped="0" time="0.001">
+    <testcase classname="src/data/identity.test.ts" name="whoami: account, bot binding and the effective (key, scope) set" time="0.000"/>
+    <testcase classname="src/data/identity.test.ts" name="session: login answer carries csrf + mustChangePassword; bootstrapRequired is anonymous" time="0.000"/>
+    <testcase classname="src/data/identity.test.ts" name="bot: profile, model kind, default model and harness survive; missing arrays stay empty" time="0.000"/>
+    <testcase classname="src/data/identity.test.ts" name="team bot: mission + roster; a seat without a bot id is dropped" time="0.000"/>
+    <testcase classname="src/data/identity.test.ts" name="share: a viewer/editor tuple keeps its display facts; a malformed tuple is dropped" time="0.000"/>
+    <testcase classname="src/data/identity.test.ts" name="share badges: sharedCount and TeamBot owner survive the parsers" time="0.000"/>
+    <testcase classname="src/data/identity.test.ts" name="bot key: metadata only (no plaintext field exists on the wire shape)" time="0.000"/>
+    <testcase classname="src/data/identity.test.ts" name="group detail: grants keep only known scopes; members keep their account" time="0.000"/>
+    <testcase classname="src/data/identity.test.ts" name="pagination: a full page is a lower bound on more, not a total" time="0.000"/>
+    <testcase classname="src/data/identity.test.ts" name="built-in groups: the server tokens read as the product&apos;s role words" time="0.000"/>
+  </testsuite>
+  <testsuite name="src/data/mcp-apps.test.ts" tests="16" failures="0" errors="0" skipped="0" time="0.006">
+    <testcase classname="src/data/mcp-apps.test.ts" name="目录：合法 app 被解析，主题只保留字符串变量" time="0.000"/>
+    <testcase classname="src/data/mcp-apps.test.ts" name="目录：domain 有则透传，缺省/超长不发明" time="0.000"/>
+    <testcase classname="src/data/mcp-apps.test.ts" name="目录：错误 mime/跨源 URL/错 appId/错 hash 的行一律丢弃" time="0.000"/>
+    <testcase classname="src/data/mcp-apps.test.ts" name="绑定：details.app 的派生身份被读取；无 app/错形状返回 null" time="0.000"/>
+    <testcase classname="src/data/mcp-apps.test.ts" name="tool-input：聚合 mcp 信封解包为内层实参；其它形状原样透传" time="0.000"/>
+    <testcase classname="src/data/mcp-apps.test.ts" name="文档地址：只接受目录自己生成的同源 hash URL" time="0.000"/>
+    <testcase classname="src/data/mcp-apps.test.ts" name="主题：只取当前 appearance 的变量；空/缺失不发明值" time="0.000"/>
+    <testcase classname="src/data/mcp-apps.test.ts" name="CallToolResult：content 始终是数组，structuredContent 原样带出" time="0.000"/>
+    <testcase classname="src/data/mcp-apps.test.ts" name="加载地址：web 必须用页面来源的绝对 URL（NSH 拒绝相对 src）；桌面用沙箱域" time="0.001"/>
+    <testcase classname="src/data/mcp-apps.test.ts" name="文本：CallToolResult.content 的 text 块按段落拼接" time="0.000"/>
+    <testcase classname="src/data/mcp-apps.test.ts" name="代理 body：sessionId 有值才发；message 固定 role=user/delivery=queue" time="0.000"/>
+    <testcase classname="src/data/mcp-apps.test.ts" name="错误映射：优先透传 host 的 JSON-RPC code；无 code 用 -32603 且有界" time="0.004"/>
+    <testcase classname="src/data/mcp-apps.test.ts" name="HTTP 错误映射：JSON-RPC 形状同 code；202 不是成功；普通 error 用 -32603" time="0.001"/>
+    <testcase classname="src/data/mcp-apps.test.ts" name="ui/message：只有 edit 分支给出预填文本；send/discard 不预填" time="0.000"/>
+    <testcase classname="src/data/mcp-apps.test.ts" name="ui/open-link：只有 opened=true 且带目标 URL 才算打开" time="0.000"/>
+    <testcase classname="src/data/mcp-apps.test.ts" name="hostCapabilities：全开声明五项 + logging + sandbox，全关只留 logging" time="0.000"/>
+  </testsuite>
+  <testsuite name="src/data/model-catalog.test.ts" tests="16" failures="0" errors="0" skipped="0" time="0.012">
+    <testcase classname="src/data/model-catalog.test.ts" name="价格摘要：四档数字、免费标记与未声明三种说法" time="0.000"/>
+    <testcase classname="src/data/model-catalog.test.ts" name="价格格式：币种码在数字前，小数位数按精度需要" time="0.000"/>
+    <testcase classname="src/data/model-catalog.test.ts" name="上下文/输出：整数千位写成 K/M，其余按位保留，缺失说未声明" time="0.009"/>
+    <testcase classname="src/data/model-catalog.test.ts" name="免费判定：显式标记或输入输出都为 0；未声明块不是免费" time="0.000"/>
+    <testcase classname="src/data/model-catalog.test.ts" name="模型元数据读回：属性、选项上限与价格块" time="0.000"/>
+    <testcase classname="src/data/model-catalog.test.ts" name="保存只写读者改动的字段：未动的模态/能力/思考档不进规则" time="0.000"/>
+    <testcase classname="src/data/model-catalog.test.ts" name="思考档：只写改动后的档位，按运行时词汇升序，请求补丁保留并补齐" time="0.000"/>
+    <testcase classname="src/data/model-catalog.test.ts" name="清除：表单展示过的字段写 null，未展示的请求补丁与组成的字段不受影响" time="0.000"/>
+    <testcase classname="src/data/model-catalog.test.ts" name="价格：只写改动的档位；整块清空写 null；未展示的字段不凭空写 null" time="0.000"/>
+    <testcase classname="src/data/model-catalog.test.ts" name="空白保存是 no-op：无解析事实的模型不会被写空能力" time="0.000"/>
+    <testcase classname="src/data/model-catalog.test.ts" name="设置视图查找：ProviderViews 的模型（含不可执行/停用项）是编辑器的种子" time="0.000"/>
+    <testcase classname="src/data/model-catalog.test.ts" name="直写凭据名字：未改写的 id 稳定，改写过的 id 带摘要后缀且互不碰撞" time="0.000"/>
+    <testcase classname="src/data/model-catalog.test.ts" name="合并补丁：对象递归、null 清除、数组替换" time="0.000"/>
+    <testcase classname="src/data/model-catalog.test.ts" name="实时清单合并：去重、追加在后、已配置不删" time="0.000"/>
+    <testcase classname="src/data/model-catalog.test.ts" name="掩码预览：18/19 边界、CJK 按码点、固定掩码不透露长度" time="0.000"/>
+    <testcase classname="src/data/model-catalog.test.ts" name="picker 第二行只补第一行没有的事实（输出上限 + 价格）" time="0.000"/>
+  </testsuite>
+  <testsuite name="src/data/permissions.test.ts" tests="7" failures="0" errors="0" skipped="0" time="0.000">
+    <testcase classname="src/data/permissions.test.ts" name="can: no whoami answer means no action (fail closed)" time="0.000"/>
+    <testcase classname="src/data/permissions.test.ts" name="can: a held key is offered; an unheld one is not" time="0.000"/>
+    <testcase classname="src/data/permissions.test.ts" name="can: a super admin short-circuits every key" time="0.000"/>
+    <testcase classname="src/data/permissions.test.ts" name="can: a viewer relation offers reads only" time="0.000"/>
+    <testcase classname="src/data/permissions.test.ts" name="can: an archived resource accepts no new work" time="0.000"/>
+    <testcase classname="src/data/permissions.test.ts" name="canAny: a section with more than one entry point" time="0.000"/>
+    <testcase classname="src/data/permissions.test.ts" name="permissionHint names the missing key" time="0.000"/>
+  </testsuite>
+  <testsuite name="src/data/queue.test.ts" tests="4" failures="0" errors="0" skipped="0" time="0.000">
+    <testcase classname="src/data/queue.test.ts" name="parseQueueFacts: 读取 202 队列块的位置与已知 ETA" time="0.000"/>
+    <testcase classname="src/data/queue.test.ts" name="parseQueueFacts: ETA 未知时 etaSeconds 为 null，不伪造 0" time="0.000"/>
+    <testcase classname="src/data/queue.test.ts" name="parseQueueFacts: 没有队列块或位置非法＝没有队列事实" time="0.000"/>
+    <testcase classname="src/data/queue.test.ts" name="parseQueueFacts: etaKnown 为真但 etaSeconds 缺失/非数仍是未知" time="0.000"/>
+  </testsuite>
+  <testsuite name="src/data/route.test.ts" tests="2" failures="0" errors="0" skipped="0" time="0.000">
+    <testcase classname="src/data/route.test.ts" name="路由：章节与深链一一对应" time="0.000"/>
+    <testcase classname="src/data/route.test.ts" name="路由：路径生成与反解一致（含编码）" time="0.000"/>
+  </testsuite>
+  <testsuite name="src/data/selection.test.ts" tests="5" failures="0" errors="0" skipped="0" time="0.000">
+    <testcase classname="src/data/selection.test.ts" name="selectionForSend: 团队会话同时带 modelId 与 teamBotId" time="0.000"/>
+    <testcase classname="src/data/selection.test.ts" name="selectionForSend: 标准会话只带模型" time="0.000"/>
+    <testcase classname="src/data/selection.test.ts" name="selectionForSend: 没有选择时不下发空事实（缺省 = 租户默认）" time="0.000"/>
+    <testcase classname="src/data/selection.test.ts" name="selectionForSend: 团队 id 为空白不发明绑定" time="0.000"/>
+    <testcase classname="src/data/selection.test.ts" name="selectionForSend: 不再下发旧 agentId / teamId 词表" time="0.000"/>
+  </testsuite>
+  <testsuite name="src/data/session-capabilities.test.ts" tests="3" failures="0" errors="0" skipped="0" time="0.000">
+    <testcase classname="src/data/session-capabilities.test.ts" name="session capabilities: the client half alone does not switch the reads on" time="0.000"/>
+    <testcase classname="src/data/session-capabilities.test.ts" name="session capabilities: both halves on switches the reads on" time="0.000"/>
+    <testcase classname="src/data/session-capabilities.test.ts" name="session capabilities: the deployment half alone does not switch the reads on" time="0.000"/>
+  </testsuite>
+  <testsuite name="src/data/session-create.test.ts" tests="2" failures="0" errors="0" skipped="0" time="0.000">
+    <testcase classname="src/data/session-create.test.ts" name="createSession sends the Bot it was given" time="0.000"/>
+    <testcase classname="src/data/session-create.test.ts" name="resolveWorkspaceBot: exactly one active Bot owns the workspace session" time="0.000"/>
+  </testsuite>
+  <testsuite name="src/data/session-query.test.ts" tests="2" failures="0" errors="0" skipped="0" time="0.000">
+    <testcase classname="src/data/session-query.test.ts" name="session-query: 导出只写页面里的消息，一行一条" time="0.000"/>
+    <testcase classname="src/data/session-query.test.ts" name="session-query: 摘要说明本页数量与是否还有更多" time="0.000"/>
+  </testsuite>
+  <testsuite name="src/data/shares.test.ts" tests="2" failures="0" errors="0" skipped="0" time="0.000">
+    <testcase classname="src/data/shares.test.ts" name="share gating: key + ownership; a super admin passes; an editor key alone does not" time="0.000"/>
+    <testcase classname="src/data/shares.test.ts" name="share labels: viewer/editor words and the 已共享 badge only above zero" time="0.000"/>
+  </testsuite>
+  <testsuite name="src/data/store.auth.test.ts" tests="4" failures="0" errors="0" skipped="0" time="0.001">
+    <testcase classname="src/data/store.auth.test.ts" name="login: whoami feeds can(); an unheld key stays hidden" time="0.000"/>
+    <testcase classname="src/data/store.auth.test.ts" name="must-change: login holds the gate and loads no permissions" time="0.000"/>
+    <testcase classname="src/data/store.auth.test.ts" name="logout: the server session and every local fact are cleared" time="0.000"/>
+    <testcase classname="src/data/store.auth.test.ts" name="session expiry: a 401 returns to the gate with a reason, not a blank list" time="0.000"/>
+  </testsuite>
+  <testsuite name="src/data/store.queue.test.ts" tests="5" failures="0" errors="0" skipped="0" time="0.000">
+    <testcase classname="src/data/store.queue.test.ts" name="mergeSessions: a non-queued server row drops the client queue fact" time="0.000"/>
+    <testcase classname="src/data/store.queue.test.ts" name="mergeSessions: a still-queued row keeps the admission fact" time="0.000"/>
+    <testcase classname="src/data/store.queue.test.ts" name="historical replay through attach() does not clear a queued row" time="0.000"/>
+    <testcase classname="src/data/store.queue.test.ts" name="retry: a queued 202 renders 排队中 with its position/ETA" time="0.000"/>
+    <testcase classname="src/data/store.queue.test.ts" name="retry: an admitted retry is running and clears any stale queue fact" time="0.000"/>
+  </testsuite>
+  <testsuite name="src/data/stream-retry.test.tsx" tests="1" failures="0" errors="0" skipped="0" time="1.523">
+    <testcase classname="src/data/stream-retry.test.tsx" name="事件流：连续 404 后有界重试并成功 open，全程不 closed" time="1.523"/>
+  </testsuite>
+  <testsuite name="src/data/tasks.test.ts" tests="15" failures="0" errors="0" skipped="0" time="0.001">
+    <testcase classname="src/data/tasks.test.ts" name="taskTree: 会话自身的卡按创建序，成员卡挂在父卡下面，外层父卡在最上面" time="0.000"/>
+    <testcase classname="src/data/tasks.test.ts" name="taskTree: 父卡不在读数里时标另一会话，不编一个标题" time="0.000"/>
+    <testcase classname="src/data/tasks.test.ts" name="forkBranches: 只报带 originSeq 的 fork 卡，并按 originSeq 排序" time="0.000"/>
+    <testcase classname="src/data/tasks.test.ts" name="eventLines: 账本序、卡名、以及 kind 自己的字段；不认识的 kind 标为未解析" time="0.000"/>
+    <testcase classname="src/data/tasks.test.ts" name="eventDetail: 每种 kind 只说自己带的字段" time="0.000"/>
+    <testcase classname="src/data/tasks.test.ts" name="panelGaps: 每个上限一句话，外来的 kind 只报一次" time="0.000"/>
+    <testcase classname="src/data/tasks.test.ts" name="panelGaps: count=1 是下界，不断言达到了上限" time="0.000"/>
+    <testcase classname="src/data/tasks.test.ts" name="panelGaps: 自己的卡页与资源折叠页各有自己的句子" time="0.000"/>
+    <testcase classname="src/data/tasks.test.ts" name="panelPhase: loading / empty / error / permission / success 各有来源" time="0.000"/>
+    <testcase classname="src/data/tasks.test.ts" name="resourceChanged / previewSummary: 一致、已变化、未核对三态" time="0.000"/>
+    <testcase classname="src/data/tasks.test.ts" name="fileReferences: 只列本会话卡归属的路径，别的会话的卡不冒充，挂载过的不重复" time="0.000"/>
+    <testcase classname="src/data/tasks.test.ts" name="fileReferences: 同一路径已被别的卡挂载，也不再按写入卡重复" time="0.000"/>
+    <testcase classname="src/data/tasks.test.ts" name="shortHash / labels: 只截断真正的 sha256，原值留在事件字段里" time="0.000"/>
+    <testcase classname="src/data/tasks.test.ts" name="resourceCount / mergeFilePage: 资源计数含清单组，翻页按 path 合并" time="0.000"/>
+    <testcase classname="src/data/tasks.test.ts" name="panelCounts / shouldShowTaskPanel: 计数来自读数，入口由能力位决定" time="0.000"/>
+  </testsuite>
+  <testsuite name="src/data/wire.test.ts" tests="4" failures="0" errors="0" skipped="0" time="0.000">
+    <testcase classname="src/data/wire.test.ts" name="时间：0 / 负数 / 2000 年前 / 非法值都不渲染" time="0.000"/>
+    <testcase classname="src/data/wire.test.ts" name="时间：最近一小时相对，更早绝对" time="0.000"/>
+    <testcase classname="src/data/wire.test.ts" name="时间：跨年时带年份" time="0.000"/>
+    <testcase classname="src/data/wire.test.ts" name="预览：富文本消息的 Markdown 标记不进入列表标签" time="0.000"/>
+  </testsuite>
+  <testsuite name="src/desktop/links.test.ts" tests="2" failures="0" errors="0" skipped="0" time="0.000">
+    <testcase classname="src/desktop/links.test.ts" name="keel 深链：session / decision / settings" time="0.000"/>
+    <testcase classname="src/desktop/links.test.ts" name="keel 深链：非法/未知链接不解析" time="0.000"/>
+  </testsuite>
+  <testsuite name="src/plugins/bridge.test.ts" tests="4" failures="0" errors="0" skipped="0" time="0.557">
+    <testcase classname="src/plugins/bridge.test.ts" name="bridge: subscribe starts one stream, dispose unsubscribes and drops every listener" time="0.110"/>
+    <testcase classname="src/plugins/bridge.test.ts" name="registry: uninstalling a plugin withdraws its bridge subscription" time="0.173"/>
+    <testcase classname="src/plugins/bridge.test.ts" name="registry: replacing a declaration also withdraws the previous subscription" time="0.126"/>
+    <testcase classname="src/plugins/bridge.test.ts" name="bridge: disposing while subscribe is in flight installs no listener and unsubscribes" time="0.148"/>
+  </testsuite>
+  <testsuite name="src/plugins/mime.test.ts" tests="4" failures="0" errors="0" skipped="0" time="0.000">
+    <testcase classname="src/plugins/mime.test.ts" name="normalizeMime: lowercase, parameters dropped, trimmed" time="0.000"/>
+    <testcase classname="src/plugins/mime.test.ts" name="MIME grammar: type/subtype and type/* only, lowercase" time="0.000"/>
+    <testcase classname="src/plugins/mime.test.ts" name="matching: exact and type wildcard, parameters ignored" time="0.000"/>
+    <testcase classname="src/plugins/mime.test.ts" name="matching is fail-closed: a malformed pattern matches nothing, never everything" time="0.000"/>
+  </testsuite>
+  <testsuite name="src/plugins/registry.test.ts" tests="24" failures="0" errors="0" skipped="0" time="0.386">
+    <testcase classname="src/plugins/registry.test.ts" name="base slots: keel.ui declares the eight slots plus the top band" time="0.000"/>
+    <testcase classname="src/plugins/registry.test.ts" name="slot validation: a foreign namespace, a missing form set and an unknown target fail closed" time="0.000"/>
+    <testcase classname="src/plugins/registry.test.ts" name="duplicate slots: the same provider replaces, another provider conflicts" time="0.000"/>
+    <testcase classname="src/plugins/registry.test.ts" name="contribution validation: a form the slot does not accept, a missing entry and an escaping path" time="0.000"/>
+    <testcase classname="src/plugins/registry.test.ts" name="duplicate contributions: same plugin replaces, another plugin conflicts, singleton is full" time="0.000"/>
+    <testcase classname="src/plugins/registry.test.ts" name="target fallback: package and iframe say unavailable in a terminal, chunk and data do not" time="0.000"/>
+    <testcase classname="src/plugins/registry.test.ts" name="data contributions: the slot schema rejects a nav item without a label" time="0.000"/>
+    <testcase classname="src/plugins/registry.test.ts" name="data actions: navigate/openUrl/callTool are the closed vocabulary" time="0.000"/>
+    <testcase classname="src/plugins/registry.test.ts" name="chunk lifecycle: the bundled fixture loads, renders, and unload leaves no residue" time="0.025"/>
+    <testcase classname="src/plugins/registry.test.ts" name="unloading a slot provider withdraws every contribution to its slots" time="0.000"/>
+    <testcase classname="src/plugins/registry.test.ts" name="bridge: an undeclared verb fails with ERR_ACCESS_DENIED before any host call" time="0.000"/>
+    <testcase classname="src/plugins/registry.test.ts" name="inventory sync: enabled plugins load, disabled/uninstalled ones unload" time="0.030"/>
+    <testcase classname="src/plugins/registry.test.ts" name="inventory sync: provides.slots is read, so a third-party slot provider works" time="0.000"/>
+    <testcase classname="src/plugins/registry.test.ts" name="inventory readers tolerate both the documented and the early field spellings" time="0.000"/>
+    <testcase classname="src/plugins/registry.test.ts" name="chunk specifier: a package entry is same-origin; a bundled entry stays a fixture" time="0.000"/>
+    <testcase classname="src/plugins/registry.test.ts" name="attachment selection: only part=attachment claims; a plain message-part contribution is not a renderer" time="0.040"/>
+    <testcase classname="src/plugins/registry.test.ts" name="attachment selection: declaration order, MIME narrowing, and no match" time="0.044"/>
+    <testcase classname="src/plugins/registry.test.ts" name="attachment selection: an iframe claim is unavailable in the terminal, explicitly" time="0.000"/>
+    <testcase classname="src/plugins/registry.test.ts" name="attachment claims: bad MIME grammar, MIME without the claim, and repeats fail closed" time="0.000"/>
+    <testcase classname="src/plugins/registry.test.ts" name="attachment selection: unregistering the plugin withdraws the preview" time="0.030"/>
+    <testcase classname="src/plugins/registry.test.ts" name="messagePart: a no-part contribution is a wildcard for host kinds, never for attachments" time="0.033"/>
+    <testcase classname="src/plugins/registry.test.ts" name="attachment selection: inventory order survives a re-registration (跨插件 MIME 顺序)" time="0.089"/>
+    <testcase classname="src/plugins/registry.test.ts" name="inventory sync: a changed plugin keeps its inventory priority across plugins" time="0.090"/>
+    <testcase classname="src/plugins/registry.test.ts" name="iframe contract: only a same-origin /plugins/&lt;id&gt;/ page is accepted" time="0.001"/>
+  </testsuite>
+  <testsuite name="src/plugins/slots.tui.test.tsx" tests="3" failures="0" errors="0" skipped="0" time="3.426">
+    <testcase classname="src/plugins/slots.tui.test.tsx" name="TUI: 系统栏的插件槽渲染 chunk 贡献，侧栏与设置同时保留" time="0.957"/>
+    <testcase classname="src/plugins/slots.tui.test.tsx" name="TUI: 设置页渲染 action 与 settings-section 贡献" time="1.350"/>
+    <testcase classname="src/plugins/slots.tui.test.tsx" name="TUI: 附件预览按插件贡献降级——chunk 渲染，iframe 说明需要图形界面，默认行保留" time="1.119"/>
+  </testsuite>
+  <testsuite name="src/screens/attachment-row.tui.test.tsx" tests="15" failures="0" errors="0" skipped="0" time="7.082">
+    <testcase classname="src/screens/attachment-row.tui.test.tsx" name="TUI: 成功态——chunk 预览渲染，事实行与下载入口仍在" time="0.408"/>
+    <testcase classname="src/screens/attachment-row.tui.test.tsx" name="TUI: 缩略图 pending——显示生成中，不把原图当缩略图" time="0.437"/>
+    <testcase classname="src/screens/attachment-row.tui.test.tsx" name="TUI: 缩略图 failed——显示不可用占位" time="0.386"/>
+    <testcase classname="src/screens/attachment-row.tui.test.tsx" name="TUI: 缩略图 none——显示没有缩略图，不回退到原图" time="0.367"/>
+    <testcase classname="src/screens/attachment-row.tui.test.tsx" name="TUI: 投影加载态——保留事实行并说明正在读取" time="0.411"/>
+    <testcase classname="src/screens/attachment-row.tui.test.tsx" name="TUI: 投影错误态——显示可解释原因与重试" time="0.420"/>
+    <testcase classname="src/screens/attachment-row.tui.test.tsx" name="TUI: part 403——显示无权限态，不泄露字节" time="0.448"/>
+    <testcase classname="src/screens/attachment-row.tui.test.tsx" name="TUI: file.read 403——显示无权限并禁用下载" time="0.385"/>
+    <testcase classname="src/screens/attachment-row.tui.test.tsx" name="TUI: 预览渲染抛错——中文失败面，事实行不受影响" time="0.414"/>
+    <testcase classname="src/screens/attachment-row.tui.test.tsx" name="TUI: 预览装载失败——显示失败原因与重试，事实行保留" time="0.600"/>
+    <testcase classname="src/screens/attachment-row.tui.test.tsx" name="TUI: 预览加载超时——4 秒后回退并说明原因" time="0.679"/>
+    <testcase classname="src/screens/attachment-row.tui.test.tsx" name="TUI: iframe 预览——终端显示需要图形界面与打开入口" time="0.460"/>
+    <testcase classname="src/screens/attachment-row.tui.test.tsx" name="TUI: 无匹配贡献——只有事实行，不留空白预览" time="0.510"/>
+    <testcase classname="src/screens/attachment-row.tui.test.tsx" name="TUI: 重复附件只渲染一行（fileId 去重）" time="0.581"/>
+    <testcase classname="src/screens/attachment-row.tui.test.tsx" name="TUI: 空附件不渲染空白占位" time="0.576"/>
+  </testsuite>
+  <testsuite name="src/screens/board/board.tui.test.tsx" tests="12" failures="0" errors="0" skipped="0" time="33.150">
+    <testcase classname="src/screens/board/board.tui.test.tsx" name="TUI: 任务队列——状态 tabs、最早优先、行内状态/依赖/租约，筛选与分页保留" time="2.588"/>
+    <testcase classname="src/screens/board/board.tui.test.tsx" name="TUI: 任务页——根任务卡、租约、动作按 moves、claim 丢失恢复、回复与完成" time="4.080"/>
+    <testcase classname="src/screens/board/board.tui.test.tsx" name="TUI: 可认领任务——认领后出现续租/完成，释放回到 ready" time="2.451"/>
+    <testcase classname="src/screens/board/board.tui.test.tsx" name="TUI: 回复空态、筛选无结果、完成筛选与返回队列" time="2.349"/>
+    <testcase classname="src/screens/board/board.tui.test.tsx" name="TUI: 同步——入口、lag/凭据/死信、重试与收件箱" time="3.005"/>
+    <testcase classname="src/screens/board/board.tui.test.tsx" name="TUI: 自动化——watcher 开关、schedule 权限被回收只能取消" time="3.455"/>
+    <testcase classname="src/screens/board/board.tui.test.tsx" name="TUI: 五态——loading/empty/error/disabled/404/迁移/只读权限" time="6.830"/>
+    <testcase classname="src/screens/board/board.tui.test.tsx" name="TUI: 旧 /superagent 下线页，不是重定向" time="0.491"/>
+    <testcase classname="src/screens/board/board.tui.test.tsx" name="TUI: 假时钟——认领租约到点，卡片按 ready 呈现并说明 lease ran out" time="1.981"/>
+    <testcase classname="src/screens/board/board.tui.test.tsx" name="TUI: 390 任务页——Composer 固定在内容底部，首屏可用并在 tab 之上" time="2.656"/>
+    <testcase classname="src/screens/board/board.tui.test.tsx" name="TUI: 390 筛选参数——活动条件以 chips 展示，可逐个移除" time="0.844"/>
+    <testcase classname="src/screens/board/board.tui.test.tsx" name="TUI: 390 手机——单列队列、44px 控件、无横向溢出" time="2.420"/>
+  </testsuite>
+  <testsuite name="src/screens/books/books.tui.test.tsx" tests="19" failures="0" errors="0" skipped="0" time="77.261">
+    <testcase classname="src/screens/books/books.tui.test.tsx" name="TUI: 系统栏是全局壳，章节只留四个日常章；身份/记录在设置页入口" time="4.566"/>
+    <testcase classname="src/screens/books/books.tui.test.tsx" name="TUI: 系统栏——声音开关/声音设置、通知面板、主题与命令面板" time="3.492"/>
+    <testcase classname="src/screens/books/books.tui.test.tsx" name="TUI: 账簿壳——1440 身份默认选中当前账号，详情有角色与账本摘要" time="3.448"/>
+    <testcase classname="src/screens/books/books.tui.test.tsx" name="TUI: 超管——统一叫超级管理员，概览显示全部能力" time="3.139"/>
+    <testcase classname="src/screens/books/books.tui.test.tsx" name="TUI: 权限组矩阵——行高密度、单一上限说明、范围 Sheet 锁定与账本登记" time="8.141"/>
+    <testcase classname="src/screens/books/books.tui.test.tsx" name="TUI: 记录——默认打开首条，详情写缺什么/归属/可授予与对象链路" time="5.580"/>
+    <testcase classname="src/screens/books/books.tui.test.tsx" name="TUI: 记录筛选行——范围、类型、结果与搜索同排可用（390 走筛选纸）" time="9.361"/>
+    <testcase classname="src/screens/books/books.tui.test.tsx" name="TUI: 新建账号表单——Field 标签与提示成对出现，用户名为空时提交禁用" time="3.849"/>
+    <testcase classname="src/screens/books/books.tui.test.tsx" name="TUI: 五态·加载——账号读未返回时是骨架，不是空态" time="0.394"/>
+    <testcase classname="src/screens/books/books.tui.test.tsx" name="TUI: 五态·空——账号索引给下一步，不是「暂无数据」" time="0.477"/>
+    <testcase classname="src/screens/books/books.tui.test.tsx" name="TUI: 五态·错——保留原因、请求编号与重试" time="0.630"/>
+    <testcase classname="src/screens/books/books.tui.test.tsx" name="TUI: 五态·权限不足——章节门给出缺什么 / 找谁 / 下一步" time="0.482"/>
+    <testcase classname="src/screens/books/books.tui.test.tsx" name="TUI: 权限矩阵五态——加载 / 空 / 错 / 只读" time="1.939"/>
+    <testcase classname="src/screens/books/books.tui.test.tsx" name="TUI: 记录五态——空 / 错 / 权限不足" time="1.514"/>
+    <testcase classname="src/screens/books/books.tui.test.tsx" name="TUI: 记录——路由未接入时是待接入面，不是示例账本" time="0.471"/>
+    <testcase classname="src/screens/books/books.tui.test.tsx" name="TUI: 四档——1440 有身份索引；1024/768 全宽；390 底部三 tab 与卡片" time="19.321"/>
+    <testcase classname="src/screens/books/books.tui.test.tsx" name="TUI: 390 账号——危险操作走溢出菜单，二次确认后才禁用" time="5.117"/>
+    <testcase classname="src/screens/books/books.tui.test.tsx" name="TUI: 账号最近活动——审计不可读时只说明一次，不逐行写「未记录」" time="0.492"/>
+    <testcase classname="src/screens/books/books.tui.test.tsx" name="TUI: 内置权限组——底部只说只读与另存为副本，没有登记人/保存" time="4.848"/>
+  </testsuite>
+  <testsuite name="src/screens/books/bots-teams.tui.test.tsx" tests="24" failures="0" errors="0" skipped="0" time="90.215">
+    <testcase classname="src/screens/books/bots-teams.tui.test.tsx" name="TUI: 新建 Bot 表单——名字/身份档案/模型类型/默认模型四个 Field，缺项不可提交" time="2.319"/>
+    <testcase classname="src/screens/books/bots-teams.tui.test.tsx" name="TUI: 新建团队表单——团队名/使命/队长三个 Field，缺项不可提交" time="2.494"/>
+    <testcase classname="src/screens/books/bots-teams.tui.test.tsx" name="TUI: 员工索引——真实 Bot、账号、模型、状态与筛选" time="3.802"/>
+    <testcase classname="src/screens/books/bots-teams.tui.test.tsx" name="TUI: Bot 页——五列能力表、Harness 编辑、账本高危确认" time="4.201"/>
+    <testcase classname="src/screens/books/bots-teams.tui.test.tsx" name="TUI: Bot 页——工作方式编辑走账本确认" time="4.523"/>
+    <testcase classname="src/screens/books/bots-teams.tui.test.tsx" name="TUI: Bot 页——高危能力保存必须先勾选" time="4.221"/>
+    <testcase classname="src/screens/books/bots-teams.tui.test.tsx" name="TUI: Bot 页——密钥列表、签发（明文只显示一次）与吊销" time="6.088"/>
+    <testcase classname="src/screens/books/bots-teams.tui.test.tsx" name="TUI: Bot 页——试跑走真实 invoke 回执并打开会话" time="2.534"/>
+    <testcase classname="src/screens/books/bots-teams.tui.test.tsx" name="TUI: 团队索引——队长、使命、状态与待处理" time="1.384"/>
+    <testcase classname="src/screens/books/bots-teams.tui.test.tsx" name="TUI: 团队页——使命、名单、启动前检查与启动" time="3.207"/>
+    <testcase classname="src/screens/books/bots-teams.tui.test.tsx" name="TUI: 团队页——添加成员走账本确认" time="4.592"/>
+    <testcase classname="src/screens/books/bots-teams.tui.test.tsx" name="TUI: 团队页——更换队长必须高危确认" time="5.484"/>
+    <testcase classname="src/screens/books/bots-teams.tui.test.tsx" name="TUI: Bot 页——改绑身份档案" time="4.658"/>
+    <testcase classname="src/screens/books/bots-teams.tui.test.tsx" name="TUI: Bot 页——归档后只读" time="3.228"/>
+    <testcase classname="src/screens/books/bots-teams.tui.test.tsx" name="TUI: 团队页——使命保存走账本确认" time="4.923"/>
+    <testcase classname="src/screens/books/bots-teams.tui.test.tsx" name="TUI: 运行页——泳道、失败横条、默认失败检查器与图切换" time="6.373"/>
+    <testcase classname="src/screens/books/bots-teams.tui.test.tsx" name="TUI: 团队页——启动后出现最近运行入口" time="3.313"/>
+    <testcase classname="src/screens/books/bots-teams.tui.test.tsx" name="TUI: 运行页——停止二次确认与停止后的状态" time="2.964"/>
+    <testcase classname="src/screens/books/bots-teams.tui.test.tsx" name="TUI: 四档——1440 页边+检查器、1024 页边、768 摘要带+检查器入口、390 时间线" time="5.728"/>
+    <testcase classname="src/screens/books/bots-teams.tui.test.tsx" name="TUI: 运行页四档——768 检查器入口、390 时间线与检查器 Sheet" time="5.624"/>
+    <testcase classname="src/screens/books/bots-teams.tui.test.tsx" name="TUI: 员工五态——加载 / 空 / 错 / 权限不足" time="3.164"/>
+    <testcase classname="src/screens/books/bots-teams.tui.test.tsx" name="TUI: 团队五态——加载 / 空 / 错 / 权限不足" time="2.314"/>
+    <testcase classname="src/screens/books/bots-teams.tui.test.tsx" name="TUI: 运行五态——错与权限不足（结构可见）" time="1.225"/>
+    <testcase classname="src/screens/books/bots-teams.tui.test.tsx" name="TUI: 员工 / 团队详情五态——错误带请求编号与重试" time="1.853"/>
+  </testsuite>
+  <testsuite name="src/screens/books/management.test.ts" tests="1" failures="0" errors="0" skipped="0" time="0.001">
+    <testcase classname="src/screens/books/management.test.ts" name="管理入口：四个门都由 canAny 能力键打开，没有身份枚举" time="0.001"/>
+  </testsuite>
+  <testsuite name="src/screens/books/plugin-top-panels.test.tsx" tests="1" failures="0" errors="0" skipped="0" time="0.866">
+    <testcase classname="src/screens/books/plugin-top-panels.test.tsx" name="TUI: 顶部插件槽——贡献渲染，空态不出现假面板" time="0.866"/>
+  </testsuite>
+  <testsuite name="src/screens/books/run-subagent.tui.test.tsx" tests="6" failures="0" errors="0" skipped="0" time="26.615">
+    <testcase classname="src/screens/books/run-subagent.tui.test.tsx" name="TUI: 子代理树五态——加载 / 空 / 错误 / 无权限 / 成功（含 depth 文案）" time="3.984"/>
+    <testcase classname="src/screens/books/run-subagent.tui.test.tsx" name="TUI: 子代理节点取消/重试——取消子树、重试同一会话（1440）" time="6.105"/>
+    <testcase classname="src/screens/books/run-subagent.tui.test.tsx" name="TUI: 子代理节点取消/重试——390 时间线检查器 Sheet" time="3.661"/>
+    <testcase classname="src/screens/books/run-subagent.tui.test.tsx" name="TUI: 子代理动作五态——空 / 加载 / 错误 / 无权限 / 成功" time="9.075"/>
+    <testcase classname="src/screens/books/run-subagent.tui.test.tsx" name="TUI: 子代理树运行级取消——二次确认、停止信号与状态" time="2.679"/>
+    <testcase classname="src/screens/books/run-subagent.tui.test.tsx" name="TUI: 节点账本读取失败后可重试" time="1.111"/>
+  </testsuite>
+  <testsuite name="src/screens/books/task-panel.tui.test.tsx" tests="9" failures="0" errors="0" skipped="0" time="22.038">
+    <testcase classname="src/screens/books/task-panel.tui.test.tsx" name="TUI: 运行页的任务面板入口——真实读数，图里有根卡、成员与分叉原点" time="2.612"/>
+    <testcase classname="src/screens/books/task-panel.tui.test.tsx" name="TUI: 任务面板三视图——图 / 事件流 / 资源预览（事件带 kind 与卡名）" time="4.706"/>
+    <testcase classname="src/screens/books/task-panel.tui.test.tsx" name="TUI: 资源预览——按会话清单打开，与引用一致" time="3.459"/>
+    <testcase classname="src/screens/books/task-panel.tui.test.tsx" name="TUI: 任务面板五态——加载 / 空 / 错（请求编号）/ 权限不足" time="1.665"/>
+    <testcase classname="src/screens/books/task-panel.tui.test.tsx" name="TUI: 资源预览——文件已变化时如实说明，不冒充旧引用" time="1.074"/>
+    <testcase classname="src/screens/books/task-panel.tui.test.tsx" name="TUI: 文件归属——按卡归属的清单文件可打开，且不与挂载资源重复" time="1.578"/>
+    <testcase classname="src/screens/books/task-panel.tui.test.tsx" name="TUI: 文件清单翻页——第一页可加载下一页，行不会互相覆盖" time="1.201"/>
+    <testcase classname="src/screens/books/task-panel.tui.test.tsx" name="TUI: 文件清单三态——失败如实报、空如实说、未接就不出现" time="2.364"/>
+    <testcase classname="src/screens/books/task-panel.tui.test.tsx" name="TUI: 390 任务面板——单列，入口与页面都在，无横向溢出" time="3.379"/>
+  </testsuite>
+  <testsuite name="src/screens/commands-blocked.test.tsx" tests="2" failures="0" errors="0" skipped="0" time="4.002">
+    <testcase classname="src/screens/commands-blocked.test.tsx" name="TUI: 目录加载中，输入 /compact 空格不发送普通消息" time="1.246"/>
+    <testcase classname="src/screens/commands-blocked.test.tsx" name="TUI: 目录失败，/compact 空格被拦截；/learn 仍作为模板发送" time="2.756"/>
+  </testsuite>
+  <testsuite name="src/screens/commands-local-error.test.tsx" tests="1" failures="0" errors="0" skipped="0" time="0.349">
+    <testcase classname="src/screens/commands-local-error.test.tsx" name="TUI: 本地命令错误覆盖 pending 行并标明无审计行" time="0.349"/>
+  </testsuite>
+  <testsuite name="src/screens/commands-states.test.tsx" tests="6" failures="0" errors="0" skipped="0" time="3.607">
+    <testcase classname="src/screens/commands-states.test.tsx" name="TUI: 命令菜单五态——加载" time="0.419"/>
+    <testcase classname="src/screens/commands-states.test.tsx" name="TUI: 命令菜单五态——空目录" time="0.442"/>
+    <testcase classname="src/screens/commands-states.test.tsx" name="TUI: 命令菜单五态——错误与重试" time="0.710"/>
+    <testcase classname="src/screens/commands-states.test.tsx" name="TUI: 命令菜单五态——无权限（缺 key 写明）" time="0.494"/>
+    <testcase classname="src/screens/commands-states.test.tsx" name="TUI: 命令菜单五态——成功（内置 + 插件同序）" time="0.526"/>
+    <testcase classname="src/screens/commands-states.test.tsx" name="TUI: 390 命令菜单与表单——卡片宽度不超出视口" time="1.016"/>
+  </testsuite>
+  <testsuite name="src/screens/commands.tui.test.tsx" tests="7" failures="0" errors="0" skipped="0" time="24.367">
+    <testcase classname="src/screens/commands.tui.test.tsx" name="TUI: 命令目录——同序、来源分组与不可用原因" time="4.127"/>
+    <testcase classname="src/screens/commands.tui.test.tsx" name="TUI: 内置 /compact——选中即执行，结果行与压缩分隔线都在" time="2.206"/>
+    <testcase classname="src/screens/commands.tui.test.tsx" name="TUI: 参数表单——字段级校验、执行与结构化结果" time="5.803"/>
+    <testcase classname="src/screens/commands.tui.test.tsx" name="TUI: 单 text 属性——剩余文本作为 args.text，不套表单" time="2.835"/>
+    <testcase classname="src/screens/commands.tui.test.tsx" name="TUI: destructive——审批卡拒绝后命令行显示已拒绝，不产生成功结果" time="2.638"/>
+    <testcase classname="src/screens/commands.tui.test.tsx" name="TUI: destructive——审批允许后只执行一次并给出结果行" time="2.498"/>
+    <testcase classname="src/screens/commands.tui.test.tsx" name="TUI: 命令面板——Mod+K 的“命令”分组与 Composer 同目录" time="4.260"/>
+  </testsuite>
+  <testsuite name="src/screens/composer-completion.test.ts" tests="6" failures="0" errors="0" skipped="0" time="0.000">
+    <testcase classname="src/screens/composer-completion.test.ts" name="completionTrigger: $ 只在词首唤醒，词中/含空白的不是补全" time="0.000"/>
+    <testcase classname="src/screens/composer-completion.test.ts" name="insertCompletion: 替换活动 token，保留前后文本，不发送" time="0.000"/>
+    <testcase classname="src/screens/composer-completion.test.ts" name="completionGroups: 固定顺序（技能/文件/任务），同一 query 过滤，空组不画" time="0.000"/>
+    <testcase classname="src/screens/composer-completion.test.ts" name="completionGroups: 每组有上限，行里没有伪造的 id" time="0.000"/>
+    <testcase classname="src/screens/composer-completion.test.ts" name="parseLearnCommand: 只认 /learn 命令本身，/learning 不是" time="0.000"/>
+    <testcase classname="src/screens/composer-completion.test.ts" name="buildLearnInstruction: 走 skills.manage create，脚本走 bash，禁止未证实的成功" time="0.000"/>
+  </testsuite>
+  <testsuite name="src/screens/composer-completion.test.tsx" tests="4" failures="0" errors="0" skipped="0" time="6.644">
+    <testcase classname="src/screens/composer-completion.test.tsx" name="TUI: $ 补全——技能/文件/任务三组共用唤醒符，空查询列出全部" time="1.015"/>
+    <testcase classname="src/screens/composer-completion.test.tsx" name="TUI: $ 补全——选择技能写入输入框，不发送" time="1.671"/>
+    <testcase classname="src/screens/composer-completion.test.tsx" name="TUI: $ 补全——文件与任务走同一唤醒符，分别插入路径与任务名" time="2.911"/>
+    <testcase classname="src/screens/composer-completion.test.tsx" name="TUI: $ 补全——没有匹配时给出可读空态，不留空白菜单" time="1.047"/>
+  </testsuite>
+  <testsuite name="src/screens/login.harness.test.ts" tests="10" failures="0" errors="0" skipped="0" time="21.090">
+    <testcase classname="src/screens/login.harness.test.ts" name="登录页：账号密码登录成功即进入应用，旧口令文案不再出现" time="1.941"/>
+    <testcase classname="src/screens/login.harness.test.ts" name="登录页：错误凭据只说一次人话，不区分账号不存在与密码错误" time="1.708"/>
+    <testcase classname="src/screens/login.harness.test.ts" name="登录页：429 显示等待秒数" time="1.920"/>
+    <testcase classname="src/screens/login.harness.test.ts" name="引导：setup token + 用户名 + 密码 → 直接进入应用，不再强制改密" time="2.655"/>
+    <testcase classname="src/screens/login.harness.test.ts" name="强制改密门：当前密码错了仍停在门内，改对才进入" time="3.682"/>
+    <testcase classname="src/screens/login.harness.test.ts" name="CSRF：匿名会话没有令牌时登录写请求被拒，页面给出可行动原因" time="1.800"/>
+    <testcase classname="src/screens/login.harness.test.ts" name="权限不足：403 显示权限面，而不是通用失败" time="1.730"/>
+    <testcase classname="src/screens/login.harness.test.ts" name="登出：清掉本地状态并回到登录页，留下成功提示" time="2.598"/>
+    <testcase classname="src/screens/login.harness.test.ts" name="会话过期：401 回到登录页并说明原因，不留下白屏" time="2.610"/>
+    <testcase classname="src/screens/login.harness.test.ts" name="加载态：会话文档未返回时是加载面，不是空表单" time="0.445"/>
+  </testsuite>
+  <testsuite name="src/screens/oar-run.test.tsx" tests="8" failures="0" errors="0" skipped="0" time="11.260">
+    <testcase classname="src/screens/oar-run.test.tsx" name="投影缓存：同一批记录只读一次，更新的记录再读一次" time="0.053"/>
+    <testcase classname="src/screens/oar-run.test.tsx" name="外部运行卡：runtime、simulated 徽标与逐行记录（终端只剩文本行）" time="0.544"/>
+    <testcase classname="src/screens/oar-run.test.tsx" name="外部运行卡：行可展开，展开后是投影的原始字段" time="0.403"/>
+    <testcase classname="src/screens/oar-run.test.tsx" name="外部运行卡：live 形态不带 simulated 徽标，也不伪造归属" time="0.463"/>
+    <testcase classname="src/screens/oar-run.test.tsx" name="外部运行卡：runtime=fake 而 simulated 标记缺失，仍然显示模拟徽标" time="0.371"/>
+    <testcase classname="src/screens/oar-run.test.tsx" name="空投影：卡片说 journal 是空的，不冒充有记录" time="0.471"/>
+    <testcase classname="src/screens/oar-run.test.tsx" name="投影不可用：501 / 无 transport / 无贡献 / 读取中，都只留文本行" time="1.669"/>
+    <testcase classname="src/screens/oar-run.test.tsx" name="App：一个会话一张卡，关联任务打开已有卡（不新建卡）" time="7.288"/>
+  </testsuite>
+  <testsuite name="src/screens/settings-capabilities.test.tsx" tests="6" failures="0" errors="0" skipped="0" time="2.947">
+    <testcase classname="src/screens/settings-capabilities.test.tsx" name="TUI: 能力分区——可用/未配置/不支持三态并存，原因与地址经净化" time="0.448"/>
+    <testcase classname="src/screens/settings-capabilities.test.tsx" name="TUI: 能力分区——401 显示登录态，不回显鉴权错误原文" time="0.397"/>
+    <testcase classname="src/screens/settings-capabilities.test.tsx" name="TUI: 能力分区——服务端无探测端点时降级为「不支持」，不回显 404 原文" time="0.469"/>
+    <testcase classname="src/screens/settings-capabilities.test.tsx" name="TUI: 能力分区——网络不可达时给出可重试的中性提示，不回显传输错误" time="0.489"/>
+    <testcase classname="src/screens/settings-capabilities.test.tsx" name="TUI: 能力分区——媒体网关 503 是「未配置」而非错误，实时语音已配置即可用" time="0.710"/>
+    <testcase classname="src/screens/settings-capabilities.test.tsx" name="TUI: 能力分区——网关扁平形状（llm/image/decision 为真）不再被误报为全不支持" time="0.435"/>
+  </testsuite>
+  <testsuite name="src/screens/settings-models.test.tsx" tests="18" failures="0" errors="0" skipped="0" time="91.446">
+    <testcase classname="src/screens/settings-models.test.tsx" name="TUI: 模型分区——当前默认区显示 provider 与模型，只有更换/刷新两个动作" time="0.530"/>
+    <testcase classname="src/screens/settings-models.test.tsx" name="TUI: 模型分区——一个 provider 一张卡片，带已配置/不可用徽标与模型 chips" time="5.044"/>
+    <testcase classname="src/screens/settings-models.test.tsx" name="TUI: 模型分区——点「配置」打开 Dialog，字段按该 provider 回填" time="1.125"/>
+    <testcase classname="src/screens/settings-models.test.tsx" name="TUI: 模型分区——保存后回到列表，卡片状态与徽标随之更新" time="3.720"/>
+    <testcase classname="src/screens/settings-models.test.tsx" name="TUI: 模型分区——保存失败时给出可读原因，Dialog 不关闭且输入不丢" time="2.752"/>
+    <testcase classname="src/screens/settings-models.test.tsx" name="TUI: 模型分区——添加 Provider 的三步路径（点添加→填地址与凭据→保存即出现卡片）" time="10.521"/>
+    <testcase classname="src/screens/settings-models.test.tsx" name="TUI: 凭据——直接粘贴密钥保存后输入框清空，显示掩码预览与「已保存」" time="6.513"/>
+    <testcase classname="src/screens/settings-models.test.tsx" name="TUI: 拉取——探测成功后并入新模型，已配置的不删，失败给出可读状态" time="1.518"/>
+    <testcase classname="src/screens/settings-models.test.tsx" name="TUI: 拉取——凭据不可用时给出可读失败，一个模型也不并入" time="1.776"/>
+    <testcase classname="src/screens/settings-models.test.tsx" name="TUI: 模型参数——编辑上下文/输出/模态/能力与价格，保存后卡片摘要随之更新" time="15.286"/>
+    <testcase classname="src/screens/settings-models.test.tsx" name="TUI: 模型参数——非法价格被拒，Dialog 不关闭且说明原因" time="7.072"/>
+    <testcase classname="src/screens/settings-models.test.tsx" name="TUI: 模型参数——清空上下文与输出上限写成 null，卡片显示未声明" time="8.055"/>
+    <testcase classname="src/screens/settings-models.test.tsx" name="TUI: 模型参数——原样保存是 no-op，不新增规则也不写 false 模态" time="7.772"/>
+    <testcase classname="src/screens/settings-models.test.tsx" name="TUI: 模型参数——凭据不可解析的模型按解析视图回填，原样保存不写空能力" time="8.299"/>
+    <testcase classname="src/screens/settings-models.test.tsx" name="TUI: 模型参数——只改一个字段时其它已解析事实原样保留" time="9.016"/>
+    <testcase classname="src/screens/settings-models.test.tsx" name="TUI: 模型分区——390 窄屏：卡片事实摘要与「参数」入口仍可读" time="0.640"/>
+    <testcase classname="src/screens/settings-models.test.tsx" name="TUI: 模型参数——390 窄屏：对话框字段与保存动作可见" time="1.062"/>
+    <testcase classname="src/screens/settings-models.test.tsx" name="TUI: 模型分区——1440 宽屏：默认模型摘要与 provider 卡片同时可读" time="0.747"/>
+  </testsuite>
+  <testsuite name="src/screens/settings-secrets.test.tsx" tests="3" failures="0" errors="0" skipped="0" time="3.123">
+    <testcase classname="src/screens/settings-secrets.test.tsx" name="TUI: 密钥——每行显示掩码预览；老行（没有预览）显示「已保存」" time="0.557"/>
+    <testcase classname="src/screens/settings-secrets.test.tsx" name="TUI: 密钥——写入后输入框清空，列表只多一个掩码行" time="2.045"/>
+    <testcase classname="src/screens/settings-secrets.test.tsx" name="TUI: 密钥——390 宽度下名字、预览与时间仍在同一行内可读" time="0.522"/>
+  </testsuite>
+  <testsuite name="src/screens/settings-skills.test.tsx" tests="11" failures="0" errors="0" skipped="0" time="16.375">
+    <testcase classname="src/screens/settings-skills.test.tsx" name="TUI: 技能——卡片给出信任/当前版本/固定/更新与冲突，订阅源可读" time="0.536"/>
+    <testcase classname="src/screens/settings-skills.test.tsx" name="TUI: 技能——查看打开 SKILL.md 正文与资源清单" time="0.785"/>
+    <testcase classname="src/screens/settings-skills.test.tsx" name="TUI: 技能——空态给出下一步与新建表单" time="0.489"/>
+    <testcase classname="src/screens/settings-skills.test.tsx" name="TUI: 技能——加载态与失败态（500 / 403）都有人话与重试" time="1.372"/>
+    <testcase classname="src/screens/settings-skills.test.tsx" name="TUI: 技能——新建走 skills.manage create 形状，保存后卡片出现且表单清空" time="2.438"/>
+    <testcase classname="src/screens/settings-skills.test.tsx" name="TUI: 技能——固定/解除固定是真实状态迁移" time="1.420"/>
+    <testcase classname="src/screens/settings-skills.test.tsx" name="TUI: 技能——更新被固定拦住时显示 server 的 pinned code，不装成功" time="0.836"/>
+    <testcase classname="src/screens/settings-skills.test.tsx" name="TUI: 技能——订阅源仍在用时取消订阅被拒，错误可见" time="1.831"/>
+    <testcase classname="src/screens/settings-skills.test.tsx" name="TUI: 技能——订阅一个本地目录后源列表出现它" time="3.406"/>
+    <testcase classname="src/screens/settings-skills.test.tsx" name="TUI: 技能——移除要二次确认，第二张卡同样可操作" time="0.968"/>
+    <testcase classname="src/screens/settings-skills.test.tsx" name="TUI: 技能——从订阅源安装（与 CLI --source 同一条路径）" time="2.294"/>
+  </testsuite>
+  <testsuite name="src/screens/share.tui.test.tsx" tests="3" failures="0" errors="0" skipped="0" time="13.330">
+    <testcase classname="src/screens/share.tui.test.tsx" name="TUI: 会话共享——共享给我筛选、所有者门、添加与撤销" time="6.255"/>
+    <testcase classname="src/screens/share.tui.test.tsx" name="TUI: Bot 共享——已有共享、添加权限组、撤销与已共享徽标" time="4.679"/>
+    <testcase classname="src/screens/share.tui.test.tsx" name="TUI: 团队共享——只影响可见性的文案与已有权限组共享" time="2.396"/>
+  </testsuite>
+  <testsuite name="src/screens/tool-families.test.ts" tests="8" failures="0" errors="0" skipped="0" time="0.001">
+    <testcase classname="src/screens/tool-families.test.ts" name="familyOf: 每个家族认自己的词（大小写/分隔符无关）" time="0.001"/>
+    <testcase classname="src/screens/tool-families.test.ts" name="familyOf: 一族名字里出现多族词时，按 terminal → changes → explore 取先命中" time="0.000"/>
+    <testcase classname="src/screens/tool-families.test.ts" name="familyOf: 词典与标签/图标对每个家族都有定义" time="0.000"/>
+    <testcase classname="src/screens/tool-families.test.ts" name="toolTone: 错误优先，其次是结果，都没有=进行中" time="0.000"/>
+    <testcase classname="src/screens/tool-families.test.ts" name="rollupCalls: 计数与名词——只有终端一族的组说「命令」" time="0.000"/>
+    <testcase classname="src/screens/tool-families.test.ts" name="summarizeCalls: 失败 &gt; 未完成 &gt; 全部完成 &gt; 只有计数" time="0.000"/>
+    <testcase classname="src/screens/tool-families.test.ts" name="familyDetail: 失败 &gt; 进行中 &gt; 全部完成" time="0.000"/>
+    <testcase classname="src/screens/tool-families.test.ts" name="groupToolCalls: 首现顺序成族，只有 ≥2 个成员的族成组，其余单行" time="0.000"/>
+  </testsuite>
+  <testsuite name="src/surfaces/image/image.test.tsx" tests="8" failures="0" errors="0" skipped="0" time="16.931">
+    <testcase classname="src/surfaces/image/image.test.tsx" name="TUI: 图像 surface——网关不可达时是配置态，不生成任何占位图" time="0.978"/>
+    <testcase classname="src/surfaces/image/image.test.tsx" name="TUI: 图像 surface——网关在但没有图像能力时，配置态说明原因" time="0.478"/>
+    <testcase classname="src/surfaces/image/image.test.tsx" name="TUI: 图像 surface——真实生成进画廊，请求体来自 composer" time="2.527"/>
+    <testcase classname="src/surfaces/image/image.test.tsx" name="TUI: 图像 surface——多轮编辑用选中资产的 Provider URL 作参考" time="3.299"/>
+    <testcase classname="src/surfaces/image/image.test.tsx" name="TUI: 图像 surface——参数摘要只列已声明字段" time="2.896"/>
+    <testcase classname="src/surfaces/image/image.test.tsx" name="TUI: 图像 surface——真实生成 503：显示 Provider 消息、保留输入并可重试" time="3.160"/>
+    <testcase classname="src/surfaces/image/image.test.tsx" name="TUI: 图像 surface——真实生成取消会中止请求并保留 prompt" time="2.112"/>
+    <testcase classname="src/surfaces/image/image.test.tsx" name="TUI: 图像 surface——请求必须带上会话选中的模型（否则网关走默认/计费 provider）" time="1.482"/>
+  </testsuite>
+  <testsuite name="src/surfaces/mcp-app/bridge.test.ts" tests="32" failures="0" errors="0" skipped="0" time="0.016">
+    <testcase classname="src/surfaces/mcp-app/bridge.test.ts" name="握手：initialize 应答后 initialized 才发 tool-input，且恰好一次" time="0.000"/>
+    <testcase classname="src/surfaces/mcp-app/bridge.test.ts" name="tool-input：聚合 mcp 信封发出内层实参；直传对象原样" time="0.000"/>
+    <testcase classname="src/surfaces/mcp-app/bridge.test.ts" name="数据流：结果在手 → initialized 后 input 再 result；之后的结果不再重发" time="0.000"/>
+    <testcase classname="src/surfaces/mcp-app/bridge.test.ts" name="数据流：结果晚到 → 补发一次 tool-result" time="0.000"/>
+    <testcase classname="src/surfaces/mcp-app/bridge.test.ts" name="超时：5 秒内没有 initialized → 销毁并给出一条 timeout 诊断" time="0.000"/>
+    <testcase classname="src/surfaces/mcp-app/bridge.test.ts" name="首载：initialize 早于 load 时 start() 幂等，不重置 5 秒期限" time="0.000"/>
+    <testcase classname="src/surfaces/mcp-app/bridge.test.ts" name="协议违规：未知方法回 -32601 且实例销毁" time="0.000"/>
+    <testcase classname="src/surfaces/mcp-app/bridge.test.ts" name="P3 面未接线：tools/call 明确回 -32601，但不销毁实例" time="0.000"/>
+    <testcase classname="src/surfaces/mcp-app/bridge.test.ts" name="协议违规：单帧超过 64 KiB 直接销毁且不回帧" time="0.006"/>
+    <testcase classname="src/surfaces/mcp-app/bridge.test.ts" name="来源：非沙箱 origin 的消息被拒绝并销毁" time="0.000"/>
+    <testcase classname="src/surfaces/mcp-app/bridge.test.ts" name="未初始化就发 initialized → 协议错误" time="0.000"/>
+    <testcase classname="src/surfaces/mcp-app/bridge.test.ts" name="尺寸：size-changed 驱动弹性高度，封顶 480 且不低于下限" time="0.000"/>
+    <testcase classname="src/surfaces/mcp-app/bridge.test.ts" name="显示模式：只切到 View 声明的模式，pip 回当前模式" time="0.000"/>
+    <testcase classname="src/surfaces/mcp-app/bridge.test.ts" name="显示模式：声明 fullscreen 时切换并返回实际模式" time="0.000"/>
+    <testcase classname="src/surfaces/mcp-app/bridge.test.ts" name="teardown：卸载前发 resource-teardown，回包或 1 秒后完成" time="0.000"/>
+    <testcase classname="src/surfaces/mcp-app/bridge.test.ts" name="teardown：View 不回包时 1 秒后完成" time="0.000"/>
+    <testcase classname="src/surfaces/mcp-app/bridge.test.ts" name="取消：无结果时发 tool-cancelled，且不再发 tool-result" time="0.000"/>
+    <testcase classname="src/surfaces/mcp-app/bridge.test.ts" name="帧解析：非对象/错版本/坏 id 都拒绝" time="0.000"/>
+    <testcase classname="src/surfaces/mcp-app/bridge.test.ts" name="字节长度：中文按 UTF-8 计" time="0.000"/>
+    <testcase classname="src/surfaces/mcp-app/bridge.test.ts" name="限速：单实例每秒最多 200 帧，超出即销毁" time="0.003"/>
+    <testcase classname="src/surfaces/mcp-app/bridge.test.ts" name="tools/call：声明 serverTools 时回调被调用，结果原样回填" time="0.000"/>
+    <testcase classname="src/surfaces/mcp-app/bridge.test.ts" name="tools/call：回调 reject 时透传 host 的 code；无 code 用 -32603" time="0.000"/>
+    <testcase classname="src/surfaces/mcp-app/bridge.test.ts" name="resources/read：成功回 {contents}；失败同 code" time="0.000"/>
+    <testcase classname="src/surfaces/mcp-app/bridge.test.ts" name="ui/message：固定 user/queue，回 {}；同一帧 id 的重放复用 requestId" time="0.002"/>
+    <testcase classname="src/surfaces/mcp-app/bridge.test.ts" name="ui/message：非 user 角色回 -32602，不调用回调" time="0.000"/>
+    <testcase classname="src/surfaces/mcp-app/bridge.test.ts" name="ui/open-link：确认后的 URL 交给回调，回 {}；拒绝由回调给 isError" time="0.000"/>
+    <testcase classname="src/surfaces/mcp-app/bridge.test.ts" name="ui/update-model-context：content/structuredContent 交给回调，回 {}" time="0.000"/>
+    <testcase classname="src/surfaces/mcp-app/bridge.test.ts" name="错误路径：message/open-link/context 的拒绝同样回 JSON-RPC error" time="0.000"/>
+    <testcase classname="src/surfaces/mcp-app/bridge.test.ts" name="未声明能力：五个 host 方法都回 -32601，回调不执行，实例不销毁" time="0.000"/>
+    <testcase classname="src/surfaces/mcp-app/bridge.test.ts" name="能力快照在 initialize 冻结：之后能力变真也不会接受未声明的请求" time="0.000"/>
+    <testcase classname="src/surfaces/mcp-app/bridge.test.ts" name="异步不阻塞：一个 pending host 请求期间仍处理 ping 与 size-changed" time="0.000"/>
+    <testcase classname="src/surfaces/mcp-app/bridge.test.ts" name="能力快照：initialize 的 hostCapabilities 全开声明五项，全关只留 logging/sandbox" time="0.000"/>
+  </testsuite>
+  <testsuite name="src/surfaces/mcp-app/frame-load.test.ts" tests="5" failures="0" errors="0" skipped="0" time="0.000">
+    <testcase classname="src/surfaces/mcp-app/frame-load.test.ts" name="首载判定：loads=0 + idle → start" time="0.000"/>
+    <testcase classname="src/surfaces/mcp-app/frame-load.test.ts" name="首载判定：loads=0 + handshaking/initialized（pre-load initialize）→ start" time="0.000"/>
+    <testcase classname="src/surfaces/mcp-app/frame-load.test.ts" name="首载判定：loads=1 + handshaking/initialized → reload" time="0.000"/>
+    <testcase classname="src/surfaces/mcp-app/frame-load.test.ts" name="load 判定：loads=1 + idle → start（同一元素第二次 load 且尚无 initialize）" time="0.000"/>
+    <testcase classname="src/surfaces/mcp-app/frame-load.test.ts" name="首载判定：destroyed → 不启动也不重载" time="0.000"/>
+  </testsuite>
+  <testsuite name="src/surfaces/mcp-app/layout.test.ts" tests="2" failures="0" errors="0" skipped="0" time="0.000">
+    <testcase classname="src/surfaces/mcp-app/layout.test.ts" name="全屏弹层：Dialog 占满模态层（100%，不再 92% x 88% 露背景）" time="0.000"/>
+    <testcase classname="src/surfaces/mcp-app/layout.test.ts" name="全屏 frame：wrapper 与 WebView 伸展；内联沿用 app 上报高度" time="0.000"/>
+  </testsuite>
+  <testsuite name="src/surfaces/mcp-app/reload-budget.test.ts" tests="4" failures="0" errors="0" skipped="0" time="0.000">
+    <testcase classname="src/surfaces/mcp-app/reload-budget.test.ts" name="reload 预算：默认 10 次自动重载，第 11 次拒绝" time="0.000"/>
+    <testcase classname="src/surfaces/mcp-app/reload-budget.test.ts" name="reload 预算：小上限可按实例设定；非法值回落默认" time="0.000"/>
+    <testcase classname="src/surfaces/mcp-app/reload-budget.test.ts" name="reload 预算：导航循环最多重载 10 次后停止（scheduleReload 计数模型）" time="0.000"/>
+    <testcase classname="src/surfaces/mcp-app/reload-budget.test.ts" name="预算耗尽的审计项：action/result 在闭集内，detail 不含 URL query" time="0.000"/>
+  </testsuite>
+  <testsuite name="src/surfaces/realtime/components/components.test.tsx" tests="2" failures="0" errors="0" skipped="0" time="1.524">
+    <testcase classname="src/surfaces/realtime/components/components.test.tsx" name="实时语音组件：状态条、音频指示、波形与转写行" time="0.323"/>
+    <testcase classname="src/surfaces/realtime/components/components.test.tsx" name="实时语音组件：通话控件——静音标签翻转，结束后回到开始" time="1.200"/>
+  </testsuite>
+  <testsuite name="src/surfaces/registry.test.ts" tests="11" failures="0" errors="0" skipped="0" time="0.000">
+    <testcase classname="src/surfaces/registry.test.ts" name="resolveSurface: 六类 provider + 旧数据默认 llm" time="0.000"/>
+    <testcase classname="src/surfaces/registry.test.ts" name="resolveSurface: 插件 descriptor 优先于 providerType" time="0.000"/>
+    <testcase classname="src/surfaces/registry.test.ts" name="resolveSurface: provider 上的类型在 model 未携带时生效" time="0.000"/>
+    <testcase classname="src/surfaces/registry.test.ts" name="resolveSurface: 未知 providerType 回退 generic 并给出原因，不伪装 llm" time="0.000"/>
+    <testcase classname="src/surfaces/registry.test.ts" name="resolveSurface: 旧数据按 outputFormat 推断 medium" time="0.000"/>
+    <testcase classname="src/surfaces/registry.test.ts" name="resolveSurface: tts/stt 共用 speech 但工作台不同" time="0.000"/>
+    <testcase classname="src/surfaces/registry.test.ts" name="resolveSelectionSurface: selection 自带的 surfaceKind 能被解析" time="0.000"/>
+    <testcase classname="src/surfaces/registry.test.ts" name="checkSurfaceSwitch: 同 surface 自由，跨 surface 必须新建会话" time="0.000"/>
+    <testcase classname="src/surfaces/registry.test.ts" name="surfaceFact: 每种 surface 都有一句可读事实" time="0.000"/>
+    <testcase classname="src/surfaces/registry.test.ts" name="video: 有明确原因（不是空面板承诺），placeholder 直接引用" time="0.000"/>
+    <testcase classname="src/surfaces/registry.test.ts" name="resolveCaptainSurface: 队长模型决定主会话 surface，无队长回退 llm" time="0.000"/>
+  </testsuite>
+  <testsuite name="src/surfaces/speech/components/components.test.tsx" tests="2" failures="0" errors="0" skipped="0" time="1.629">
+    <testcase classname="src/surfaces/speech/components/components.test.tsx" name="语音转写组件：Waveform / TranscriptRow / RecordButton 渲染并带 testID" time="0.503"/>
+    <testcase classname="src/surfaces/speech/components/components.test.tsx" name="语音转写组件：RecordButton 随状态切换为停止并释放" time="1.126"/>
+  </testsuite>
+  <testsuite name="src/surfaces/unsupported/unsupported.test.tsx" tests="2" failures="0" errors="0" skipped="0" time="1.464">
+    <testcase classname="src/surfaces/unsupported/unsupported.test.tsx" name="TUI: 视频无专用面板——显示类型名与原因，不渲染输入框" time="0.405"/>
+    <testcase classname="src/surfaces/unsupported/unsupported.test.tsx" name="TUI: 唯一主动作是打开模型设置，次动作返回对话" time="1.059"/>
+  </testsuite>
+  <testsuite name="src/ui/kit/components/basic.test.tsx" tests="3" failures="0" errors="0" skipped="0" time="1.811">
+    <testcase classname="src/ui/kit/components/basic.test.tsx" name="TUI: C1 基础件渲染（Button/Badge/Separator/Kbd/Spinner/Avatar/Skeleton）" time="0.352"/>
+    <testcase classname="src/ui/kit/components/basic.test.tsx" name="TUI: C1 disabled 按钮不可按（ERR_NSH_TEST_DISABLED）" time="0.297"/>
+    <testcase classname="src/ui/kit/components/basic.test.tsx" name="TUI: C1 状态切换（Button onPress 驱动应用状态）" time="1.161"/>
+  </testsuite>
+  <testsuite name="src/ui/kit/components/container.test.tsx" tests="3" failures="0" errors="0" skipped="0" time="3.440">
+    <testcase classname="src/ui/kit/components/container.test.tsx" name="TUI: C3 Card 三件套与 Collapsible 开合" time="1.238"/>
+    <testcase classname="src/ui/kit/components/container.test.tsx" name="TUI: C3 Accordion 展开与 Tabs 切换面板" time="1.368"/>
+    <testcase classname="src/ui/kit/components/container.test.tsx" name="TUI: C3 Table 表头与表体渲染与 ScrollArea 滚动" time="0.834"/>
+  </testsuite>
+  <testsuite name="src/ui/kit/components/form.test.tsx" tests="4" failures="0" errors="0" skipped="0" time="8.605">
+    <testcase classname="src/ui/kit/components/form.test.tsx" name="TUI: C2 输入件——Field 三态与键入回读" time="2.019"/>
+    <testcase classname="src/ui/kit/components/form.test.tsx" name="TUI: C2 开关件——Switch / Checkbox / RadioGroup 状态切换" time="2.693"/>
+    <testcase classname="src/ui/kit/components/form.test.tsx" name="TUI: C2 Select 选择与 Command 过滤选择" time="2.535"/>
+    <testcase classname="src/ui/kit/components/form.test.tsx" name="TUI: C2 Combobox 输入过滤与多选回读" time="1.357"/>
+  </testsuite>
+  <testsuite name="src/ui/kit/components/overlay.test.tsx" tests="3" failures="0" errors="0" skipped="0" time="6.548">
+    <testcase classname="src/ui/kit/components/overlay.test.tsx" name="TUI: C4 Dialog / AlertDialog / Sheet 打开与关闭" time="3.475"/>
+    <testcase classname="src/ui/kit/components/overlay.test.tsx" name="TUI: C4 Popover / DropdownMenu / ContextMenu 交互" time="1.881"/>
+    <testcase classname="src/ui/kit/components/overlay.test.tsx" name="TUI: C4 Empty / Breadcrumb / Toast" time="1.193"/>
+  </testsuite>
+  <testsuite name="src/ui/kit/components/styles.test.ts" tests="3" failures="0" errors="0" skipped="0" time="0.000">
+    <testcase classname="src/ui/kit/components/styles.test.ts" name="kit 尺寸：field 是 34px，其余仍是 24/28/32 的密集阶梯" time="0.000"/>
+    <testcase classname="src/ui/kit/components/styles.test.ts" name="kit 尺寸：field 的半径与内边距跟 default 同一语言" time="0.000"/>
+    <testcase classname="src/ui/kit/components/styles.test.ts" name="withoutUndefined：条件值为空时不抹掉组件的默认高度" time="0.000"/>
+  </testsuite>
+  <testsuite name="src/ui/kit/layout/sidebar-collapse-affordance.test.tsx" tests="1" failures="0" errors="0" skipped="0" time="1.061">
+    <testcase classname="src/ui/kit/layout/sidebar-collapse-affordance.test.tsx" name="TUI: 侧栏收起后唯一入口是 shell 的收起条（id:sidebar-collapse-strip / label:展开侧栏），按下即展开" time="1.061"/>
+  </testsuite>
+  <testsuite name="src/ui/run-state.test.ts" tests="4" failures="0" errors="0" skipped="0" time="0.000">
+    <testcase classname="src/ui/run-state.test.ts" name="sessionState: queued 映射为排队中，不再落到 ready" time="0.000"/>
+    <testcase classname="src/ui/run-state.test.ts" name="queueDetail: 有队列事实时展示位置与 ETA" time="0.000"/>
+    <testcase classname="src/ui/run-state.test.ts" name="queueDetail: 未知 ETA 只说位置，不伪造 0" time="0.000"/>
+    <testcase classname="src/ui/run-state.test.ts" name="conversationState: 队列事实不改变对话投影（由调用方优先用 queue）" time="0.000"/>
+  </testsuite>
+  <testsuite name="src/ui/session-title.test.ts" tests="2" failures="0" errors="0" skipped="0" time="0.000">
+    <testcase classname="src/ui/session-title.test.ts" name="session-title: a derived title wins and keeps one line" time="0.000"/>
+    <testcase classname="src/ui/session-title.test.ts" name="session-title: an unnamed session falls back to 新会话 · time, never the id" time="0.000"/>
+  </testsuite>
+</testsuites>

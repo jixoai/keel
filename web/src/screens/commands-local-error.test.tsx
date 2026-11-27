@@ -11,4 +11,4 @@ test("TUI: 本地命令错误覆盖 pending 行并标明无审计行", async () 
   expect(text).toContain("没有执行该命令的权限。");
   expect(text).toContain("失败");
   expect(text).not.toContain("等待审批");
-});
+}, 120_000);

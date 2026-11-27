@@ -1,3 +1,5 @@
+> **RETIRED** — the super-agent board HTTP routes are deleted; this script is history and will 404. See ../README.md.
+
 # superagent-live-github
 
 Live GitHub E2E for change `keel-collab-superagent` (task 5.2). It drives a real

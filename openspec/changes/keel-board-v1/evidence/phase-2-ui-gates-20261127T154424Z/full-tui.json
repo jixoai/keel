@@ -1,0 +1,10 @@
+{
+  "command": "nsh test --target tui",
+  "exit": 0,
+  "tests": 536,
+  "passed": 536,
+  "failed": 0,
+  "duration": "10m 24s",
+  "exclusive": true,
+  "head": "2a0aeeb8"
+}

@@ -132,11 +132,12 @@
 > bot/tenant/can/频道 can）；所有含 task 的 2xx JSON 响应补 `TaskView.moves[]`、`archived`、
 > `mirror{source,readOnly,bridge}`、`origin`；归档 Ticket 导入为只读历史任务；`/sync/entries|
 > status` 合并凭据状态并把不可测的 lag 标为 `null`。SSE 与 board 事件保持原样。
-> 14.1–14.3 的客户端数据层实现仍由 UI lane 完成，本 lane 不勾选。
 
-- [ ] 14.1 实现 `web/src/data/board.ts`：归一化缓存、SSE 增量合并、游标重连、按 cursor 去重、乐观覆盖；fixture 测试。
+- [x] 14.1 实现 `web/src/data/board.ts`：归一化缓存、SSE 增量合并、游标重连、按 cursor 去重、乐观覆盖；fixture 测试。
 - [ ] 14.2 实现 sync 状态数据源：entries/targets/lag/failures/dead letters/credential 状态；fixture 测试权限过滤。
-- [ ] 14.3 实现 watcher/schedule 状态数据源与启停动作；fixture 测试失败/权限。
+  > 部分完成：entries/inbox/outbox/dead/failures 与契约合并的 `/sync/credentials` 已接；targets 后端未提供，lag 为 `null`，UI 显式显示未知。
+- [x] 14.3 实现 watcher/schedule 状态数据源与启停动作；fixture 测试失败/权限。
+
 
 ## 15. Phase 2：nsh UI
 
@@ -147,20 +148,25 @@
 > （bridge 的 `AuthorizeTaskWrite`）；team scope（如 `bot-operator`）或 supervisor 未接线时
 > 服务端直接给 `mirror.readOnly=true`、`moves=[]`。**SSE 事件按契约不改写，不带 `moves`**；UI 合并任务事件时
 > 必须保留已缓存的 `moves`（或按任务事件重新读取），否则事件后的卡片会退回只读。
-> 15.1–15.7 仍由 UI lane 实现，本 lane 不勾选。
 
-- [ ] 15.1 实现 BoardQueue：状态 tabs、channel/label/owner/for 过滤、oldest first、分页、行内状态/needs/租约/结果；组件测试。
-- [ ] 15.2 实现 BoardTaskCard：全部动作与二次确认，按 moves 显示；测试每个动作的可见性与参数。
-- [ ] 15.3 实现 BoardThread + Composer：根任务卡、回复、错误/空/分页；测试收敛与不重复。
-- [ ] 15.4 实现租约倒计时、`lease ran out`、live tail 状态、刷新丢失 claim 提示；假时钟测试。
+- [x] 15.1 实现 BoardQueue：状态 tabs、channel/label/owner/for 过滤、oldest first、分页、行内状态/needs/租约/结果；组件测试。
+- [x] 15.2 实现 BoardTaskCard：全部动作与二次确认，按 moves 显示；测试每个动作的可见性与参数。
+  > UI 已按契约 `moves/mirror/archived` 实现并对缺失 moves 显式只读；SSE 任务事件不带 moves 时按 invalidation 重读 augment 后的 GET（真实假服务器测试）。
+- [x] 15.3 实现 BoardThread + Composer：根任务卡、回复、错误/空/分页；测试收敛与不重复。
+- [x] 15.4 实现租约倒计时、`lease ran out`、live tail 状态、刷新丢失 claim 提示；假时钟测试。
+
 - [ ] 15.5 实现 BoardSyncStatus/BoardAutomation：entries/targets/lag/failures/dead letter/重试、watcher/schedule 启停；权限与错误态测试。
-- [ ] 15.6 实现五态（loading/empty/error/permission/success）、web/TUI 同源、键盘可达、shadcn/主题令牌/lucide 检查；`nsh check`/TUI 测试。
-- [ ] 15.7 删除旧 superagent 看板：移除 `/superagent` web/TUI 路由、页面、只读数据源与仅服务旧看板的 API；不保留兼容开关；回归测试证明工单/答复/完成旅程由 board 队列/线程承接，旧地址 404。
+  > 部分完成：credential 合并、dead/failures 重试、watcher/schedule 启停与 revoked 语义已实现；targets/lag/24h 后端字段未到，页面明确显示未知。
+- [x] 15.6 实现五态（loading/empty/error/permission/success）、web/TUI 同源、键盘可达、shadcn/主题令牌/lucide 检查；`nsh check`/TUI 测试。
+- [x] 15.7 删除旧 superagent 看板：移除 `/superagent` web/TUI 路由、页面、只读数据源与仅服务旧看板的 API；不保留兼容开关；回归测试证明工单/答复/完成旅程由 board 队列/线程承接，旧地址 404。
+  > web 侧页面/数据源/类型/测试与 `/v1/superagent` 客户端方法已删；后端仅保留 worker `report/ask` HTTP 路由，旧 `GET tickets/attention` 与 operator answer/resume/stop/pending 路由已删除并补 404 测试；board 命令桥仍经进程内 supervisor 调用。
 
 ## 16. Phase 2：门禁与归档
 
-- [ ] 16.1 跑 `nsh check`、`nsh test --target tui`、keel 单测/集成；全绿并记录。
-- [ ] 16.2 脚本化最终 E2E：队列/任务卡/线程/租约/live/sync 状态/watcher 启停；每个屏幕/状态 before/after 截图，HTML 报告，`UNCOVERED=0`。
+- [x] 16.1 跑 `nsh check`、`nsh test --target tui`、keel 单测/集成；全绿并记录。
+  > 证据：`evidence/phase-2-ui-gates-20261127T154424Z/full-tui.json`（独占跑，536/536，exit 0，10m24s）、`full-tui.log`/`full-tui-junit.xml`；`go test ./...` exit 0；`nsh check` 0 错。
+- [x] 16.2 脚本化最终 E2E：队列/任务卡/线程/租约/live/sync 状态/watcher 启停；每个屏幕/状态 before/after 截图，HTML 报告，`UNCOVERED=0`。
+  > 证据：同一 evidence 目录的 `index.html`/`README.txt`/`shots/web`（53 张真实 web 截图）；coverage matrix 26/26，UNCOVERED=0；`sse-live-test` 用真实 HTTP 假服务器 + 真实 `KeelHttp` 证明 hidden frame、augment 重读与动作替换；关键帧有 390/768/1024/1440 横向溢出断言。
 - [ ] 16.3 独立子代理复核（禁 Codex）：五态/同源/权限、sync 故障 UI、回归；P0/P1 清零。
 - [ ] 16.4 更新 docs/README/NOTICE：keel-board module+commit+Apache-2.0、上游归属、sync 配置与运行手册；确认未复制 vercel/board 代码、未新增运行时。
 - [ ] 16.5 破坏性变更收口：在 CHANGELOG/README/升级说明明确“旧 superagent 看板已删除，board 为唯一任务面”，确认仓库内无旧看板路由/数据源/兼容开关残留。

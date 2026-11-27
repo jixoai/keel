@@ -1,7 +1,7 @@
 // The identity invalidation stream's client behavior — change keel-harness-v2.
 //
 // These cases pin the acceptance facts the server tests cannot: a fact re-reads
-// the loaded projections without a manual refresh, a superagent fact stays
+// the loaded projections without a manual refresh, a stale fact stays
 // quiet until the board was opened, a burst coalesces into one re-read,
 // heartbeats do not cause requests, and a 401 closes the stream for good (no
 // reconnect with the old cookie) while returning to the login gate.
@@ -13,8 +13,6 @@ import { identityStream, resetIdentityStreamForTest } from "./identity-stream";
 import { can, setEffectivePermissions } from "./permissions";
 import { resetSharesForTest } from "./shares";
 import { store } from "./store";
-import { superagentAccess } from "./superagent";
-import type { SuperagentApi } from "./contract";
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -85,8 +83,6 @@ const setup = (
   resetSharesForTest();
   store.skipBootForTest();
   store.useHTTPForTest(new KeelHttp("", fetchImpl));
-  store.setSuperagentTransport(null);
-  superagentAccess.reset();
   store.resetAuthForTest();
   setEffectivePermissions(permissions, false);
   store.auth.set("ok");
@@ -254,215 +250,6 @@ test("identity stream: a sessions fact refreshes the session list; heartbeats do
   expect(sessionCalls).toBe(3);
 
   identityStream.stop();
-});
-
-test("identity stream: a superagent fact re-reads only an already-loaded board/inbox, coalesced", async () => {
-  const stream = liveStream();
-  const fetchImpl = (async (input: unknown) => {
-    const path = String(input).split("?")[0];
-    if (path === "/v1/identity/events") {
-      return { ok: true, status: 200, headers: { get: () => null }, body: stream.body };
-    }
-    return json(404, { error: "not found" });
-  }) as unknown as FetchLike;
-
-  setup(fetchImpl);
-  let boardCalls = 0;
-  let inboxCalls = 0;
-  const transport: SuperagentApi = {
-    async superagentBoard() {
-      boardCalls += 1;
-      return { tenantId: "t-1", modeId: "superagent", tickets: [] };
-    },
-    async superagentAttention() {
-      inboxCalls += 1;
-      return { tenantId: "t-1", items: [] };
-    },
-    async answerSuperagentAttention() {
-      throw new Error("not used");
-    },
-    async resumeSuperagentTicket() {
-      throw new Error("not used");
-    },
-    async stopSuperagentTicket() {
-      throw new Error("not used");
-    },
-    async retrySuperagentPending() {
-      throw new Error("not used");
-    },
-    async dismissSuperagentPending() {
-      throw new Error("not used");
-    },
-  };
-  store.setSuperagentTransport(transport);
-
-  identityStream.sync("ok");
-  await waitFor(() => identityStream.state() === "open", "stream open");
-
-  // The page was never opened: an invalidated superagent projection costs no
-  // background request.
-  stream.push(frame("superagent"));
-  await sleep(160);
-  expect(boardCalls).toBe(0);
-  expect(inboxCalls).toBe(0);
-
-  // Opening the board loads both projections once; a later fact re-reads both.
-  await superagentAccess.refresh();
-  expect(boardCalls).toBe(1);
-  expect(inboxCalls).toBe(1);
-  expect(superagentAccess.board()).not.toBe(null);
-  expect(superagentAccess.inboxLoaded()).toBe(true);
-
-  stream.push(frame("superagent"));
-  expect(await waitFor(() => boardCalls === 2 && inboxCalls === 2, "board/inbox re-read")).toBeLessThan(2000);
-
-  // The stream's coalescing window still holds for this kind.
-  stream.push(frame("superagent"));
-  stream.push(frame("superagent"));
-  stream.push(frame("superagent"));
-  await waitFor(() => boardCalls === 3 && inboxCalls === 3, "coalesced re-read");
-  await sleep(120);
-  expect(boardCalls).toBe(3);
-  expect(inboxCalls).toBe(3);
-
-  identityStream.stop();
-  store.setSuperagentTransport(null);
-  superagentAccess.reset();
-});
-
-test("identity stream: a superagent fact during the first load re-reads once it settles", async () => {
-  const stream = liveStream();
-  const fetchImpl = (async (input: unknown) => {
-    const path = String(input).split("?")[0];
-    if (path === "/v1/identity/events") {
-      return { ok: true, status: 200, headers: { get: () => null }, body: stream.body };
-    }
-    return json(404, { error: "not found" });
-  }) as unknown as FetchLike;
-
-  setup(fetchImpl, { "app.read": "tenant", "task.read": "tenant" });
-  let boardCalls = 0;
-  let inboxCalls = 0;
-  let release!: () => void;
-  const gate = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  const transport: SuperagentApi = {
-    async superagentBoard() {
-      boardCalls += 1;
-      if (boardCalls === 1) await gate;
-      return { tenantId: "t-1", modeId: "superagent", tickets: [] };
-    },
-    async superagentAttention() {
-      inboxCalls += 1;
-      if (inboxCalls === 1) await gate;
-      return { tenantId: "t-1", items: [] };
-    },
-    async answerSuperagentAttention() {
-      throw new Error("not used");
-    },
-    async resumeSuperagentTicket() {
-      throw new Error("not used");
-    },
-    async stopSuperagentTicket() {
-      throw new Error("not used");
-    },
-    async retrySuperagentPending() {
-      throw new Error("not used");
-    },
-    async dismissSuperagentPending() {
-      throw new Error("not used");
-    },
-  };
-  store.setSuperagentTransport(transport);
-
-  identityStream.sync("ok");
-  await waitFor(() => identityStream.state() === "open", "stream open", 5000);
-
-  // The page mounts: the first board/inbox read is deliberately still in
-  // flight while the fact arrives.
-  superagentAccess.ensure();
-  await waitFor(() => boardCalls === 1 && inboxCalls === 1, "first read in flight", 5000);
-  expect(superagentAccess.loading()).toBe(true);
-  stream.push(frame("superagent"));
-  await sleep(140);
-  expect(boardCalls).toBe(1);
-  expect(inboxCalls).toBe(1);
-
-  // Settling the first read must trigger exactly one more read of both
-  // projections: the in-flight answer may predate the event's write.
-  release();
-  expect(
-    await waitFor(() => boardCalls === 2 && inboxCalls === 2, "post-load re-read", 5000),
-  ).toBeLessThan(5000);
-  await waitFor(() => !superagentAccess.loading(), "settled", 5000);
-  expect(superagentAccess.board()).not.toBe(null);
-
-  identityStream.stop();
-  store.setSuperagentTransport(null);
-  superagentAccess.reset();
-});
-
-test("identity stream: a superagent fact recovers a failed board read without a manual retry", async () => {
-  const stream = liveStream();
-  const fetchImpl = (async (input: unknown) => {
-    const path = String(input).split("?")[0];
-    if (path === "/v1/identity/events") {
-      return { ok: true, status: 200, headers: { get: () => null }, body: stream.body };
-    }
-    return json(404, { error: "not found" });
-  }) as unknown as FetchLike;
-
-  setup(fetchImpl, { "app.read": "tenant", "task.read": "tenant" });
-  let fail = true;
-  let boardCalls = 0;
-  let inboxCalls = 0;
-  const transport: SuperagentApi = {
-    async superagentBoard() {
-      boardCalls += 1;
-      if (fail) throw new KeelApiError(500, "服务暂时没有响应");
-      return { tenantId: "t-1", modeId: "superagent", tickets: [] };
-    },
-    async superagentAttention() {
-      inboxCalls += 1;
-      if (fail) throw new KeelApiError(500, "服务暂时没有响应");
-      return { tenantId: "t-1", items: [] };
-    },
-    async answerSuperagentAttention() {
-      throw new Error("not used");
-    },
-    async resumeSuperagentTicket() {
-      throw new Error("not used");
-    },
-    async stopSuperagentTicket() {
-      throw new Error("not used");
-    },
-    async retrySuperagentPending() {
-      throw new Error("not used");
-    },
-    async dismissSuperagentPending() {
-      throw new Error("not used");
-    },
-  };
-  store.setSuperagentTransport(transport);
-
-  await superagentAccess.refresh();
-  expect(superagentAccess.board()).toBe(null);
-  expect(superagentAccess.error()?.status).toBe(500);
-
-  identityStream.sync("ok");
-  await waitFor(() => identityStream.state() === "open", "stream open", 5000);
-  fail = false;
-  stream.push(frame("superagent"));
-  expect(
-    await waitFor(() => boardCalls === 2 && inboxCalls === 2, "error-state re-read", 5000),
-  ).toBeLessThan(5000);
-  await waitFor(() => superagentAccess.error() === null && superagentAccess.board() !== null, "recovered");
-  expect(superagentAccess.inboxLoaded()).toBe(true);
-
-  identityStream.stop();
-  store.setSuperagentTransport(null);
-  superagentAccess.reset();
 });
 
 test("identity stream: a reconnect re-reads loaded projections (facts are not replayed)", async () => {

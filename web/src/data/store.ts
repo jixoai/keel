@@ -70,7 +70,6 @@ import type {
   TriggersView,
   TurnErrorState,
   UiCommands,
-  SuperagentApi,
   WireEvent,
 } from "./contract";
 import type { ExternalProjectionView } from "./oar-projection";
@@ -97,9 +96,18 @@ export type Mode = "checking" | "http" | "offline";
 
 // The route model lives in `route.ts` (pure, no transport); the store holds its
 // signals and re-exports the words the shell compares.
-export type { IdentitySection, Route, RouteState } from "./route";
+export type { IdentitySection, Route, RouteState, BoardView } from "./route";
 export { resolveRoute } from "./route";
-import { resolveRoute, routeState, routePath, type IdentitySection, type Route, type RouteState } from "./route";
+import {
+  resolveRoute,
+  routeState,
+  routePath,
+  type BoardView,
+  type IdentitySection,
+  type Route,
+  type RouteState,
+} from "./route";
+import type { BoardApi } from "./board-wire";
 
 export interface Notice {
   tone: "info" | "warn" | "danger" | "success";
@@ -165,7 +173,7 @@ const COMMAND_MAX_BUSY_RETRIES = 3;
  * the identity pages say so instead of inventing rows. */
 type Client = SettingsApi &
   Partial<IdentityApi> &
-  Partial<SuperagentApi> & {
+  Partial<BoardApi> & {
   probe(): Promise<"ok" | "auth" | "down">;
   capabilities(): Promise<Record<string, unknown>>;
   /** `GET /v1/mcp/apps`: the app catalogue. Optional because a transport that
@@ -438,6 +446,10 @@ class KeelStore {
   readonly routeObjectId = signal<string | null>(null);
   /** The open team run (the captain session id) below a team page. */
   readonly routeRunId = signal<string | null>(null);
+  /** The board's view (`/board`, `/board/sync`, `/board/automation`). */
+  readonly routeBoardView = signal<BoardView>("queue");
+  /** The board's filter search, as the page URL carried it. */
+  readonly routeSearch = signal("");
 
   // ---- settings face (change keel-model-settings) ------------------------
 
@@ -568,10 +580,10 @@ class KeelStore {
    * memory so the real `KeelHttp` parsing runs without a network). `null` uses
    * the app's transport. */
   private skillsClient: SettingsApi | null = null;
-  /** Test/host seam for the super-agent board (a harness answers it in memory
-   * so the page's five states and write feedback run through the real store).
+  /** Test/host seam for the board (a harness answers it in memory so the
+   * page's five states and write feedback run through the real data layer).
    * `null` uses the app's transport. */
-  private superagentClient: SuperagentApi | null = null;
+  private boardClient: BoardApi | null = null;
   /** Test/host seam for the command surface (the states harness answers the
    * catalog/execution in memory). `null` uses the app's transport. */
   private commandClient: CommandTransport | null = null;
@@ -1040,12 +1052,13 @@ class KeelStore {
     const [page] = await Promise.all([this.pageRoute(), this.devLaunch()]);
     if (!page) return;
     this.routePlumbed = true;
-    if (!this.routeTouched) this.applyRoute(page.path);
+    if (!this.routeTouched) this.applyRoute(page.path, page.search);
     try {
       // Browser back/forward: the URL is authoritative again.
       host.on<{ path?: string; search?: string }>("keel.route", (payload) => {
         const next = typeof payload?.path === "string" ? payload.path : "";
-        this.applyRoute(next);
+        const search = typeof payload?.search === "string" ? payload.search : "";
+        this.applyRoute(next, search);
       });
     } catch {
       /* a host without events is fine: routes stay in-app */
@@ -1054,24 +1067,29 @@ class KeelStore {
 
   /** Land on a path: the chapter and its parameters move together, so a deep
    * link and the back button cannot leave a chapter showing another object. */
-  private applyRoute(path: string) {
+  private applyRoute(path: string, search = "") {
     const state = resolveRoute(path, this.dev);
-    this.route.set(state.route);
-    this.routeSection.set(state.section);
-    this.routeObjectId.set(state.objectId);
-    this.routeRunId.set(state.runId);
-  }
-
-  /** Move to a route in-app and keep the page URL in step. The state is set
-   * before the host call: a host without a URL (TUI, desktop, tests) still
-   * navigates, it just does not change an address bar. */
-  private go(state: RouteState) {
     this.routeTouched = true;
     this.route.set(state.route);
     this.routeSection.set(state.section);
     this.routeObjectId.set(state.objectId);
     this.routeRunId.set(state.runId);
-    this.navigate(routePath(state));
+    this.routeBoardView.set(state.boardView);
+    this.routeSearch.set(state.route === "board" ? search.replace(/^\?/, "") : "");
+  }
+
+  /** Move to a route in-app and keep the page URL in step. The state is set
+   * before the host call: a host without a URL (TUI, desktop, tests) still
+   * navigates, it just does not change an address bar. */
+  private go(state: RouteState, search = "") {
+    this.routeTouched = true;
+    this.route.set(state.route);
+    this.routeSection.set(state.section);
+    this.routeObjectId.set(state.objectId);
+    this.routeRunId.set(state.runId);
+    this.routeBoardView.set(state.boardView);
+    this.routeSearch.set(state.route === "board" ? search.replace(/^\?/, "") : "");
+    this.navigate(`${routePath(state)}${search ? `?${search.replace(/^\?/, "")}` : ""}`);
   }
 
   /** Keep the page URL in step with the shell (`/settings`, `/plugins` and the
@@ -1114,22 +1132,38 @@ class KeelStore {
 
   /** Enter a chapter. Identity keeps whichever sub-page the reader was on; the
    * object chapters open their index (a deep link keeps its own object). */
-  openChapter(route: "workspace" | "superagent" | "bots" | "teams" | "identity" | "records") {
+  openChapter(route: "workspace" | "board" | "bots" | "teams" | "identity" | "records") {
     const section: IdentitySection = route === "identity" ? this.routeSection() : "accounts";
     this.go(routeState(route, section, null));
   }
 
-  /** One super-agent ticket (`/superagent/<ticketId>`). The board keeps the
-   * list; the route names the detail so the phone's back button and a deep
-   * link agree with the visible pane. */
-  openSuperagentTicket(ticketId: string) {
-    this.go(routeState("superagent", "accounts", ticketId));
+  /** The board's own navigation: `view` picks the queue/sync/automation face,
+   * `taskId` opens one task's thread, `search` carries the queue's filters. */
+  openBoard(view: BoardView = "queue", taskId: string | null = null, search = "") {
+    this.go(routeState("board", "accounts", taskId, null, view), search);
   }
 
-  /** Back from the ticket detail to the board list. */
-  closeSuperagentTicket() {
-    if (this.route() !== "superagent") return;
-    this.go(routeState("superagent"));
+  /** One task's thread (`/board/<id>`); the queue's filters stay in the URL. */
+  openBoardTask(taskId: string) {
+    const search = this.routeSearch();
+    this.go(routeState("board", "accounts", taskId), search);
+  }
+
+  /** Back from a task to the queue, keeping the filters. */
+  closeBoardTask() {
+    if (this.route() !== "board") return;
+    this.go(routeState("board"), this.routeSearch());
+  }
+
+  /** Replace only the queue's filters (the address bar follows). */
+  setBoardSearch(search: string) {
+    this.routeSearch.set(search.replace(/^\?/, ""));
+    this.navigate(`/board${search ? `?${search.replace(/^\?/, "")}` : ""}`);
+  }
+
+  /** The retired board address: `/superagent*` is a 404 page, not a redirect. */
+  openGone(objectId: string | null = null) {
+    this.go(routeState("gone", "accounts", objectId));
   }
 
   /** One Bot page (`/bots/<id>`). */
@@ -2514,10 +2548,10 @@ class KeelStore {
     this.pluginClient = client;
   }
 
-  /** Test/host seam: answer the super-agent board without a network. `null`
-   * restores the app's own transport. */
-  setSuperagentTransport(client: SuperagentApi | null): void {
-    this.superagentClient = client;
+  /** Test/host seam: answer the board without a network. `null` restores the
+   * app's own transport. */
+  setBoardTransport(client: BoardApi | null): void {
+    this.boardClient = client;
   }
 
   /** Test/host seam: answer the command catalog/execution without a network.
@@ -2544,12 +2578,12 @@ class KeelStore {
     this.restorePendingCommands(sessionId);
   }
 
-  /** The super-agent board transport in force, or null when this transport
-   * does not serve the surface (the page then says so instead of rendering
-   * invented rows). The fixture and `KeelHttp` both implement it. */
-  superagentApi(): SuperagentApi | null {
-    const client = this.superagentClient ?? this.client;
-    return typeof client.superagentBoard === "function" ? (client as SuperagentApi) : null;
+  /** The board transport in force, or null when this transport does not serve
+   * the surface (the page then says so instead of rendering invented rows).
+   * The fixture and `KeelHttp` both implement it. */
+  boardApi(): BoardApi | null {
+    const client = this.boardClient ?? this.client;
+    return typeof client.boardTasks === "function" ? (client as BoardApi) : null;
   }
 
   private resetSettingsState() {

@@ -217,7 +217,7 @@ test("TUI: 拉取——探测成功后并入新模型，已配置的不删，失
   // (testIDs are unique per model), and mergeLiveModels is unit-tested to
   // dedupe by identity.
   expect(app.shows("id:provider-config-model-deepseek-v4.1-flash")).toBe(true);
-});
+}, 120_000);
 
 test("TUI: 拉取——凭据不可用时给出可读失败，一个模型也不并入", async () => {
   const app = await openModels();

@@ -55,12 +55,15 @@ web/
 │   │   ├── contract.ts        冻结契约的 type re-export + UI 侧扩展类型（含 settings/secrets/plugins/selection）
 │   │   ├── wire.ts            事件 payload 解析/格式化 + selection/模型能力格式化
 │   │   ├── core.ts            @keel/chat-surface 核心的宿主适配层（附件索引/partial 访问）
-│   │   ├── http.ts            fetch + SSE EventSource、SurfaceCommands、设置/密钥/插件/任务看板 API
-│   │   ├── fixture.ts         本地 scripted keel 服务（演示/QA，含设置面与任务看板演示数据）
-│   │   ├── superagent.ts      任务看板状态：四类计数、收件箱、answer/resume/stop 与刷新
+│   │   ├── http.ts            fetch + SSE EventSource、SurfaceCommands、设置/密钥/插件/任务面 API
+│   │   ├── fixture.ts         本地 scripted keel 服务（演示/QA，含设置面与任务面演示数据）
+│   │   ├── board.ts           任务面数据层：归一化缓存、SSE/游标、乐观写与回滚、sync/自动化
+│   │   ├── board-wire.ts      board v0.1.1 线格式、解析器与纯缓存合并
+│   │   ├── fixture-board.ts   任务面演示租户（只在 ?fixture=1 下）
 │   │   └── store.ts           会话列表、打开/发送/停止/审批、模式切换、重连、路由、设置/密钥/插件状态
 │   ├── screens/               session-list / conversation / messages / composer / settings / model-picker
-│   │   └── books/             工作区外章节：任务看板 / 员工 / 团队 / 身份 / 记录
+│   │   ├── board/             任务面：队列 / 任务线程 / 同步 / 自动化 + 五态 harness
+│   │   └── books/             工作区外章节：员工 / 团队 / 身份 / 记录
 │   └── ui/                    theme tokens、lucide 风格单色 Canvas 图标、primitives
 ```
 
@@ -127,45 +130,39 @@ web/
 - **通知**：web 构建通过 `host.js` 的 `keel.notify` 在审批到达时发系统通知（需权限）；
   非 web 宿主自动 no-op。
 
-## 任务看板（change keel-collab-superagent, 4.2/4.3 产品 UI）
+## 任务面（change keel-board-v1 Phase 2）
 
-> **DEPRECATED（keel-board-v1 11.6）**：本页 `/superagent`（web/TUI）已冻结，
-> Phase 2 15.7 删除；工单/答复/完成旅程由 board 队列/线程承接，不新增兼容层。
+「02 任务」是 board 的唯一任务面；旧 superagent 看板已删除（`/superagent` 是 404 下线页，
+不重定向），web 与 TUI 共用同一份 TSX。
 
-「02 任务」是 superagent 工单模式的产品面，web 与 TUI 共用同一份 TSX：
-
-- **路由与入口**：`/superagent`（深链 `/superagent/<ticketId>`），主导航「任务」与命令面板
-  「打开任务看板」都按 `task.read` 能力门显示；窄屏底部标签同语义。
-- **数据面**：`GET /v1/superagent/tickets`（Ticket + Mandate + 当前 Assignment + 计数）与
-  `GET /v1/superagent/attention`（开放问题收件箱）；写入口是
-  `POST /v1/superagent/attention/{id}/answer`、`POST /v1/superagent/tickets/{id}/resume|stop`。
-  `src/data/http.ts` 用现有 CSRF/`KeelApiError` 词汇实现，`src/data/superagent.ts` 持有页面状态与
-  读写动作（单一 transport seam：`store.superagentApi()`），不另建 fetch 通道。
-- **五态**：加载骨架、空（说明来源事件如何产生工单 + 刷新/去工作区）、错误（服务端原因 +
-  请求编号 + 重试；503 说「未接通」）、权限不足（缺 `task.read`，四段式说明 + 申请入口）、
-  成功（四类计数、工单列表、Ticket 详情、待人工收件箱）。空/错/权限态不注入任何示例行；
-  fixture 只在 `?fixture=1` / `host.params.fixture` 下提供。
-- **四类计数**：待人工（blocked 或有开放 Attention）/ 执行中 / 完成 / 失败（failed 或 cancelled），
-  一票只进一个桶，未知状态单列 `other`，四个数加总等于可见行数。
-- **Ticket 详情**：Mandate（发起人/来源/强度/策略/撤销）、Worker（当前 Assignment、Bot、Session、
-  最近 report 的 summary 或原始 JSON、错误）、开放 Attention，以及恢复/停止动作。
-- **收件箱**：问题正文、来源线程、选项与自由文本、截止时间（过期就地禁用并说明服务端会拒绝）；
-  作答走 durable 写，成功后与看板/计数一起刷新；失败按卡片显示服务端原因（403 另说明 operator 授权）。
-- **权限门**：读=`task.read`；写=`task.write` 且服务端 `OperatorAuthorizer` 另行判定。只读账号
-  看得到看板，但答复/恢复/停止控件不渲染，页面明确写出缺少 `task.write`；服务端 403 显示原因，
-  operator 未接通与 503 未启用均使用中文说明。
-- **实时刷新**：identity stream 新增 `superagent` kind；只有已尝试加载的看板/收件箱才重读
-  （未打开不请求；错误态也会自愈重读）；事件落在首屏加载中时在本次结束后补读一次；
-  后台重读不清空写操作的成功/失败反馈，手动「刷新」保留为兜底并清空反馈。
-- **视觉**：计数瓦片 + 收件箱卡片 + 工单行/详情 band，全部 solid-glass 令牌 + lucide 单色；
-  ≥1024 列表与详情同屏（详情 420px），<1024 列表/详情分屏，≤767 单列、计数 2×2、44px 控件。
-- **验证**：`src/screens/books/superagent.tui.test.tsx`（成功面、最新在前、answer 选项/自由文本、
-  resume/stop、待投递失败行与重试/清除（停止/终态仅保留清除）、五态、只读、写失败、390/768）与
-  `src/data/superagent.test.ts`（计数/时限/词表/202 等待投递/409 投递失败/待投递路由）；
-  `nsh test --target tui --filter 'superagent'` → `20 tests: 20 passed, 0 failed`
-  （11 TUI + 6 data + 3 identity-stream 失效/竞态事件）。全量 `nsh test --target tui`
-  的结果按每次运行记录（本轮一次为 437/437）；该宿主存在少量 flake，失败时须复跑对应
-  文件并在 change 的 tasks/证据里记录，不把单次全绿当作稳定门禁。
+- **路由与入口**：`/board`（队列）、`/board/:taskId`（任务线程）、`/board/sync`、`/board/automation`；
+  主导航「任务」在 `board.read` 或迁移期 `task.read` 下显示，命令面板「打开任务队列」同语义。
+  只有 `task.read` 的账号进入迁移说明页；两者都无则 404 且不显示 02 入口。
+- **数据面**：`src/data/board.ts` 是唯一状态源：归一化缓存（channels/messages/threads/tasks/
+  actors/labels/needs/claims）、`GET /v1/board/tasks` + `/messages/{id}` 分页、SSE
+  `/v1/board/events`（`Last-Event-ID` 优先、游标去重、隐藏事件只推进游标）、断线指数重连后重读
+  当前页/线程。`board-wire.ts` 只解析服务端视图，不在客户端 fold 账本。
+- **写**：任务写用 `epoch`/`token` 围栏；回复写携带 `If-Revision`（根消息 revision）。token
+  只存内存（不用 localStorage），刷新后显示「认领凭据不在本标签页」并提供 takeover / 收回认领
+  （由服务端 `moves` 决定）。写前有乐观视图，失败按原任务回滚并保留服务器错误码；实时事件已推进
+  的状态不会被旧响应覆盖。同一条草稿/表单重试复用稳定幂等键，成功后丢弃。
+- **动作**：任务卡只渲染 TaskView `moves`；未知 move 忽略；缺失 `moves` 即只读。认领、续租、
+  释放、完成、失败、阻塞、解除、重开、指派、改依赖、取消、回答都有二次确认与后果文案。
+- **归档**：归档任务由服务端 `board.archived=true` 标签过滤（board 没有 `archived` 查询
+  参数）；客户端同时校验 `TaskView.archived`，分页由服务端完成。
+- **五态**：队列/任务/同步/自动化各自 loading/empty/error/permission/success；空态分「没有打开
+  任务 / 筛选无结果 / 无可读频道 / 无归档」，错误保留筛选与已加载内容；404/403/board_disabled
+  分开呈现。五态由 `src/screens/board/harness.tsx` 在真实组件树里驱动。
+- **实时与租约**：SSE 四态 badge（实时/连接中/重连中/离线）+ 最后可见事件时间；租约每秒本地重算，
+  <60s 警告、到点按 ready 呈现并显示「租约已到期」。
+- **同步/自动化**：`board.manage` 才显示；entries、inbox/outbox depth、死信、出站失败、重试、
+  watcher/schedule 启停、权限被回收自动停发；凭据取 `/v1/board/sync/credentials`，路由只显示不编辑。
+  后端尚未提供的 targets/lag/24h 明确显示「未知」，不伪造成功数据。
+- **主题**：shadcn 官方组件 + solid-glass/主题令牌 + lucide 单色；状态有图标、文字、颜色三通道；
+  390/768/1024/1440 用同一断点，手机 44px、无横向溢出。
+- **验证**：`src/data/board.test.ts`（缓存/游标/租约/筛选/moves/回滚/权限）、
+  `src/screens/board/board.tui.test.tsx`（队列/任务/claim-lost/回复/同步/自动化/五态/390），
+  以及 `scripts/board-phase2-ui-evidence.mjs` 生成的真实 web 截图与 HTML 报告。
 
 ## 设置页与会话模型选择（change keel-model-settings）
 

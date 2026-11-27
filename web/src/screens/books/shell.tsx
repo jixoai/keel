@@ -48,7 +48,7 @@ import {
 } from "./common";
 import { MANAGEMENT_KEYS, TASK_KEYS } from "./management";
 
-export type ChapterId = "workspace" | "superagent" | "bots" | "teams" | "identity" | "records";
+export type ChapterId = "workspace" | "board" | "bots" | "teams" | "identity" | "records";
 
 interface ChapterEntry {
   id: ChapterId;
@@ -61,7 +61,7 @@ interface ChapterEntry {
 
 const CHAPTERS: ChapterEntry[] = [
   { id: "workspace", num: "01", label: "工作区", icon: "message" },
-  { id: "superagent", num: "02", label: "任务", icon: "inbox", keys: TASK_KEYS },
+  { id: "board", num: "02", label: "任务", icon: "inbox", keys: TASK_KEYS },
   { id: "bots", num: "03", label: "员工", icon: "bot", keys: MANAGEMENT_KEYS.bots },
   { id: "teams", num: "04", label: "团队", icon: "users", keys: MANAGEMENT_KEYS.teams },
 ];

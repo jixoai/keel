@@ -17,7 +17,7 @@ import { RecordsChapter } from "./records";
 import { BotsChapter } from "./bots";
 import { TeamsChapter } from "./teams";
 import { TeamRunPage } from "./run";
-import { SuperagentPage } from "./superagent";
+import { BoardPage, GonePage } from "../board/page";
 
 /** 04 团队 — the chapter's own capability gate when the chapter component is
  * not mounted (kept for the route router below). */
@@ -70,14 +70,24 @@ function NotBots() {
   );
 }
 
-/** 02 任务 — the super-agent board. The page gates its own read (`task.read`)
- * and, separately, every write (`task.write`); a deep link to it does not
- * depend on the rail's visibility. */
+/** 02 任务 — the board. The page gates its own read (`board.read`) and, during
+ * the migration window, explains a legacy `task.read` account; a deep link to
+ * it does not depend on the rail's visibility. `/superagent*` is the retired
+ * address: the same 404 page, never a redirect. */
 function NotTeams() {
   const route = () => store.route();
   return (
-    <If when={route() === "superagent"} else={<Fallback />}>
-      <SuperagentPage />
+    <If when={route() === "board"} else={<NotBoard />}>
+      <BoardPage />
+    </If>
+  );
+}
+
+function NotBoard() {
+  const route = () => store.route();
+  return (
+    <If when={route() === "gone"} else={<Fallback />}>
+      <GonePage />
     </If>
   );
 }

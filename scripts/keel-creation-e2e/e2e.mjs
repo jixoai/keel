@@ -992,7 +992,7 @@ function coverageRule(file) {
     'internal/superagent/', 'internal/harnessapi/superagent', 'internal/harnessapi/identity_events',
     'cmd/keel/superagent', 'internal/store/superagent', 'internal/toolsurface/superagent', 'internal/toolsurface/permissions_test.go',
     'internal/collab/store.go', 'internal/toolauth/authorizer_test.go',
-    'web/src/data/superagent', 'web/src/screens/books/superagent', 'scripts/superagent-acceptance/',
+    'web/src/data/superagent', 'web/src/screens/books/superagent', 'scripts/archive/retired-superagent/',
     // Shared shell/route/data files changed by the superagent board lane; its
     // own TUI suite (17/17) and report cover them, not this creation lane.
     'web/App.tsx', 'web/src/data/route.ts', 'web/src/data/route.test.ts',

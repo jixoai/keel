@@ -220,18 +220,18 @@ const paletteActions = (openSession: OpenPaletteSession): PaletteAction[] => {
       },
       run: chooseModel,
     },
-    // The 任务 chapter exists only for an account holding `task.read`: a row
-    // that cannot open its destination is not offered (hide, never grey).
-    ...(can("task.read")
+    // The 任务 chapter exists for `board.read`; a legacy `task.read` account
+    // still sees the section and its migration page.
+    ...(can("board.read") || can("task.read")
       ? [
           {
             item: {
-              id: "route:superagent",
-              label: "打开任务看板",
-              keywords: ["任务", "工单", "ticket", "superagent", "看板"],
+              id: "route:board",
+              label: "打开任务队列",
+              keywords: ["任务", "队列", "看板", "board", "同步", "自动化"],
               group: GROUP.tasks,
             },
-            run: () => store.openChapter("superagent"),
+            run: () => store.openBoard("queue"),
           },
         ]
       : []),

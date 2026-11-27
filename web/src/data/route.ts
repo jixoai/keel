@@ -4,21 +4,37 @@
 // parameters (the identity sub-page, the open object, an open team run), and
 // vice versa. The store holds the signals and calls these; a test can exercise
 // the deep-link table without booting the app.
-export type Route = "workspace" | "settings" | "plugins" | "kit" | "superagent" | "bots" | "teams" | "identity" | "records";
+export type Route =
+  | "workspace"
+  | "settings"
+  | "plugins"
+  | "kit"
+  | "board"
+  | "gone"
+  | "bots"
+  | "teams"
+  | "identity"
+  | "records";
 
 /** The identity chapter's two sub-pages (the 280 index column's segmented). */
 export type IdentitySection = "accounts" | "groups";
 
+/** The board's three views. `/board` and `/board/:id` are the queue/thread;
+ * `/board/sync` and `/board/automation` are the management faces. */
+export type BoardView = "queue" | "sync" | "automation";
+
 /** What the route carries besides its chapter: the identity sub-page, the open
- * object (an account/group/bot/team/record id) and, for a team, the open run
- * (the captain session's id). Every chapter owns one `objectId`; a chapter
- * without objects leaves it null. */
+ * object (an account/group/bot/team/record/task id), for a team the open run,
+ * and the board's view. Every chapter owns one `objectId`; a chapter without
+ * objects leaves it null. */
 export interface RouteState {
   route: Route;
   section: IdentitySection;
   objectId: string | null;
   /** `/teams/:teamId/runs/:runId` — the captain session id. */
   runId: string | null;
+  /** `/board`, `/board/sync`, `/board/automation`. */
+  boardView: BoardView;
 }
 
 export const routeState = (
@@ -26,11 +42,13 @@ export const routeState = (
   section: IdentitySection = "accounts",
   objectId: string | null = null,
   runId: string | null = null,
+  boardView: BoardView = "queue",
 ): RouteState => ({
   route,
   section,
   objectId,
   runId,
+  boardView,
 });
 
 const decodePart = (part: string | undefined): string | null => {
@@ -44,36 +62,41 @@ const decodePart = (part: string | undefined): string | null => {
 
 /** The route a page path names: the web host's `keel.route` answer and its
  * back/forward events both arrive as paths, so a deep link
- * (`/superagent/:ticketId`, `/identity/accounts/:id`, `/records/:id`,
- * `/bots/:id`, `/teams/:id/runs/:runId`, `/settings`, `/plugins`) and the
- * address bar agree with the shell. `/kit` is the kit gallery — a developer
- * route, mapped only for a dev launch (`?fixture=1` / `host.params.fixture`);
- * no product link enters it and a product URL falls back to the workspace. */
+ * (`/board/:taskId`, `/identity/accounts/:id`, `/records/:id`, `/bots/:id`,
+ * `/teams/:id/runs/:runId`, `/settings`, `/plugins`) and the address bar agree
+ * with the shell. `/kit` is the kit gallery — a developer route, mapped only
+ * for a dev launch (`?fixture=1` / `host.params.fixture`); no product link
+ * enters it and a product URL falls back to the workspace. The retired
+ * `/superagent*` addresses are `/gone` (404), never a redirect. */
 export const resolveRoute = (path: string, dev = false): RouteState => {
-  if (path.startsWith("/settings")) return routeState("settings");
-  if (path.startsWith("/plugins")) return routeState("plugins");
-  if (dev && path.startsWith("/kit")) return routeState("kit");
-  // DEPRECATED (keel-board-v1 11.6): this legacy board route is deleted in
-  // Phase 2 15.7; the board queue/thread is the task surface.
-  if (path === "/superagent" || path.startsWith("/superagent/")) {
-    const parts = path.split("/").filter((part) => part !== "");
-    return routeState("superagent", "accounts", decodePart(parts[1]));
+  const bare = path.split("?")[0].split("#")[0];
+  if (bare.startsWith("/settings")) return routeState("settings");
+  if (bare.startsWith("/plugins")) return routeState("plugins");
+  if (dev && bare.startsWith("/kit")) return routeState("kit");
+  if (bare === "/superagent" || bare.startsWith("/superagent/")) {
+    return routeState("gone");
   }
-  if (path === "/identity" || path.startsWith("/identity/")) {
-    const parts = path.split("/").filter((part) => part !== "");
+  if (bare === "/board" || bare.startsWith("/board/")) {
+    const parts = bare.split("/").filter((part) => part !== "");
+    if (parts[1] === "sync") return routeState("board", "accounts", null, null, "sync");
+    if (parts[1] === "automation") return routeState("board", "accounts", null, null, "automation");
+    return routeState("board", "accounts", decodePart(parts[1]));
+  }
+  if (bare === "/identity" || bare.startsWith("/identity/")) {
+    const parts = bare.split("/").filter((part) => part !== "");
     const section: IdentitySection = parts[1] === "groups" ? "groups" : "accounts";
     return routeState("identity", section, decodePart(parts[2]));
   }
-  if (path === "/records" || path.startsWith("/records/")) {
-    const parts = path.split("/").filter((part) => part !== "");
+  if (bare === "/records" || bare.startsWith("/records/")) {
+    const parts = bare.split("/").filter((part) => part !== "");
     return routeState("records", "accounts", decodePart(parts[1]));
   }
-  if (path === "/bots" || path.startsWith("/bots/")) {
-    const parts = path.split("/").filter((part) => part !== "");
+  if (bare === "/bots" || bare.startsWith("/bots/")) {
+    const parts = bare.split("/").filter((part) => part !== "");
     return routeState("bots", "accounts", decodePart(parts[1]));
   }
-  if (path === "/teams" || path.startsWith("/teams/")) {
-    const parts = path.split("/").filter((part) => part !== "");
+  if (bare === "/teams" || bare.startsWith("/teams/")) {
+    const parts = bare.split("/").filter((part) => part !== "");
     const teamId = decodePart(parts[1]);
     const runId = parts[2] === "runs" ? decodePart(parts[3]) : null;
     return routeState("teams", "accounts", teamId, runId);
@@ -81,7 +104,9 @@ export const resolveRoute = (path: string, dev = false): RouteState => {
   return routeState("workspace");
 };
 
-/** The path a route state names (the address bar's form). */
+/** The path a route state names (the address bar's form). A board view other
+ * than the queue is a path segment; its filters travel in the search (the
+ * store appends them). */
 export const routePath = (state: RouteState): string => {
   switch (state.route) {
     case "settings":
@@ -90,8 +115,13 @@ export const routePath = (state: RouteState): string => {
       return "/plugins";
     case "kit":
       return "/kit";
-    case "superagent":
+    case "gone":
       return state.objectId ? `/superagent/${encodeURIComponent(state.objectId)}` : "/superagent";
+    case "board": {
+      if (state.boardView === "sync") return "/board/sync";
+      if (state.boardView === "automation") return "/board/automation";
+      return state.objectId ? `/board/${encodeURIComponent(state.objectId)}` : "/board";
+    }
     case "bots":
       return state.objectId ? `/bots/${encodeURIComponent(state.objectId)}` : "/bots";
     case "teams": {

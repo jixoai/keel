@@ -41,19 +41,6 @@ import type {
   SendOptions,
   DeliverablesOptions,
   DeliverablesView,
-  SuperagentAnswerInput,
-  SuperagentAnswerReceiptView,
-  SuperagentAnswerResult,
-  SuperagentAssignmentView,
-  SuperagentAttentionInboxView,
-  SuperagentAttentionOptionView,
-  SuperagentAttentionView,
-  SuperagentBoardView,
-  SuperagentMandateView,
-  SuperagentPendingView,
-  SuperagentTicketView,
-  SuperagentThreadView,
-  SuperagentActorView,
   SessionExportOptions,
   SessionExportView,
   SessionFilesQuery,
@@ -85,6 +72,40 @@ import type {
 } from "./contract";
 import { parseQueueFacts } from "./queue";
 import { parseCommandCatalog } from "./commands";
+import type {
+  BoardActorsPage,
+  BoardApi,
+  BoardChannelsPage,
+  BoardCreateTaskInput,
+  BoardMeView,
+  BoardMessageView,
+  BoardReplyInput,
+  BoardScheduleView,
+  BoardStreamOptions,
+  BoardSyncCredentialView,
+  BoardSyncEntryView,
+  BoardSyncFailure,
+  BoardSyncInboxItem,
+  BoardSyncStatusView,
+  BoardTaskClaim,
+  BoardTaskMutation,
+  BoardTaskQuery,
+  BoardTasksPage,
+  BoardTaskView,
+  BoardThreadView,
+  BoardWatcherDelivery,
+  BoardWatcherView,
+} from "./board-wire";
+import {
+  parseActorsPage,
+  parseChannelsPage,
+  parseMessage,
+  parseStreamFrame,
+  parseTasksPage,
+  parseThreadView,
+  streamQueryParams,
+  taskQueryParams,
+} from "./board-wire";
 import { parseExternalProjection, type ExternalProjectionView } from "./oar-projection";
 import {
   APP_ID_PATTERN,
@@ -221,7 +242,7 @@ const issueList = (value: unknown): SettingsIssue[] => {
     .filter((issue) => issue.field || issue.message);
 };
 
-const numberOr = (value: unknown, fallback: number): number =>
+const numberOr = (value: unknown, fallback = 0): number =>
   typeof value === "number" && Number.isFinite(value) ? value : fallback;
 
 const listOf = (value: unknown): unknown[] => (Array.isArray(value) ? value : []);
@@ -687,266 +708,6 @@ const textOr = (value: unknown): string | undefined =>
 const objectOr = (value: unknown): Record<string, unknown> | undefined =>
   value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined;
 
-// ---- super-agent board normalization -------------------------------------
-//
-// The shapes are `internal/superagent/domain.go` + `orchestrator.go`
-// (`BoardView`, `TicketView`, `AttentionView`) flattened by Go's embedded
-// structs. A row without an id cannot be opened or acted on, so it is dropped;
-// every other missing field is coerced (the page renders what the server said,
-// never an invented status).
-
-function parseSuperagentThread(value: unknown): SuperagentThreadView | undefined {
-  const row = asRecord(value);
-  const source = asText(row.source);
-  const id = asText(row.id);
-  if (!source && !id) return undefined;
-  const thread: SuperagentThreadView = { source, id };
-  const kind = asText(row.kind);
-  if (kind) thread.kind = kind;
-  const url = asText(row.url);
-  if (url) thread.url = url;
-  return thread;
-}
-
-function parseSuperagentActor(value: unknown): SuperagentActorView | undefined {
-  const row = asRecord(value);
-  const id = asText(row.id);
-  if (!id) return undefined;
-  const actor: SuperagentActorView = { id };
-  const login = asText(row.login);
-  if (login) actor.login = login;
-  const display = asText(row.display);
-  if (display) actor.display = display;
-  if (typeof row.isBot === "boolean") actor.isBot = row.isBot;
-  return actor;
-}
-
-function parseSuperagentMandate(value: unknown): SuperagentMandateView | undefined {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
-  const row = asRecord(value);
-  const mandate: SuperagentMandateView = {};
-  const requester = parseSuperagentActor(row.requester);
-  if (requester) mandate.requester = requester;
-  const thread = parseSuperagentThread(row.thread);
-  const source = asText(row.source);
-  const strength = asText(row.strength);
-  const policyVersion = asText(row.policyVersion);
-  const acceptedAt = asText(row.acceptedAt);
-  const acceptedBy = asText(row.acceptedBy);
-  const revokedAt = asText(row.revokedAt);
-  const revokedBy = asText(row.revokedBy);
-  const revocationCause = asText(row.revocationCause);
-  if (source) mandate.source = source;
-  if (thread) mandate.thread = thread;
-  if (strength) mandate.strength = strength;
-  if (policyVersion) mandate.policyVersion = policyVersion;
-  if (acceptedAt) mandate.acceptedAt = acceptedAt;
-  if (acceptedBy) mandate.acceptedBy = acceptedBy;
-  if (revokedAt) mandate.revokedAt = revokedAt;
-  if (revokedBy) mandate.revokedBy = revokedBy;
-  if (revocationCause) mandate.revocationCause = revocationCause;
-  return mandate;
-}
-
-function parseSuperagentAssignment(value: unknown): SuperagentAssignmentView | undefined {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
-  const row = asRecord(value);
-  const id = asText(row.id);
-  if (!id) return undefined;
-  const assignment: SuperagentAssignmentView = { id };
-  const workItemId = asText(row.workItemId);
-  if (workItemId) assignment.workItemId = workItemId;
-  const botId = asText(row.botId);
-  if (botId) assignment.botId = botId;
-  const sessionId = asText(row.sessionId);
-  if (sessionId) assignment.sessionId = sessionId;
-  const status = asText(row.status);
-  if (status) assignment.status = status;
-  const title = asText(row.title);
-  if (title) assignment.title = title;
-  const error = asText(row.error);
-  if (error) assignment.error = error;
-  const createdAt = asText(row.createdAt);
-  if (createdAt) assignment.createdAt = createdAt;
-  const updatedAt = asText(row.updatedAt);
-  if (updatedAt) assignment.updatedAt = updatedAt;
-  if ("result" in row && row.result !== null && row.result !== undefined) assignment.result = row.result;
-  return assignment;
-}
-
-function parseSuperagentPending(value: unknown): SuperagentPendingView | undefined {
-  const row = asRecord(value);
-  const id = asText(row.id);
-  if (!id) return undefined;
-  const pending: SuperagentPendingView = { id };
-  if (asText(row.kind)) pending.kind = asText(row.kind);
-  if (asText(row.text)) pending.text = asText(row.text);
-  if (asText(row.title)) pending.title = asText(row.title);
-  if (asText(row.body)) pending.body = asText(row.body);
-  if (asText(row.attentionId)) pending.attentionId = asText(row.attentionId);
-  if (asText(row.optionId)) pending.optionId = asText(row.optionId);
-  if (asText(row.answerText)) pending.answerText = asText(row.answerText);
-  if (asText(row.nextAttemptAt)) pending.nextAttemptAt = asText(row.nextAttemptAt);
-  if (asText(row.lastError)) pending.lastError = asText(row.lastError);
-  if (asText(row.createdAt)) pending.createdAt = asText(row.createdAt);
-  if (row.trusted === true) pending.trusted = true;
-  if (row.allowDispatch === true) pending.allowDispatch = true;
-  if (row.failed === true) pending.failed = true;
-  if (typeof row.attempts === "number" && Number.isFinite(row.attempts)) pending.attempts = row.attempts;
-  return pending;
-}
-
-function parseSuperagentReceipt(value: unknown): SuperagentAnswerReceiptView | undefined {
-  const row = asRecord(value);
-  const attentionId = asText(row.attentionId);
-  if (!attentionId) return undefined;
-  const receipt: SuperagentAnswerReceiptView = { attentionId };
-  if (asText(row.optionId)) receipt.optionId = asText(row.optionId);
-  if (asText(row.text)) receipt.text = asText(row.text);
-  if (asText(row.actor)) receipt.actor = asText(row.actor);
-  if (asText(row.deliveredAt)) receipt.deliveredAt = asText(row.deliveredAt);
-  if (asText(row.via)) receipt.via = asText(row.via);
-  if (row.commentQueued === true) receipt.commentQueued = true;
-  if (row.dismissed === true) receipt.dismissed = true;
-  return receipt;
-}
-
-function parseSuperagentTicket(value: unknown): SuperagentTicketView | undefined {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
-  const row = asRecord(value);
-  const id = asText(row.id);
-  if (!id) return undefined;
-  const source = asRecord(row.source);
-  const ticket: SuperagentTicketView = {
-    id,
-    title: asText(row.title),
-    status: asText(row.status) || "unknown",
-  };
-  const tenantId = asText(row.tenantId);
-  if (tenantId) ticket.tenantId = tenantId;
-  const modeId = asText(row.modeId);
-  if (modeId) ticket.modeId = modeId;
-  const sourceKind = asText(source.kind);
-  const sourceId = asText(source.id);
-  const sourceUri = asText(source.uri);
-  if (sourceKind || sourceId || sourceUri) {
-    ticket.source = {};
-    if (sourceKind) ticket.source.kind = sourceKind;
-    if (sourceId) ticket.source.id = sourceId;
-    if (sourceUri) ticket.source.uri = sourceUri;
-  }
-  const request = asText(row.request);
-  if (request) ticket.request = request;
-  const workerBot = asText(row.workerBot);
-  if (workerBot) ticket.workerBot = workerBot;
-  const mandate = parseSuperagentMandate(row.mandate);
-  if (mandate) ticket.mandate = mandate;
-  const thread = parseSuperagentThread(row.thread);
-  if (thread) ticket.thread = thread;
-  const ownerSessionId = asText(row.ownerSessionId);
-  if (ownerSessionId) ticket.ownerSessionId = ownerSessionId;
-  const createdAt = asText(row.createdAt);
-  if (createdAt) ticket.createdAt = createdAt;
-  const updatedAt = asText(row.updatedAt);
-  if (updatedAt) ticket.updatedAt = updatedAt;
-  const assignmentCount = row.assignmentCount;
-  if (typeof assignmentCount === "number" && Number.isFinite(assignmentCount)) {
-    ticket.assignmentCount = assignmentCount;
-  }
-  const activeAssignment = parseSuperagentAssignment(row.activeAssignment);
-  if (activeAssignment) ticket.activeAssignment = activeAssignment;
-  const attentionCount = row.attentionCount;
-  if (typeof attentionCount === "number" && Number.isFinite(attentionCount)) {
-    ticket.attentionCount = attentionCount;
-  }
-  const openAttentionCount = row.openAttentionCount;
-  if (typeof openAttentionCount === "number" && Number.isFinite(openAttentionCount)) {
-    ticket.openAttentionCount = openAttentionCount;
-  }
-  ticket.pending = listOf(row.pending).flatMap((item): SuperagentPendingView[] => {
-    const pending = parseSuperagentPending(item);
-    return pending ? [pending] : [];
-  });
-  if (typeof row.pendingCount === "number" && Number.isFinite(row.pendingCount)) {
-    ticket.pendingCount = row.pendingCount;
-  } else {
-    ticket.pendingCount = ticket.pending.length;
-  }
-  const failedPending = ticket.pending.filter((entry) => entry.failed === true).length;
-  if (typeof row.failedPendingCount === "number" && Number.isFinite(row.failedPendingCount)) {
-    ticket.failedPendingCount = row.failedPendingCount;
-  } else {
-    ticket.failedPendingCount = failedPending;
-  }
-  ticket.answers = listOf(row.answers).flatMap((item): SuperagentAnswerReceiptView[] => {
-    const receipt = parseSuperagentReceipt(item);
-    return receipt ? [receipt] : [];
-  });
-  return ticket;
-}
-
-function parseSuperagentAttention(value: unknown): SuperagentAttentionView | undefined {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
-  const row = asRecord(value);
-  const id = asText(row.id);
-  if (!id) return undefined;
-  const attention: SuperagentAttentionView = {
-    id,
-    workItemId: asText(row.workItemId),
-    prompt: asText(row.prompt),
-  };
-  const tenantId = asText(row.tenantId);
-  if (tenantId) attention.tenantId = tenantId;
-  const assignmentId = asText(row.assignmentId);
-  if (assignmentId) attention.assignmentId = assignmentId;
-  const sessionId = asText(row.sessionId);
-  if (sessionId) attention.sessionId = sessionId;
-  const requestId = asText(row.requestId);
-  if (requestId) attention.requestId = requestId;
-  const kind = asText(row.kind);
-  if (kind) attention.kind = kind;
-  const options = listOf(row.options).flatMap((entry): SuperagentAttentionOptionView[] => {
-    const option = asRecord(entry);
-    const optionId = asText(option.id);
-    if (!optionId) return [];
-    const view: SuperagentAttentionOptionView = { id: optionId };
-    const label = asText(option.label);
-    if (label) view.label = label;
-    const description = asText(option.description);
-    if (description) view.description = description;
-    return [view];
-  });
-  if (options.length) attention.options = options;
-  if (typeof row.allowFreeText === "boolean") attention.allowFreeText = row.allowFreeText;
-  const route = asText(row.route);
-  if (route) attention.route = route;
-  const channel = asText(row.channel);
-  if (channel) attention.channel = channel;
-  const status = asText(row.status);
-  if (status) attention.status = status;
-  const answer = asRecord(row.answer);
-  if (asText(answer.at) || asText(answer.optionId) || asText(answer.text)) {
-    attention.answer = {};
-    const optionId = asText(answer.optionId);
-    const text = asText(answer.text);
-    const actor = asText(answer.actor);
-    const at = asText(answer.at);
-    if (optionId) attention.answer.optionId = optionId;
-    if (text) attention.answer.text = text;
-    if (actor) attention.answer.actor = actor;
-    if (at) attention.answer.at = at;
-  }
-  const createdAt = asText(row.createdAt);
-  if (createdAt) attention.createdAt = createdAt;
-  const deadline = asText(row.deadline);
-  if (deadline) attention.deadline = deadline;
-  const ticketTitle = asText(row.ticketTitle);
-  if (ticketTitle) attention.ticketTitle = ticketTitle;
-  const thread = parseSuperagentThread(row.thread);
-  if (thread) attention.thread = thread;
-  return attention;
-}
-
 /** The CSRF token of the app's live session. KeelHttp keeps it current; the
  * media module (which writes through its own fetch) reads it so every non-GET
  * `/v1` request carries the header, whichever code path sends it. */
@@ -967,7 +728,125 @@ export function withCSRF(
   return merged;
 }
 
-export class KeelHttp implements SettingsApi {
+const boardNumber = (value: unknown): number =>
+  typeof value === "number" && Number.isFinite(value) ? value : 0;
+
+const boardText = (value: unknown): string | undefined =>
+  typeof value === "string" && value.trim() !== "" ? value : undefined;
+
+/** One sync entry as the management API sends it. The Phase 0 DTO carries the
+ * key/platform/enabled/owned facts and an inbox depth; the Phase 2 design's
+ * health facts stay optional until the adapter provides them. */
+function parseSyncEntry(value: unknown): BoardSyncEntryView {
+  const row = asRecord(value);
+  const inbox = asRecord(row?.inbox);
+  const entry: BoardSyncEntryView = {
+    key: String(row?.key ?? ""),
+    platform: String(row?.platform ?? ""),
+    enabled: row?.enabled === true,
+    owned: row?.owned === true,
+    createdAt: String(row?.createdAt ?? ""),
+    updatedAt: String(row?.updatedAt ?? ""),
+  };
+  if (inbox) {
+    entry.inbox = {
+      pending: boardNumber(inbox.pending),
+      leased: boardNumber(inbox.leased),
+      done: boardNumber(inbox.done),
+      dead: boardNumber(inbox.dead),
+    };
+  }
+  const credential = boardText(row?.credential);
+  if (credential === "valid" || credential === "invalid" || credential === "unknown") entry.credential = credential;
+  if (Array.isArray(row?.routes)) {
+    entry.routes = row.routes
+      .map((item) => asRecord(item))
+      .filter((item): item is Record<string, unknown> => item !== null)
+      .map((item) => ({ from: String(item.from ?? ""), to: String(item.to ?? "") }));
+  }
+  if (Array.isArray(row?.targets)) {
+    entry.targets = row.targets
+      .map((item) => asRecord(item))
+      .filter((item): item is Record<string, unknown> => item !== null)
+      .map((item) => ({
+        target: String(item.target ?? ""),
+        ...(typeof item.root === "string" || typeof item.root === "number" ? { root: String(item.root) } : {}),
+        status: String(item.status ?? ""),
+        ...(typeof item.attempts === "number" ? { attempts: item.attempts } : {}),
+        ...(typeof item.lastError === "string" ? { lastError: item.lastError } : {}),
+        ...(typeof item.undelivered === "number" ? { undelivered: item.undelivered } : {}),
+      }));
+  }
+  if (typeof row?.lastDeliveryAt === "string") entry.lastDeliveryAt = row.lastDeliveryAt;
+  if (typeof row?.failures24h === "number") entry.failures24h = row.failures24h;
+  if (typeof row?.bridgeHost === "string") entry.bridgeHost = row.bridgeHost;
+  if (typeof row?.bridgeErrors === "number") entry.bridgeErrors = row.bridgeErrors;
+  return entry;
+}
+
+function parseWatcher(value: unknown): BoardWatcherView {
+  const row = asRecord(value) ?? {};
+  const filter = asRecord(row.filter);
+  const watcher: BoardWatcherView = {
+    id: String(row.id ?? ""),
+    channel: String(row.channel ?? ""),
+    action: String(row.action ?? ""),
+    enabled: row.enabled === true,
+    createdAt: String(row.createdAt ?? ""),
+    updatedAt: String(row.updatedAt ?? ""),
+  };
+  if (typeof row.bot === "string") watcher.bot = row.bot;
+  if (typeof row.cursor === "string") watcher.cursor = row.cursor;
+  if (filter) {
+    watcher.filter = {};
+    if (Array.isArray(filter.types)) {
+      watcher.filter.types = filter.types.filter((item): item is string => typeof item === "string");
+    }
+    const labels = asRecord(filter.labels);
+    if (labels) {
+      const out: Record<string, string> = {};
+      for (const [key, entry] of Object.entries(labels)) if (typeof entry === "string") out[key] = entry;
+      watcher.filter.labels = out;
+    }
+  }
+  if (typeof row.lastDeliveryAt === "string") watcher.lastDeliveryAt = row.lastDeliveryAt;
+  if (typeof row.successes24h === "number") watcher.successes24h = row.successes24h;
+  if (typeof row.failures24h === "number") watcher.failures24h = row.failures24h;
+  if (typeof row.dead === "number") watcher.dead = row.dead;
+  if (typeof row.lastError === "string") watcher.lastError = row.lastError;
+  return watcher;
+}
+
+function parseSchedule(value: unknown): BoardScheduleView {
+  const row = asRecord(value) ?? {};
+  const labels = asRecord(row.labels);
+  const schedule: BoardScheduleView = {
+    id: String(row.id ?? ""),
+    channel: String(row.channel ?? ""),
+    creator: String(row.creator ?? ""),
+    nextRunAt: String(row.nextRunAt ?? ""),
+    sent: boardNumber(row.sent),
+    status: String(row.status ?? ""),
+    attempts: boardNumber(row.attempts),
+    createdAt: String(row.createdAt ?? ""),
+    updatedAt: String(row.updatedAt ?? ""),
+  };
+  if (typeof row.re === "string") schedule.re = row.re;
+  if (labels) {
+    const out: Record<string, string> = {};
+    for (const [key, entry] of Object.entries(labels)) if (typeof entry === "string") out[key] = entry;
+    schedule.labels = out;
+  }
+  if (typeof row.everySeconds === "number") schedule.everySeconds = row.everySeconds;
+  if (typeof row.untilAt === "string") schedule.untilAt = row.untilAt;
+  if (typeof row.times === "number") schedule.times = row.times;
+  if (typeof row.lastError === "string") schedule.lastError = row.lastError;
+  if (typeof row.cancelReason === "string") schedule.cancelReason = row.cancelReason;
+  if (typeof row.completedAt === "string") schedule.completedAt = row.completedAt;
+  return schedule;
+}
+
+export class KeelHttp implements SettingsApi, BoardApi {
   readonly base: string;
   private readonly fetchImpl: FetchLike;
   /** The double-submit CSRF token (`/v1/auth/session` and every login/password
@@ -2160,139 +2039,583 @@ export class KeelHttp implements SettingsApi {
     return asRecord(body.result).triggerId ? (asRecord(body.result) as FireResultView) : (body as FireResultView);
   }
 
-  // ---- super-agent board (change keel-collab-superagent, 4.2/4.3) --------
+  // ---- board (keel-board v0.1.1) ----------------------------------------
   //
-  // Reads need `task.read`; every write needs `task.write` plus the server's
-  // independent operator authorization. The client offers actions only under
-  // `task.write`, but the server decides — a 403 keeps its `requiredKey` so a
-  // page can say exactly what is missing instead of a generic failure.
+  // One route per action, the server's own projections on the way out. A write
+  // body is the board's: `epoch` + `token` for a claim, `force` for an owner's
+  // recall, `revision` (and `If-Revision`) for a reply. The client never folds
+  // the log.
 
-  /** `GET /v1/superagent/tickets` — the tenant's ticket board (newest first as
-   * the server projects it). The response's status count map is not kept: the
-   * page derives its one set of counters from the rows. */
-  async superagentBoard(filter: { status?: string; limit?: number } = {}): Promise<SuperagentBoardView> {
-    const query = new URLSearchParams();
-    if (filter.status) query.set("status", filter.status);
-    if (filter.limit !== undefined) query.set("limit", String(filter.limit));
-    const suffix = query.toString() ? `?${query.toString()}` : "";
-    const response = await this.request(`/v1/superagent/tickets${suffix}`);
+  async boardMe(): Promise<BoardMeView> {
+    const response = await this.request("/v1/board/me");
     const body = asRecord(await response.json());
-    const view: SuperagentBoardView = {
-      tickets: listOf(body.tickets).flatMap((row): SuperagentTicketView[] => {
-        const ticket = parseSuperagentTicket(row);
-        return ticket ? [ticket] : [];
-      }),
+    const account = asRecord(body.account);
+    const bot = asRecord(body.bot);
+    const can = asRecord(body.can);
+    const board = asRecord(can?.board);
+    const view: BoardMeView = {
+      actor: String(body.actor ?? ""),
     };
-    const tenantId = asText(body.tenantId);
-    if (tenantId) view.tenantId = tenantId;
-    const modeId = asText(body.modeId);
-    if (modeId) view.modeId = modeId;
-    return view;
-  }
-
-  /** `GET /v1/superagent/attention` — the open attention inbox. */
-  async superagentAttention(): Promise<SuperagentAttentionInboxView> {
-    const response = await this.request("/v1/superagent/attention");
-    const body = asRecord(await response.json());
-    const view: SuperagentAttentionInboxView = {
-      items: listOf(body.items).flatMap((row): SuperagentAttentionView[] => {
-        const attention = parseSuperagentAttention(row);
-        return attention ? [attention] : [];
-      }),
-    };
-    const tenantId = asText(body.tenantId);
-    if (tenantId) view.tenantId = tenantId;
-    return view;
-  }
-
-  /** `POST /v1/superagent/attention/{id}/answer` — one durable operator
-   * answer (an option, free text, or both when the question allowed it). 202
-   * means the decision is recorded but the worker has not received it yet; 409
-   * `answer_delivery_failed` means it is recorded and its delivery needs an
-   * operator retry on the board. Both are "recorded" facts, not lost answers. */
-  async answerSuperagentAttention(
-    attentionId: string,
-    answer: SuperagentAnswerInput,
-  ): Promise<SuperagentAnswerResult> {
-    const body: Record<string, string> = {};
-    if (answer.optionId) body.optionId = answer.optionId;
-    if (answer.text) body.text = answer.text;
-    try {
-      const response = await this.request(
-        `/v1/superagent/attention/${encodeURIComponent(attentionId)}/answer`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
-        },
-      );
-      const document = asRecord(await response.json());
-      const attention = parseSuperagentAttention(document.attention);
-      if (!attention) throw new KeelApiError(500, "服务端返回了无法识别的答复结果");
-      return { attention, deliveryPending: document.deliveryPending === true };
-    } catch (error) {
-      if (
-        error instanceof KeelApiError &&
-        error.status === 409 &&
-        (error.code === "answer_delivery_failed" || error.code === "answer_not_delivered")
-      ) {
-        return { deliveryFailed: true, deliveryCode: error.code };
-      }
-      throw error;
+    if (account) {
+      view.account = {};
+      if (typeof account.id === "string") view.account.id = account.id;
+      if (typeof account.username === "string") view.account.username = account.username;
+      if (typeof account.displayName === "string") view.account.displayName = account.displayName;
     }
+    if (bot) {
+      view.bot = {};
+      if (typeof bot.id === "string") view.bot.id = bot.id;
+      if (typeof bot.name === "string") view.bot.name = bot.name;
+    }
+    if (typeof body.actorName === "string") view.actorName = body.actorName;
+    if (board) {
+      view.can = {
+        board: {
+          read: board.read === true,
+          write: board.write === true,
+          manage: board.manage === true,
+        },
+      };
+    }
+    const channels = asRecord(body.channels);
+    if (channels) {
+      view.channels = {};
+      for (const [path, value] of Object.entries(channels)) {
+        const can = asRecord(value);
+        if (!can) continue;
+        view.channels[path] = {
+          read: can.read === true,
+          write: can.write === true,
+          manage: can.manage === true,
+        };
+      }
+    }
+    return view;
   }
 
-  /** `POST /v1/superagent/tickets/{id}/pending/{pendingId}/retry` — re-arm a
-   * durable input whose delivery failed permanently. */
-  async retrySuperagentPending(ticketId: string, pendingId: string): Promise<SuperagentTicketView> {
+  async boardChannels(after?: string, limit = 100): Promise<BoardChannelsPage> {
+    const params: string[] = [`limit=${encodeURIComponent(String(limit))}`];
+    if (after) params.push(`after=${encodeURIComponent(after)}`);
+    const response = await this.request(`/v1/board/channels?${params.join("&")}`);
+    return parseChannelsPage(await response.json());
+  }
+
+  async boardActors(limit = 200): Promise<BoardActorsPage> {
+    const response = await this.request(`/v1/board/actors?limit=${encodeURIComponent(String(limit))}`);
+    return parseActorsPage(await response.json());
+  }
+
+  async boardTasks(query: BoardTaskQuery): Promise<BoardTasksPage> {
+    const params = taskQueryParams(query);
+    const response = await this.request(`/v1/board/tasks${params.length ? `?${params.join("&")}` : ""}`);
+    return parseTasksPage(await response.json());
+  }
+
+  async boardThread(id: string, after?: string, limit = 50): Promise<BoardThreadView> {
+    const params: string[] = [];
+    if (after) params.push(`after=${encodeURIComponent(after)}`);
+    if (limit) params.push(`limit=${encodeURIComponent(String(limit))}`);
     const response = await this.request(
-      `/v1/superagent/tickets/${encodeURIComponent(ticketId)}/pending/${encodeURIComponent(pendingId)}/retry`,
-      { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" },
+      `/v1/board/messages/${encodeURIComponent(id)}${params.length ? `?${params.join("&")}` : ""}`,
     );
-    const body = asRecord(await response.json());
-    const ticket = parseSuperagentTicket(body.ticket);
-    if (!ticket) throw new KeelApiError(500, "服务端返回了无法识别的工单");
-    return ticket;
+    const view = parseThreadView(await response.json());
+    if (!view) throw new KeelApiError(500, "服务端返回了无法识别的线程");
+    return view;
   }
 
-  /** `POST /v1/superagent/tickets/{id}/pending/{pendingId}/dismiss` — drop a
-   * durable input at the operator's explicit request. */
-  async dismissSuperagentPending(ticketId: string, pendingId: string): Promise<SuperagentTicketView> {
-    const response = await this.request(
-      `/v1/superagent/tickets/${encodeURIComponent(ticketId)}/pending/${encodeURIComponent(pendingId)}/dismiss`,
-      { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" },
-    );
-    const body = asRecord(await response.json());
-    const ticket = parseSuperagentTicket(body.ticket);
-    if (!ticket) throw new KeelApiError(500, "服务端返回了无法识别的工单");
-    return ticket;
+  private boardWrite(path: string, body: unknown, ifRevision?: number): Promise<Response> {
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (ifRevision !== undefined && Number.isFinite(ifRevision)) headers["If-Revision"] = String(ifRevision);
+    return this.request(path, { method: "POST", headers, body: JSON.stringify(body) });
   }
 
-  /** `POST /v1/superagent/tickets/{id}/resume` — reopen a blocked/finished
-   * ticket with a human-follow-up assignment. */
-  async resumeSuperagentTicket(ticketId: string, reason?: string): Promise<SuperagentTicketView> {
-    const response = await this.request(
-      `/v1/superagent/tickets/${encodeURIComponent(ticketId)}/resume`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(reason ? { reason } : {}),
-      },
-    );
+  private async boardMutation(response: Response): Promise<BoardTaskMutation> {
     const body = asRecord(await response.json());
-    const ticket = parseSuperagentTicket(body.ticket);
-    if (!ticket) throw new KeelApiError(500, "服务端返回了无法识别的工单");
-    return ticket;
+    const mutation: BoardTaskMutation = {};
+    // A board write answers `{task: MessageView}`; the field predates the
+    // task/message split. A harness may answer `{message: ...}`.
+    const message = parseMessage(body.task) ?? parseMessage(body.message);
+    if (message) mutation.message = message;
+    const claim = asRecord(body.claim);
+    if (claim) {
+      const epoch = Number(claim.epoch ?? 0);
+      if (Number.isFinite(epoch)) {
+        const parsed: BoardTaskClaim = { epoch, until: String(claim.until ?? "") };
+        if (typeof claim.token === "string" && claim.token) parsed.token = claim.token;
+        mutation.claim = parsed;
+      }
+    }
+    if (typeof body.until === "string") mutation.until = body.until;
+    return mutation;
   }
 
-  /** `POST /v1/superagent/tickets/{id}/stop` — the human stop: the mandate is
-   * revoked and every bound session is cancelled through the core Host. */
-  async stopSuperagentTicket(ticketId: string, reason?: string): Promise<void> {
-    await this.request(`/v1/superagent/tickets/${encodeURIComponent(ticketId)}/stop`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(reason ? { reason } : {}),
+  async boardCreateTask(input: BoardCreateTaskInput): Promise<{ message: BoardMessageView; claim?: BoardTaskClaim }> {
+    const response = await this.boardWrite("/v1/board/tasks", {
+      channel: input.channel,
+      text: input.text,
+      ...(input.labels ? { labels: input.labels } : {}),
+      ...(input.needs?.length ? { needs: input.needs } : {}),
+      ...(input.for !== undefined ? { for: input.for } : {}),
+      ...(input.claim ? { claim: true } : {}),
+      ...(input.lease ? { lease: input.lease } : {}),
+      ...(input.token ? { token: input.token } : {}),
+      ...(input.idempotencyKey ? { id: input.idempotencyKey } : {}),
     });
+    const mutation = await this.boardMutation(response);
+    if (!mutation.message) throw new KeelApiError(500, "服务端没有返回任务消息");
+    return { message: mutation.message, ...(mutation.claim ? { claim: mutation.claim } : {}) };
+  }
+
+  async boardReply(input: BoardReplyInput): Promise<{ message: BoardMessageView }> {
+    const response = await this.boardWrite(
+      "/v1/board/messages",
+      {
+        re: input.re,
+        text: input.text,
+        ...(input.idempotencyKey ? { id: input.idempotencyKey } : {}),
+      },
+      input.ifRevision,
+    );
+    const mutation = await this.boardMutation(response);
+    if (!mutation.message) throw new KeelApiError(500, "服务端没有返回回复");
+    return { message: mutation.message };
+  }
+
+  async boardClaim(id: string, input: { lease?: number; token?: string }): Promise<BoardTaskMutation> {
+    return await this.boardMutation(
+      await this.boardWrite(`/v1/board/tasks/${encodeURIComponent(id)}/claim`, {
+        ...(input.lease ? { lease: input.lease } : {}),
+        ...(input.token ? { token: input.token } : {}),
+      }),
+    );
+  }
+
+  async boardClaimReady(input: {
+    channel: string;
+    label?: Record<string, string>;
+    from?: string[];
+    lease?: number;
+    wait?: number;
+    token?: string;
+  }): Promise<{ task: import("./board-wire").BoardThreadSummary | null; claim?: BoardTaskClaim }> {
+    const response = await this.boardWrite("/v1/board/tasks/claim", {
+      channel: input.channel,
+      ...(input.label ? { label: input.label } : {}),
+      ...(input.from?.length ? { from: input.from } : {}),
+      ...(input.lease ? { lease: input.lease } : {}),
+      ...(input.wait ? { wait: input.wait } : {}),
+      ...(input.token ? { token: input.token } : {}),
+    });
+    const body = asRecord(await response.json());
+    const task = parseMessage(body.task);
+    const summary = task ? { message: task, replies: 0 } : null;
+    const claimView = asRecord(body.claim);
+    const claim = claimView
+      ? {
+          epoch: Number(claimView.epoch ?? 0),
+          until: String(claimView.until ?? ""),
+          ...(typeof claimView.token === "string" && claimView.token ? { token: claimView.token } : {}),
+        }
+      : undefined;
+    return { task: summary, ...(claim ? { claim } : {}) };
+  }
+
+  async boardRenew(id: string, input: { epoch: number; token: string; lease?: number }): Promise<BoardTaskMutation> {
+    return await this.boardMutation(
+      await this.boardWrite(`/v1/board/tasks/${encodeURIComponent(id)}/renew`, {
+        epoch: input.epoch,
+        token: input.token,
+        ...(input.lease ? { lease: input.lease } : {}),
+      }),
+    );
+  }
+
+  async boardRelease(
+    id: string,
+    input: { epoch?: number; token?: string; force?: boolean },
+  ): Promise<BoardTaskMutation> {
+    const body = input.force
+      ? { force: true }
+      : { epoch: input.epoch ?? 0, token: input.token ?? "" };
+    return await this.boardMutation(
+      await this.boardWrite(`/v1/board/tasks/${encodeURIComponent(id)}/release`, body),
+    );
+  }
+
+  /** `POST /v1/board/tasks/{id}/takeover` — the Phase 2 contract action. A
+   * board v0.1.1 deployment answers 404; the page names that gap instead of
+   * pretending the claim came back. */
+  async boardTakeover(id: string): Promise<BoardTaskMutation> {
+    return await this.boardMutation(
+      await this.boardWrite(`/v1/board/tasks/${encodeURIComponent(id)}/takeover`, {}),
+    );
+  }
+
+  async boardComplete(
+    id: string,
+    input: { epoch: number; token: string; result?: string },
+  ): Promise<BoardTaskMutation> {
+    return await this.boardMutation(
+      await this.boardWrite(`/v1/board/tasks/${encodeURIComponent(id)}/complete`, {
+        epoch: input.epoch,
+        token: input.token,
+        ...(input.result !== undefined ? { result: input.result } : {}),
+      }),
+    );
+  }
+
+  async boardFail(
+    id: string,
+    input: { epoch: number; token: string; reason: string },
+  ): Promise<BoardTaskMutation> {
+    return await this.boardMutation(
+      await this.boardWrite(`/v1/board/tasks/${encodeURIComponent(id)}/fail`, {
+        epoch: input.epoch,
+        token: input.token,
+        reason: input.reason,
+      }),
+    );
+  }
+
+  async boardBlock(
+    id: string,
+    input: { reason: string; kind?: string; epoch?: number; token?: string },
+  ): Promise<BoardTaskMutation> {
+    return await this.boardMutation(
+      await this.boardWrite(`/v1/board/tasks/${encodeURIComponent(id)}/block`, {
+        reason: input.reason,
+        ...(input.kind ? { kind: input.kind } : {}),
+        ...(input.epoch !== undefined && input.token ? { epoch: input.epoch, token: input.token } : {}),
+      }),
+    );
+  }
+
+  async boardUnblock(id: string, input: { reply?: string }): Promise<BoardTaskMutation> {
+    const mutation = await this.boardMutation(
+      await this.boardWrite(`/v1/board/tasks/${encodeURIComponent(id)}/unblock`, {}),
+    );
+    if (input.reply?.trim()) {
+      // The optional note is a second write. Its failure must not report the
+      // unblock (already committed) as a rollback; the thread simply lacks the
+      // note and the reader can reply again.
+      try {
+        await this.boardReply({ re: id, text: input.reply.trim() });
+      } catch {
+        /* the unblock stands */
+      }
+    }
+    return mutation;
+  }
+
+  async boardReopen(id: string): Promise<BoardTaskMutation> {
+    return await this.boardMutation(
+      await this.boardWrite(`/v1/board/tasks/${encodeURIComponent(id)}/reopen`, {}),
+    );
+  }
+
+  async boardAssign(id: string, input: { for: string | null }): Promise<BoardTaskMutation> {
+    return await this.boardMutation(
+      await this.boardWrite(`/v1/board/tasks/${encodeURIComponent(id)}/assign`, { for: input.for }),
+    );
+  }
+
+  async boardNeeds(id: string, needs: string[]): Promise<BoardTaskMutation> {
+    return await this.boardMutation(
+      await this.boardWrite(`/v1/board/tasks/${encodeURIComponent(id)}/needs`, { needs }),
+    );
+  }
+
+  async boardCancel(id: string, input: { reason: string }): Promise<BoardTaskMutation> {
+    return await this.boardMutation(
+      await this.boardWrite(`/v1/board/tasks/${encodeURIComponent(id)}/cancel`, { reason: input.reason }),
+    );
+  }
+
+  async boardSyncEntries(): Promise<{ entries: BoardSyncEntryView[] }> {
+    const response = await this.request("/v1/board/sync/entries");
+    const body = asRecord(await response.json());
+    return { entries: listOf(body.entries).map(parseSyncEntry) };
+  }
+
+  async boardSyncCredentials(): Promise<{ entries: BoardSyncCredentialView[] }> {
+    const response = await this.request("/v1/board/sync/credentials");
+    const body = asRecord(await response.json());
+    return {
+      entries: listOf(body.entries).map((value) => {
+        const row = asRecord(value);
+        const raw = typeof row.credential === "string" ? row.credential : "unknown";
+        const credential: BoardSyncCredentialView["credential"] =
+          raw === "valid" || raw === "invalid" || raw === "missing" ? raw : "unknown";
+        return {
+          key: String(row.key ?? ""),
+          platform: String(row.platform ?? ""),
+          enabled: row.enabled === true,
+          credential,
+          ...(row.restartRequired === true ? { restartRequired: true } : {}),
+        };
+      }),
+    };
+  }
+
+  async boardSyncStatus(): Promise<BoardSyncStatusView> {
+    const response = await this.request("/v1/board/sync/status");
+    const body = asRecord(await response.json());
+    const keys = listOf(body.keys).map(parseSyncEntry);
+    const outbox = asRecord(body.outbox);
+    return {
+      keys,
+      outbox: {
+        pending: numberOr(outbox?.pending),
+        leased: numberOr(outbox?.leased),
+        done: numberOr(outbox?.done),
+        dead: numberOr(outbox?.dead),
+      },
+      ...(typeof body.updatedAt === "string" ? { updatedAt: body.updatedAt } : {}),
+      ...(typeof body.syncEnabled === "boolean" ? { syncEnabled: body.syncEnabled } : {}),
+    };
+  }
+
+  async boardSyncInbox(key?: string): Promise<{ dead: BoardSyncInboxItem[] }> {
+    const params: string[] = ["state=dead"];
+    if (key) params.push(`key=${encodeURIComponent(key)}`);
+    const response = await this.request(`/v1/board/sync/inbox?${params.join("&")}`);
+    const body = asRecord(await response.json());
+    return {
+      dead: listOf(body.dead).map((value) => {
+        const row = asRecord(value);
+        return {
+          id: String(row.id ?? ""),
+          key: String(row.key ?? ""),
+          thread: String(row.thread ?? ""),
+          attempts: numberOr(row.attempts),
+          ...(typeof row.dedupe === "string" ? { dedupe: row.dedupe } : {}),
+          ...(typeof row.receivedAt === "string" ? { receivedAt: row.receivedAt } : {}),
+          ...(typeof row.status === "string" ? { status: row.status } : {}),
+          ...(typeof row.lastError === "string" ? { lastError: row.lastError } : {}),
+        };
+      }),
+    };
+  }
+
+  async boardSyncRetryInbox(id: string, key: string): Promise<{ retried: boolean }> {
+    const response = await this.boardWrite(
+      `/v1/board/sync/inbox/${encodeURIComponent(id)}/retry?key=${encodeURIComponent(key)}`,
+      {},
+    );
+    const body = asRecord(await response.json());
+    return { retried: body.retried === true };
+  }
+
+  async boardSyncFailures(key?: string): Promise<{ failures: BoardSyncFailure[] }> {
+    const params: string[] = [];
+    if (key) params.push(`key=${encodeURIComponent(key)}`);
+    const response = await this.request(`/v1/board/sync/outbox/failures${params.length ? `?${params.join("&")}` : ""}`);
+    const body = asRecord(await response.json());
+    return {
+      failures: listOf(body.failures).map((value) => {
+        const row = asRecord(value);
+        return {
+          delivery: String(row.delivery ?? ""),
+          message: String(row.message ?? ""),
+          target: String(row.target ?? ""),
+          attempts: numberOr(row.attempts),
+          error: String(row.error ?? ""),
+          ...(typeof row.key === "string" ? { key: row.key } : {}),
+          ...(typeof row.at === "string" ? { at: row.at } : {}),
+        };
+      }),
+    };
+  }
+
+  async boardSyncRetryOutbox(id: string): Promise<{ retried: boolean }> {
+    const response = await this.boardWrite(`/v1/board/sync/outbox/${encodeURIComponent(id)}/retry`, {});
+    const body = asRecord(await response.json());
+    return { retried: body.retried === true };
+  }
+
+  async boardWatchers(): Promise<{ watchers: BoardWatcherView[] }> {
+    const response = await this.request("/v1/board/watchers");
+    const body = asRecord(await response.json());
+    return { watchers: listOf(body.watchers).map(parseWatcher) };
+  }
+
+  async boardWatcherEnable(id: string, enabled: boolean): Promise<BoardWatcherView> {
+    const response = await this.boardWrite(
+      `/v1/board/watchers/${encodeURIComponent(id)}/${enabled ? "enable" : "disable"}`,
+      {},
+    );
+    const body = asRecord(await response.json());
+    return parseWatcher(body.watcher ?? body);
+  }
+
+  async boardWatcherDeliveries(id: string): Promise<{ deliveries: BoardWatcherDelivery[] }> {
+    const response = await this.request(`/v1/board/watchers/${encodeURIComponent(id)}/deliveries`);
+    const body = asRecord(await response.json());
+    return {
+      deliveries: listOf(body.deliveries).map((value) => {
+        const row = asRecord(value);
+        return {
+          watcherId: String(row.watcherId ?? ""),
+          event: String(row.event ?? ""),
+          state: String(row.state ?? ""),
+          attempts: numberOr(row.attempts),
+          nextAt: String(row.nextAt ?? ""),
+          ...(typeof row.lastError === "string" ? { lastError: row.lastError } : {}),
+          createdAt: String(row.createdAt ?? ""),
+          updatedAt: String(row.updatedAt ?? ""),
+          ...(typeof row.completedAt === "string" ? { completedAt: row.completedAt } : {}),
+        };
+      }),
+    };
+  }
+
+  async boardWatcherRetryDelivery(id: string, seq: string): Promise<{ retried: boolean }> {
+    const response = await this.boardWrite(
+      `/v1/board/watchers/${encodeURIComponent(id)}/deliveries/${encodeURIComponent(seq)}/retry`,
+      {},
+    );
+    const body = asRecord(await response.json());
+    return { retried: body.retried === true };
+  }
+
+  async boardSchedules(): Promise<{ schedules: BoardScheduleView[] }> {
+    const response = await this.request("/v1/board/schedules");
+    const body = asRecord(await response.json());
+    return { schedules: listOf(body.schedules).map(parseSchedule) };
+  }
+
+  async boardScheduleEnable(id: string, enabled: boolean): Promise<BoardScheduleView> {
+    const response = await this.boardWrite(
+      `/v1/board/schedules/${encodeURIComponent(id)}/${enabled ? "enable" : "disable"}`,
+      {},
+    );
+    const body = asRecord(await response.json());
+    return parseSchedule(body.schedule ?? body);
+  }
+
+  async boardScheduleCancel(
+    id: string,
+    opts: { reason?: string; status?: string } = {},
+  ): Promise<BoardScheduleView | null> {
+    const reason = opts.reason ?? "取消定时任务";
+    if (opts.status === "dead") {
+      // `/clear` removes a dead plan only; it refuses a live one.
+      const response = await this.boardWrite(`/v1/board/schedules/${encodeURIComponent(id)}/clear`, { reason });
+      const body = asRecord(await response.json());
+      return body.schedule ? parseSchedule(body.schedule) : null;
+    }
+    // A live plan is deleted (the board has no separate "cancel" write); the
+    // shared request path keeps the session CSRF header and error mapping.
+    await this.request(`/v1/board/schedules/${encodeURIComponent(id)}`, { method: "DELETE" });
+    return null;
+  }
+
+  /** The board's SSE feed. `Last-Event-ID` wins over `after`; a normal close
+   * (a proxy, the server's drain) reconnects from the last cursor. A frame
+   * with no data is a hidden event: the caller advances its cursor and does
+   * not show "new activity". */
+  boardStream(opts: BoardStreamOptions): () => void {
+    let stopped = false;
+    let cursor = opts.after ?? "";
+    let attempt = 0;
+    let controller: AbortController | null = null;
+    let retryTimer: number | undefined;
+
+    const schedule = () => {
+      if (stopped) return;
+      const delay = Math.min(30_000, 1_000 * Math.pow(2, Math.min(attempt, 5)));
+      attempt += 1;
+      opts.onState("reconnecting", attempt);
+      retryTimer = setTimeout(connect, delay) as unknown as number;
+    };
+
+    const connect = async () => {
+      if (stopped) return;
+      controller = new AbortController();
+      const params = streamQueryParams(opts.query, cursor || undefined);
+      const headers: Record<string, string> = { Accept: "text/event-stream" };
+      if (cursor) headers["Last-Event-ID"] = cursor;
+      opts.onState(attempt === 0 ? "connecting" : "reconnecting", attempt);
+      try {
+        const response = await this.transport()(
+          this.url(`/v1/board/events${params.length ? `?${params.join("&")}` : ""}`),
+          { headers, signal: controller.signal, credentials: "same-origin" },
+        );
+        if (!response.ok) {
+          if (response.status === 404 || response.status === 403 || response.status === 401) {
+            stopped = true;
+            opts.onState("offline", attempt);
+            return;
+          }
+          schedule();
+          return;
+        }
+        if (!response.body) {
+          schedule();
+          return;
+        }
+        attempt = 0;
+        opts.onState("live", 0);
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        try {
+          for (;;) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            buffer = buffer.replace(/\r\n/g, "\n");
+            let boundary = buffer.indexOf("\n\n");
+            while (boundary >= 0) {
+              const frame = buffer.slice(0, boundary);
+              buffer = buffer.slice(boundary + 2);
+              let id = "";
+              const data: string[] = [];
+              for (const line of frame.split("\n")) {
+                if (!line || line.startsWith(":")) continue;
+                const colon = line.indexOf(":");
+                const field = colon >= 0 ? line.slice(0, colon) : line;
+                const value = colon >= 0 ? line.slice(colon + 1).replace(/^ /, "") : "";
+                if (field === "id") id = value;
+                else if (field === "data") data.push(value);
+              }
+              if (id) {
+                // An id-only frame is a hidden event: the server advances the
+                // subscriber's cursor without carrying content. It must still
+                // reach the caller (as `event: null`) and move the replay
+                // header; dropping it makes every reconnect replay the same
+                // hidden event.
+                const parsed = parseStreamFrame(id, data.join("\n"));
+                if (parsed) {
+                  const seq = Number(parsed.id);
+                  const current = Number(cursor);
+                  if (!Number.isFinite(seq) || !Number.isFinite(current) || seq > current) cursor = parsed.id;
+                  opts.onFrame(parsed);
+                }
+              }
+              boundary = buffer.indexOf("\n\n");
+            }
+          }
+        } finally {
+          try {
+            reader.releaseLock();
+          } catch {
+            /* already released */
+          }
+        }
+        if (!stopped) schedule();
+      } catch {
+        if (!stopped) schedule();
+      }
+    };
+
+    void connect();
+    return () => {
+      stopped = true;
+      controller?.abort();
+      if (retryTimer !== undefined) clearTimeout(retryTimer);
+      opts.onState("closed", attempt);
+    };
   }
 
   // ---- identity & access (A4.3) -----------------------------------------

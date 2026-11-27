@@ -438,6 +438,9 @@ const CURRENT_PERMISSIONS: Record<string, PermissionScope> = {
   "trigger.read": "tenant",
   "task.read": "team",
   "task.write": "team",
+  "board.read": "tenant",
+  "board.write": "tenant",
+  "board.manage": "tenant",
 };
 
 export class FixtureIdentity implements IdentityApi {

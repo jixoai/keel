@@ -226,23 +226,12 @@ var rules = []Rule{
 	resource(http.MethodGet, "/v1/subagents/{id}", access.KeySessionRead, "session", "path:id"),
 	resource(http.MethodPost, "/v1/subagents/{id}/cancel", access.KeySessionWrite, "session", "query:parentSessionId"),
 
-	// --- super-agent board (read-only projections) --------------------------
-	// The queue is tenant-scoped; task.read is relation-scoped on individual
-	// task cards, so the held-key mode is the same shape as the other
-	// collection read edges. Writes stay in the Source/Channel and operator
-	// paths, not these routes.
-	route(http.MethodGet, "/v1/superagent/tickets", ModeHeldKey, access.KeyTaskRead),
-	route(http.MethodGet, "/v1/superagent/attention", ModeHeldKey, access.KeyTaskRead),
-	// Worker and operator writes are task writes. Operator semantics are
-	// enforced again by the orchestrator's OperatorAuthorizer seam.
+	// --- super-agent worker writes -----------------------------------------
+	// The retired board's read projections and operator writes are gone; only
+	// the worker's report/ask remain (a Bot's model tools are the usual path,
+	// but the HTTP seam stays for a worker host that posts directly).
 	route(http.MethodPost, "/v1/superagent/tickets/{id}/report", ModeHeldKey, access.KeyTaskWrite),
 	route(http.MethodPost, "/v1/superagent/tickets/{id}/ask", ModeHeldKey, access.KeyTaskWrite),
-	route(http.MethodPost, "/v1/superagent/tickets/{id}/resume", ModeHeldKey, access.KeyTaskWrite),
-	route(http.MethodPost, "/v1/superagent/tickets/{id}/stop", ModeHeldKey, access.KeyTaskWrite),
-	route(http.MethodPost, "/v1/superagent/attention/{id}/answer", ModeHeldKey, access.KeyTaskWrite),
-	// The operator recovery for a durable input whose delivery failed.
-	route(http.MethodPost, "/v1/superagent/tickets/{id}/pending/{pendingId}/retry", ModeHeldKey, access.KeyTaskWrite),
-	route(http.MethodPost, "/v1/superagent/tickets/{id}/pending/{pendingId}/dismiss", ModeHeldKey, access.KeyTaskWrite),
 
 	// --- realtime voice bridge ---------------------------------------------
 	resource(http.MethodGet, "/v1/realtime", access.KeySessionRead, "session", "query:session_id"),

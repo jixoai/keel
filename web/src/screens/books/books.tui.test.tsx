@@ -37,7 +37,7 @@ test("TUI: 系统栏是全局壳，章节只留四个日常章；身份/记录�
   expect(wide.shows("id:books-rail")).toBe(true);
   // The daily rail: exactly the four daily chapters.
   expect(wide.shows("id:books-chapter-workspace")).toBe(true);
-  expect(wide.shows("id:books-chapter-superagent")).toBe(true);
+  expect(wide.shows("id:books-chapter-board")).toBe(true);
   expect(wide.shows("id:books-chapter-bots")).toBe(true);
   expect(wide.shows("id:books-chapter-teams")).toBe(true);
   expect(wide.shows("id:books-chapter-identity")).toBe(false);
@@ -55,7 +55,7 @@ test("TUI: 系统栏是全局壳，章节只留四个日常章；身份/记录�
   await phone.waitFor("id:books-tabbar");
   expect(phone.shows("id:books-rail")).toBe(false);
   expect(phone.shows("id:books-tab-workspace")).toBe(true);
-  expect(phone.shows("id:books-tab-superagent")).toBe(true);
+  expect(phone.shows("id:books-tab-board")).toBe(true);
   expect(phone.shows("id:books-tab-bots")).toBe(true);
   expect(phone.shows("id:books-tab-teams")).toBe(true);
   expect(phone.shows("id:books-tab-identity")).toBe(false);
@@ -157,7 +157,7 @@ test("TUI: 超管——统一叫超级管理员，概览显示全部能力", asy
   const screen = view.texts().join("\n");
   expect(screen).toContain("超级管理员");
   expect(screen).not.toContain("部署管理员");
-  expect(screen).toContain("全部能力（53 项）");
+  expect(screen).toContain("全部能力（56 项）");
   expect(screen).toContain("身份由部署决定");
   expect(view.shows("id:account-add-group-head")).toBe(false);
 });
@@ -167,7 +167,10 @@ test("TUI: 权限组矩阵——行高密度、单一上限说明、范围 Sheet
   await openManagement(view, "identity");
   await view.waitFor("id:identity-index");
   await view.press("id:identity-segment-groups");
-  await view.waitFor("text:客服组");
+  // Wait for the group row itself: 客服组 also appears in the open account's
+  // chip, so a text wait can fire before the group rows exist. The wide
+  // identity chapter is an index list, not the 1024 table.
+  await view.waitFor("label:打开权限组 客服组");
   await view.press("label:打开权限组 客服组");
   await view.waitFor("id:group-matrix");
   expect(view.texts()).toContain("调用 Bot");
@@ -390,6 +393,8 @@ test("TUI: 四档——1440 有身份索引；1024/768 全宽；390 底部三 ta
   // 1024 的权限组：索引表 → 对象页矩阵。
   await mid.press("id:identity-segment-groups");
   await mid.waitFor("id:groups-head");
+  await mid.waitFor("id:groups-table");
+  await mid.waitFor("label:打开权限组 客服组");
   expect(mid.shows("id:groups-table")).toBe(true);
   const groupsHeader = mid.texts().join("\n");
   expect(groupsHeader).toContain("权限组");

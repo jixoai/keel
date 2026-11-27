@@ -71,8 +71,7 @@ keel version
 | GET | `/v1/triggers`、POST `/v1/triggers/{id}/fire` | 触发器审计与手动/签名触发（幂等键；签名头见 §3.3）；fire 以 trigger 的 `botId` 创建 Bot-owned Session，`created_by` = 调用者 |
 | GET | `/v1/subagents`、`/v1/subagents/{id}` | 子代理列表/详情 |
 | POST | `/v1/sessions/{id}/subagents` | 派生子代理（`wait:true` 同步等待；断线不再取消子代理） |
-| GET | `/v1/superagent/tickets`、`/v1/superagent/attention` | super-agent 工单看板（`updated_at DESC`，limit 取最新头部）/ Attention 收件箱（需 `task.read`；未装配 503，`superagent.board=false`；写成功后经 `/v1/identity/events` 的 `superagent` invalidation 通知） |
-| POST | `/v1/superagent/tickets/{id}/report`、`…/ask`、`…/resume`、`…/stop`、`/v1/superagent/attention/{id}/answer` | worker report/ask（需 sessionId；report 可带幂等 `requestId`）与 operator answer/resume/stop（需 `task.write` + `OperatorAuthorizer`）；worker 模型侧另有 `report`/`ask` 工具（§3.5） |
+| POST | `/v1/superagent/tickets/{id}/report`、`…/ask` | worker report/ask（需 sessionId；report 可带幂等 `requestId`；需 `task.write`）；worker 模型侧另有 `report`/`ask` 工具（§3.5）。旧看板的 `GET /tickets`、`GET /attention` 与 operator answer/resume/stop/pending 路由已删除（404）；board 队列/线程是唯一任务面 |
 
 ### 命令面（`internal/harnessapi/commands.go`，keel-plugin-commands）
 
@@ -233,6 +232,12 @@ mode：
   `GITHUB_TOKEN`）、可选 `KEEL_SUPERAGENT_GITHUB_SINCE`（空=首次轮询只建立基线，不回放仓库历史）
 - `KEEL_SUPERAGENT_INTERVAL`、`KEEL_SUPERAGENT_SLOTS`、`KEEL_SUPERAGENT_HUMAN_SLOTS`
 - `KEEL_SUPERAGENT_ORCHESTRATOR_SESSION`（可选；空=按 tenant+Bot 派生稳定 session id）
+
+旧 super-agent 看板已删除：`GET /v1/superagent/tickets`、`GET /v1/superagent/attention`、
+`POST …/resume|stop`、`POST /attention/{id}/answer` 及 pending retry/dismiss 均为 404；
+super-agent 的 Ticket/Assignment/Attention 仍经 board 适配器镜像，board 命令桥在进程内调用
+`AnswerAttention`/`ResumeTicket`/`StopTicket`，不依赖这些 HTTP 路由。仅保留 worker 的
+report/ask 两个 HTTP 写入口。
 
 Worker Bot 的 Harness 是工具白名单：要使用模型侧 `report`/`ask`，需在 `harness.tools` 中授予
 这两个工具，并在 `harness.context.permissions` 中授予 `task.write`（与 HTTP worker 路由同一

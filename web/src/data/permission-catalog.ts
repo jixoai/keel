@@ -107,6 +107,11 @@ export const CAPABILITIES: CapabilitySpec[] = [
   spec("shell.exec", "执行命令", "high"),
   spec("task.read", "查看任务", "normal"),
   spec("task.write", "写任务", "normal"),
+  // The board (keel-board-v1): the one task face. `board.manage` opens sync
+  // and automation; it is a tenant-scoped management key.
+  spec("board.read", "查看任务面", "normal"),
+  spec("board.write", "写任务面", "normal"),
+  spec("board.manage", "管理任务面", "high", TENANT_SCOPES),
   spec("approval.read", "查看审批", "normal"),
   spec("approval.write", "发起审批", "high"),
   spec("decision.ask", "请求决策", "high"),
@@ -170,6 +175,7 @@ const DOMAIN_ORDER: Array<{ id: string; label: string; icon: string }> = [
   { id: "notification", label: "通知", icon: "message" },
   { id: "shell", label: "终端", icon: "terminal" },
   { id: "task", label: "任务", icon: "check" },
+  { id: "board", label: "任务面", icon: "inbox" },
   { id: "approval", label: "审批", icon: "check" },
   { id: "decision", label: "决策", icon: "brain" },
 ];
