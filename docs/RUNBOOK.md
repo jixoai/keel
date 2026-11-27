@@ -251,8 +251,9 @@ export KEEL_SECRET_KEY='…'     # 必填；缺失时 mirror/bridge 均 fail clo
 - 幂等：`board_links` 的 `(tenant, source, source_id, kind)` 唯一；重复同步/重启复用同一
   task/回复；report_id / attention_id 是回复幂等键；claim token 由
   `HMAC-SHA256(KEEL_SECRET_KEY, "board-claim:v1:<tenant>:<assignment>:<session>")` 派生，服务端只存 hash。
-- 只读：镜像线程/消息写 `noSync`，统一 GitHub sync 不会二次回写；旧 `/superagent` 看板已
-  冻结（Phase 2 15.7 删除），board 队列/线程承接工单、答复与完成旅程。
+- 只读：镜像线程/消息写 `noSync`，统一 GitHub sync 不会二次回写；旧 `/superagent` 看板与
+  `/v1/superagent` 只读/运营 API 已删除（破坏性变更，旧脚本归档在
+  `scripts/archive/retired-superagent/`），board 队列/线程是唯一任务面。
 - 命令桥：board 的 claim/complete/fail/block/unblock/assign/cancel 先做 **频道级** 授权
   （mirrored task 所在 channel 的 editor 关系 + board.write/manage；仅“别的频道有写权限”
   不够），再调 supervisor 既有 API（ResumeTicket/Report/Ask/AnswerAttention/StopTicket），
@@ -285,7 +286,16 @@ scripts/binary-size.sh --budget-kb 4096 --base 6ee7fe3
 KEEL_TEST_DSN='postgres://…' scripts/keel-board-phase1-sync-gate.sh
 KEEL_TEST_DSN='postgres://…' go run ./cmd/board-sync-e2e \
   -dsn 'postgres://…' -out /tmp/phase-1-sync-e2e.html
+
+# Phase 2 最终门禁：独占全量 TUI、全量 Go、UI 截图/五态 HTML、文件覆盖表；
+# 需要干净 tracked worktree，输出 evidence/phase-2-gates.md + phase-2-pin.txt。
+KEEL_TEST_DSN='postgres://…' scripts/board-phase2-gates.sh
 ```
+
+- **Phase 2 任务面 UI**：nsh `/board`（web/TUI 同源）是唯一任务面；旧 `/superagent` 页面、
+  只读数据源与 `/v1/superagent` 只读/运营 API 已删除，旧脚本在
+  `scripts/archive/retired-superagent/`。`targets`/可测量 lag/24h 失败计数在 board v0.1.1
+  没有后端字段，UI 明确显示“未知”（见 change 的 `DISPOSITION.md`），不伪造成功。
 
 - `GET /metrics` 同时输出 `board_*`（事件数、append 延迟、live claims、SSE 连接/滞后、
   sync 深度/失败、`board_sync_credential_status`）；标签只有 kind/key/platform/status，

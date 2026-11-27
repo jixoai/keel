@@ -212,16 +212,23 @@ env 文件路径：`FDE2E_ENV_PERSONAL`，默认取主仓根目录的 `.env.pers
   `moves[]`（唯一动作来源）、`archived`、`mirror{source,readOnly,bridge}`、`origin`；
   `/sync/entries|status` 合并 keel 的凭据状态，无法测量的 lag 明确为 `null`。SSE 事件、
   状态码、内容类型与错误体保持原样；`moves` 由频道关系与 board 状态推导，不伪造权限。
+- **任务面 UI**：nsh 的 `/board`（web 与 TUI 同源）是唯一任务面：队列（状态/频道/标签/
+  owner/for/归档）、任务卡（只渲染服务端 `moves`）、线程与 Composer、租约倒计时/丢失提示、
+  SSE live、sync 状态与 watcher/schedule 启停；五态、390/768/1024/1440、键盘可达。
+  旧 `/superagent` web/TUI 页面、只读数据源与 `/v1/superagent` 只读/运营 API 已删除；
+  旧脚本归档在 `scripts/archive/retired-superagent/`，旧地址返回 404 历史页。
 - **superagent 镜像/命令桥**：tenant 文档 `board.superagent.{mirror,bridge,channel}`（默认
   `false/false/"superagent"`）。`mirror=true` 把 Ticket/Assignment/Attention/report 单向投影为
   board 任务/claim/blocked/回复（`board_links` 幂等、`KEEL_SECRET_KEY` 派生确定性 claim token，
   缺失即 fail closed）；归档 Ticket 也导入为只读历史任务（`board.archived=true`，`moves=[]`）；
   `bridge=true` 让 board 上的 claim/complete/fail/block/unblock/assign/
   cancel 先调 supervisor 既有 API，成功后才写 board。superagent 的 `collab_*` 仍是真值，
-  board 不反写；旧 `/superagent` 看板已冻结，Phase 2 15.7 删除。
+  board 不反写；旧 `/superagent` 看板与 `/v1/superagent` 只读/运营 API 已删除（破坏性变更），
+  board 是唯一任务面。
 
 运行细节（DSN 角色、迁移、tenant 开关、entry/secret 配置、验收与 E2E 命令）见
-[docs/RUNBOOK.md](docs/RUNBOOK.md#boardkeel-board-v011)。
+[docs/RUNBOOK.md](docs/RUNBOOK.md#boardkeel-board-v011)。Phase 2 最终验收：
+`KEEL_TEST_DSN=… scripts/board-phase2-gates.sh`（独占全量 TUI + Go + UI 证据 + 文件覆盖）。
 
 ## 状态与路线
 
