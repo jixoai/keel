@@ -1,1 +1,2 @@
-exit=0
+nsh check (web, TypeScript 7)
+exit=0; errors=0

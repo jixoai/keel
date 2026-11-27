@@ -87,8 +87,9 @@
 - [x] 5.4 真实浏览器 E2E（7 步起）：上传 → 发送带附件消息 → 原生/兜底 → 安装预览插件 →
   渲染 → 停用 → 回退；每步截图，`UNCOVERED=0`，生成 HTML 报告并挂公网。
   > `scripts/keel-attachment-e2e/` 真实 PG + 双租户服务 + Chrome：9 步 / 116 断言全绿，
-  > 12 张截图，`evidence/ui/steps.json` + `report.html`，覆盖表 UNCOVERED=0（EXEMPT 只允许
-  > openspec 证据与 E2E 运行器，其余未映射即 UNCOVERED 并失败）。
+  > 12 张截图，`evidence/ui/steps.json` + `report.html`。覆盖基线取分支 merge-base
+  > （本次 `2b88c8e`，不把 mainline 新文件算入），UNCOVERED=0；EXEMPT 只允许 openspec
+  > 证据与 E2E 运行器，其余未映射即 UNCOVERED 并失败。
   > 公网挂载受本 worktree 禁止 push/merge 的约束，合并后按 `fde2e-ops` 发布。
 - [x] 5.5 跨租户与无权限 E2E：租户 B 打开租户 A 的附件 URL/缩略图 404；无 `session.read`
   账号看到无权限态，不泄露字节。
