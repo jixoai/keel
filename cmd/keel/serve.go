@@ -1080,7 +1080,7 @@ func runServe(parent context.Context, opts serveOptions) error {
 		// board_disabled before any bridge action (or reply/mutation guard) can
 		// reach the supervisor, and every successful bridge/board response still
 		// carries the Phase 2 moves/archived/mirror fields.
-		boardBridge = newSuperagentBoardBridge(boardSurface, log)
+		boardBridge = newSuperagentBoardBridge(boardSurface, st, log)
 		boardSurface.SetMirrorFacts(boardBridge)
 		boardHandler = boardSurface.Gate(boardSurface.Augment(boardBridge))
 		defer boardSurface.Close()

@@ -120,10 +120,16 @@ export KEEL_BOARD_FILE_TIMEOUT=10s   # 可选；单个入站文件下载超时
     不再提供 token 动作。
   - `archived=true`、`mirror.readOnly=true`：`moves=[]`。镜像任务在命令桥开启时只保留
     bridge 真正支持的 `claim`/`complete`/`fail`/`block`/`unblock`/`assign`/`cancel`。
+    镜像动作还要求调用者自己的 `task.write` 覆盖 tenant scope（bridge 的 `AuthorizeTaskWrite`）；
+    只有 team scope（如默认 `bot-operator`）或 supervisor 未接线时 `mirror.readOnly=true`、
+    `bridge=false`、`moves=[]`，不会出现点击后才 403 的动作。
   - `takeover`、`release.force`、`answer` 在当前 board v0.1.1/keel 没有后端端点，**不**谎报。
 - `archived` 来自镜像写入的 `board.archived=true` 标签（客户端不能写 `board.*`）；归档 Ticket
   导入为只读历史任务。`mirror{source,readOnly,bridge}` 来自 `source=superagent` +
-  `ticket` + `noSync` 标签与 `board_links`；命令桥未开启/未装配时 `readOnly=true`。
+  `ticket` + `noSync` 标签与 `board_links`；命令桥未开启/未装配或调用者缺 tenant
+  `task.write` 时 `readOnly=true`。supervisor 完全未装配时 bridge 仍会 attach
+  links/config/board 的只读半边：linked 线程的 reply/edit/delete 与任务动作返回 409
+  `mirror_read_only`，普通线程不受影响。
   `origin{platform,ref}` 对镜像任务指向 superagent ticket。`copies` 暂不提供：board v0.1.1
   的 message view 只有 `undelivered`，没有 task-level 成功副本列表，mount 层不伪造空数组。
 - `/v1/board/sync/entries|status` 保留 board 形状，合并 keel 的凭据状态

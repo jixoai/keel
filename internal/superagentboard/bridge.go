@@ -82,6 +82,20 @@ func (b *Bridge) Attach(links LinkStore, config ConfigReader, mirror *Mirror, co
 	b.board = board
 }
 
+// AttachGuard wires the read-only half of the bridge before a supervisor
+// exists. links/config/board are enough to keep every mirrored thread
+// read-only (reply/edit/delete guards) and to render TaskMirror as archived
+// history; a later Attach adds mirror/commands and turns the command path on.
+// Calling AttachGuard on a fully attached bridge only replaces those three
+// seams, which is harmless for a deployment that attaches twice.
+func (b *Bridge) AttachGuard(links LinkStore, config ConfigReader, board BoardPort) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.links = links
+	b.config = config
+	b.board = board
+}
+
 func (b *Bridge) snapshot() (LinkStore, ConfigReader, *Mirror, *SupervisorCommands, BoardPort) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -91,12 +105,13 @@ func (b *Bridge) snapshot() (LinkStore, ConfigReader, *Mirror, *SupervisorComman
 // TaskMirror reports the durable mirror fact of one board task to the keel
 // mount layer that renders TaskView.mirror/moves (boardintegration.MirrorFacts).
 // It returns mirrored=false for an ordinary board task; a mirrored task is
-// read-only unless the supervisor bridge is fully enabled (mirror + bridge +
-// the token secret), because every board action on it would otherwise be
-// refused with mirror_read_only.
+// read-only unless the supervisor bridge is configured (mirror + bridge + the
+// token secret). It deliberately does not check the caller's supervisor
+// task.write grant: that is once-per-request work, and the mount layer applies
+// CanBridge to every mirrored task in the response.
 func (b *Bridge) TaskMirror(ctx context.Context, tenantID uuid.UUID, taskID uint64) (bool, string, bool, bool, error) {
 	links, configReader, mirror, commands, board := b.snapshot()
-	if links == nil || configReader == nil || mirror == nil || commands == nil || board == nil {
+	if links == nil || configReader == nil || board == nil {
 		return false, "", true, false, nil
 	}
 	_, found, err := links.GetBoardLinkByTask(ctx, tenantID, BoardSource, store.BoardLinkTicket, taskID)
@@ -108,12 +123,46 @@ func (b *Bridge) TaskMirror(ctx context.Context, tenantID uuid.UUID, taskID uint
 	if !found {
 		return false, "", true, false, nil
 	}
+	if mirror == nil || commands == nil {
+		// The guard half is attached but the supervisor is not (or failed to
+		// attach). The linked task is archived history, not a writable board
+		// task; the action path answers mirror_read_only.
+		return true, BoardSource, true, false, nil
+	}
 	config, err := configReader.SuperagentConfig(ctx, tenantID)
 	if err != nil {
 		return true, BoardSource, true, false, err
 	}
 	enabled := config.Mirror && config.Bridge && mirror.Secret != nil
 	return true, BoardSource, !enabled, enabled, nil
+}
+
+// CanBridge reports whether this caller's mirrored-task actions can actually
+// reach the supervisor. It is the second half of TaskView.mirror: board config
+// alone is not enough, because the command bridge requires the caller's own
+// task.write at tenant scope (SupervisorCommands/Operator gate). A nil
+// operator, a disabled mirror/bridge, a missing secret or a failed
+// AuthorizeTaskWrite all mean false; the mount layer then renders the task
+// read-only instead of offering a move that would 403 after a supervisor call.
+func (b *Bridge) CanBridge(ctx context.Context, tenantID uuid.UUID) (bool, error) {
+	if b == nil {
+		return false, nil
+	}
+	_, configReader, mirror, commands, _ := b.snapshot()
+	if configReader == nil || mirror == nil || commands == nil || mirror.Secret == nil || b.Operator == nil {
+		return false, nil
+	}
+	config, err := configReader.SuperagentConfig(ctx, tenantID)
+	if err != nil {
+		return false, err
+	}
+	if !config.Mirror || !config.Bridge {
+		return false, nil
+	}
+	if err := b.Operator.AuthorizeTaskWrite(ctx, tenantID); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // ServeHTTP implements the board surface wrapper.
@@ -123,7 +172,7 @@ func (b *Bridge) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	links, configReader, mirror, commands, board := b.snapshot()
-	if links == nil || configReader == nil || mirror == nil || commands == nil || board == nil {
+	if links == nil || configReader == nil || board == nil {
 		b.Next.ServeHTTP(w, r)
 		return
 	}
@@ -141,12 +190,12 @@ func (b *Bridge) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		b.Next.ServeHTTP(w, r)
 		return
 	}
-	config, err := configReader.SuperagentConfig(r.Context(), tenantID)
-	if err != nil {
-		writeBridgeError(w, http.StatusServiceUnavailable, "config_unavailable", "the board.superagent configuration could not be read")
-		return
-	}
 	if action == "claim-ready" {
+		config, err := configReader.SuperagentConfig(r.Context(), tenantID)
+		if err != nil {
+			writeBridgeError(w, http.StatusServiceUnavailable, "config_unavailable", "the board.superagent configuration could not be read")
+			return
+		}
 		// claim-ready has no task id, so a channel that overlaps the mirror
 		// channel in either direction could select a mirrored task. The guard
 		// applies even when both switches are off: a link from an earlier
@@ -166,6 +215,18 @@ func (b *Bridge) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if !found {
 		b.Next.ServeHTTP(w, r)
+		return
+	}
+	if mirror == nil || commands == nil {
+		// The guard half is attached but the supervisor is not. A linked task
+		// stays read-only: never mutate the board projection without the
+		// supervisor that owns the ticket.
+		writeMirrorReadOnly(w, "the mirrored task is read-only while the supervisor is not wired")
+		return
+	}
+	config, err := configReader.SuperagentConfig(r.Context(), tenantID)
+	if err != nil {
+		writeBridgeError(w, http.StatusServiceUnavailable, "config_unavailable", "the board.superagent configuration could not be read")
 		return
 	}
 	if !config.Mirror || !config.Bridge || mirror.Secret == nil {

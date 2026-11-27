@@ -16,20 +16,27 @@ import (
 	"github.com/jixoai/keel/internal/superagentboard"
 )
 
-// newSuperagentBoardBridge builds the pass-through bridge the board handler is
-// mounted behind. It is attached to the supervisor after the agent runtime
-// exists; until then every request goes straight to the board.
-func newSuperagentBoardBridge(surface *boardintegration.Surface, log *slog.Logger) *superagentboard.Bridge {
+// newSuperagentBoardBridge builds the bridge the board handler is mounted
+// behind. links/config/board are attached immediately: mirrored threads must
+// stay read-only even when no supervisor exists (attachSuperagentBoard returns
+// early), while mirror/commands are added later by the real Attach once the
+// agent runtime exists.
+func newSuperagentBoardBridge(surface *boardintegration.Surface, st *store.Store, log *slog.Logger) *superagentboard.Bridge {
 	if surface == nil {
 		return nil
 	}
-	return &superagentboard.Bridge{
+	bridge := &superagentboard.Bridge{
 		Next:       surface,
 		Identity:   surface.Identity(),
 		Authorizer: surface.Authorizer(),
 		Operator:   superagentOperator{bridge: surface.Authorizer().Bridge},
 		Logger:     log,
 	}
+	if st != nil {
+		bridge.AttachGuard(st, superagentboard.StoreConfigReader{Store: st},
+			&superagentboard.LogBoard{Board: surface.Board()})
+	}
+	return bridge
 }
 
 // attachSuperagentBoard wires the mirror and command bridge. A deployment

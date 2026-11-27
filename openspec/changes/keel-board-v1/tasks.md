@@ -143,7 +143,9 @@
 > **依赖状态**：`moves`/`archived`/`mirror`/`origin`、`/v1/board/me` 与 sync 凭据合并已在
 > keel 挂载层实现并有真实 PG 测试（见 §14 注与 `internal/boardintegration/moves_pg_test.go`）；
 > UI 仅渲染服务端 `moves`，不按 `source=`/标签推断。`takeover`/`release.force`/`answer`
-> 没有后端端点，UI 不应提供。**SSE 事件按契约不改写，不带 `moves`**；UI 合并任务事件时
+> 没有后端端点，UI 不应提供。镜像动作额外要求调用者的 `task.write` 覆盖 tenant scope
+> （bridge 的 `AuthorizeTaskWrite`）；team scope（如 `bot-operator`）或 supervisor 未接线时
+> 服务端直接给 `mirror.readOnly=true`、`moves=[]`。**SSE 事件按契约不改写，不带 `moves`**；UI 合并任务事件时
 > 必须保留已缓存的 `moves`（或按任务事件重新读取），否则事件后的卡片会退回只读。
 > 15.1–15.7 仍由 UI lane 实现，本 lane 不勾选。
 

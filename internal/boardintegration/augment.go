@@ -42,6 +42,12 @@ import (
 // link is not evidence that the task is board-writable.
 type MirrorFacts interface {
 	TaskMirror(ctx context.Context, tenantID uuid.UUID, taskID uint64) (mirrored bool, source string, readOnly, bridge bool, err error)
+	// CanBridge reports whether this caller's mirrored actions can actually
+	// reach the supervisor: the bridge must be configured and the caller must
+	// hold task.write at tenant scope. It is checked once per response, not per
+	// task. An error means false: a failed probe must not offer an action that
+	// would be refused after a supervisor round-trip.
+	CanBridge(ctx context.Context, tenantID uuid.UUID) (bool, error)
 }
 
 const (
@@ -196,6 +202,11 @@ type taskAugmentSession struct {
 	abilities   map[string]ChannelAbilities
 	mirrors     map[uint64]mirrorFact
 	changed     bool
+	// bridgeChecked/bridgeAllowed cache the caller's supervisor task.write
+	// probe. The bridge is either usable for every mirrored task in this
+	// response or for none; one check per request is enough.
+	bridgeChecked bool
+	bridgeAllowed bool
 }
 
 func (s *Surface) augmentTasks(r *http.Request, value any) bool {
@@ -300,6 +311,14 @@ func (s *taskAugmentSession) augmentTask(task map[string]any, message map[string
 		task["archived"] = true
 	}
 	mirror := s.mirrorOf(task, message, labels)
+	if mirror.mirrored && !mirror.readOnly && !s.canBridge() {
+		// board's bridge config may be on while this caller cannot pass the
+		// supervisor's tenant task.write gate. Offering the moves would only
+		// produce a 403 after a supervisor round-trip, so the task is read-only
+		// for this caller.
+		mirror.readOnly = true
+		mirror.bridge = false
+	}
 	if mirror.mirrored {
 		task["mirror"] = map[string]any{
 			"source":   mirror.source,
@@ -348,6 +367,26 @@ func (s *taskAugmentSession) mirrorOf(_ map[string]any, message map[string]any, 
 	}
 	s.mirrors[taskID] = fact
 	return fact
+}
+
+// canBridge probes the supervisor task.write gate at most once per response.
+// An error, a nil fact source or a caller without tenant task.write all mean
+// false: mirrored tasks stay read-only rather than exposing a move that the
+// bridge would refuse.
+func (s *taskAugmentSession) canBridge() bool {
+	if s.bridgeChecked {
+		return s.bridgeAllowed
+	}
+	s.bridgeChecked = true
+	if s.mirrorFacts == nil {
+		return false
+	}
+	allowed, err := s.mirrorFacts.CanBridge(s.ctx, s.tenantID)
+	if err != nil {
+		return false
+	}
+	s.bridgeAllowed = allowed
+	return allowed
 }
 
 func (s *taskAugmentSession) abilitiesFor(channel string) ChannelAbilities {
