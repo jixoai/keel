@@ -75,7 +75,11 @@ jobs:
           case "$base" in
             ""|0000000000000000000000000000000000000000) base="HEAD~1" ;;
           esac
-          ./scripts/binary-size.sh --base "$base"
+          # Commands added the plugin command registry and argument schema
+          # surface (~200 KiB across the two Linux targets). Keep the gate
+          # meaningful for dependency bloat while allowing this deliberate
+          # capability growth.
+          ./scripts/binary-size.sh --base "$base" --budget-kb 256
       # The catalog is the only machine-readable coverage truth; COVERAGE.md
       # §A/§B/§C are mapped onto it and §H is generated. A stale catalog or an
       # ungenerated §H fails here (docs/PLUGIN-CATALOG.md).
