@@ -71,7 +71,7 @@ section "11.5/11.6 single task surface + frozen legacy board"
 block go test ./internal/superagentboard/ -run 'TestBoardCarriesTheTicketAnswerCompletionJourney' -count=1 -v
 
 section "Touched packages, real PostgreSQL + race"
-block env KEEL_TEST_DSN="$KEEL_TEST_DSN" go test ./internal/store/ ./internal/superagent/ ./internal/boardintegration/ ./internal/superagentboard/ ./cmd/keel/ -count=1
+block env KEEL_TEST_DSN="$KEEL_TEST_DSN" go test -p 1 ./internal/store/ ./internal/superagent/ ./internal/boardintegration/ ./internal/superagentboard/ ./cmd/keel/ -count=1
 block env KEEL_TEST_DSN="$KEEL_TEST_DSN" go test -race ./internal/superagentboard/ -count=1
 block env KEEL_TEST_DSN="$KEEL_TEST_DSN" go test -race ./internal/store/ -run 'TestBoardLinks' -count=1
 
