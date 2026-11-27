@@ -571,58 +571,98 @@ func newProjectionFactory(cfg Config) servicegraph.Factory {
 // --- telemetry -----------------------------------------------------------
 
 type telemetryService struct {
-	run      *agent.RunTelemetry
-	shutdown func(context.Context) error
+	run *agent.RunTelemetry
+	hub *telemetry.Hub
 }
 
 func (t *telemetryService) RunTelemetry() *agent.RunTelemetry                      { return t.run }
 func (t *telemetryService) Start(context.Context, *servicegraph.EffectScope) error { return nil }
 func (t *telemetryService) Stop(ctx context.Context) error {
-	if t.shutdown == nil {
+	if t.hub == nil {
 		return nil
 	}
 	shutdownCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	return t.shutdown(shutdownCtx)
+	// The exporter pipeline belongs to the plugin; Stop only flushes what is
+	// still queued. A plugin Stop that already ran is a no-op here.
+	return t.hub.Flush(shutdownCtx)
 }
 
+// TelemetryPluginConfig maps the tenant document's telemetry section onto the
+// plugin's configuration vocabulary. It is the one mapping the service factory,
+// the plugin factory and the approval preview share.
+func TelemetryPluginConfig(tenant host.TenantConfig) telemetry.Config {
+	var signals []string
+	if tenant.Telemetry.Signals != nil {
+		signals = make([]string, len(tenant.Telemetry.Signals))
+		copy(signals, tenant.Telemetry.Signals)
+	}
+	return telemetry.Config{
+		Adapter:     tenant.Telemetry.Adapter,
+		Endpoint:    tenant.Telemetry.Endpoint,
+		Headers:     cloneStringMap(tenant.Telemetry.Headers),
+		ServiceName: tenant.Telemetry.ServiceName,
+		Signals:     signals,
+		SampleRatio: tenant.Telemetry.SampleRatio,
+		LogRatio:    tenant.Telemetry.LogRatio,
+		LogMinLevel: tenant.Telemetry.LogMinLevel,
+	}
+}
+
+// newTelemetryFactory builds the generation's telemetry service over the
+// process hub. Adapter selection no longer creates an exporter: OTLP export is
+// owned by the optional keel.telemetry plugin, so an unenabled plugin never
+// produces a collector request. The hub's base adapter preserves the existing
+// in-process behavior for memory/none.
 func newTelemetryFactory(tenant host.TenantConfig, cfg Config) servicegraph.Factory {
-	return func(ctx context.Context, _ servicegraph.Resolved) (servicegraph.Instance, error) {
-		var runContext telemetry.Context
-		var shutdown func(context.Context) error
+	return func(_ context.Context, _ servicegraph.Resolved) (servicegraph.Instance, error) {
+		var base telemetry.Context = telemetry.NoopContext
 		switch strings.ToLower(strings.TrimSpace(tenant.Telemetry.Adapter)) {
-		case "", "memory":
-			runContext = telemetry.NewMemory()
-		case "none":
-			runContext = telemetry.NoopContext
-		case "otlp":
-			if strings.TrimSpace(tenant.Telemetry.Endpoint) == "" {
-				// OTLP without an endpoint must not create an exporter or a
-				// background goroutine; keep the in-process reference adapter.
-				runContext = telemetry.NewMemory()
-				break
-			}
-			adapter, err := telemetry.NewOTLP(ctx, telemetry.OTLPOptions{
-				Endpoint:    tenant.Telemetry.Endpoint,
-				Headers:     tenant.Telemetry.Headers,
-				ServiceName: tenant.Telemetry.ServiceName,
-			})
-			if err != nil {
-				return nil, err
-			}
-			runContext = adapter
-			shutdown = adapter.Shutdown
-		default:
-			return nil, fmt.Errorf("telemetry: unsupported adapter %q", tenant.Telemetry.Adapter)
+		case "", "none", "otlp":
+			// otlp: the exporter (when the plugin is enabled) records its own
+			// copies; keeping Memory would grow without bound for no store.
+			base = telemetry.NoopContext
+		case "memory":
+			base = telemetry.NewMemory()
 		}
+		hub := cfg.Telemetry.Hub
+		if hub == nil {
+			hub = telemetry.NewHub(telemetry.HubOptions{
+				TenantID: cfg.TenantID.String(),
+				Base:     base,
+				Logger:   cfg.Seams.Logger,
+			})
+		} else {
+			hub.SetBase(base)
+		}
+		// The configured projection is status/approval data; it never starts an
+		// exporter. The plugin overwrites it (same values) when it activates.
+		hub.Configure(telemetry.SummarizeConfig(withTenantID(TelemetryPluginConfig(tenant), cfg.TenantID.String())))
+		runContext := telemetry.Context(hub)
 		if cfg.Product.WrapTelemetry != nil {
 			runContext = cfg.Product.WrapTelemetry(runContext)
 		}
 		return &telemetryService{
-			run:      &agent.RunTelemetry{Context: runContext, Metrics: runContext.Metrics()},
-			shutdown: shutdown,
+			run: &agent.RunTelemetry{Context: runContext, Metrics: hub.Metrics()},
+			hub: hub,
 		}, nil
 	}
+}
+
+func withTenantID(config telemetry.Config, tenantID string) telemetry.Config {
+	config.TenantID = tenantID
+	return config
+}
+
+func cloneStringMap(values map[string]string) map[string]string {
+	if len(values) == 0 {
+		return nil
+	}
+	copied := make(map[string]string, len(values))
+	for key, value := range values {
+		copied[key] = value
+	}
+	return copied
 }
 
 // --- pi-loop -------------------------------------------------------------

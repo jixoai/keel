@@ -57,6 +57,8 @@ import (
 	"github.com/jixoai/keel/internal/supervisor"
 	"github.com/jixoai/keel/internal/telemetry"
 	"github.com/jixoai/keel/internal/toolsurface"
+
+	"github.com/google/uuid"
 )
 
 // Default collector timing. The retire timeout bounds how long an old
@@ -220,10 +222,23 @@ type ProductOptions struct {
 	ToolBackends toolsurface.Backends
 }
 
+// TelemetryOptions carries the process-level telemetry hub. The hosting process
+// creates one hub before Boot so a plugin can register an exporter after the
+// service graph exists, and the HTTP status surface reads the same object.
+type TelemetryOptions struct {
+	Hub *telemetry.Hub
+}
+
 // Config is the hosting-process input for Boot.
 type Config struct {
 	Seams  Seams
 	Tenant host.TenantConfig
+	// TenantID is the tenant the process serves. The telemetry hub is bound to
+	// it (one hub per tenant; multi-tenant processes must not share one).
+	TenantID uuid.UUID
+	// Telemetry is the process-level hub (nil creates one per graph generation;
+	// production wires the long-lived hub).
+	Telemetry TelemetryOptions
 	// Options is the loadout snapshot header and the process-level worker
 	// switch.
 	Options loadout.Options
@@ -538,6 +553,25 @@ func (r *Runtime) RefreshSkills() ([]skills.Warning, error) {
 		return nil, nil
 	}
 	return assembly.RefreshSkills()
+}
+
+// TelemetryHub returns the process-level PI telemetry hub of the current
+// generation (nil when the tenant document disables the telemetry service).
+// The plugin surface and GET /v1/telemetry/status read the same object, so a
+// late exporter registration is visible without a restart.
+func (r *Runtime) TelemetryHub() *telemetry.Hub {
+	if r == nil {
+		return nil
+	}
+	svc, ok := r.engine.Lookup(loadout.ServiceTelemetry)
+	if !ok {
+		return r.cfg.Telemetry.Hub
+	}
+	service, ok := svc.(*telemetryService)
+	if !ok {
+		return r.cfg.Telemetry.Hub
+	}
+	return service.hub
 }
 
 // Projection returns the read seam of the session-projection service (the

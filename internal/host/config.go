@@ -156,13 +156,25 @@ type CompactionConfig struct {
 	ManualCompact *bool `json:"manualCompact,omitempty"`
 }
 
-// TelemetryConfig selects the telemetry adapter ("memory", "prometheus", or
-// "otlp"; empty inherits the default).
+// TelemetryConfig selects the telemetry adapter ("memory", "none" or "otlp";
+// empty inherits the default). The OTLP exporter only runs while the
+// keel.telemetry plugin is enabled; the values here stay lazy otherwise.
 type TelemetryConfig struct {
 	Adapter     string            `json:"adapter,omitempty"` // memory | none | otlp
 	Endpoint    string            `json:"endpoint,omitempty"`
 	Headers     map[string]string `json:"headers,omitempty"`
 	ServiceName string            `json:"serviceName,omitempty"`
+	// Signals selects the exported signal families. Nil means the default
+	// (traces+metrics); an explicit empty list means none.
+	Signals []string `json:"signals,omitempty"`
+	// SampleRatio is the span head-sampling ratio 0..1 (nil means 1.0). Logs
+	// and metrics are not affected by trace sampling.
+	SampleRatio *float64 `json:"sampleRatio,omitempty"`
+	// LogRatio is the log sampling ratio 0..1 (nil means 1.0); error-level logs
+	// always pass.
+	LogRatio *float64 `json:"logRatio,omitempty"`
+	// LogMinLevel drops logs below this severity (debug|info|warn|error).
+	LogMinLevel string `json:"logMinLevel,omitempty"`
 }
 
 // ToolsConfig filters the assembled tool registry. Allow holds tool names and
@@ -511,7 +523,14 @@ func Merge(defaults, tenant TenantConfig) TenantConfig {
 			ManualCompact:    pickBool(defaults.Compaction.ManualCompact, tenant.Compaction.ManualCompact),
 		},
 		Telemetry: TelemetryConfig{
-			Adapter: pickString(defaults.Telemetry.Adapter, tenant.Telemetry.Adapter),
+			Adapter:     pickString(defaults.Telemetry.Adapter, tenant.Telemetry.Adapter),
+			Endpoint:    pickString(defaults.Telemetry.Endpoint, tenant.Telemetry.Endpoint),
+			ServiceName: pickString(defaults.Telemetry.ServiceName, tenant.Telemetry.ServiceName),
+			Headers:     pickStringMap(defaults.Telemetry.Headers, tenant.Telemetry.Headers),
+			Signals:     pickStrings(defaults.Telemetry.Signals, tenant.Telemetry.Signals),
+			SampleRatio: pickFloatPointer(defaults.Telemetry.SampleRatio, tenant.Telemetry.SampleRatio),
+			LogRatio:    pickFloatPointer(defaults.Telemetry.LogRatio, tenant.Telemetry.LogRatio),
+			LogMinLevel: pickString(defaults.Telemetry.LogMinLevel, tenant.Telemetry.LogMinLevel),
 		},
 		Tools: ToolsConfig{
 			Allow: cloneStrings(defaults.Tools.Allow),
@@ -667,6 +686,38 @@ func (c TenantConfig) Validate() error {
 		if parsed.Scheme != "http" && parsed.Scheme != "https" {
 			return problem("telemetry.endpoint scheme must be http or https")
 		}
+		if parsed.User != nil {
+			return problem("telemetry.endpoint must not carry userinfo")
+		}
+		if parsed.RawQuery != "" || parsed.Fragment != "" {
+			return problem("telemetry.endpoint must not carry a query or fragment")
+		}
+	}
+	for index, signal := range c.Telemetry.Signals {
+		switch signal {
+		case "traces", "metrics", "logs":
+		default:
+			return problem("telemetry.signals[%d] %q (want traces, metrics or logs)", index, signal)
+		}
+	}
+	if c.Telemetry.SampleRatio != nil && (*c.Telemetry.SampleRatio < 0 || *c.Telemetry.SampleRatio > 1) {
+		return problem("telemetry.sampleRatio must be between 0 and 1")
+	}
+	if c.Telemetry.LogRatio != nil && (*c.Telemetry.LogRatio < 0 || *c.Telemetry.LogRatio > 1) {
+		return problem("telemetry.logRatio must be between 0 and 1")
+	}
+	switch strings.ToLower(strings.TrimSpace(c.Telemetry.LogMinLevel)) {
+	case "", "debug", "info", "warn", "error":
+	default:
+		return problem("telemetry.logMinLevel %q (want debug, info, warn or error)", c.Telemetry.LogMinLevel)
+	}
+	for name, value := range c.Telemetry.Headers {
+		if strings.TrimSpace(name) == "" || strings.TrimSpace(value) == "" {
+			return problem("telemetry.headers[%q] must have a name and a secret:NAME reference", name)
+		}
+		if !strings.HasPrefix(strings.TrimSpace(value), "secret:") {
+			return problem("telemetry.headers[%q] must reference a secret (secret:NAME); plaintext values are refused", name)
+		}
 	}
 	for i, command := range c.Hooks.Commands {
 		if strings.TrimSpace(command.Event) == "" {
@@ -704,11 +755,6 @@ func (c TenantConfig) Validate() error {
 		if !toolPattern.MatchString(pattern) {
 			return problem(`tools.allow[%d] %q (want a tool name or trailing-* wildcard)`, i, pattern)
 		}
-	}
-	switch c.Telemetry.Adapter {
-	case "", "memory", "prometheus", "otlp":
-	default:
-		return problem("telemetry.adapter %q (want memory|prometheus|otlp)", c.Telemetry.Adapter)
 	}
 	if c.Quota.RunConcurrency < 0 {
 		return problem("quota.runConcurrency must be >= 0")
@@ -837,6 +883,32 @@ func cloneBool(value *bool) *bool {
 	}
 	copied := *value
 	return &copied
+}
+
+func pickFloatPointer(defaults, tenant *float64) *float64 {
+	if tenant != nil {
+		copied := *tenant
+		return &copied
+	}
+	if defaults != nil {
+		copied := *defaults
+		return &copied
+	}
+	return nil
+}
+
+func pickStrings(defaults, tenant []string) []string {
+	if tenant != nil {
+		return cloneStrings(tenant)
+	}
+	return cloneStrings(defaults)
+}
+
+func pickStringMap(defaults, tenant map[string]string) map[string]string {
+	if len(tenant) > 0 {
+		return cloneStringMap(tenant)
+	}
+	return cloneStringMap(defaults)
 }
 
 // pickBool takes the override when explicitly set (non-nil), otherwise the
