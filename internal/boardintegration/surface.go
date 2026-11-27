@@ -90,6 +90,11 @@ type Options struct {
 	// credential rotation can go unnoticed by this process's workers. Zero uses
 	// 5s; tests shorten it.
 	SyncMonitorInterval time.Duration
+	// SyncWorkerPollInterval is how long an inbound/outbound worker waits after
+	// an empty pass. Zero uses the board module's 1s default; tests shorten it
+	// so a disabled gate is observed within a full poll cycle rather than only
+	// after the process stops the worker.
+	SyncWorkerPollInterval time.Duration
 	// MaxWebhookBody, MaxFileBytes, MaxFiles, MaxLinks and FileFetchTimeout
 	// bound untrusted platform input. Zero keeps the board defaults.
 	MaxWebhookBody   int64
@@ -231,7 +236,7 @@ func New(ctx context.Context, opts Options) (*Surface, error) {
 			statuses:      make(map[boardsync.Key]CredentialStatus),
 		}
 	} else {
-		boot, err = loadSyncBoot(ctx, opts, syncEnabled, syncdb)
+		boot, err = loadSyncBoot(ctx, opts, syncEnabled, syncdb, board)
 		if err != nil {
 			if automationStore != nil {
 				automationStore.Close()
@@ -299,18 +304,20 @@ func New(ctx context.Context, opts Options) (*Surface, error) {
 		Store: opts.Store, Audit: opts.Access, Schema: opts.Schema, DSN: opts.DSN,
 		Logger: opts.Logger,
 	}
-	manager := newSyncManager(boot, opts.Store, syncdb, auditStore, deploymentTenant, opts.SecretBox, opts.Logger, metricsRegistry, flags, opts.SyncMonitorInterval, opts.ProviderHosts)
+	manager := newSyncManager(boot, opts.Store, syncdb, auditStore, board, deploymentTenant, opts.SecretBox, opts.Logger, metricsRegistry, flags, opts.SyncMonitorInterval, opts.ProviderHosts)
 	manager.externalRegistry = opts.SyncRegistry != nil
+	manager.workerPoll = opts.SyncWorkerPollInterval
 	manager.Attach(server, deploymentTenant.String())
 	runCtx, cancel := context.WithCancel(context.Background())
 	admin := &syncAdmin{manager: manager, bridge: opts.Access, tenant: deploymentTenant, next: server, logger: opts.Logger}
 	handler := &handler{
-		next:      server,
-		board:     board,
-		owners:    owners,
-		sse:       &sseHandler{next: server, heartbeat: opts.Heartbeat, lifetime: opts.StreamLifetime, logger: opts.Logger},
-		syncAdmin: admin,
-		logger:    opts.Logger,
+		next:       server,
+		board:      board,
+		owners:     owners,
+		authorizer: authorizer,
+		sse:        &sseHandler{next: server, heartbeat: opts.Heartbeat, lifetime: opts.StreamLifetime, logger: opts.Logger},
+		syncAdmin:  admin,
+		logger:     opts.Logger,
 	}
 	surface := &Surface{
 		handler:       handler,
@@ -440,6 +447,44 @@ func (s *Surface) checkBoardFlags(w http.ResponseWriter, r *http.Request) bool {
 		return false
 	}
 	return true
+}
+
+// CheckEnabled applies the tenant board switches before a handler mounted
+// outside the Surface. The superagent bridge sits in front of the board and
+// handles mirrored-task actions before the Surface sees them; wrapping it in
+// Gate makes every /v1/board route (including the bridge's reply/mutation
+// guards) answer 404 board_disabled before a supervisor call.
+func (s *Surface) CheckEnabled(w http.ResponseWriter, r *http.Request) bool {
+	return s.checkBoardFlags(w, r)
+}
+
+// Gate wraps next with CheckEnabled. A nil next is a NotFound handler.
+func (s *Surface) Gate(next http.Handler) http.Handler {
+	if next == nil {
+		next = http.NotFoundHandler()
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !s.CheckEnabled(w, r) {
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// BoardEnabled reports the deployment tenant's board.enabled switch for
+// background writers (the superagent mirror). A flag read failure is false:
+// a disabled or unknown board must not receive mirror events.
+func (s *Surface) BoardEnabled(ctx context.Context) bool {
+	if s == nil || s.flags == nil || s.webhookTenant == uuid.Nil {
+		return true
+	}
+	flags, err := s.flags.Get(ctx, s.webhookTenant)
+	if err != nil {
+		s.logger.Warn("board tenant flags read failed; board writers stay paused",
+			"tenant", s.webhookTenant, "error", err)
+		return false
+	}
+	return flags.Enabled
 }
 
 // Webhook serves the platform webhook namespace. It is mounted outside the

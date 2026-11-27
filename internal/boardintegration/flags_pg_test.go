@@ -96,3 +96,46 @@ func newWebhookServer(env *testEnv) *httptest.Server {
 func containsCode(body []byte, code string) bool {
 	return json.Valid(body) && strings.Contains(string(body), `"code":"`+code+`"`)
 }
+
+// TestSurfaceGateStopsWrappedHandler covers the P1-1 gate composition used by
+// keel serve: the superagent bridge is wrapped with Surface.Gate, so a disabled
+// tenant answers 404 board_disabled before the bridge sees the request and the
+// background writer (BoardEnabled) stops too.
+func TestSurfaceGateStopsWrappedHandler(t *testing.T) {
+	env := newTestEnv(t, nil)
+	env.setBoardFlags(t, `{"board":{"enabled":false}}`)
+	ctx := context.Background()
+
+	calls := 0
+	wrapped := env.surf.Gate(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls++
+		w.WriteHeader(http.StatusTeapot)
+	}))
+	principal, ok := env.principal("alice")
+	if !ok {
+		t.Fatal("no principal")
+	}
+	request := httptest.NewRequest(http.MethodPost, "/v1/board/tasks/1/claim", strings.NewReader(`{}`))
+	request = request.WithContext(withTestPrincipal(request.Context(), principal))
+	recorder := httptest.NewRecorder()
+	wrapped.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusNotFound || !strings.Contains(recorder.Body.String(), "board_disabled") {
+		t.Fatalf("disabled gate = %d %s", recorder.Code, recorder.Body.String())
+	}
+	if calls != 0 {
+		t.Fatal("a disabled tenant reached the wrapped bridge")
+	}
+	if env.surf.BoardEnabled(ctx) {
+		t.Fatal("BoardEnabled is true while board.enabled=false")
+	}
+
+	env.setBoardFlags(t, `{"board":{"enabled":true,"sync":{"enabled":true}}}`)
+	recorder = httptest.NewRecorder()
+	wrapped.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusTeapot || calls != 1 {
+		t.Fatalf("enabled gate = %d calls=%d", recorder.Code, calls)
+	}
+	if !env.surf.BoardEnabled(ctx) {
+		t.Fatal("BoardEnabled is false while board.enabled=true")
+	}
+}

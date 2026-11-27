@@ -27,12 +27,13 @@ import (
 // creator as channel owner after a successful create, and the SSE keepalive /
 // lifetime policy.
 type handler struct {
-	next      http.Handler
-	board     *boardlog.Board
-	owners    *ChannelOwners
-	sse       *sseHandler
-	syncAdmin *syncAdmin
-	logger    *slog.Logger
+	next       http.Handler
+	board      *boardlog.Board
+	owners     *ChannelOwners
+	authorizer *Authorizer
+	sse        *sseHandler
+	syncAdmin  *syncAdmin
+	logger     *slog.Logger
 }
 
 func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -81,7 +82,7 @@ func (h *handler) createChannel(w http.ResponseWriter, r *http.Request) {
 
 	recorder := &statusWriter{ResponseWriter: w}
 	h.next.ServeHTTP(recorder, r.WithContext(withChannelCreate(r.Context())))
-	if recorder.status != http.StatusCreated || request.Path == "" {
+	if request.Path == "" {
 		return
 	}
 	principal, ok := EdgePrincipal(r)
@@ -90,9 +91,28 @@ func (h *handler) createChannel(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
 	defer cancel()
-	if err := h.owners.GrantOwner(ctx, principal.TenantID.String(), request.Path, principal.AccountID, principal.AccountID); err != nil {
-		h.logger.Warn("board channel owner relation was not recorded",
-			"channel", request.Path, "err", err)
+	switch recorder.status {
+	case http.StatusCreated:
+		if err := h.owners.GrantOwner(ctx, principal.TenantID.String(), request.Path, principal.AccountID, principal.AccountID); err != nil {
+			h.logger.Warn("board channel owner relation was not recorded",
+				"channel", request.Path, "err", err)
+		}
+	case http.StatusOK:
+		// The channel already existed (created=false). A tenant board.manage
+		// holder may adopt a channel that has no relation tuple at all; this is
+		// the explicit repair path for a channel created before the ACL existed.
+		// Any existing relation leaves the channel untouched.
+		if h.authorizer == nil || !h.authorizer.tenantManager(ctx, principal) {
+			return
+		}
+		claimed, err := h.owners.ClaimOrphan(ctx, principal.TenantID.String(), request.Path, principal.AccountID)
+		if err != nil {
+			h.logger.Warn("board orphan channel adoption failed", "channel", request.Path, "err", err)
+			return
+		}
+		if claimed {
+			h.logger.Info("board orphan channel adopted by a tenant manager", "channel", request.Path)
+		}
 	}
 }
 
@@ -250,6 +270,46 @@ func (c *ChannelOwners) GrantOwner(ctx context.Context, tenant string, channel s
 		}
 	}
 	return nil
+}
+
+// ClaimOrphan records accountID as owner of a channel that has no relation
+// tuple at all. It is the explicit adoption path for a channel created before
+// the ACL existed: it never changes a channel that has any relation, so it
+// cannot be used to take over an owned channel. It reports whether this call
+// wrote the relation.
+func (c *ChannelOwners) ClaimOrphan(ctx context.Context, tenant string, channel string, accountID uuid.UUID) (bool, error) {
+	if c == nil || c.Store == nil {
+		return false, errors.New("boardintegration: channel owners are not wired")
+	}
+	tenantID, err := uuid.Parse(strings.TrimSpace(tenant))
+	if err != nil || tenantID == uuid.Nil {
+		return false, errors.New("boardintegration: invalid tenant for channel owner")
+	}
+	channel = strings.Trim(strings.TrimSpace(channel), "/")
+	if err := protocol.ValidateChannel(channel); err != nil {
+		return false, err
+	}
+	if accountID == uuid.Nil {
+		return false, errors.New("boardintegration: channel owner account is required")
+	}
+	created, err := c.Store.PutResourceRelationIfOrphan(ctx, store.ResourceRelation{
+		TenantID:     tenantID,
+		ResourceType: BoardChannelResourceType,
+		ResourceID:   channel,
+		Relation:     store.RelationOwner,
+		SubjectType:  store.RelationSubjectAccount,
+		SubjectID:    accountID.String(),
+		CreatedBy:    accountID,
+	})
+	if err != nil || !created {
+		return created, err
+	}
+	if c.Audit != nil {
+		if auditErr := c.Audit.AuditRelation(ctx, tenantID, accountID, "grant", BoardChannelResourceType, channel, store.RelationOwner, store.RelationSubjectAccount, accountID.String()); auditErr != nil {
+			c.Logger.Warn("board orphan channel adoption is unaudited", "channel", channel, "err", auditErr)
+		}
+	}
+	return true, nil
 }
 
 // Run is the repair loop. It scans every channel.created event and the earliest

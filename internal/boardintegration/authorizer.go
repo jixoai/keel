@@ -256,6 +256,25 @@ func (a *Authorizer) authorizePrincipal(ctx context.Context, tenantID uuid.UUID,
 	return nil
 }
 
+// tenantManager reports whether the caller holds board.manage at tenant or all
+// scope. It is the adoption gate for a relation-free channel: board.manage
+// administers metadata but never bypasses an existing content relation.
+func (a *Authorizer) tenantManager(ctx context.Context, principal auth.Principal) bool {
+	if a == nil || a.Bridge == nil || principal.TenantID == uuid.Nil {
+		return false
+	}
+	effectivePrincipal, err := a.Bridge.Principal(ctx, principal.TenantID)
+	if err != nil {
+		return false
+	}
+	effective, err := a.Bridge.Effective(ctx, effectivePrincipal)
+	if err != nil {
+		return false
+	}
+	scope, held := effective.ScopeOf(access.KeyBoardManage)
+	return held && (scope == access.ScopeTenant || scope == access.ScopeAll)
+}
+
 // AuthorizeAnywhere implements server.AnywhereAuthorizer: a board write action
 // that names no channel yet (an attachment upload) is allowed when the caller
 // may write somewhere. The channel relation is checked when the message names

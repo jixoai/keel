@@ -35,6 +35,10 @@ func (e *testEnv) addSlackEntry(t *testing.T, enabled bool) {
 
 func (e *testEnv) addSlackEntryWithAPI(t *testing.T, enabled bool, apiBase string) {
 	t.Helper()
+	// P0-1: the entry's route must name a provisioned channel at boot. Tests
+	// seed the same event/owner the HTTP create would produce; the E2E proves
+	// the real POST /v1/board/channels path.
+	e.seedChannel("support", e.alice)
 	e.grant(e.tenant, e.alice.record.ID, access.KeySecretWrite)
 	ctx := context.Background()
 	if _, err := e.st.PutTenantSecret(ctx, e.tenant, "SLACK_SIGNING", []byte(testSlackSigning), e.box); err != nil {
@@ -189,9 +193,7 @@ func TestSyncDisableEnableKeepsWorkersAlive(t *testing.T) {
 		e.addSlackEntry(t, true)
 	})
 	server := env.server()
-	if resp := env.do(t, server, http.MethodPost, "/v1/board/channels", "alice", map[string]any{"path": "support"}); resp.status != 201 {
-		t.Fatalf("create channel: %d %s", resp.status, resp.body)
-	}
+	env.ensureChannel(t, server, "support")
 	if resp := env.do(t, server, http.MethodPatch, "/v1/board/sync/entries/slack", "alice", map[string]any{"enabled": false}); resp.status != 200 {
 		t.Fatalf("disable: %d %s", resp.status, resp.body)
 	}
@@ -215,13 +217,13 @@ func TestSyncTenantFlagsPauseAndResumeWorkers(t *testing.T) {
 		e.addSlackEntry(t, true)
 	})
 	server := env.server()
-	if resp := env.do(t, server, http.MethodPost, "/v1/board/channels", "alice", map[string]any{"path": "support"}); resp.status != 201 {
-		t.Fatalf("create channel: %d %s", resp.status, resp.body)
-	}
+	env.ensureChannel(t, server, "support")
 	env.setBoardFlags(t, `{"board":{"enabled":true,"sync":{"enabled":false}}}`)
 	time.Sleep(150 * time.Millisecond) // let the monitor pause the workers
 	env.pushSlackInbox(t, "while sync is off", "1700000600.000001")
-	env.assertNoBoardMessage(t, server, "support", "while sync is off", 300*time.Millisecond)
+	// More than one worker poll cycle: this fails if both the monitor stop and
+	// the durable lease gate are removed (the old 300ms window did not).
+	env.assertNoBoardMessage(t, server, "support", "while sync is off", 500*time.Millisecond)
 
 	env.setBoardFlags(t, `{"board":{"enabled":true,"sync":{"enabled":true}}}`)
 	time.Sleep(150 * time.Millisecond)
@@ -239,9 +241,7 @@ func TestSyncCredentialRotationPausesWorkers(t *testing.T) {
 		e.addSlackEntry(t, true)
 	})
 	server := env.server()
-	if resp := env.do(t, server, http.MethodPost, "/v1/board/channels", "alice", map[string]any{"path": "support"}); resp.status != 201 {
-		t.Fatalf("create channel: %d %s", resp.status, resp.body)
-	}
+	env.ensureChannel(t, server, "support")
 	if _, err := env.st.PutTenantSecret(context.Background(), env.tenant, "SLACK_SIGNING", []byte("rotated-signing-value"), env.box); err != nil {
 		t.Fatalf("rotate secret: %v", err)
 	}
@@ -282,9 +282,7 @@ func TestSyncCredentialDeletionPausesWorkers(t *testing.T) {
 		e.addSlackEntry(t, true)
 	})
 	server := env.server()
-	if resp := env.do(t, server, http.MethodPost, "/v1/board/channels", "alice", map[string]any{"path": "support"}); resp.status != 201 {
-		t.Fatalf("create channel: %d %s", resp.status, resp.body)
-	}
+	env.ensureChannel(t, server, "support")
 	if _, err := env.st.DeleteTenantSecret(context.Background(), env.tenant, "SLACK_SIGNING"); err != nil {
 		t.Fatalf("delete secret: %v", err)
 	}
@@ -353,9 +351,7 @@ func TestSyncDisabledEntryBlocksAttachAndSource(t *testing.T) {
 		e.addSlackEntry(t, true)
 	})
 	server := env.server()
-	if resp := env.do(t, server, http.MethodPost, "/v1/board/channels", "alice", map[string]any{"path": "support"}); resp.status != 201 {
-		t.Fatalf("create channel: %d %s", resp.status, resp.body)
-	}
+	env.ensureChannel(t, server, "support")
 	posted := env.do(t, server, http.MethodPost, "/v1/board/messages", "alice", map[string]any{"channel": "support", "text": "attach target"})
 	var body struct {
 		Message syncMessageView `json:"message"`
@@ -390,9 +386,7 @@ func TestSyncBootDisabledEnableRequiresRestart(t *testing.T) {
 		e.addSlackEntry(t, false)
 	})
 	server := env.server()
-	if resp := env.do(t, server, http.MethodPost, "/v1/board/channels", "alice", map[string]any{"path": "support"}); resp.status != 201 {
-		t.Fatalf("create channel: %d %s", resp.status, resp.body)
-	}
+	env.ensureChannel(t, server, "support")
 	resp := env.do(t, server, http.MethodPatch, "/v1/board/sync/entries/slack", "alice", map[string]any{"enabled": true})
 	var result SyncEntryResult
 	env.decode(t, resp, &result)
@@ -411,9 +405,7 @@ func TestSyncDualInstanceDisableIsDurable(t *testing.T) {
 		e.addSlackEntry(t, true)
 	})
 	server := env.server()
-	if resp := env.do(t, server, http.MethodPost, "/v1/board/channels", "alice", map[string]any{"path": "support"}); resp.status != 201 {
-		t.Fatalf("create channel: %d %s", resp.status, resp.body)
-	}
+	env.ensureChannel(t, server, "support")
 	second, err := New(context.Background(), env.options)
 	if err != nil {
 		t.Fatalf("second surface: %v", err)
@@ -451,9 +443,7 @@ func TestSyncDisabledEntryBlocksRootStart(t *testing.T) {
 		e.addSlackEntryWithAPI(t, true, fake.URL)
 	})
 	server := env.server()
-	if resp := env.do(t, server, http.MethodPost, "/v1/board/channels", "alice", map[string]any{"path": "support"}); resp.status != 201 {
-		t.Fatalf("create channel: %d %s", resp.status, resp.body)
-	}
+	env.ensureChannel(t, server, "support")
 	if resp := env.do(t, server, http.MethodPatch, "/v1/board/sync/entries/slack", "alice", map[string]any{"enabled": false}); resp.status != 200 {
 		t.Fatalf("disable: %d %s", resp.status, resp.body)
 	}
@@ -513,9 +503,7 @@ func TestSyncDisabledEntryBlocksOutbound(t *testing.T) {
 		e.addSlackEntryWithAPI(t, true, fake.URL)
 	})
 	server := env.server()
-	if resp := env.do(t, server, http.MethodPost, "/v1/board/channels", "alice", map[string]any{"path": "support"}); resp.status != 201 {
-		t.Fatalf("create channel: %d %s", resp.status, resp.body)
-	}
+	env.ensureChannel(t, server, "support")
 	env.pushSlackInbox(t, "root before disable", "1700001000.000001")
 	root, err := env.waitSyncMessage(t, server, "support", "root before disable")
 	if err != nil {
@@ -557,5 +545,67 @@ func TestSyncLogsCarryNoSecretValue(t *testing.T) {
 	env.do(t, server, http.MethodGet, "/v1/board/sync/credentials", "alice", nil)
 	if strings.Contains(logs.String(), value) {
 		t.Fatalf("logs leaked a secret: %s", logs.String())
+	}
+}
+
+// TestSyncInboundWorkerGateBlocksLeases isolates the durable worker gate from
+// the monitor: the board sync row is disabled directly while the process's
+// worker keeps running, and the worker must not lease/import across several
+// poll cycles.
+func TestSyncInboundWorkerGateBlocksLeases(t *testing.T) {
+	env := newTestEnvBefore(t, func(options *Options) {
+		options.SyncMonitorInterval = time.Hour
+	}, func(e *testEnv) {
+		e.addSlackEntry(t, true)
+	})
+	server := env.server()
+	env.ensureChannel(t, server, "support")
+	if _, err := env.surf.SyncStore().SetEntryEnabled(context.Background(), env.tenant.String(), "slack", false); err != nil {
+		t.Fatalf("disable board sync row: %v", err)
+	}
+	env.pushSlackInbox(t, "blocked by the worker lease gate", "1700003000.000001")
+	env.assertNoBoardMessage(t, server, "support", "blocked by the worker lease gate", 500*time.Millisecond)
+}
+
+// TestSyncOutboundWorkerGateBlocksLeases is the outbound half: a reply queued
+// while the durable row is disabled is never posted, even though the worker is
+// still polling.
+func TestSyncOutboundWorkerGateBlocksLeases(t *testing.T) {
+	var requests atomic.Int64
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		w.Header().Set("content-type", "application/json")
+		switch r.URL.Path {
+		case "/auth.test":
+			_, _ = w.Write([]byte(`{"ok":true,"user_id":"U_APP","response_metadata":{"scopes":["chat:write","chat:write.customize"]}}`))
+		case "/chat.postMessage":
+			_, _ = w.Write([]byte(`{"ok":true,"channel":"C0SUPPORT","ts":"1700000001.000100"}`))
+		default:
+			_, _ = w.Write([]byte(`{"ok":true}`))
+		}
+	}))
+	defer fake.Close()
+	env := newTestEnvBefore(t, func(options *Options) {
+		options.SyncMonitorInterval = time.Hour
+	}, func(e *testEnv) {
+		e.addSlackEntryWithAPI(t, true, fake.URL)
+	})
+	server := env.server()
+	env.ensureChannel(t, server, "support")
+	env.pushSlackInbox(t, "root before the gate closes", "1700003001.000001")
+	root, err := env.waitSyncMessage(t, server, "support", "root before the gate closes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := env.surf.SyncStore().SetEntryEnabled(context.Background(), env.tenant.String(), "slack", false); err != nil {
+		t.Fatalf("disable board sync row: %v", err)
+	}
+	requests.Store(0)
+	if resp := env.do(t, server, http.MethodPost, "/v1/board/messages", "alice", map[string]any{"re": root.ID, "text": "must not post"}); resp.status != 201 {
+		t.Fatalf("reply: %d %s", resp.status, resp.body)
+	}
+	time.Sleep(500 * time.Millisecond)
+	if got := requests.Load(); got != 0 {
+		t.Fatalf("disabled outbound worker made %d platform requests", got)
 	}
 }

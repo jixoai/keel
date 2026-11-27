@@ -23,6 +23,8 @@ import (
 	keelstore "github.com/jixoai/keel/internal/store"
 
 	boardaudit "github.com/jixoai/keel-board/audit"
+	boardlog "github.com/jixoai/keel-board/log"
+	boardstore "github.com/jixoai/keel-board/store"
 	boardsync "github.com/jixoai/keel-board/sync"
 )
 
@@ -149,6 +151,9 @@ func newTestEnvBefore(t *testing.T, mutate func(*Options), before func(*testEnv)
 		BlobDir:             t.TempDir(),
 		DisableAutomation:   true,
 		SyncMonitorInterval: 20 * time.Millisecond,
+		// Short worker poll: a durable/flag gate must be observed inside a full
+		// poll cycle even when the monitor's Stop did not run.
+		SyncWorkerPollInterval: 50 * time.Millisecond,
 	}
 	if mutate != nil {
 		mutate(&options)
@@ -173,6 +178,35 @@ func newTestEnvBefore(t *testing.T, mutate func(*Options), before func(*testEnv)
 		_, _ = st.Pool().Exec(dropCtx, "DROP SCHEMA IF EXISTS "+quoteIdent(env.schema)+" CASCADE")
 	})
 	return env
+}
+
+// seedChannel provisions a board channel before Surface.New: it writes the
+// same channel.created event the HTTP API would emit and the owner relation the
+// adapter writes after a 201. Sync entries configured before boot need this;
+// the E2E path uses the real API instead.
+func (e *testEnv) seedChannel(channel string, owner kAccount) {
+	e.t.Helper()
+	ctx := context.Background()
+	if err := ensureSchema(ctx, e.dsn, e.schema); err != nil {
+		e.t.Fatalf("seed channel schema: %v", err)
+	}
+	boardStore, err := boardstore.OpenPostgres(ctx, boardstore.PostgresOptions{DSN: e.dsn, SearchPath: e.schema})
+	if err != nil {
+		e.t.Fatalf("seed channel store: %v", err)
+	}
+	defer boardStore.Close()
+	board := boardlog.New(boardlog.Options{Store: boardStore})
+	actorID := AccountActorID(owner.record.ID)
+	if err := board.Update(ctx, e.tenant.String(), boardlog.UpdateOptions{}, func(tx *boardlog.Tx) error {
+		tx.Emit(boardlog.EventChannelCreated, &boardlog.ChannelCreatedPayload{
+			Channel: channel,
+			By:      boardlog.Author{Actor: actorID, Principal: actorID},
+		})
+		return nil
+	}); err != nil {
+		e.t.Fatalf("seed channel event: %v", err)
+	}
+	e.relation(e.tenant, channel, keelstore.RelationOwner, owner.record.ID)
 }
 
 func (e *testEnv) account(tenant uuid.UUID, username, kind string) kAccount {
@@ -307,6 +341,17 @@ func (e *testEnv) server() *httptest.Server {
 type response struct {
 	status int
 	body   []byte
+}
+
+// ensureChannel creates a channel or accepts an idempotent 200 for a channel a
+// fixture already seeded before boot.
+func (e *testEnv) ensureChannel(t *testing.T, server *httptest.Server, channel string) response {
+	t.Helper()
+	resp := e.do(t, server, http.MethodPost, "/v1/board/channels", "alice", map[string]any{"path": channel})
+	if resp.status != http.StatusCreated && resp.status != http.StatusOK {
+		t.Fatalf("create channel %s: %d %s", channel, resp.status, resp.body)
+	}
+	return resp
 }
 
 func (e *testEnv) do(t *testing.T, server *httptest.Server, method, path, who string, body any) response {

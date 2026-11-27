@@ -102,18 +102,23 @@ func (p SyncEntryPatch) secretRef() (*map[string]string, error) {
 // SyncEntryView is the management projection. It never carries a credential
 // value: credential is a status, and secretRef names are configuration.
 type SyncEntryView struct {
-	Key             string            `json:"key"`
-	Platform        string            `json:"platform"`
-	Enabled         bool              `json:"enabled"`
-	SecretRef       map[string]string `json:"secretRef"`
-	Settings        json.RawMessage   `json:"settings,omitempty"`
-	Routes          map[string]string `json:"routes,omitempty"`
-	StartChannels   []string          `json:"startChannels,omitempty"`
-	Revision        int64             `json:"revision"`
-	Credential      CredentialStatus  `json:"credential"`
-	RestartRequired bool              `json:"restartRequired,omitempty"`
-	CreatedAt       string            `json:"createdAt,omitempty"`
-	UpdatedAt       string            `json:"updatedAt,omitempty"`
+	Key           string            `json:"key"`
+	Platform      string            `json:"platform"`
+	Enabled       bool              `json:"enabled"`
+	SecretRef     map[string]string `json:"secretRef"`
+	Settings      json.RawMessage   `json:"settings,omitempty"`
+	Routes        map[string]string `json:"routes,omitempty"`
+	StartChannels []string          `json:"startChannels,omitempty"`
+	Revision      int64             `json:"revision"`
+	Credential    CredentialStatus  `json:"credential"`
+	// RoutesReady reports whether every static route target exists and carries
+	// a board_channel relation. RouteIssue is the actionable reason when it
+	// doesn't; neither field exposes a credential.
+	RoutesReady     bool   `json:"routesReady"`
+	RouteIssue      string `json:"routeIssue,omitempty"`
+	RestartRequired bool   `json:"restartRequired,omitempty"`
+	CreatedAt       string `json:"createdAt,omitempty"`
+	UpdatedAt       string `json:"updatedAt,omitempty"`
 }
 
 // SyncEntryResult is one create/update response. restartRequired is true when

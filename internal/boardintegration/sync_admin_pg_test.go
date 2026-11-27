@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -52,6 +54,10 @@ func TestSyncEntryAdminRoutes(t *testing.T) {
 	// Alice now holds both keys.
 	env.grant(env.tenant, env.alice.record.ID, access.KeySecretWrite)
 
+	// The static route needs a pre-created, relation-bearing channel (P0-1).
+	if resp := env.do(t, server, http.MethodPost, "/v1/board/channels", "alice", map[string]any{"path": "support"}); resp.status != 201 {
+		t.Fatalf("create channel: %d %s", resp.status, resp.body)
+	}
 	// A plaintext credential field is rejected by the strict decoder before
 	// anything is stored.
 	leaky := map[string]any{"key": "slack2", "platform": "slack", "secret": secretValue}
@@ -90,8 +96,13 @@ func TestSyncEntryAdminRoutes(t *testing.T) {
 		t.Fatalf("stored entry = %+v", config)
 	}
 	boardEntry, found, err := env.surf.SyncStore().Entry(ctx, env.tenant.String(), boardsync.Key("slack"))
-	if err != nil || !found || !boardEntry.Enabled {
+	if err != nil || !found {
 		t.Fatalf("board sync entry = %+v/%v/%v", boardEntry, found, err)
+	}
+	// A newly created entry is pending adoption: this process never loaded it,
+	// so the board sync row stays disabled until a restart.
+	if boardEntry.Enabled {
+		t.Fatal("a pending entry was enabled in the board sync store")
 	}
 	if resp := env.do(t, server, http.MethodPost, "/v1/board/sync/entries", "alice", body); resp.status != 409 {
 		t.Fatalf("duplicate create = %d %s", resp.status, resp.body)
@@ -198,5 +209,28 @@ func TestSyncEntryAdminRoutes(t *testing.T) {
 		if strings.Contains(string(detail), secretValue) || strings.Contains(string(detail), "new-signing") {
 			t.Fatalf("audit detail leaked a credential: %s", detail)
 		}
+	}
+}
+
+// TestSyncEntryStorageFailureIs503 covers P2: a store/DB failure on the entry
+// path is a 503, while validation errors stay 400.
+func TestSyncEntryStorageFailureIs503(t *testing.T) {
+	env := newTestEnv(t, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, _, _, err := env.surf.manager.Update(ctx, "slack", SyncEntryPatch{})
+	if !errors.Is(err, errSyncEntryUnavailable) {
+		t.Fatalf("canceled store read = %v, want errSyncEntryUnavailable", err)
+	}
+	recorder := httptest.NewRecorder()
+	writeEntryError(recorder, err)
+	if recorder.Code != http.StatusServiceUnavailable {
+		t.Fatalf("storage failure status = %d %s", recorder.Code, recorder.Body.String())
+	}
+
+	recorder = httptest.NewRecorder()
+	writeEntryError(recorder, errors.New("key: bad entry"))
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("validation status = %d %s", recorder.Code, recorder.Body.String())
 	}
 }

@@ -31,6 +31,7 @@ import (
 	"github.com/jixoai/keel/internal/store"
 
 	boardaudit "github.com/jixoai/keel-board/audit"
+	boardlog "github.com/jixoai/keel-board/log"
 	boardmetrics "github.com/jixoai/keel-board/metrics"
 	boardserver "github.com/jixoai/keel-board/server"
 	boardsync "github.com/jixoai/keel-board/sync"
@@ -42,6 +43,24 @@ import (
 // errSyncEntryUnavailable marks a storage failure on the entry path. The HTTP
 // layer answers 503, never 400 or a success.
 var errSyncEntryUnavailable = errors.New("boardintegration: sync entry storage is unavailable")
+
+// syncEntryStoreError distinguishes an entry storage failure (503) from a
+// validation failure (400). The domain sentinels keep their own HTTP mapping.
+func syncEntryStoreError(err error) error {
+	if err == nil {
+		return nil
+	}
+	switch {
+	case errors.Is(err, store.ErrBoardSyncEntryMissing),
+		errors.Is(err, store.ErrBoardSyncEntryExists),
+		errors.Is(err, store.ErrBoardSyncEntryConflict):
+		return err
+	}
+	if errors.Is(err, errSyncEntryUnavailable) {
+		return err
+	}
+	return fmt.Errorf("%w: %v", errSyncEntryUnavailable, err)
+}
 
 const (
 	auditKindEntryCreated   = "sync.entry.created"
@@ -84,6 +103,7 @@ type syncManager struct {
 	store    *store.Store
 	syncdb   *boardsyncstore.Postgres
 	audit    *boardaudit.Postgres
+	board    *boardlog.Board
 	tenant   uuid.UUID
 	resolver SecretResolver
 	logger   *slog.Logger
@@ -97,6 +117,7 @@ type syncManager struct {
 
 	flags         BoardFlagReader
 	monitor       time.Duration
+	workerPoll    time.Duration
 	providerHosts []string
 	// externalRegistry means an embedding test/deployment supplied its own
 	// registry; keel has no durable entry document to compare, so the durable
@@ -116,7 +137,7 @@ type syncManager struct {
 // loadSyncBoot reads the tenant's entries and builds the registry. It never
 // fails the board surface for one bad entry: a bad entry is logged (without a
 // credential) and disabled.
-func loadSyncBoot(ctx context.Context, opts Options, syncEnabled bool, syncdb *boardsyncstore.Postgres) (*syncBoot, error) {
+func loadSyncBoot(ctx context.Context, opts Options, syncEnabled bool, syncdb *boardsyncstore.Postgres, board *boardlog.Board) (*syncBoot, error) {
 	boot := &syncBoot{
 		registry:      boardsync.NewRegistry(),
 		startChannels: make(map[boardserver.SyncKey][]string),
@@ -147,6 +168,21 @@ func loadSyncBoot(ctx context.Context, opts Options, syncEnabled bool, syncdb *b
 			opts.Logger.Warn("board sync entry endpoint is not allowed",
 				"tenant", tenant, "key", record.Key, "error", err)
 			boot.statuses[boardsync.Key(record.Key)] = CredentialInvalid
+			_ = upsertSyncStoreEntry(ctx, syncdb, tenant, record.Key, record.Platform, false, opts.Logger)
+			continue
+		}
+		// P0-1: a historical entry that names an absent or relation-free board
+		// channel must not start a worker. It stays disabled (fail closed) and
+		// the log names the exact create call; one bad entry never crashes the
+		// process. The relation is checked at boot because a platform actor can
+		// never be mapped to a keel Account by the owner reconciler.
+		if report, aclErr := checkRouteACL(ctx, opts.Store, board, opts.TenantID, record.Routes); aclErr != nil || !report.Ready() {
+			issue := report.Error()
+			if issue == "" && aclErr != nil {
+				issue = "the route ACL could not be read"
+			}
+			opts.Logger.Warn("board sync entry route is not provisioned; the entry stays disabled",
+				"tenant", tenant, "key", record.Key, "reason", issue)
 			_ = upsertSyncStoreEntry(ctx, syncdb, tenant, record.Key, record.Platform, false, opts.Logger)
 			continue
 		}
@@ -272,7 +308,7 @@ func sanitizedBuildError(err error) string {
 
 // newSyncManager wraps a boot result with the process store, audit, tenant
 // switches and gauge.
-func newSyncManager(boot *syncBoot, st *store.Store, syncdb *boardsyncstore.Postgres, audit *boardaudit.Postgres, tenant uuid.UUID, box *store.SecretBox, logger *slog.Logger, metricsRegistry *boardmetrics.Registry, flags BoardFlagReader, monitor time.Duration, providerHosts []string) *syncManager {
+func newSyncManager(boot *syncBoot, st *store.Store, syncdb *boardsyncstore.Postgres, audit *boardaudit.Postgres, board *boardlog.Board, tenant uuid.UUID, box *store.SecretBox, logger *slog.Logger, metricsRegistry *boardmetrics.Registry, flags BoardFlagReader, monitor time.Duration, providerHosts []string) *syncManager {
 	if boot == nil {
 		boot = &syncBoot{
 			registry:      boardsync.NewRegistry(),
@@ -290,7 +326,7 @@ func newSyncManager(boot *syncBoot, st *store.Store, syncdb *boardsyncstore.Post
 		monitor = defaultSyncMonitor
 	}
 	manager := &syncManager{
-		store: st, syncdb: syncdb, audit: audit,
+		store: st, syncdb: syncdb, audit: audit, board: board,
 		tenant: tenant, logger: logger, flags: flags, monitor: monitor,
 		providerHosts: append([]string(nil), providerHosts...),
 		resolver:      SecretResolver{Store: st, Box: box},
@@ -337,7 +373,7 @@ func (m *syncManager) Attach(server *boardserver.Server, tenant string) {
 	if server == nil {
 		return
 	}
-	m.pool = newSyncWorkerPool(server, &gatedSyncStore{Store: m.syncdb, allowed: m.workerAllowed}, m.registry, tenant, m.logger)
+	m.pool = newSyncWorkerPool(server, &gatedSyncStore{Store: m.syncdb, allowed: m.workerAllowed}, m.registry, tenant, m.workerPoll, m.logger)
 }
 
 // Start prepares the sync cursors, then starts the board subscription, the
@@ -462,6 +498,15 @@ func (m *syncManager) workerAllowed(ctx context.Context, key boardsync.Key) bool
 			return false
 		}
 	}
+	// The board sync row is the durable enabled view every replica shares. A
+	// row disabled directly (structural change, credential rotation, operator
+	// action) must stop leases without waiting for the monitor's Stop.
+	if m.syncdb != nil {
+		entry, found, err := m.syncdb.Entry(ctx, m.tenant.String(), key)
+		if err != nil || !found || !entry.Enabled {
+			return false
+		}
+	}
 	state, _, err := m.connectionState(ctx, key)
 	return err == nil && state == connectionOK
 }
@@ -542,7 +587,7 @@ func (m *syncManager) List(ctx context.Context) ([]SyncEntryView, error) {
 	for _, record := range records {
 		status := m.credentialStatus(ctx, record)
 		m.gauge.set(boardsync.Key(record.Key), status)
-		view := viewOf(record, status)
+		view := m.decorateView(ctx, record, viewOf(record, status))
 		if state, _, err := m.connectionState(ctx, boardsync.Key(record.Key)); err == nil && record.Enabled {
 			view.RestartRequired = state == connectionPending
 		}
@@ -559,7 +604,7 @@ func (m *syncManager) Get(ctx context.Context, key string) (SyncEntryView, bool,
 	}
 	status := m.credentialStatus(ctx, record)
 	m.gauge.set(boardsync.Key(record.Key), status)
-	view := viewOf(record, status)
+	view := m.decorateView(ctx, record, viewOf(record, status))
 	if state, _, err := m.connectionState(ctx, boardsync.Key(record.Key)); err == nil && record.Enabled {
 		view.RestartRequired = state == connectionPending
 	}
@@ -593,9 +638,13 @@ func (m *syncManager) Create(ctx context.Context, input SyncEntryInput) (SyncEnt
 	}
 	created, err := m.store.CreateBoardSyncEntry(ctx, record)
 	if err != nil {
-		return SyncEntryView{}, false, err
+		return SyncEntryView{}, false, syncEntryStoreError(err)
 	}
-	if err := upsertSyncStoreEntry(ctx, m.syncdb, m.tenant.String(), created.Key, effectiveStoredPlatform(created), created.Enabled, m.logger); err != nil {
+	// P2 (hardening): a new entry is pending adoption. This process has not
+	// loaded its provider, so the board sync store row must stay disabled until
+	// a restart loads and aligns it; an enabled row here would advertise a
+	// connection no process serves.
+	if err := upsertSyncStoreEntry(ctx, m.syncdb, m.tenant.String(), created.Key, effectiveStoredPlatform(created), false, m.logger); err != nil {
 		// The keel row and the board's local row are two stores. Do not leave a
 		// configuration row whose board half was never written: remove the keel
 		// row and answer 503 so the operator can retry.
@@ -608,7 +657,7 @@ func (m *syncManager) Create(ctx context.Context, input SyncEntryInput) (SyncEnt
 	status := m.credentialStatus(ctx, created)
 	m.gauge.set(boardsync.Key(created.Key), status)
 	m.auditEntry(ctx, auditKindEntryCreated, created, status)
-	return viewOf(created, status), true, nil
+	return m.decorateView(ctx, created, viewOf(created, status)), true, nil
 }
 
 // Update applies a PATCH. A structural change is persisted but disabled at the
@@ -620,7 +669,7 @@ func (m *syncManager) Update(ctx context.Context, key string, patch SyncEntryPat
 	defer m.stateMu.Unlock()
 	current, found, err := m.store.GetBoardSyncEntry(ctx, m.tenant, key)
 	if err != nil {
-		return SyncEntryView{}, false, false, err
+		return SyncEntryView{}, false, false, syncEntryStoreError(err)
 	}
 	if !found {
 		return SyncEntryView{}, false, false, store.ErrBoardSyncEntryMissing
@@ -651,6 +700,12 @@ func (m *syncManager) Update(ctx context.Context, key string, patch SyncEntryPat
 	if err := validateSyncEntry(&next); err != nil {
 		return SyncEntryView{}, false, false, err
 	}
+	// Every update (routes, rotation, or a plain enable) re-checks the route
+	// target: a revoked channel relation must fail closed instead of reviving a
+	// connection whose imports nobody can read.
+	if err := m.validateRouteACL(ctx, m.tenant, next.Routes); err != nil {
+		return SyncEntryView{}, false, false, err
+	}
 	if !sameEntryDocument(current, next) {
 		return m.structuralUpdate(ctx, current, next)
 	}
@@ -668,7 +723,7 @@ func (m *syncManager) Update(ctx context.Context, key string, patch SyncEntryPat
 		}
 		updated, err := m.store.SetBoardSyncEntryEnabled(ctx, m.tenant, key, false)
 		if err != nil {
-			return SyncEntryView{}, false, false, err
+			return SyncEntryView{}, false, false, syncEntryStoreError(err)
 		}
 		if m.pool != nil {
 			m.pool.Stop(boardsync.Key(key))
@@ -688,7 +743,7 @@ func (m *syncManager) Update(ctx context.Context, key string, patch SyncEntryPat
 		var err error
 		updated, err = m.store.SetBoardSyncEntryEnabled(ctx, m.tenant, key, true)
 		if err != nil {
-			return SyncEntryView{}, false, false, err
+			return SyncEntryView{}, false, false, syncEntryStoreError(err)
 		}
 	}
 	status := m.credentialStatus(ctx, updated)
@@ -728,7 +783,7 @@ func (m *syncManager) structuralUpdate(ctx context.Context, current, next store.
 	}
 	updated, err := m.store.UpdateBoardSyncEntry(ctx, next, current.Revision)
 	if err != nil {
-		return SyncEntryView{}, false, false, err
+		return SyncEntryView{}, false, false, syncEntryStoreError(err)
 	}
 	if m.pool != nil {
 		m.pool.Stop(boardsync.Key(updated.Key))
@@ -752,6 +807,12 @@ func (m *syncManager) validateProviderConfig(ctx context.Context, record store.B
 	if err := validateProviderEndpoints(record, m.providerHosts); err != nil {
 		return err
 	}
+	// P0-1: the static route must name an existing, relation-bearing board
+	// channel before the entry is stored. A platform actor has no keel Account,
+	// so there is no repair path after the fact.
+	if err := m.validateRouteACL(ctx, m.tenant, record.Routes); err != nil {
+		return err
+	}
 	provider, report, err := buildSyncProvider(ctx, m.tenant, record, m.resolver)
 	if err != nil {
 		if report.Status == CredentialMissing {
@@ -765,6 +826,25 @@ func (m *syncManager) validateProviderConfig(ctx context.Context, record store.B
 		return errors.New("entry configuration: no provider was built")
 	}
 	return nil
+}
+
+// routeStatus resolves the view fields for an entry's static routes. A read
+// failure is a not-ready status, never a silent "ready".
+func (m *syncManager) routeStatus(ctx context.Context, record store.BoardSyncEntryRecord) (bool, string) {
+	report, err := checkRouteACL(ctx, m.store, m.board, m.tenant, record.Routes)
+	if err != nil || !report.Ready() {
+		issue := report.Error()
+		if issue == "" {
+			issue = "the route ACL could not be read"
+		}
+		return false, issue
+	}
+	return true, ""
+}
+
+func (m *syncManager) decorateView(ctx context.Context, record store.BoardSyncEntryRecord, view SyncEntryView) SyncEntryView {
+	view.RoutesReady, view.RouteIssue = m.routeStatus(ctx, record)
+	return view
 }
 
 // credentialStatus resolves the entry's credential roles now, without

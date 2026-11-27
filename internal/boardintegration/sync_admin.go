@@ -255,6 +255,8 @@ type credentialEntryView struct {
 	Platform        string           `json:"platform"`
 	Enabled         bool             `json:"enabled"`
 	Credential      CredentialStatus `json:"credential"`
+	RoutesReady     bool             `json:"routesReady"`
+	RouteIssue      string           `json:"routeIssue,omitempty"`
 	RestartRequired bool             `json:"restartRequired,omitempty"`
 }
 
@@ -272,7 +274,8 @@ func (a *syncAdmin) credentials(w http.ResponseWriter, r *http.Request, tenantID
 	for _, entry := range entries {
 		views = append(views, credentialEntryView{
 			Key: entry.Key, Platform: entry.Platform, Enabled: entry.Enabled,
-			Credential: entry.Credential, RestartRequired: entry.RestartRequired,
+			Credential: entry.Credential, RoutesReady: entry.RoutesReady,
+			RouteIssue: entry.RouteIssue, RestartRequired: entry.RestartRequired,
 		})
 	}
 	writeAdminJSON(w, http.StatusOK, map[string]any{"entries": views})

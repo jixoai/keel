@@ -114,6 +114,63 @@ func (s *Store) DeleteResourceRelation(ctx context.Context, tenantID uuid.UUID, 
 	return identityRowsResult("delete resource relation", tag.RowsAffected())
 }
 
+// PutResourceRelationIfOrphan writes one relation only when the resource has no
+// relation tuples at all. It is the explicit adoption path for a resource whose
+// ACL was never written (keel-board-v1 Phase 1 P0-1): a board.manage holder may
+// claim a relation-free board channel, but can never take over a channel that
+// already has any relation.
+//
+// The emptiness check and the insert share one transaction under a
+// transaction-scoped advisory lock keyed by (tenant, type, id), so two
+// concurrent adopters cannot both become owner. created=false means the
+// resource already had relations; the caller keeps whatever ACL it had.
+func (s *Store) PutResourceRelationIfOrphan(ctx context.Context, relation ResourceRelation) (bool, error) {
+	relation.ResourceType = strings.TrimSpace(relation.ResourceType)
+	relation.ResourceID = strings.TrimSpace(relation.ResourceID)
+	relation.Relation = strings.TrimSpace(relation.Relation)
+	relation.SubjectType = strings.TrimSpace(relation.SubjectType)
+	relation.SubjectID = strings.TrimSpace(relation.SubjectID)
+	if err := validateResourceRelation(relation); err != nil {
+		return false, err
+	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return false, identityWriteError("begin orphan relation", err)
+	}
+	defer func() { _ = tx.Rollback(context.Background()) }()
+	lockKey := relation.TenantID.String() + "|" + relation.ResourceType + "|" + relation.ResourceID
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, lockKey); err != nil {
+		return false, identityWriteError("lock orphan relation", err)
+	}
+	var exists bool
+	if err := tx.QueryRow(ctx,
+		`SELECT EXISTS (
+		   SELECT 1 FROM resource_relations
+		    WHERE tenant_id = $1 AND resource_type = $2 AND resource_id = $3)`,
+		relation.TenantID, relation.ResourceType, relation.ResourceID).Scan(&exists); err != nil {
+		return false, identityWriteError("check orphan relation", err)
+	}
+	if exists {
+		return false, nil
+	}
+	tag, err := tx.Exec(ctx,
+		`INSERT INTO resource_relations
+		    (tenant_id, resource_type, resource_id, relation, subject_type, subject_id, created_by)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7)
+		 ON CONFLICT (tenant_id, resource_type, resource_id, relation, subject_type, subject_id)
+		 DO NOTHING`,
+		relation.TenantID, relation.ResourceType, relation.ResourceID, relation.Relation,
+		relation.SubjectType, relation.SubjectID, relation.CreatedBy)
+	if err != nil {
+		return false, identityWriteError("adopt orphan resource", err)
+	}
+	created := tag.RowsAffected() == 1
+	if err := tx.Commit(ctx); err != nil {
+		return false, identityWriteError("commit orphan relation", err)
+	}
+	return created, nil
+}
+
 // HasResourceRelation reports whether one exact tuple exists.
 func (s *Store) HasResourceRelation(ctx context.Context, tenantID uuid.UUID, resourceType, resourceID, relation, subjectType, subjectID string) (bool, error) {
 	candidate := ResourceRelation{

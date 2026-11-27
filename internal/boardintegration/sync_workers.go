@@ -31,6 +31,9 @@ type syncWorkerPool struct {
 	registry *boardsync.Registry
 	tenant   string
 	logger   *slog.Logger
+	// poll is the inbound/outbound worker's idle wait. Zero keeps the board
+	// module's 1s default.
+	poll time.Duration
 	// actionTimeout bounds one automation action; it must be shorter than the
 	// automation store's lease.
 	actionTimeout time.Duration
@@ -44,10 +47,10 @@ type workerHandle struct {
 	done   chan struct{}
 }
 
-func newSyncWorkerPool(server *boardserver.Server, store boardsyncstore.Store, registry *boardsync.Registry, tenant string, logger *slog.Logger) *syncWorkerPool {
+func newSyncWorkerPool(server *boardserver.Server, store boardsyncstore.Store, registry *boardsync.Registry, tenant string, poll time.Duration, logger *slog.Logger) *syncWorkerPool {
 	return &syncWorkerPool{
 		server: server, store: store, registry: registry, tenant: tenant,
-		logger: logger, actionTimeout: 2 * time.Minute,
+		logger: logger, poll: poll, actionTimeout: 2 * time.Minute,
 		handles: make(map[boardsync.Key]*workerHandle),
 	}
 }
@@ -71,7 +74,7 @@ func (p *syncWorkerPool) Start(ctx context.Context, key boardsync.Key) error {
 	inbound, err := boardsyncstore.NewInboundWorker(boardsyncstore.InboundWorkerConfig{
 		Store: p.store, Registry: p.registry, Runner: runner,
 		Tenant: p.tenant, Key: key, Owner: "keel-inbound-" + string(key),
-		Hooks: hooks, Logger: p.logger,
+		PollInterval: p.poll, Hooks: hooks, Logger: p.logger,
 	})
 	if err != nil {
 		return err
@@ -80,7 +83,7 @@ func (p *syncWorkerPool) Start(ctx context.Context, key boardsync.Key) error {
 		Store: p.store, Registry: p.registry, Runner: runner, Host: host,
 		Tenant: p.tenant, Keys: []boardsync.Key{key},
 		Files: boardsync.FileLoader(host.LoadFiles), Owner: "keel-outbound-" + string(key),
-		Hooks: hooks, Logger: p.logger,
+		PollInterval: p.poll, Hooks: hooks, Logger: p.logger,
 	})
 	if err != nil {
 		return err
