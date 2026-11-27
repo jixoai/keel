@@ -171,4 +171,5 @@
   > 证据：`evidence/phase-2-independent-review.md`（独立只读子代理；第一轮 P0=0/P1=2，修复后复核又发现 1 个新 P1，最终 `P0/P1=0, 16.3 PASS`）。
 - [x] 16.4 更新 docs/README/NOTICE：keel-board module+commit+Apache-2.0、上游归属、sync 配置与运行手册；确认未复制 vercel/board 代码、未新增运行时。（README/NOTICE 记录 `keel-board v0.1.1` / `70b503f…` / Apache-2.0 与 vercel/board 上游 pin；RUNBOOK 含 route/secret/moves/CanBridge/guard-only/验收命令；`cmd/runtime` 无新增依赖）
 - [x] 16.5 破坏性变更收口：在 CHANGELOG/README/升级说明明确“旧 superagent 看板已删除，board 为唯一任务面”，确认仓库内无旧看板路由/数据源/兼容开关残留。（README/RUNBOOK 已写“已删除（破坏性变更）”；`/superagent*` 为 404 历史页；harnessapi 仅保留 worker report/ask；旧脚本归档在 `scripts/archive/retired-superagent/`；residue-grep 无活跃调用）
-- [ ] 16.6 `openspec validate keel-board-v1 --strict`、`openspec archive keel-board-v1 --yes`、`openspec validate --specs --strict`；提交实现与 openspec（不 push，除非 Owner 要求），汇报 commit hash 与剩余 Owner 决策。
+- [x] 16.6 `openspec validate keel-board-v1 --strict`、`openspec archive keel-board-v1 --yes`、`openspec validate --specs --strict`；提交实现与 openspec（不 push，除非 Owner 要求），汇报 commit hash 与剩余 Owner 决策。
+  > 结果：change 已归档为 `2026-11-28-keel-board-v1`；`agent-board` spec strict PASS。全仓 `openspec validate --specs --strict` 仍因 28 个**既有** capability 的 placeholder Purpose 失败（非本 change 引入；本次只新建 `agent-board`，其 spec 已单独 strict PASS），已在 `DISPOSITION.md` 记录为仓库级文档债，不冒充全仓通过。

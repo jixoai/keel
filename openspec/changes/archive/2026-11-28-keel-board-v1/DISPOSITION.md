@@ -59,6 +59,11 @@ them without a client rule.
    very short screens remain incremental polish.
 10. Provider error detail is reduced to product categories in the UI; the raw
     provider sentence remains in server logs for operators.
+11. Repo-wide `openspec validate --specs --strict` still reports 28 pre-existing
+    capabilities whose Purpose section is a placeholder. This change's new
+    `agent-board` spec passes strict validation on its own; replacing the other
+    placeholders belongs to a separate documentation pass, not a client
+    fallback or a hidden exception.
 
 ## Verification
 
