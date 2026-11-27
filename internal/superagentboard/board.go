@@ -127,17 +127,19 @@ func WorkerActor(botID string) ActorInfo {
 
 // TaskInfo is the adapter's read of one board task.
 type TaskInfo struct {
-	ID         uint64
-	Channel    string
-	Owner      string
-	State      string
-	Epoch      uint64
-	ClaimActor string
-	ClaimUntil time.Time
-	For        string
-	Labels     map[string]string
-	Text       string
-	Replies    int
+	ID            uint64
+	Channel       string
+	Owner         string
+	State         string
+	Epoch         uint64
+	ClaimActor    string
+	ClaimUntil    time.Time
+	BlockedKind   string
+	BlockedReason string
+	For           string
+	Labels        map[string]string
+	Text          string
+	Replies       int
 }
 
 // TicketThread is the root write of one Ticket.
@@ -845,6 +847,12 @@ func taskInfoOf(message *boardlog.Message, snapshot *boardlog.Snapshot) TaskInfo
 	if message.Task.Claim != nil {
 		info.ClaimActor = message.Task.Claim.Actor
 		info.ClaimUntil = message.Task.Claim.Until
+	}
+	if message.Task.Blocked != nil {
+		info.BlockedReason = message.Task.Blocked.Reason
+		if message.Task.Blocked.Kind != nil {
+			info.BlockedKind = *message.Task.Blocked.Kind
+		}
 	}
 	if message.Task.For != nil {
 		info.For = *message.Task.For

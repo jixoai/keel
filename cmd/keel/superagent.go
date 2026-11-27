@@ -328,6 +328,16 @@ type superagentOperator struct {
 var _ superagent.OperatorAuthorizer = superagentOperator{}
 
 func (o superagentOperator) AuthorizeOperator(ctx context.Context, tenantID, ticketID uuid.UUID, actor, action string) error {
+	if err := o.AuthorizeTaskWrite(ctx, tenantID); err != nil {
+		return fmt.Errorf("%w: operator action %s needs task.write at tenant scope on ticket %s", err, action, ticketID)
+	}
+	return nil
+}
+
+// AuthorizeTaskWrite is the same tenant-scope task.write check every mirrored
+// board command passes before the supervisor runs. Keeping it in one method
+// means the bridge and the orchestrator's operator paths cannot drift.
+func (o superagentOperator) AuthorizeTaskWrite(ctx context.Context, tenantID uuid.UUID) error {
 	if o.bridge == nil {
 		return superagent.ErrOperatorUnavailable
 	}
@@ -341,7 +351,7 @@ func (o superagentOperator) AuthorizeOperator(ctx context.Context, tenantID, tic
 	}
 	scope, held := effective.ScopeOf(access.KeyTaskWrite)
 	if !held || !scope.Covers(access.ScopeTenant) {
-		return fmt.Errorf("%w: operator action %s needs task.write at tenant scope on ticket %s", collab.ErrPermissionDenied, action, ticketID)
+		return fmt.Errorf("%w: task.write at tenant scope is required", collab.ErrPermissionDenied)
 	}
 	return nil
 }

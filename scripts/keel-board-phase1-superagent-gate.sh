@@ -12,7 +12,7 @@ set -euo pipefail
 
 repo_root="$(git rev-parse --show-toplevel)"
 evidence="$repo_root/openspec/changes/keel-board-v1/evidence/phase-1-superagent.md"
-base_ref="${KEEL_BOARD_BASE:-a088058}"
+base_ref="${KEEL_BOARD_BASE:-896b766}"
 if [ -z "${KEEL_TEST_DSN:-}" ]; then
   echo "keel-board-phase1-superagent-gate: KEEL_TEST_DSN is required for the real-PostgreSQL suites" >&2
   exit 2
@@ -61,9 +61,9 @@ block go test ./internal/superagentboard/ -run 'TestEnsureTicketThread|TestClaim
 block env KEEL_TEST_DSN="$KEEL_TEST_DSN" go test ./internal/superagentboard/ -run 'TestPGBoard' -count=1 -v
 
 section "11.3 Attention->blocked/unblock, report->reply, idempotency"
-block go test ./internal/superagentboard/ -run 'TestMirrorAttention|TestMirrorReport|TestMirrorSkips|TestMirrorGitHub|TestMirrorNeverRewrites|TestMirrorLogs' -count=1 -v
+block go test ./internal/superagentboard/ -run 'TestMirrorAttention|TestMirrorReport|TestMirrorSkips|TestMirrorGitHub|TestMirrorNeverRewrites|TestMirrorLogs|TestMirrorTimedOut|TestMirrorCompleted|TestMirrorCounts|TestMirrorReopens' -count=1 -v
 
-section "11.4 command bridge: all actions, rejection, timeout"
+section "11.4 command bridge: all actions, rejection, timeout, task.write gate"
 block go test ./internal/superagentboard/ -run 'TestBridge|TestStaleLink' -count=1 -v
 
 section "11.5/11.6 single task surface + frozen legacy board"
@@ -73,6 +73,9 @@ section "Touched packages, real PostgreSQL + race"
 block env KEEL_TEST_DSN="$KEEL_TEST_DSN" go test ./internal/store/ ./internal/superagent/ ./internal/boardintegration/ ./internal/superagentboard/ ./cmd/keel/ -count=1
 block env KEEL_TEST_DSN="$KEEL_TEST_DSN" go test -race ./internal/superagentboard/ -count=1
 block env KEEL_TEST_DSN="$KEEL_TEST_DSN" go test -race ./internal/store/ -run 'TestBoardLinks' -count=1
+
+section "Mutation gate (4 targeted mutations must be red)"
+block scripts/keel-board-phase1-superagent-mutations.sh
 
 section "Format and vet"
 block sh -c 'test -z "$(gofmt -l internal cmd)" || { gofmt -l internal cmd; exit 1; }'

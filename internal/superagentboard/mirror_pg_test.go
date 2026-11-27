@@ -202,3 +202,102 @@ func TestPGBoardClaimEpochPersistsAndIsRecoverable(t *testing.T) {
 
 // silence the unused-import guard when a build tags variant removes pgx.
 var _ = pgx.ErrNoRows
+
+func TestPGBoardMirrorNeverWritesAnyCollabTable(t *testing.T) {
+	st, pg := newPGBoard(t)
+	ctx := context.Background()
+	tenant := uuid.New()
+	if err := st.CreateTenant(ctx, tenant, "snapshot-"+tenant.String()[:8]); err != nil {
+		t.Fatalf("create tenant: %v", err)
+	}
+	ticket := pgSeedTicket(t, st, tenant, "evt-snapshot")
+	assignment, err := st.CreateAssignment(ctx, collab.Assignment{
+		ID: uuid.New(), TenantID: tenant, WorkItemID: ticket.ID,
+		ModeID: superagent.DefaultModeID, BotID: "researcher", SessionID: uuid.New(),
+		Status: collab.AssignmentActive, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
+	})
+	if err != nil {
+		t.Fatalf("assignment: %v", err)
+	}
+	if _, err := st.CreateAttention(ctx, collab.Attention{
+		ID: uuid.New(), TenantID: tenant, WorkItemID: ticket.ID,
+		AssignmentID: assignment.ID, ModeID: superagent.DefaultModeID,
+		SessionID: assignment.SessionID, Kind: collab.AttentionClarify, Prompt: "Which?",
+		Route: collab.AttentionRouteChannel, Status: collab.AttentionOpen,
+		CreatedAt: time.Now().UTC(), Deadline: time.Now().UTC().Add(time.Hour),
+	}); err != nil {
+		t.Fatalf("attention: %v", err)
+	}
+	report, created, err := st.ClaimWorkerReport(ctx, superagent.WorkerReport{
+		ID: uuid.New(), TenantID: tenant, WorkItemID: ticket.ID, AssignmentID: assignment.ID,
+		SessionID: assignment.SessionID, RequestID: "report-1", State: superagent.ReportProgress,
+		Summary: "halfway", CreatedAt: time.Now().UTC(),
+	})
+	if err != nil || !created {
+		t.Fatalf("report claim: created=%v err=%v", created, err)
+	}
+	if _, err := st.MarkWorkerReportAudited(ctx, tenant, report.ID, time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.MarkWorkerReportApplied(ctx, tenant, report.ID, time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	item, err := st.GetWorkItem(ctx, tenant, ticket.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	item.Status = collab.WorkItemBlocked
+	if _, err := st.UpdateWorkItem(ctx, item); err != nil {
+		t.Fatal(err)
+	}
+
+	before := pgCollabSnapshot(t, st, tenant)
+	clock := newTestClock()
+	mirror := newMirrorForTest(t, tenant, st, pg.log, st,
+		SuperagentConfig{Mirror: true, Bridge: true, Channel: "superagent"}, clock)
+	if _, err := mirror.SyncOnce(ctx); err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+	after := pgCollabSnapshot(t, st, tenant)
+	if before != after {
+		t.Fatalf("the mirror rewrote a collab table\nbefore:\n%s\nafter:\n%s", before, after)
+	}
+	if head := boardHead(t, pg.log, tenant); head == 0 {
+		t.Fatal("the mirror wrote no board events")
+	}
+}
+
+func pgCollabSnapshot(t *testing.T, st *keelstore.Store, tenant uuid.UUID) string {
+	t.Helper()
+	tables := []string{
+		"collab_work_items", "collab_assignments", "collab_worker_reports",
+		"collab_attentions", "collab_links", "collab_subscriptions",
+		"collab_source_cursors", "collab_source_events", "collab_outbox",
+		"collab_session_index",
+	}
+	var builder strings.Builder
+	for _, table := range tables {
+		rows, err := st.Pool().Query(context.Background(),
+			"SELECT row_to_json(t)::text FROM "+table+" t WHERE tenant_id = $1 ORDER BY 1", tenant)
+		if err != nil {
+			t.Fatalf("snapshot %s: %v", table, err)
+		}
+		for rows.Next() {
+			var row string
+			if err := rows.Scan(&row); err != nil {
+				rows.Close()
+				t.Fatalf("scan %s: %v", table, err)
+			}
+			builder.WriteString(table)
+			builder.WriteString(":")
+			builder.WriteString(row)
+			builder.WriteString("\n")
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			t.Fatalf("rows %s: %v", table, err)
+		}
+		rows.Close()
+	}
+	return builder.String()
+}

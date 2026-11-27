@@ -39,6 +39,15 @@ type TaskAuthorizer interface {
 	AuthorizeAnywhere(ctx context.Context, tenant string, actor protocol.Actor, permission protocol.Permission) error
 }
 
+// TaskWriteGate is the supervisor's operator boundary for a board action. The
+// bridge asks it before calling any supervisor command, so complete/fail/block
+// cannot bypass the task.write requirement the supervisor applies to its own
+// operator routes. It is action-agnostic; the supervisor still checks the
+// ticket-specific operator permission for claim/assign/cancel.
+type TaskWriteGate interface {
+	AuthorizeTaskWrite(ctx context.Context, tenantID uuid.UUID) error
+}
+
 // Bridge wraps the board HTTP surface and routes actions on mirrored tasks to
 // the supervisor first. It is the 1b command bridge; it never owns a second
 // board mutation path for mirrored tasks.
@@ -46,6 +55,7 @@ type Bridge struct {
 	Next       http.Handler
 	Identity   PrincipalResolver
 	Authorizer TaskAuthorizer
+	Operator   TaskWriteGate
 	Logger     *slog.Logger
 	// Timeout bounds one supervisor command. Zero uses 5s.
 	Timeout time.Duration
@@ -90,7 +100,7 @@ func (b *Bridge) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	action, taskID, ok := parseTaskAction(r)
 	if !ok {
-		if b.rejectMessageMutation(w, r, links, board) {
+		if b.rejectMessageMutation(w, r, links, board) || b.rejectReplyOnMirroredThread(w, r, links, board) {
 			return
 		}
 		b.Next.ServeHTTP(w, r)
@@ -108,7 +118,11 @@ func (b *Bridge) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if action == "claim-ready" {
-		if (config.Mirror || config.Bridge) && claimReadyTouchesMirror(r, config.Channel) {
+		// claim-ready has no task id, so a channel that overlaps the mirror
+		// channel in either direction could select a mirrored task. The guard
+		// applies even when both switches are off: a link from an earlier
+		// enabled period is still a mirrored task the supervisor owns.
+		if claimReadyTouchesMirror(r, config.Channel) {
 			writeMirrorReadOnly(w, "claim-ready would bypass the supervisor; claim the mirrored task by id")
 			return
 		}
@@ -146,6 +160,16 @@ func (b *Bridge) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			writeAuthorizerError(w, authErr)
 			return
 		}
+	}
+	if b.Operator == nil {
+		writeBridgeError(w, http.StatusServiceUnavailable, "task_write_gate_unwired",
+			"the supervisor operator gate is not wired in this deployment")
+		return
+	}
+	if gateErr := b.Operator.AuthorizeTaskWrite(r.Context(), tenantID); gateErr != nil {
+		writeBridgeError(w, http.StatusForbidden, string(protocol.CodeForbidden),
+			"supervisor task.write at tenant scope is required for a mirrored task action")
+		return
 	}
 
 	body, err := decodeActionBody(r)
@@ -220,7 +244,7 @@ func (b *Bridge) applyCommand(ctx context.Context, commands *SupervisorCommands,
 	case "block":
 		return commands.BlockTicket(ctx, commands.TenantID, ticketID, body.kindValue(), body.reasonValue(), operator)
 	case "unblock":
-		return commands.UnblockTicket(ctx, commands.TenantID, ticketID, body.reasonValue(), operator)
+		return commands.UnblockTicket(ctx, commands.TenantID, ticketID, body.optionValue(), body.reasonValue(), operator)
 	case "cancel":
 		return commands.CancelTicket(ctx, commands.TenantID, ticketID, body.reasonValue(), operator)
 	default:
@@ -228,7 +252,57 @@ func (b *Bridge) applyCommand(ctx context.Context, commands *SupervisorCommands,
 	}
 }
 
-// rejectMessageMutation refuses edit/delete/label writes on a mirrored thread.
+// rejectReplyOnMirroredThread refuses a new reply whose `re` names a mirrored
+// root. The thread is the supervisor's projection; a board reply would exist
+// only on the board and vanish from the supervisor's timeline.
+func (b *Bridge) rejectReplyOnMirroredThread(w http.ResponseWriter, r *http.Request, links LinkStore, board BoardPort) bool {
+	if r.Method != http.MethodPost || strings.TrimSuffix(r.URL.Path, "/") != "/v1/board/messages" {
+		return false
+	}
+	raw, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	if err != nil {
+		return false
+	}
+	r.Body = io.NopCloser(bytes.NewReader(raw))
+	var body struct {
+		Re string `json:"re"`
+	}
+	if len(bytes.TrimSpace(raw)) == 0 {
+		return false
+	}
+	if err := json.Unmarshal(raw, &body); err != nil || strings.TrimSpace(body.Re) == "" {
+		return false
+	}
+	rootID, ok := boardRef(body.Re)
+	if !ok {
+		return false
+	}
+	tenantID, _, _, ok := b.principal(r)
+	if !ok {
+		return false
+	}
+	root, _, found, err := board.MessageRoot(r.Context(), tenantID, rootID)
+	if err != nil || !found {
+		return false
+	}
+	_, linked, err := links.GetBoardLinkByTask(r.Context(), tenantID, BoardSource, store.BoardLinkTicket, root)
+	if err != nil || !linked {
+		return false
+	}
+	writeMirrorReadOnly(w, "a mirrored task thread is read-only; replies belong to the supervisor timeline")
+	return true
+}
+
+// boardRef parses a board decimal ref for a guard that only needs the number.
+func boardRef(value string) (uint64, bool) {
+	id, err := strconv.ParseUint(strings.TrimSpace(value), 10, 64)
+	if err != nil || id == 0 {
+		return 0, false
+	}
+	return id, true
+}
+
+// rejectMessageMutation refuses edit/delete/label/reaction writes on a mirrored thread.
 // It returns true when it answered the request.
 func (b *Bridge) rejectMessageMutation(w http.ResponseWriter, r *http.Request, links LinkStore, board BoardPort) bool {
 	if r.Method != http.MethodPost {
@@ -239,7 +313,7 @@ func (b *Bridge) rejectMessageMutation(w http.ResponseWriter, r *http.Request, l
 		return false
 	}
 	switch action {
-	case "edit", "delete", "labels":
+	case "edit", "delete", "labels", "reactions":
 	default:
 		return false
 	}
@@ -287,10 +361,11 @@ func (b *Bridge) logger() *slog.Logger {
 }
 
 type actionBody struct {
-	For    *string `json:"for"`
-	Result *string `json:"result"`
-	Reason *string `json:"reason"`
-	Kind   *string `json:"kind"`
+	For      *string `json:"for"`
+	Result   *string `json:"result"`
+	Reason   *string `json:"reason"`
+	Kind     *string `json:"kind"`
+	OptionID *string `json:"optionId"`
 }
 
 func (a actionBody) forValue() string {
@@ -319,6 +394,13 @@ func (a actionBody) kindValue() string {
 		return ""
 	}
 	return *a.Kind
+}
+
+func (a actionBody) optionValue() string {
+	if a.OptionID == nil {
+		return ""
+	}
+	return *a.OptionID
 }
 
 func decodeActionBody(r *http.Request) (actionBody, error) {
@@ -396,7 +478,11 @@ func parseMessageAction(path string) (uint64, string, bool) {
 	return id, parts[1], true
 }
 
-func claimReadyTouchesMirror(r *http.Request, channel string) bool {
+func claimReadyTouchesMirror(r *http.Request, mirrorChannel string) bool {
+	mirror := strings.Trim(strings.TrimSpace(mirrorChannel), "/")
+	if mirror == "" {
+		return false
+	}
 	raw, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
 	if err != nil {
 		return true
@@ -410,11 +496,25 @@ func claimReadyTouchesMirror(r *http.Request, channel string) bool {
 			return true
 		}
 	}
-	if body.Channel == nil || strings.TrimSpace(*body.Channel) == "" {
+	if body.Channel == nil {
+		// No channel names any channel in the board, including the mirror.
 		return true
 	}
 	want := strings.Trim(strings.TrimSpace(*body.Channel), "/")
-	return want == strings.Trim(strings.TrimSpace(channel), "/") || strings.HasPrefix(want+"/", strings.Trim(channel, "/")+"/")
+	if want == "" {
+		return true
+	}
+	// Any overlap counts: the same channel, the mirror inside the request's
+	// subtree (work/ contains work/agents), or the request inside the mirror's
+	// subtree (superagent/sub inside superagent).
+	return channelsOverlap(want, mirror)
+}
+
+func channelsOverlap(a, b string) bool {
+	if a == "" || b == "" {
+		return true
+	}
+	return a == b || strings.HasPrefix(a, b+"/") || strings.HasPrefix(b, a+"/")
 }
 
 func writeMirrorReadOnly(w http.ResponseWriter, message string) {
@@ -444,6 +544,20 @@ func writeSupervisorError(w http.ResponseWriter, err error) {
 			"the ticket has no open attention to unblock")
 	case errors.Is(err, superagent.ErrOperatorUnavailable), errors.Is(err, collab.ErrPermissionDenied):
 		writeBridgeError(w, http.StatusForbidden, string(protocol.CodeForbidden), "the supervisor refused the action")
+	case errors.Is(err, superagent.ErrAnswerDeliveryPending):
+		// The decision is durable; the worker has not received it yet. The
+		// mirror will reflect the answered Attention; 202 says exactly that.
+		writeJSON(w, http.StatusAccepted, map[string]any{
+			"supervisorAccepted": true,
+			"deliveryPending":    true,
+			"boardSynced":        false,
+		})
+	case errors.Is(err, superagent.ErrAnswerDeliveryFailed):
+		writeBridgeError(w, http.StatusConflict, "answer_delivery_failed",
+			"the answer is recorded but delivery failed; retry or dismiss it on the ticket board")
+	case errors.Is(err, superagent.ErrAnswerNotDelivered):
+		writeBridgeError(w, http.StatusConflict, "answer_not_delivered",
+			"the answer is recorded but the ticket closed before a worker received it")
 	case errors.Is(err, collab.ErrWorkItemNotFound), errors.Is(err, collab.ErrAssignmentNotFound),
 		errors.Is(err, collab.ErrAttentionNotFound):
 		writeBridgeError(w, http.StatusNotFound, string(protocol.CodeNotFound), "the supervisor record does not exist")

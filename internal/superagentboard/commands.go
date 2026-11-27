@@ -91,7 +91,7 @@ func (c *SupervisorCommands) CompleteTicket(ctx context.Context, tenantID, ticke
 	}
 	request := superagent.ReportRequest{
 		TenantID: tenantID, WorkItemID: ticketID, AssignmentID: assignment.ID,
-		CallerSessionID: assignment.SessionID, State: superagent.ReportReady,
+		State:   superagent.ReportReady,
 		Summary: strings.TrimSpace(result),
 	}
 	if encoded, marshalErr := json.Marshal(strings.TrimSpace(result)); marshalErr == nil && strings.TrimSpace(result) != "" {
@@ -111,7 +111,7 @@ func (c *SupervisorCommands) FailTicket(ctx context.Context, tenantID, ticketID 
 	}
 	return c.Supervisor.Report(ctx, superagent.ReportRequest{
 		TenantID: tenantID, WorkItemID: ticketID, AssignmentID: assignment.ID,
-		CallerSessionID: assignment.SessionID, State: superagent.ReportFailed,
+		State:   superagent.ReportFailed,
 		Summary: BoardNote(reason, "failed from board"),
 	})
 }
@@ -132,11 +132,14 @@ func (c *SupervisorCommands) BlockTicket(ctx context.Context, tenantID, ticketID
 	}
 	requestID := "board-block:" + ticketID.String() + ":" + digestOf(strings.TrimSpace(reason))[:16]
 	_, err = c.Supervisor.Ask(ctx, ticketID, assignment.ID, collab.AttentionRequest{
-		CallerSessionID: assignment.SessionID,
-		RequestID:       requestID,
-		Kind:            attentionKind,
-		Prompt:          BoardNote(reason, "blocked from board"),
-		Route:           collab.AttentionRouteChannel,
+		// A board block is an operator question, not a worker tool call: the
+		// supervisor contract refuses a question with no options and no free
+		// text, so the operator can answer it in the thread.
+		RequestID:     requestID,
+		Kind:          attentionKind,
+		Prompt:        BoardNote(reason, "blocked from board"),
+		AllowFreeText: true,
+		Route:         collab.AttentionRouteChannel,
 	})
 	return err
 }
@@ -145,7 +148,7 @@ func (c *SupervisorCommands) BlockTicket(ctx context.Context, tenantID, ticketID
 // text. A ticket that has no open Attention is refused, not silently resumed:
 // unblocking a supervisor state the board did not create would be a second
 // truth.
-func (c *SupervisorCommands) UnblockTicket(ctx context.Context, tenantID, ticketID uuid.UUID, reason, actor string) error {
+func (c *SupervisorCommands) UnblockTicket(ctx context.Context, tenantID, ticketID uuid.UUID, optionID, reason, actor string) error {
 	if err := c.checkTenant(tenantID); err != nil {
 		return err
 	}
@@ -153,7 +156,7 @@ func (c *SupervisorCommands) UnblockTicket(ctx context.Context, tenantID, ticket
 	if err != nil {
 		return err
 	}
-	_, err = c.Supervisor.AnswerAttention(ctx, tenantID, attention.ID, "", BoardNote(reason, "unblocked from board"), actor)
+	_, err = c.Supervisor.AnswerAttention(ctx, tenantID, attention.ID, optionID, BoardNote(reason, "unblocked from board"), actor)
 	return err
 }
 

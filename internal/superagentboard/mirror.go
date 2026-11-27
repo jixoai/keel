@@ -305,7 +305,15 @@ func (m *Mirror) syncTicketState(ctx context.Context, ticket superagent.Ticket, 
 
 	activeAssignment := activeAssignmentOf(assignments)
 	openAttention := oldestOpenAttention(attentions)
+	hasClosedAttention := false
+	for _, attention := range attentions {
+		if attention.Status != collab.AttentionOpen {
+			hasClosedAttention = true
+			break
+		}
+	}
 	ticketTerminal := isTerminalTicket(ticket)
+	ticketAcceptsWork := ticket.Status == collab.WorkItemOpen || ticket.Status == collab.WorkItemActive
 
 	// 0. A supervisor reopen (ResumeTicket) revives a failed task in place, so
 	// the same pass can claim or block it. A completed board task cannot be
@@ -321,6 +329,14 @@ func (m *Mirror) syncTicketState(ctx context.Context, ticket superagent.Ticket, 
 		}
 	}
 
+	// A completed board task cannot be reopened by the board domain. Say so
+	// explicitly instead of retrying a claim that the fold must refuse forever.
+	if !ticketTerminal && task.State == StateCompleted {
+		report.Conflicts++
+		m.Logger.Warn("superagent board task is completed but the ticket is not; board history is append-only",
+			"ticket", ticket.ID, "task", task.ID, "ticketStatus", ticket.Status)
+	}
+
 	// 1. A hold wins over a claim. When the newest Attention closed, unblock
 	// first so the same pass can claim the replacement assignment.
 	if openAttention != nil && !ticketTerminal {
@@ -331,8 +347,11 @@ func (m *Mirror) syncTicketState(ctx context.Context, ticket superagent.Ticket, 
 			// fold then ends that claim.
 			actor = claimActorOf(task)
 		}
+		holdKind := attentionHoldKind(openAttention.Kind)
+		holdReason := BoardNote(openAttention.Prompt, "waiting for a person")
+		alreadyHeld := task.State == StateBlocked && task.BlockedKind == holdKind && task.BlockedReason == holdReason
 		if err := m.Board.Block(ctx, m.TenantID, BlockRequest{
-			TaskID: task.ID, Kind: attentionHoldKind(openAttention.Kind),
+			TaskID: task.ID, Kind: holdKind,
 			Reason: openAttention.Prompt, Actor: actor,
 		}); err != nil {
 			if errors.Is(err, ErrClaimConflict) {
@@ -341,12 +360,12 @@ func (m *Mirror) syncTicketState(ctx context.Context, ticket superagent.Ticket, 
 			} else {
 				m.Logger.Warn("superagent board mirror block failed", "ticket", ticket.ID, "err", err)
 			}
-		} else {
+		} else if !alreadyHeld {
 			report.Blocked++
 		}
 		task, _ = m.Board.Task(ctx, m.TenantID, task.ID)
 	} else if openAttention == nil && task.State == StateBlocked && !ticketTerminal &&
-		ticket.Status != collab.WorkItemBlocked {
+		(ticket.Status != collab.WorkItemBlocked || hasClosedAttention) {
 		if err := m.Board.Unblock(ctx, m.TenantID, UnblockRequest{
 			TaskID: task.ID, Actor: ServiceActor(m.TenantID),
 		}); err != nil {
@@ -358,22 +377,26 @@ func (m *Mirror) syncTicketState(ctx context.Context, ticket superagent.Ticket, 
 	}
 
 	// 2. Mirrored claim / lease. A blocked or finished ticket holds no claim.
-	if !ticketTerminal && openAttention == nil && activeAssignment != nil && task.State != StateBlocked {
+	// A completed board task is left alone (warned above): the board domain has
+	// no completed -> ready edge.
+	if ticketAcceptsWork && openAttention == nil && activeAssignment != nil &&
+		task.State != StateBlocked && task.State != StateCompleted {
 		if m.mirrorClaim(ctx, ticket, *activeAssignment, task, &report) {
 			task, _ = m.Board.Task(ctx, m.TenantID, task.ID)
 		}
 	}
 	if !ticketTerminal && openAttention == nil && activeAssignment == nil && task.State == StateClaimed {
-		if _, err := m.Board.Release(ctx, m.TenantID, ReleaseRequest{
+		released, err := m.Board.Release(ctx, m.TenantID, ReleaseRequest{
 			TaskID: task.ID, Actor: claimActorOf(task), Epoch: task.Epoch,
-		}); err != nil {
+		})
+		if err != nil {
 			if errors.Is(err, ErrClaimConflict) {
 				report.Conflicts++
 				m.logClaimConflict(ticket, task, err)
 			} else {
 				m.Logger.Warn("superagent board mirror release failed", "ticket", ticket.ID, "err", err)
 			}
-		} else {
+		} else if released {
 			report.Released++
 		}
 		task, _ = m.Board.Task(ctx, m.TenantID, task.ID)
@@ -458,7 +481,9 @@ func (m *Mirror) syncTicketState(ctx context.Context, ticket superagent.Ticket, 
 			}
 		}
 	case collab.WorkItemBlocked:
-		if openAttention == nil && task.State != StateBlocked && !boardFinished(task.State) {
+		// A timed-out/cancelled Attention's unblock is the supervisor's final
+		// answer even when it leaves the Ticket blocked; do not re-block it.
+		if openAttention == nil && !hasClosedAttention && task.State != StateBlocked && !boardFinished(task.State) {
 			if err := m.Board.Block(ctx, m.TenantID, BlockRequest{
 				TaskID: task.ID, Kind: HoldNeedsInput, Reason: "the ticket is blocked",
 				Actor: ServiceActor(m.TenantID),

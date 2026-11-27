@@ -1737,10 +1737,16 @@ CREATE TABLE IF NOT EXISTS board_links (
     PRIMARY KEY (tenant_id, source, source_id, kind)
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS board_links_by_task
-    ON board_links (tenant_id, source, kind, board_task_id);
+-- Only the Ticket link is one-per-task. An Attention or report link shares the
+-- task with many siblings, so a plain (tenant, source, kind, task) index is
+-- enough for the bridge's reverse lookup. The old unique index was too wide:
+-- the second Attention/report of one ticket collided on it.
+DROP INDEX IF EXISTS board_links_by_task;
+CREATE UNIQUE INDEX IF NOT EXISTS board_links_ticket_by_task
+    ON board_links (tenant_id, source, board_task_id)
+    WHERE kind = 'ticket';
 CREATE INDEX IF NOT EXISTS board_links_by_task_any
-    ON board_links (tenant_id, board_task_id);
+    ON board_links (tenant_id, source, kind, board_task_id);
 
 -- Command invocations (change keel-plugin-commands): the durable idempotency
 -- and audit row of one chat command call. (tenant, session, requestId) is the

@@ -27,6 +27,7 @@ func newSuperagentBoardBridge(surface *boardintegration.Surface, log *slog.Logge
 		Next:       surface,
 		Identity:   surface.Identity(),
 		Authorizer: surface.Authorizer(),
+		Operator:   superagentOperator{bridge: surface.Authorizer().Bridge},
 		Logger:     log,
 	}
 }

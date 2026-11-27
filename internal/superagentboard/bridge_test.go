@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -44,13 +45,21 @@ func (f fakeAuthorizer) AuthorizeAnywhere(context.Context, string, protocol.Acto
 	return f.err
 }
 
+type fakeTaskWriteGate struct{ err error }
+
+func (f fakeTaskWriteGate) AuthorizeTaskWrite(context.Context, uuid.UUID) error { return f.err }
+
 // fakeSupervisor records the action and lets the test mutate the supervisor
 // store the way the real orchestrator would.
 type fakeSupervisor struct {
-	mu       sync.Mutex
-	calls    []string
-	err      error
-	behavior func(action string) error
+	mu             sync.Mutex
+	calls          []string
+	err            error
+	behavior       func(action string) error
+	lastAsk        collab.AttentionRequest
+	lastReport     superagent.ReportRequest
+	lastAnswerOpt  string
+	lastAnswerText string
 }
 
 func (f *fakeSupervisor) record(action string) error {
@@ -72,18 +81,34 @@ func (f *fakeSupervisor) callCount() int {
 	return len(f.calls)
 }
 
-func (f *fakeSupervisor) Report(context.Context, superagent.ReportRequest) error {
+func (f *fakeSupervisor) Report(_ context.Context, request superagent.ReportRequest) error {
+	f.mu.Lock()
+	f.lastReport = request
+	f.mu.Unlock()
 	return f.record("report")
 }
 
-func (f *fakeSupervisor) Ask(context.Context, uuid.UUID, uuid.UUID, collab.AttentionRequest) (collab.Attention, error) {
+func (f *fakeSupervisor) Ask(_ context.Context, _ uuid.UUID, _ uuid.UUID, request collab.AttentionRequest) (collab.Attention, error) {
+	// The real collab.Host refuses a question with no selectable answer. The
+	// fake keeps that contract so a bridge regression (dropping AllowFreeText)
+	// fails here instead of in production.
+	if len(request.Options) == 0 && !request.AllowFreeText {
+		return collab.Attention{}, errors.New("collab: an attention needs options or free text")
+	}
+	f.mu.Lock()
+	f.lastAsk = request
+	f.mu.Unlock()
 	if err := f.record("ask"); err != nil {
 		return collab.Attention{}, err
 	}
 	return collab.Attention{}, nil
 }
 
-func (f *fakeSupervisor) AnswerAttention(context.Context, uuid.UUID, uuid.UUID, string, string, string) (collab.Attention, error) {
+func (f *fakeSupervisor) AnswerAttention(_ context.Context, _ uuid.UUID, _ uuid.UUID, optionID, text, _ string) (collab.Attention, error) {
+	f.mu.Lock()
+	f.lastAnswerOpt = optionID
+	f.lastAnswerText = text
+	f.mu.Unlock()
 	if err := f.record("answer"); err != nil {
 		return collab.Attention{}, err
 	}
@@ -152,6 +177,7 @@ func newBridgeWorld(t *testing.T, config SuperagentConfig, setup func(world *bri
 			Handle: "alice", Name: "Alice",
 		}},
 		Authorizer: fakeAuthorizer{},
+		Operator:   fakeTaskWriteGate{},
 		Logger:     discardLogger(),
 		Timeout:    200 * time.Millisecond,
 	}
@@ -518,5 +544,244 @@ func TestStaleLinkIsReadOnlyWhenMirrorIsOff(t *testing.T) {
 		if world.super.callCount() != 0 {
 			t.Fatal("a stale link reached the supervisor while the mirror was off")
 		}
+	}
+}
+
+func TestBridgeBlockSendsAnswerableAsk(t *testing.T) {
+	world := newBridgeWorld(t, SuperagentConfig{Mirror: true, Bridge: true, Channel: "superagent"},
+		func(w *bridgeWorld) { activeWorld(t, w) })
+	world.super.behavior = func(string) error {
+		assignment := newestAssignment(t, world)
+		addAttention(t, world.store, world.ticket, assignment, collab.AttentionApproval, collab.AttentionOpen)
+		updateTicketStatus(t, world.store, world.tenant, world.ticket.ID, collab.WorkItemBlocked)
+		return nil
+	}
+	recorder := world.post("block", map[string]any{"reason": "Approve?", "kind": "awaiting_approval"})
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", recorder.Code, recorder.Body.String())
+	}
+	world.super.mu.Lock()
+	request := world.super.lastAsk
+	world.super.mu.Unlock()
+	if !request.AllowFreeText {
+		t.Fatal("the bridge's Ask has no options and no free text: the real supervisor would refuse it")
+	}
+	if request.Prompt != "Approve?" {
+		t.Fatalf("prompt = %q", request.Prompt)
+	}
+	if request.CallerSessionID != uuid.Nil {
+		t.Fatalf("the bridge impersonated worker session %s", request.CallerSessionID)
+	}
+}
+
+func TestBridgeRequiresSupervisorTaskWrite(t *testing.T) {
+	for _, action := range []string{"claim", "complete", "fail", "block", "unblock", "assign", "cancel"} {
+		t.Run(action, func(t *testing.T) {
+			world := newBridgeWorld(t, SuperagentConfig{Mirror: true, Bridge: true, Channel: "superagent"},
+				func(w *bridgeWorld) { activeWorld(t, w) })
+			world.surf.Operator = fakeTaskWriteGate{err: errors.New("task.write missing")}
+			recorder := world.post(action, map[string]any{"reason": "x", "result": "x"})
+			if recorder.Code != http.StatusForbidden {
+				t.Fatalf("status = %d body=%s", recorder.Code, recorder.Body.String())
+			}
+			if world.super.callCount() != 0 {
+				t.Fatalf("%s reached the supervisor without task.write", action)
+			}
+		})
+	}
+}
+
+func TestBridgeClaimReadyOverlapGuard(t *testing.T) {
+	cases := []struct {
+		name          string
+		channel       string
+		mirrorChannel string
+		mirror        bool
+		bridge        bool
+		want          int
+	}{
+		{name: "exact", channel: "superagent", mirror: true, bridge: true, want: http.StatusConflict},
+		{name: "ancestor", channel: "work/", mirrorChannel: "work/agents", mirror: true, bridge: true, want: http.StatusConflict},
+		{name: "descendant", channel: "superagent/sub", mirror: true, bridge: true, want: http.StatusConflict},
+		{name: "unrelated", channel: "work/agents", mirror: true, bridge: true, want: http.StatusTeapot},
+		{name: "both off exact", channel: "superagent", want: http.StatusConflict},
+		{name: "both off ancestor", channel: "work/", mirrorChannel: "work/agents", want: http.StatusConflict},
+		{name: "empty", mirror: true, bridge: true, want: http.StatusConflict},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			channel := testCase.mirrorChannel
+			if channel == "" {
+				channel = "superagent"
+			}
+			world := newBridgeWorld(t, SuperagentConfig{
+				Mirror: testCase.mirror, Bridge: testCase.bridge, Channel: channel,
+			}, nil)
+			body := map[string]any{}
+			if testCase.channel != "" {
+				body["channel"] = testCase.channel
+			}
+			raw, _ := json.Marshal(body)
+			request := httptest.NewRequest(http.MethodPost, "/v1/board/tasks/claim", bytes.NewReader(raw))
+			recorder := httptest.NewRecorder()
+			world.surf.ServeHTTP(recorder, request)
+			if recorder.Code != testCase.want {
+				t.Fatalf("status = %d body=%s, want %d", recorder.Code, recorder.Body.String(), testCase.want)
+			}
+			if testCase.want == http.StatusConflict {
+				if code := decodeCode(t, recorder); code != "mirror_read_only" {
+					t.Fatalf("code = %q", code)
+				}
+			}
+		})
+	}
+}
+
+func TestBridgeAnswerDeliveryErrors(t *testing.T) {
+	cases := []struct {
+		name       string
+		err        error
+		wantStatus int
+		wantCode   string
+	}{
+		{name: "pending", err: superagent.ErrAnswerDeliveryPending, wantStatus: http.StatusAccepted, wantCode: ""},
+		{name: "failed", err: superagent.ErrAnswerDeliveryFailed, wantStatus: http.StatusConflict, wantCode: "answer_delivery_failed"},
+		{name: "not delivered", err: superagent.ErrAnswerNotDelivered, wantStatus: http.StatusConflict, wantCode: "answer_not_delivered"},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			world := newBridgeWorld(t, SuperagentConfig{Mirror: true, Bridge: true, Channel: "superagent"},
+				func(w *bridgeWorld) {
+					activeWorld(t, w)
+					assignment := newestAssignment(t, w)
+					attention := addAttention(t, w.store, w.ticket, assignment, collab.AttentionClarify, collab.AttentionOpen)
+					w.attentionID = attention.ID
+					updateTicketStatus(t, w.store, w.tenant, w.ticket.ID, collab.WorkItemBlocked)
+				})
+			world.super.err = testCase.err
+			recorder := world.post("unblock", map[string]any{"reason": "approved"})
+			if recorder.Code != testCase.wantStatus {
+				t.Fatalf("status = %d body=%s, want %d", recorder.Code, recorder.Body.String(), testCase.wantStatus)
+			}
+			if testCase.wantCode != "" {
+				if code := decodeCode(t, recorder); code != testCase.wantCode {
+					t.Fatalf("code = %q, want %q", code, testCase.wantCode)
+				}
+			}
+		})
+	}
+}
+
+func TestBridgeIgnoresForgedSourceLink(t *testing.T) {
+	world := newBridgeWorld(t, SuperagentConfig{Mirror: true, Bridge: true, Channel: "superagent"}, nil)
+	// A board task that only a non-superagent link names must not route to the
+	// supervisor: the reverse lookup requires source=superagent, kind=ticket.
+	forged, err := world.board.EnsureTicketThread(context.Background(), world.tenant, TicketThread{
+		TicketID: "forged-ticket", Channel: "superagent", Title: "Forged", Request: "Body",
+		Actor: ServiceActor(world.tenant),
+	})
+	if err != nil {
+		t.Fatalf("forged task: %v", err)
+	}
+	if _, err := world.links.PutBoardLink(context.Background(), keelstore.BoardLink{
+		TenantID: world.tenant, Source: "forged", SourceID: "forged-ticket",
+		Kind: keelstore.BoardLinkTicket, BoardTaskID: forged.ID,
+	}); err != nil {
+		t.Fatalf("forged link insert: %v", err)
+	}
+	raw, _ := json.Marshal(map[string]any{})
+	request := httptest.NewRequest(http.MethodPost,
+		"/v1/board/tasks/"+formatID(forged.ID)+"/claim", bytes.NewReader(raw))
+	recorder := httptest.NewRecorder()
+	world.surf.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusTeapot {
+		t.Fatalf("status = %d body=%s, want pass-through", recorder.Code, recorder.Body.String())
+	}
+	if world.super.callCount() != 0 {
+		t.Fatal("a forged link reached the supervisor")
+	}
+}
+
+func TestBridgeTaskMutationsAreReadOnly(t *testing.T) {
+	world := newBridgeWorld(t, SuperagentConfig{Mirror: true, Bridge: true, Channel: "superagent"}, nil)
+	for _, action := range []string{"release", "renew", "reopen", "needs"} {
+		recorder := world.post(action, map[string]any{})
+		if recorder.Code != http.StatusConflict {
+			t.Fatalf("%s status = %d body=%s", action, recorder.Code, recorder.Body.String())
+		}
+		if code := decodeCode(t, recorder); code != "mirror_read_only" {
+			t.Fatalf("%s code = %q", action, code)
+		}
+	}
+}
+
+func TestBridgeMessageRepliesAndReactionsAreReadOnly(t *testing.T) {
+	world := newBridgeWorld(t, SuperagentConfig{Mirror: true, Bridge: true, Channel: "superagent"}, nil)
+	// A reply whose `re` names the mirrored root.
+	raw := []byte(`{"re":"` + formatID(world.taskID) + `","text":"hello"}`)
+	request := httptest.NewRequest(http.MethodPost, "/v1/board/messages", bytes.NewReader(raw))
+	recorder := httptest.NewRecorder()
+	world.surf.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusConflict {
+		t.Fatalf("reply status = %d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if code := decodeCode(t, recorder); code != "mirror_read_only" {
+		t.Fatalf("reply code = %q", code)
+	}
+	// A reaction on the mirrored root.
+	request = httptest.NewRequest(http.MethodPost,
+		"/v1/board/messages/"+formatID(world.taskID)+"/reactions", strings.NewReader(`{"emoji":"+1"}`))
+	recorder = httptest.NewRecorder()
+	world.surf.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusConflict {
+		t.Fatalf("reaction status = %d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if code := decodeCode(t, recorder); code != "mirror_read_only" {
+		t.Fatalf("reaction code = %q", code)
+	}
+}
+
+func TestBridgeDoesNotImpersonateTheWorkerSession(t *testing.T) {
+	world := newBridgeWorld(t, SuperagentConfig{Mirror: true, Bridge: true, Channel: "superagent"},
+		func(w *bridgeWorld) { activeWorld(t, w) })
+	world.post("complete", map[string]any{"result": "done"})
+	world.super.mu.Lock()
+	report := world.super.lastReport
+	world.super.mu.Unlock()
+	if report.CallerSessionID != uuid.Nil {
+		t.Fatalf("the bridge impersonated worker session %s", report.CallerSessionID)
+	}
+}
+
+func TestBridgeUnblockPassesOptionID(t *testing.T) {
+	world := newBridgeWorld(t, SuperagentConfig{Mirror: true, Bridge: true, Channel: "superagent"},
+		func(w *bridgeWorld) {
+			activeWorld(t, w)
+			assignment := newestAssignment(t, w)
+			attention := addAttention(t, w.store, w.ticket, assignment, collab.AttentionClarify, collab.AttentionOpen)
+			w.attentionID = attention.ID
+			updateTicketStatus(t, w.store, w.tenant, w.ticket.ID, collab.WorkItemBlocked)
+		})
+	world.super.behavior = func(string) error {
+		attention, err := world.store.GetAttention(context.Background(), world.tenant, world.attentionID)
+		if err != nil {
+			return err
+		}
+		answerAttention(t, world.store, attention, "yes")
+		updateTicketStatus(t, world.store, world.tenant, world.ticket.ID, collab.WorkItemActive)
+		return nil
+	}
+	recorder := world.post("unblock", map[string]any{"optionId": "yes", "reason": "approved"})
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", recorder.Code, recorder.Body.String())
+	}
+	world.super.mu.Lock()
+	option, text := world.super.lastAnswerOpt, world.super.lastAnswerText
+	world.super.mu.Unlock()
+	if option != "yes" {
+		t.Fatalf("optionId = %q", option)
+	}
+	if text == "" {
+		t.Fatal("free-text answer lost")
 	}
 }

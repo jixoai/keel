@@ -515,11 +515,15 @@ func TestMirrorLogsContainNoSecretOrTicketBody(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	addAssignment(t, store, ticket, collab.AssignmentActive, "researcher", uuid.New())
+	assignment := addAssignment(t, store, ticket, collab.AssignmentActive, "researcher", uuid.New())
 	updateTicketStatus(t, store, tenantID, ticket.ID, collab.WorkItemActive)
 
 	var buffer bytes.Buffer
 	tokens, _ := NewTokenSource("log-secret")
+	token, err := tokens.ClaimToken(tenantID, assignment.ID, assignment.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
 	mirror, err := NewMirror(&Mirror{
 		TenantID: tenantID, Store: store, Board: board, Links: links,
 		Config: StaticConfigReader{Config: SuperagentConfig{Mirror: true, Channel: "superagent"}},
@@ -535,7 +539,7 @@ func TestMirrorLogsContainNoSecretOrTicketBody(t *testing.T) {
 	if logged == "" {
 		t.Fatal("expected a claim-conflict warning")
 	}
-	for _, forbidden := range []string{bodyMarker, "log-secret"} {
+	for _, forbidden := range []string{bodyMarker, "log-secret", token} {
 		if strings.Contains(logged, forbidden) {
 			t.Fatalf("log leaked %q: %s", forbidden, logged)
 		}
@@ -635,5 +639,169 @@ func TestMirrorReopensAFailedTaskAfterSupervisorResume(t *testing.T) {
 	resumed := mustTask(t, board, tenantID, link.BoardTaskID)
 	if resumed.State != StateClaimed || resumed.Epoch != 2 {
 		t.Fatalf("resumed = %+v", resumed)
+	}
+}
+
+func TestMirrorTimedOutAttentionUnblocksEvenWhileTicketStaysBlocked(t *testing.T) {
+	mirror, store, board, links, _, tenantID := mirrorFixture(t)
+	ctx := context.Background()
+	ticket := seedTicket(t, store, tenantID, "Timeout", "Body", "manual", "timeout-1", "evt-timeout")
+	assignment := addAssignment(t, store, ticket, collab.AssignmentActive, "researcher", uuid.New())
+	updateTicketStatus(t, store, tenantID, ticket.ID, collab.WorkItemActive)
+	if _, err := mirror.SyncOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+	link := mustLink(t, links, tenantID, ticket.ID.String(), keelstore.BoardLinkTicket)
+	attention := addAttention(t, store, ticket, assignment, collab.AttentionClarify, collab.AttentionOpen)
+	updateTicketStatus(t, store, tenantID, ticket.ID, collab.WorkItemBlocked)
+	if _, err := mirror.SyncOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if mustTask(t, board, tenantID, link.BoardTaskID).State != StateBlocked {
+		t.Fatal("attention did not block")
+	}
+	attention.Status = collab.AttentionTimedOut
+	if _, err := store.UpdateAttention(ctx, attention); err != nil {
+		t.Fatal(err)
+	}
+	// The supervisor leaves the Ticket blocked; the expired question is still
+	// the board's unblock signal.
+	report, err := mirror.SyncOnce(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	task := mustTask(t, board, tenantID, link.BoardTaskID)
+	if task.State == StateBlocked {
+		t.Fatalf("board stayed blocked after timeout: %+v", report)
+	}
+	if report.Unblocked != 1 || report.Replies != 1 {
+		t.Fatalf("report = %+v", report)
+	}
+}
+
+func TestMirrorCompletedTaskReopenIsExplicitAndAppendOnly(t *testing.T) {
+	mirror, store, board, links, _, tenantID := mirrorFixture(t)
+	ctx := context.Background()
+	ticket := seedTicket(t, store, tenantID, "Done", "Body", "manual", "done-1", "evt-done")
+	addAssignment(t, store, ticket, collab.AssignmentActive, "researcher", uuid.New())
+	updateTicketStatus(t, store, tenantID, ticket.ID, collab.WorkItemActive)
+	if _, err := mirror.SyncOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+	link := mustLink(t, links, tenantID, ticket.ID.String(), keelstore.BoardLinkTicket)
+	if mustTask(t, board, tenantID, link.BoardTaskID).State != StateClaimed {
+		t.Fatal("setup did not claim")
+	}
+	updateTicketStatus(t, store, tenantID, ticket.ID, collab.WorkItemDone)
+	if _, err := mirror.SyncOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if mustTask(t, board, tenantID, link.BoardTaskID).State != StateCompleted {
+		t.Fatal("board did not complete")
+	}
+	// The supervisor reopens the Ticket; the board has no completed -> ready
+	// edge, so the mirror must warn and leave history alone.
+	addAssignment(t, store, ticket, collab.AssignmentActive, "researcher", uuid.New())
+	updateTicketStatus(t, store, tenantID, ticket.ID, collab.WorkItemOpen)
+	var buffer bytes.Buffer
+	mirror.Logger = slog.New(slog.NewTextHandler(&buffer, nil))
+	report, err := mirror.SyncOnce(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Conflicts != 1 {
+		t.Fatalf("report = %+v", report)
+	}
+	if mustTask(t, board, tenantID, link.BoardTaskID).State != StateCompleted {
+		t.Fatal("a completed board task was rewritten")
+	}
+	if !strings.Contains(buffer.String(), "board history is append-only") {
+		t.Fatalf("no explicit warning: %s", buffer.String())
+	}
+}
+
+func TestMirrorCountsOnlyRealBlockAndRelease(t *testing.T) {
+	mirror, store, _, links, _, tenantID := mirrorFixture(t)
+	ctx := context.Background()
+	ticket := seedTicket(t, store, tenantID, "Counts", "Body", "manual", "counts-1", "evt-counts")
+	assignment := addAssignment(t, store, ticket, collab.AssignmentActive, "researcher", uuid.New())
+	updateTicketStatus(t, store, tenantID, ticket.ID, collab.WorkItemActive)
+	if _, err := mirror.SyncOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+	_ = mustLink(t, links, tenantID, ticket.ID.String(), keelstore.BoardLinkTicket)
+	attention := addAttention(t, store, ticket, assignment, collab.AttentionClarify, collab.AttentionOpen)
+	updateTicketStatus(t, store, tenantID, ticket.ID, collab.WorkItemBlocked)
+	first, err := mirror.SyncOnce(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Blocked != 1 {
+		t.Fatalf("first block = %+v", first)
+	}
+	second, err := mirror.SyncOnce(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.Blocked != 0 || second.Replies != 0 {
+		t.Fatalf("an unchanged blocked task was counted again: %+v", second)
+	}
+	// Answer and drop the active assignment: the board unblocks, then releases
+	// the mirrored claim exactly once.
+	answerAttention(t, store, attention, "yes")
+	assignments, _ := store.ListAssignments(ctx, tenantID, ticket.ID)
+	for _, assignment := range assignments {
+		assignment.Status = collab.AssignmentDone
+		if _, err := store.UpdateAssignment(ctx, assignment); err != nil {
+			t.Fatal(err)
+		}
+	}
+	updateTicketStatus(t, store, tenantID, ticket.ID, collab.WorkItemOpen)
+	third, err := mirror.SyncOnce(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if third.Unblocked != 1 || third.Released != 0 || third.Replies != 1 {
+		t.Fatalf("unblock/release = %+v", third)
+	}
+	fourth, err := mirror.SyncOnce(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fourth.Unblocked != 0 || fourth.Released != 0 || fourth.Replies != 0 {
+		t.Fatalf("a settled task was counted again: %+v", fourth)
+	}
+}
+
+func TestMirrorCountsReleaseOnce(t *testing.T) {
+	mirror, store, board, links, _, tenantID := mirrorFixture(t)
+	ctx := context.Background()
+	ticket := seedTicket(t, store, tenantID, "Release", "Body", "manual", "release-1", "evt-release")
+	assignment := addAssignment(t, store, ticket, collab.AssignmentActive, "researcher", uuid.New())
+	updateTicketStatus(t, store, tenantID, ticket.ID, collab.WorkItemActive)
+	if _, err := mirror.SyncOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+	link := mustLink(t, links, tenantID, ticket.ID.String(), keelstore.BoardLinkTicket)
+	assignment.Status = collab.AssignmentDone
+	if _, err := store.UpdateAssignment(ctx, assignment); err != nil {
+		t.Fatal(err)
+	}
+	first, err := mirror.SyncOnce(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Released != 1 {
+		t.Fatalf("release = %+v", first)
+	}
+	if mustTask(t, board, tenantID, link.BoardTaskID).State != StateReady {
+		t.Fatal("board did not return to ready")
+	}
+	second, err := mirror.SyncOnce(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.Released != 0 {
+		t.Fatalf("release counted again: %+v", second)
 	}
 }

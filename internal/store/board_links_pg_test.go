@@ -155,3 +155,83 @@ func TestBoardLinksRLSReadIsTenantScoped(t *testing.T) {
 		t.Fatalf("tenant-scoped read: %v", err)
 	}
 }
+
+func TestBoardLinksAllowManyChildrenPerTask(t *testing.T) {
+	st := boardLinksTestStore(t)
+	ctx := context.Background()
+	tenant := uuid.New()
+	if err := st.CreateTenant(ctx, tenant, "children-"+tenant.String()[:8]); err != nil {
+		t.Fatalf("create tenant: %v", err)
+	}
+	if _, err := st.PutBoardLink(ctx, BoardLink{
+		TenantID: tenant, Source: "superagent", SourceID: "ticket-1", Kind: BoardLinkTicket, BoardTaskID: 42,
+	}); err != nil {
+		t.Fatalf("ticket link: %v", err)
+	}
+	// Two Attentions and two reports of one Ticket share its task. The old
+	// (tenant, source, kind, task) unique index refused the second row.
+	for _, id := range []string{"att-1", "att-2"} {
+		if _, err := st.PutBoardLink(ctx, BoardLink{
+			TenantID: tenant, Source: "superagent", SourceID: id, Kind: BoardLinkAttention, BoardTaskID: 42,
+		}); err != nil {
+			t.Fatalf("attention link %s: %v", id, err)
+		}
+	}
+	for _, id := range []string{"rep-1", "rep-2"} {
+		if _, err := st.PutBoardLink(ctx, BoardLink{
+			TenantID: tenant, Source: "superagent", SourceID: id, Kind: BoardLinkReport, BoardTaskID: 42,
+		}); err != nil {
+			t.Fatalf("report link %s: %v", id, err)
+		}
+	}
+	// A second Ticket link for the same board task is still refused: one task
+	// is one Ticket.
+	if _, err := st.PutBoardLink(ctx, BoardLink{
+		TenantID: tenant, Source: "superagent", SourceID: "ticket-2", Kind: BoardLinkTicket, BoardTaskID: 42,
+	}); err == nil {
+		t.Fatal("a second ticket was allowed to share one board task")
+	}
+}
+
+func TestBoardLinksRLSRefusesForeignInsert(t *testing.T) {
+	st := boardLinksTestStore(t)
+	ctx := context.Background()
+	tenantA, tenantB := uuid.New(), uuid.New()
+	for _, tenant := range []uuid.UUID{tenantA, tenantB} {
+		if err := st.CreateTenant(ctx, tenant, "forge-"+tenant.String()[:8]); err != nil {
+			t.Fatalf("create tenant: %v", err)
+		}
+	}
+	err := st.TenantScoped(ctx, tenantA, func(tx TenantTx) error {
+		_, err := tx.Exec(ctx, `
+			INSERT INTO board_links (tenant_id, source, source_id, kind, board_task_id)
+			VALUES ($1, 'superagent', 'forged', 'ticket', 99)`, tenantB)
+		return err
+	})
+	if errors.Is(err, ErrRLSUnavailable) {
+		t.Skip("RLS role is unavailable on this test cluster")
+	}
+	if err == nil {
+		t.Fatal("a tenant-scoped transaction inserted another tenant's board link")
+	}
+}
+
+func TestBoardLinkValidateRejectsMalformedRows(t *testing.T) {
+	tenant := uuid.New()
+	base := BoardLink{TenantID: tenant, Source: "superagent", SourceID: "t", Kind: BoardLinkTicket, BoardTaskID: 1}
+	if err := base.Validate(); err != nil {
+		t.Fatalf("valid link: %v", err)
+	}
+	cases := []BoardLink{
+		{Source: "superagent", SourceID: "t", Kind: BoardLinkTicket, BoardTaskID: 1},
+		{TenantID: tenant, SourceID: "t", Kind: BoardLinkTicket, BoardTaskID: 1},
+		{TenantID: tenant, Source: "superagent", Kind: BoardLinkTicket, BoardTaskID: 1},
+		{TenantID: tenant, Source: "superagent", SourceID: "t", BoardTaskID: 1},
+		{TenantID: tenant, Source: "superagent", SourceID: "t", Kind: BoardLinkTicket},
+	}
+	for index, candidate := range cases {
+		if err := candidate.Validate(); err == nil {
+			t.Fatalf("case %d: malformed link accepted", index)
+		}
+	}
+}
