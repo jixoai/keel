@@ -26,7 +26,9 @@ const tuiLog = fs.existsSync(tuiFile) ? fs.readFileSync(tuiFile, 'utf8') : '';
 const residueFile = path.join(DIR, 'residue.txt');
 const residue = fs.existsSync(residueFile) ? fs.readFileSync(residueFile, 'utf8') : '';
 const residueClean = residue !== '' && !/STILL_(LISTENING|RUNNING)/.test(residue);
-const overallPass = report.pass && residueClean;
+const coverage = report.coverage || null;
+const coverageClean = Boolean(coverage) && coverage.uncovered === 0;
+const overallPass = report.pass && residueClean && coverageClean;
 
 const esc = (value) =>
   String(value ?? '')
@@ -158,6 +160,7 @@ a { color:var(--accent); }
   <div class="kpi"><b>${checkCount}</b>断言（失败 ${failedChecks}）</div>
   <div class="kpi"><b>${report.steps.length}</b>步骤</div>
   <div class="kpi"><b>${shotCount}</b>截图</div>
+  <div class="kpi"><b>${coverage ? coverage.uncovered : '—'}</b>UNCOVERED</div>
 </div>
 ${!residueClean ? `<div class="card"><h2>残留进程</h2><pre class="error">${esc(residue || 'missing residue.txt')}</pre></div>` : ''}
 ${report.error ? `<div class="card"><h2>运行错误</h2><pre class="error">${esc(report.error)}</pre></div>` : ''}
@@ -173,6 +176,24 @@ ${report.error ? `<div class="card"><h2>运行错误</h2><pre class="error">${es
   <h2>进程回收验证 ${residueClean ? '<span class="badge ok">CLEAN</span>' : '<span class="badge bad">RESIDUE</span>'}</h2>
   <p class="muted">由 <code>run.sh</code> 在报告生成前写入 <code>residue.txt</code>：serve/model 端口必须 free，sidecar 与 fake provider 必须 gone。这里的标记同时参与总结果（STILL_* 即失败）。</p>
   ${residue ? `<pre>${esc(residue)}</pre>` : '<pre class="error">missing residue.txt — 未证明进程回收</pre>'}
+</div>
+
+<div class="card">
+  <h2>改动文件覆盖表 ${coverageClean ? '<span class="badge ok">UNCOVERED=0</span>' : '<span class="badge bad">UNCOVERED</span>'}</h2>
+  ${
+    coverage
+      ? `<p class="meta">基线 <code>${esc(coverage.baseline)}</code> · ${coverage.total} 个文件 · COVERED ${coverage.covered} · EXEMPT ${coverage.exempt} · <b class="${coverage.uncovered ? 'bad' : 'ok'}">UNCOVERED ${coverage.uncovered}</b></p>
+  <p class="muted">EXEMPT 只允许 change 文档/证据与 E2E 运行器；其他任何未映射的产品/测试文件都标 UNCOVERED 并使本次 E2E 失败。没有自动豁免。</p>
+  <div style="max-height:520px;overflow:auto">
+  <table><thead><tr><th>文件</th><th>状态</th><th>面</th><th>证据</th></tr></thead><tbody>
+  ${coverage.rows
+    .map(
+      (row) => `<tr class="${row.status === 'UNCOVERED' ? 'failed' : ''}"><td><code>${esc(row.file)}</code></td><td>${esc(row.status)}</td><td>${esc(row.surface)}</td><td>${esc(row.evidence)}</td></tr>`,
+    )
+    .join('\n')}
+  </tbody></table></div>`
+      : '<pre class="error">missing coverage table — 未声明 UNCOVERED=0</pre>'
+  }
 </div>
 
 <div class="card">
@@ -211,7 +232,7 @@ ${stepSections}
     <li>本报告的声明范围就是上列 9 个步骤的断言与截图；未列出的能力不作声明。</li>
     <li>无权限命令态由 TUI 五态门禁覆盖；本页的 403 是 destructive 审批拒绝的预期响应。</li>
     <li><strong>未部署公网</strong>：本报告与截图作为仓库内证据提交，不提供公网链接。</li>
-    <li>没有 coverageRows / 自动 EXEMPT 表，也不声明 <code>UNCOVERED=0</code>；覆盖性以 9 个步骤的 36 条断言与 19 张截图为准。</li>
+    <li>改动文件覆盖表见上：EXEMPT 仅 change 文档/证据与 E2E 运行器，任何未映射的产品/测试文件都会标 UNCOVERED 并让 E2E exit 1；本次 <b>UNCOVERED=0</b>。</li>
   </ul>
 </div>
 </main>

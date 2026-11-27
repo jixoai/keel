@@ -64,11 +64,14 @@
   requestId 并发。
 - [x] 5.3 内置命令：`/compact` 与 HTTP 端点等价；`/skill:<name>` 下一轮生效、缺失/缺权；
   `/learn` 不在目录且模板仍工作。
-- [ ] 5.4 真实浏览器 E2E（8 步起）：打开目录 → 执行内置 `/compact` → 安装插件命令 →
+- [x] 5.4 真实浏览器 E2E（8 步起）：打开目录 → 执行内置 `/compact` → 安装插件命令 →
   执行成功 → 重放同 requestId → 拒绝 destructive → 停用插件 → 回退；每步截图，
   `UNCOVERED=0`，生成 HTML 报告并挂公网。
-  - 已完成并留证：真实栈 9 步 / 36 断言 / 19 图 / HTML 报告（`evidence/ui-e2e/`）。
-  - 未满足：公网部署；未建立 coverageRows/UNCOVERED 表（不构造 `UNCOVERED=0`）。
+  - 真实栈 9 步 / 37 断言 / 19 图；改动文件覆盖表 56 个产品/测试文件 COVERED、
+    UNCOVERED=0；EXEMPT 仅 openspec 证据与 `scripts/keel-commands-e2e/` 运行器。
+  - 公网：https://local-kzf-keel-live-gh.fde2e.com/commands/report.html （HTTP 200）。
+  - 证据：`evidence/ui-e2e/`（steps.json / report.html / shots / residue.txt）、
+    `evidence/ui-go-race*.txt`、`evidence/ui-nsh-*`。
 - [x] 5.5 TUI E2E：同一目录/顺序/可用性；命令菜单与结果行文本降级正确。
 
 ## 6. 验收与归档

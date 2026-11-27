@@ -733,7 +733,11 @@ func (s *Server) executeSessionCommand(w http.ResponseWriter, r *http.Request) {
 	if !idle {
 		if s.finishCommandFrom(r.Context(), &invocation, store.CommandStatusRunning, store.CommandStatusRefused,
 			CommandCodeBusy, "session is busy", nil, started, "") {
-			writeCommandError(w, http.StatusConflict, CommandCodeBusy, "session is busy; retry after the active turn settles")
+			// The refusal wrote a durable command.invoked row: name its seq so
+			// the client does not mistake a durable busy refusal for a local
+			// request-phase failure.
+			writeCommandErrorWithDecision(w, http.StatusConflict, CommandCodeBusy,
+				"session is busy; retry after the active turn settles", "", invocation.EventSeq)
 		} else {
 			s.writeCommandRow(w, r, invocation)
 		}
@@ -848,8 +852,11 @@ func (s *Server) resumeCommandDecision(w http.ResponseWriter, r *http.Request, i
 			return
 		}
 		if !idle {
-			writeCommandError(w, http.StatusConflict, CommandCodeBusy,
-				"session is busy; retry after the active turn settles")
+			// The pending invocation (and its decision event) is durable; keep
+			// its seq on the retryable answer so the client does not relabel it
+			// as a local failure.
+			writeCommandErrorWithDecision(w, http.StatusConflict, CommandCodeBusy,
+				"session is busy; retry after the active turn settles", "", invocation.EventSeq)
 			return
 		}
 		claimed, owned, err := s.cfg.CommandStore.ClaimDecisionResult(

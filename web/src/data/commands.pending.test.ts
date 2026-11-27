@@ -325,6 +325,28 @@ test("pending: 忙等重试耗尽 → 中文错误可见，可重新执行", asy
   }
 });
 
+test("pending: durable busy（eventSeq）不标本地记录", async () => {
+  installStorage();
+  store.resetCommandStateForTest();
+  store.activeId.set("session-a");
+  const calls: Call[] = [];
+  const api = fakeTransport({
+    calls,
+    decisionStatus: () => "open",
+    onExecute: async () => {
+      throw new KeelApiError(409, "session is busy", [], undefined, "session_busy", {}, undefined, 9);
+    },
+  });
+  store.setCommandTransport(api);
+  try {
+    const outcome = await store.runCommand("e2e.commands:purge", {});
+    expect(outcome.status).toBe("error");
+    expect(store.commandLocalOutcome(outcome.requestId)).toBeUndefined();
+  } finally {
+    store.resetCommandStateForTest();
+  }
+});
+
 test("pending: 初始 403（未产生审计行）也留下本地错误", async () => {
   installStorage();
   store.resetCommandStateForTest();

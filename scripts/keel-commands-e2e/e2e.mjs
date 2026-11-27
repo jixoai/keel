@@ -19,6 +19,7 @@
 // Every step writes assertions and PNGs; report.mjs renders report.html.
 // Secrets and the DSN stay in files the report never reads.
 import { execFileSync, spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -44,6 +45,31 @@ const CHROME = process.env.E2E_CHROME || '/Applications/Google Chrome.app/Conten
 const PLAYWRIGHT = process.env.PLAYWRIGHT_CORE || '';
 const HEADLESS = process.env.E2E_HEADLESS !== 'false';
 const PUBLIC_URL = process.env.E2E_PUBLIC_URL || '';
+const REPO_ROOT =
+  process.env.E2E_REPO_ROOT || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+
+/** The change's own commits. The coverage universe is their union plus HEAD;
+ * unrelated mainline commits that merely landed between them are not folded
+ * in. A missing commit is a hard failure, not a silently smaller table. */
+const COVERAGE_COMMITS = [
+  'f40b8df396e7f6edc38d81f2c6f2f6b1cd8dbfb1',
+  'fd05600df760d5ab6a809822ac501e694ed4ba05',
+  'fab852713a5bf3c27057c12a13de4e3db4e2d454',
+  'e099715af34f627bc9ed45bb035db651dee48a6b',
+  'b60affd1810e4fd968b044489c6244b1f44601f1',
+  'ce3656c9a1dd2c6bda9d7c6ef30d84da28121d27',
+  '5141443a4f55be696cbfc060250ca026608c44d3',
+  'cdb08406ee6828f20245ff58b84baae230505690',
+  'ac60a2463bbe2e76374389f94c04024746d4ca9d',
+  '8baf0e12242e1f1f938fee7a48d9f8c9a2b8abdb',
+  '1b10e358279182161db187a75d2efc4ec0cc1adb',
+  '891639382bf0956cab224436f1f99db17f07ec42',
+  '92cebeff24d8a912b9bb1a2daa461436d24ffb2c',
+  '13c91415bc6ea468a961ff89f09eadc74842b4a0',
+  '20cd5f48403f56d825039d133aed44a6a628c145',
+  'b26b89c85040bab5cfb45e73dd322c5a85a9b216',
+  '8c590c56a801df7c32f4daa9e92961371ccdb4d9',
+];
 
 if (!BASE || !EVIDENCE || !BIN || !DSN_FILE || !SECRET_FILE || !DB || !PLUGIN_SRC) {
   console.error('missing E2E_BASE/E2E_EVIDENCE/E2E_KEEL_BIN/E2E_DSN_FILE/E2E_SECRET_FILE/E2E_DB/E2E_PLUGIN_SRC');
@@ -76,7 +102,8 @@ const report = {
     models: 'e2e-model (deterministic loopback provider; /compact summary included)',
     plugin: PLUGIN_SRC,
     databaseRowProbe: 'command_invocations (tenant, session, request_id)',
-    publicDeployment: PUBLIC_URL ? PUBLIC_URL : '未部署（仅本地 127.0.0.1 证据）',
+    publicDeployment: PUBLIC_URL || '未部署（仅本地 127.0.0.1 证据）',
+    coverageBaseline: `${COVERAGE_COMMITS[0].slice(0, 7)}..HEAD（本 change 提交 + 工作区）`,
   },
   steps: [],
   console: [],
@@ -171,6 +198,96 @@ function record(details) {
 
 function saveData(name, value) {
   fs.writeFileSync(path.join(DATA, name), JSON.stringify(value, null, 2) + '\n');
+}
+
+// ---- change coverage -------------------------------------------------------
+
+function gitLines(args) {
+  return execFileSync('git', args, { cwd: REPO_ROOT, encoding: 'utf8' })
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+/** Every file this change touched: the union of its commits, HEAD (the final
+ * coverage/evidence commits) and any uncommitted path. */
+function changedFiles() {
+  const files = new Set();
+  for (const ref of [...COVERAGE_COMMITS, 'HEAD']) {
+    for (const file of gitLines(['show', '--name-only', '--format=', ref])) files.add(file);
+  }
+  // Porcelain's XY prefixes are significant; do not trim the leading space
+  // of an unstaged modification (gitLines trims every line).
+  const status = execFileSync('git', ['status', '--porcelain'], {
+    cwd: REPO_ROOT,
+    encoding: 'utf8',
+  })
+    .split('\n')
+    .filter((line) => line.length > 0);
+  for (const line of status) {
+    const raw = line.slice(3).trim();
+    const file = raw.includes(' -> ') ? raw.split(' -> ').pop().trim() : raw;
+    if (file) files.add(file);
+  }
+  return [...files].sort();
+}
+
+/** Explicit evidence per product/test surface. Order matters: the first match
+ * wins. A file outside the map is UNCOVERED unless the narrow EXEMPT allowlist
+ * below names it; there is no automatic exemption. */
+const COVERAGE_MAP = [
+  [/^\.github\/workflows\/ci\.yml$/, 'CI 增长预算与构建门', 'CI workflow（go build + web build）'],
+  [/^cmd\/keel\//, 'serve 装配与命令路由', 'go test ./cmd/keel + 本 E2E'],
+  [/^docs\//, 'HARNESS / PI parity 契约文档', '后端契约测试 + 本 E2E'],
+  [/^internal\/accessgate\//, '命令权限矩阵', 'go test ./internal/harnessapi ./internal/access'],
+  [/^internal\/agent\//, 'skill 下一轮加载 / runner', 'go test ./internal/agent'],
+  [/^internal\/harnessapi\//, '目录 / 执行 / 审批路由', 'go test ./internal/harnessapi + PG + 本 E2E'],
+  [/^internal\/harnessext\//, '插件命令注册 / 工具分发', 'go test ./internal/harnessext + PG'],
+  [/^internal\/pluginpkg\//, '命令声明与字段校验', 'go test ./internal/pluginpkg'],
+  [/^internal\/store\//, 'invocation 账本 / 事件 / RLS / schema', 'go test ./internal/store + PG'],
+  [/^packages\/chat-surface\/src\//, '命令投影与冻结契约', 'bun test chat-surface + TUI 命令测试'],
+  [/^packages\/chat-surface\/test\//, '投影 / AG-UI 测试', 'bun test chat-surface'],
+  [/^web\/src\/data\//, '目录客户端 / store / fixture', 'TUI 命令五态/阻塞/pending 测试 + 本 E2E'],
+  [/^web\/src\/screens\/command-invocation\.tsx$/, '命令结果行 / 本地错误覆盖', 'E2E 步骤 2/4/7/8 + TUI'],
+  [/^web\/src\/screens\/command-palette\.tsx$/, 'Mod+K 命令分组', 'TUI 面板测试 + E2E 目录'],
+  [/^web\/src\/screens\/composer-commands\.tsx$/, '命令菜单 / schema 表单', 'E2E 步骤 1/3/4 + TUI'],
+  [/^web\/src\/screens\/composer\.tsx$/, '发送门禁 / 参数映射', 'TUI 阻塞与命令测试 + E2E'],
+  [/^web\/src\/screens\/conversation\.tsx$/, '按 seq 合并对话行', 'TUI destructive/palette + E2E'],
+  [/^web\/src\/screens\/commands[^/]*\.(tsx|ts)$/, '命令 TUI 门禁与 harness', 'nsh test --target tui'],
+];
+
+/** Only change documentation/evidence and the E2E runner itself are exempt. */
+const EXEMPT_ALLOWLIST = [/^openspec\//, /^scripts\/keel-commands-e2e\//];
+
+function changeCoverage() {
+  const rows = changedFiles().map((file) => {
+    const match = COVERAGE_MAP.find(([pattern]) => pattern.test(file));
+    if (match) {
+      return { file, status: 'COVERED', surface: match[1], evidence: match[2] };
+    }
+    if (EXEMPT_ALLOWLIST.some((pattern) => pattern.test(file))) {
+      return {
+        file,
+        status: 'EXEMPT',
+        surface: file.startsWith('openspec/') ? 'change 文档/证据' : 'E2E 运行器（证据生产者）',
+        evidence: 'EXEMPT：显式白名单',
+      };
+    }
+    return {
+      file,
+      status: 'UNCOVERED',
+      surface: '未映射的产品/测试文件',
+      evidence: 'UNCOVERED：必须加入 COVERAGE_MAP 或补真实证据',
+    };
+  });
+  return {
+    baseline: `${COVERAGE_COMMITS[0].slice(0, 7)}..HEAD（本 change 提交 + 工作区）`,
+    total: rows.length,
+    covered: rows.filter((row) => row.status === 'COVERED').length,
+    exempt: rows.filter((row) => row.status === 'EXEMPT').length,
+    uncovered: rows.filter((row) => row.status === 'UNCOVERED').length,
+    rows,
+  };
 }
 
 // ---- server lifecycle ------------------------------------------------------
@@ -763,12 +880,35 @@ async function main() {
   await shot(page, 'after-uninstall.png', '卸载后的工作区');
   finishStep();
 
+  // ---- change coverage -------------------------------------------------
+  step = 'coverage';
+  beginStep(step, '改动文件覆盖表：仅证据/运行器可 EXEMPT，其余必须 COVERED');
+  const coverage = changeCoverage();
+  check(
+    'UNCOVERED=0',
+    coverage.uncovered === 0,
+    { total: coverage.total, covered: coverage.covered, exempt: coverage.exempt, uncovered: coverage.uncovered },
+    { uncovered: 0 },
+  );
+  record({
+    baseline: coverage.baseline,
+    total: coverage.total,
+    covered: coverage.covered,
+    exempt: coverage.exempt,
+    uncovered: coverage.uncovered,
+  });
+  finishStep();
+  report.coverage = coverage;
+
   // ---- report ----------------------------------------------------------
   report.finishedAt = new Date().toISOString();
   report.console = consoleErrors;
   report.pageErrors = pageErrors;
   report.failedRequests = failedRequests;
-  report.pass = report.failures === 0 && report.steps.every((entry) => entry.status === 'passed');
+  report.pass =
+    report.failures === 0 &&
+    report.steps.every((entry) => entry.status === 'passed') &&
+    coverage.uncovered === 0;
   report.environment.durationSeconds = Math.round((Date.now() - started) / 1000);
   saveData('catalog-before.json', before);
   saveData('catalog-after.json', after);

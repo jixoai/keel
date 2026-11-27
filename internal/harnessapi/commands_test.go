@@ -566,6 +566,9 @@ func TestCommandExecuteRefusals(t *testing.T) {
 	if code != http.StatusConflict || body["code"] != CommandCodeBusy {
 		t.Fatalf("busy = %d %v", code, body)
 	}
+	if seq, _ := body["eventSeq"].(float64); seq == 0 {
+		t.Fatalf("busy refusal lost its durable eventSeq: %v", body)
+	}
 	if harness.compact.callCount() != 0 {
 		t.Fatalf("busy executed the seam: %d", harness.compact.callCount())
 	}
