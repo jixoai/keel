@@ -14,6 +14,7 @@ import type {
   SlotTarget,
 } from "./types";
 import { BRIDGE_CAPABILITIES, SLOT_ARITIES, SLOT_FORMS, SLOT_TARGETS } from "./types";
+import { MIME_PATTERNS_MAX, mimePatternProblem } from "./mime";
 
 type Raw = Record<string, unknown>;
 
@@ -217,7 +218,7 @@ export function normalizeContribution(
   }
   checkKeys(
     raw,
-    ["id", "slot", "form", "entry", "title", "description", "payload", "capabilities", "targets", "tool", "toolName", "part", "partKind", "priority"],
+    ["id", "slot", "form", "entry", "title", "description", "payload", "capabilities", "targets", "tool", "toolName", "part", "partKind", "mime", "priority"],
     pluginId,
     `${field}.`,
     issues,
@@ -310,6 +311,107 @@ export function normalizeContribution(
     const finding = validateSchemaValue(slot.schema, raw.payload, `${field}.payload`);
     if (finding) issues.push(issue("error", "ERR_CONTRIBUTION_INVALID", pluginId, finding.field, finding.message));
   }
+  // The attachment claim (`part: attachment` + optional MIME narrowing). The
+  // backend enforces the same grammar; validating it here means a bad manifest
+  // never half-registers in the client.
+  const partKindRaw = raw.partKind ?? raw.part;
+  let partKind: string | undefined;
+  if (partKindRaw !== undefined) {
+    if (typeof partKindRaw !== "string") {
+      issues.push(issue("error", "ERR_CONTRIBUTION_INVALID", pluginId, `${field}.part`, "part 必须是字符串。"));
+    } else if (partKindRaw.trim()) {
+      partKind = partKindRaw.trim();
+    }
+  }
+  let mime: string[] | undefined;
+  if (raw.mime !== undefined) {
+    if (!Array.isArray(raw.mime)) {
+      issues.push(issue("error", "ERR_CONTRIBUTION_INVALID", pluginId, `${field}.mime`, "mime 必须是字符串数组。"));
+    } else if (raw.mime.length > MIME_PATTERNS_MAX) {
+      issues.push(
+        issue(
+          "error",
+          "ERR_CONTRIBUTION_INVALID",
+          pluginId,
+          `${field}.mime`,
+          `mime 最多 ${MIME_PATTERNS_MAX} 个模式。`,
+        ),
+      );
+    } else {
+      const patterns: string[] = [];
+      for (let mimeIndex = 0; mimeIndex < raw.mime.length; mimeIndex += 1) {
+        const pattern = raw.mime[mimeIndex];
+        if (typeof pattern !== "string") {
+          issues.push(
+            issue("error", "ERR_CONTRIBUTION_INVALID", pluginId, `${field}.mime[${mimeIndex}]`, "MIME 模式必须是字符串。"),
+          );
+          continue;
+        }
+        const problem = mimePatternProblem(pattern);
+        if (problem) {
+          issues.push(
+            issue("error", "ERR_CONTRIBUTION_INVALID", pluginId, `${field}.mime[${mimeIndex}]`, problem),
+          );
+          continue;
+        }
+        if (patterns.includes(pattern)) {
+          issues.push(
+            issue(
+              "error",
+              "ERR_CONTRIBUTION_INVALID",
+              pluginId,
+              `${field}.mime[${mimeIndex}]`,
+              `MIME 模式「${pattern}」在同一条贡献里重复。`,
+            ),
+          );
+          continue;
+        }
+        patterns.push(pattern);
+      }
+      if (patterns.length > 0) mime = patterns;
+    }
+  }
+  if (slotID !== "keel.ui.message-part") {
+    if (partKind !== undefined) {
+      issues.push(
+        issue(
+          "error",
+          "ERR_CONTRIBUTION_INVALID",
+          pluginId,
+          `${field}.part`,
+          "part 只支持 keel.ui.message-part 槽位。",
+        ),
+      );
+    }
+    if (mime !== undefined) {
+      issues.push(
+        issue(
+          "error",
+          "ERR_CONTRIBUTION_INVALID",
+          pluginId,
+          `${field}.mime`,
+          "mime 收窄只支持 keel.ui.message-part 槽位。",
+        ),
+      );
+    }
+  } else {
+    if (partKind !== undefined && partKind !== "attachment") {
+      issues.push(
+        issue("error", "ERR_CONTRIBUTION_INVALID", pluginId, `${field}.part`, "part 只能是 attachment。"),
+      );
+    }
+    if (mime !== undefined && partKind !== "attachment") {
+      issues.push(
+        issue(
+          "error",
+          "ERR_CONTRIBUTION_INVALID",
+          pluginId,
+          `${field}.mime`,
+          "mime 收窄要求 part: attachment。",
+        ),
+      );
+    }
+  }
   if (issues.some((entryIssue) => entryIssue.severity === "error")) return { contribution: null, issues };
   const id = typeof raw.id === "string" && raw.id.trim() ? raw.id.trim() : `${pluginId}:${slotID}:${index}`;
   if (!CONTRIBUTION_ID_PATTERN.test(id)) {
@@ -319,7 +421,6 @@ export function normalizeContribution(
     return { contribution: null, issues };
   }
   const toolNameRaw = raw.toolName ?? raw.tool;
-  const partKindRaw = raw.partKind ?? raw.part;
   return {
     contribution: {
       id,
@@ -333,7 +434,8 @@ export function normalizeContribution(
       targets,
       capabilities,
       toolName: typeof toolNameRaw === "string" ? toolNameRaw : undefined,
-      partKind: typeof partKindRaw === "string" ? partKindRaw : undefined,
+      partKind,
+      mime,
     },
     issues,
   };

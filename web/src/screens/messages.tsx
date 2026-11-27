@@ -14,7 +14,7 @@
 // Tool families are *derived* from the tool's own name (`./tool-families`):
 // `ToolCallView` is a frozen contract with no family field, so the words and
 // the counts the summary line says them with live in that pure module.
-import { Clipboard, effect, Image, type JSX, keymap, platform, signal, Text, View, windowSize } from "nsh";
+import { cleanup, Clipboard, effect, Image, type JSX, keymap, openUrl, platform, signal, Text, View, windowSize } from "nsh";
 import { Radio, RadioGroup as NativeRadioGroup, TextView } from "nsh/base";
 import type {
   AttachmentRef,
@@ -29,10 +29,23 @@ import type {
 } from "../data/contract";
 import { contentTextOf } from "../data/mcp-apps";
 import { displayNameOf, formatDuration, formatTime, formatTokens, preview } from "../data/wire";
+import { absoluteAttachmentUrl } from "../data/attachment-link";
+import {
+  attachmentPartKey,
+  attachmentPartState,
+  formatAttachmentSize,
+  loadAttachmentPart,
+  localAttachmentPart,
+  probeAttachmentAccess,
+  retryAttachmentPart,
+  useLocalAttachmentPart,
+  type AttachmentAccess,
+} from "../data/attachments";
 import { store } from "../data/store";
 import { Icon, type IconName } from "../ui/icons";
 import { fitCells, wrapCells } from "../ui/text";
 import {
+  Alert,
   Avatar,
   Badge,
   Button,
@@ -46,6 +59,7 @@ import {
   EmptyTitle,
   IconButton,
   Separator,
+  Skeleton,
   Spinner,
   alpha,
   color,
@@ -63,7 +77,7 @@ import {
 } from "../ui/kit";
 import { McpAppSlot } from "../surfaces/mcp-app";
 import { currentPluginTarget } from "../plugins/forms";
-import { PluginMessagePartSlot, PluginToolRendererEntry, PluginToolRendererSlot } from "../plugins/slots";
+import { PluginAttachmentPreview, PluginMessagePartSlot, PluginToolRendererEntry, PluginToolRendererSlot } from "../plugins/slots";
 import { oarAccess } from "../data/oar";
 import { taskPanelAccess } from "../data/tasks";
 import {
@@ -130,41 +144,320 @@ function ToneDot(props: { variant: BadgeVariant }) {
   );
 }
 
-function AttachmentChip(props: { item: AttachmentRef }) {
-  const image = () => (props.item.mime ?? "").startsWith("image/") && !!props.item.url;
-  const sizeLabel = () =>
-    !props.item.size
-      ? ""
-      : props.item.size > 1024 * 1024
-        ? `${(props.item.size / 1024 / 1024).toFixed(1)} MB`
-        : `${Math.max(1, Math.round(props.item.size / 1024))} KB`;
+/** One attachment's kind glyph: the host's single icon language. */
+const attachmentIcon = (kind: string): IconName =>
+  kind === "image" ? "image" : kind === "audio" || kind === "video" ? "play" : "file";
+
+/** The projection's delivery fact in words. The server records `native:false`
+ * with an "attempt not stored" reason today (design §11); a future persisted
+ * attempt would render as 原生. Never invent a delivery form. */
+const deliveryLabel = (delivery: { native: boolean; reason?: string }): string => {
+  if (delivery.native) return "本次投递：原生";
+  const reason = delivery.reason ?? "";
+  if (/not stored|未存储|attempt/i.test(reason)) return "本次投递形态未记录（attempt 结果不随消息存储）";
+  return reason || "本次投递形态未记录";
+};
+
+/** The host's default attachment line (change keel-plugin-attachment, 3.1-3.5).
+ *
+ * It always shows the facts a renderer may never hide — name, size and the
+ * download/open entry — and adds whatever preview is available:
+ *
+ *   · loading   the canonical part is being read (facts still shown);
+ *   · success   the projection + an optional plugin preview above the line;
+ *   · empty     no attachment (the caller draws no area at all);
+ *   · error     an unreadable projection/thumbnail, with the reason and retry;
+ *   · forbidden the account may not read the attachment (no bytes fetched).
+ *
+ * Thumbnail lifecycle is the projection's own: `pending` waits, `ready` draws,
+ * `failed`/`none` fall back to a glyph and never retry in a loop. A plugin
+ * preview is additive; a failing contribution never removes this line or
+ * touches another attachment.
+ */
+function AttachmentRow(props: { item: AttachmentRef; index: number; sessionId: string; seq?: number }) {
+  // A row without a fileId (the fixture, an optimistic send, a legacy message)
+  // still needs a cache identity of its own: name+mime+size keeps two local
+  // attachments from sharing one projection.
+  const cacheId =
+    props.item.fileId ??
+    `local:${props.item.name}\u0000${props.item.mime ?? ""}\u0000${props.item.size ?? 0}`;
+  const key = attachmentPartKey(props.sessionId, props.seq, cacheId);
+  const state = () => attachmentPartState(key);
+  const localOnly = () => !props.item.fileId || props.seq === undefined || !store.attachmentPartAvailable();
+  const part = () => state()?.part ?? localAttachmentPart(props.item);
+  const status = () => state()?.status ?? (localOnly() ? "ready" : "loading");
+  const ready = () => (state()?.part ? state()!.status === "ready" : localOnly());
+  const name = () => part().name || props.item.name || `附件 ${props.index + 1}`;
+  const sizeLabel = () => formatAttachmentSize(part().size || props.item.size);
+  const download = () => part().downloadUrl || props.item.url || "";
+  const thumbSrc = () => {
+    const value = part();
+    if (value.kind !== "image") return "";
+    if (value.thumbStatus === "ready" && value.thumbnailUrl) return value.thumbnailUrl;
+    if (value.thumbStatus === "none" && value.downloadUrl) return value.downloadUrl;
+    return "";
+  };
+  const thumbLoadedFor = signal<string | null>(null);
+  const thumbError = signal<{ src: string; code?: string } | null>(null);
+  const thumbLoaded = () => !!thumbSrc() && thumbLoadedFor() === thumbSrc();
+  const thumbFailure = () => {
+    const failure = thumbError();
+    return failure && failure.src === thumbSrc() ? failure : null;
+  };
+  const openNote = signal<string | null>(null);
+  const access = signal<AttachmentAccess>("checking");
+  const accessProbeFor = signal<string | null>(null);
+  const accessDenied = () => access() === "forbidden";
+  /** The thumbnail is generated asynchronously; a bounded refresh turns the
+   * `pending` face into `ready`/`failed` without a manual reload. */
+  const thumbPolls = signal(0);
+  const reloadPart = () => {
+    retryAttachmentPart(key);
+    if (props.item.fileId && props.seq !== undefined && store.attachmentPartAvailable()) {
+      void loadAttachmentPart(key, () => store.attachmentPart(props.sessionId, props.item.fileId!, props.seq!));
+    }
+  };
+  const openDownload = async () => {
+    openNote.set(null);
+    try {
+      const absolute = await absoluteAttachmentUrl(download());
+      const result = await openUrl(absolute);
+      if (!result.opened) openNote.set(`没有应用能打开：${absolute}`);
+    } catch (error) {
+      openNote.set(error instanceof Error ? error.message : String(error));
+    }
+  };
+  effect(() => {
+    if (props.item.fileId && props.seq !== undefined && store.attachmentPartAvailable()) {
+      void loadAttachmentPart(key, () => store.attachmentPart(props.sessionId, props.item.fileId!, props.seq!));
+      return;
+    }
+    useLocalAttachmentPart(key, props.item);
+  });
+  effect(() => {
+    if (status() !== "ready" || part().thumbStatus !== "pending" || thumbPolls() >= 12) return;
+    const timer = setTimeout(() => {
+      thumbPolls.update((value) => value + 1);
+      reloadPart();
+    }, 1500);
+    cleanup(() => clearTimeout(timer));
+  });
+  // `file.read` is a different permission from the session read that produced
+  // the projection. A metadata GET asks it without downloading a byte: a
+  // refusal is the row's explicit no-permission face, not a broken image.
+  effect(() => {
+    const url = download();
+    if (!url || platform.idiom === "terminal" || accessProbeFor() === url) return;
+    accessProbeFor.set(url);
+    access.set("checking");
+    void probeAttachmentAccess(url).then((verdict) => {
+      if (accessProbeFor() === url) access.set(verdict);
+    });
+  });
   return (
-    <Card size="sm" style={{ alignSelf: "flex-end", maxWidth: "100%", gap: space.sm, padding: space.sm }}>
-      <If when={image()}>
-        <Image
-          src={props.item.url ?? ""}
+    <Card
+      size="sm"
+      testID={`attachment-${props.item.fileId || `local-${props.index}`}`}
+      accessibilityLabel={`附件 ${name()}`}
+      style={{ alignSelf: "flex-end", maxWidth: "100%", width: 320, gap: space.sm, padding: space.sm }}
+    >
+      <If when={status() === "loading"}>
+        <View testID="attachment-state-loading" style={{ flexDirection: "row", alignItems: "center", gap: space.sm }}>
+          <Spinner size={iconSize.xs} tint={color.mutedForeground} />
+          <Text style={{ fontSize: typeScale.xs, color: color.mutedForeground }}>正在读取附件…</Text>
+        </View>
+      </If>
+      <If when={status() === "forbidden"}>
+        <Alert
+          variant="destructive"
+          icon="lock"
+          title="无权限查看附件"
+          description="当前账号没有读取这个附件的权限；没有返回任何字节。"
+          testID="attachment-state-forbidden"
+        />
+      </If>
+      <If when={status() === "error"}>
+        <Alert
+          variant="destructive"
+          icon="alert"
+          title="附件读取失败"
+          description={state()?.reason ?? "附件投影读取失败。"}
+          action={
+            <Button variant="ghost" size="sm" icon="refresh" label="重试" accessibilityLabel="重试读取附件" onPress={reloadPart} />
+          }
+          testID="attachment-state-error"
+        />
+      </If>
+      <If when={accessDenied()}>
+        <Alert
+          variant="destructive"
+          icon="lock"
+          title="无权限查看附件内容"
+          description="当前账号缺少 file.read：缩略图与下载都不会返回字节。附件名称与大小仍可见。"
+          testID="attachment-state-file-forbidden"
+        />
+      </If>
+      {/* The preview: only the plugin's additive face. The default facts below
+          always render, so a preview can never make an attachment undownloadable. */}
+      <If when={ready()}>
+        <PluginAttachmentPreview part={part()} />
+      </If>
+      <If when={platform.idiom === "terminal"}>
+        <View
           style={{
+            flexDirection: "row",
+            alignItems: "center",
+            gap: space.sm,
+            padding: space.sm,
+            borderRadius: radius.sm,
+            backgroundColor: color.muted,
+            borderWidth: 1,
+            borderColor: color.border,
+          }}
+        >
+          <Icon name={attachmentIcon(part().kind)} size={iconSize.sm} tint={color.mutedForeground} />
+          <Text style={{ flexShrink: 1, minWidth: 0, fontSize: typeScale.xs, color: color.mutedForeground, numberOfLines: 1 }}>
+            {part().kind === "image" ? "图片附件（终端不内嵌预览）" : `${part().mime || "附件"}（终端按文本展示）`}
+          </Text>
+        </View>
+      </If>
+      <If when={platform.idiom !== "terminal" && thumbSrc() !== "" && !accessDenied()}>
+        <View
+          style={{
+            position: "relative",
             width: 280,
             maxWidth: "100%",
             height: 158,
             borderRadius: radius.sm,
-            objectFit: "cover",
+            overflow: "hidden",
+            borderWidth: 1,
+            borderColor: color.border,
+            backgroundColor: color.muted,
+          }}
+        >
+          <If when={access() === "checking" || (!thumbLoaded() && !thumbFailure())}>
+            <Skeleton
+              width="100%"
+              height={158}
+              radius={radius.sm}
+              accessibilityLabel="缩略图正在生成"
+              testID="attachment-thumb-pending"
+              style={{ position: "absolute", left: 0, top: 0, right: 0, bottom: 0 }}
+            />
+          </If>
+          <If when={!!thumbFailure()}>
+            <View
+              testID="attachment-thumb-failed"
+              style={{ flex: 1, alignItems: "center", justifyContent: "center", gap: space.xs, padding: space.sm }}
+            >
+              <Icon name="image" size={iconSize.md} tint={color.mutedForeground} />
+              <Text style={{ fontSize: typeScale.xs, color: color.mutedForeground, textAlign: "center" }}>
+                {thumbFailure()?.code === "ERR_ACCESS_DENIED" ? "无权限查看缩略图" : "缩略图加载失败"}
+              </Text>
+            </View>
+          </If>
+          <If when={access() !== "checking"}>
+            <Image
+              src={thumbSrc()}
+              onLoad={() => thumbLoadedFor.set(thumbSrc())}
+              onError={(event) => thumbError.set({ src: thumbSrc(), code: event.code })}
+              style={{
+                position: "absolute",
+                left: 0,
+                top: 0,
+                width: "100%",
+                height: 158,
+                objectFit: "cover",
+                opacity: thumbLoaded() ? 1 : 0,
+              }}
+            />
+          </If>
+        </View>
+      </If>
+      <If when={platform.idiom !== "terminal" && part().kind === "image" && thumbSrc() === ""}>
+        <View
+          testID={part().thumbStatus === "failed" ? "attachment-thumb-failed" : "attachment-thumb-none"}
+          style={{
+            width: 280,
+            maxWidth: "100%",
+            height: 96,
+            borderRadius: radius.sm,
+            alignItems: "center",
+            justifyContent: "center",
+            gap: space.xs,
+            backgroundColor: color.muted,
             borderWidth: 1,
             borderColor: color.border,
           }}
-        />
+        >
+          <Icon name="image" size={iconSize.lg} tint={color.mutedForeground} />
+          <Text style={{ fontSize: typeScale.xs, color: color.mutedForeground }}>
+            {part().thumbStatus === "pending"
+              ? "缩略图生成中"
+              : part().thumbStatus === "failed"
+                ? "缩略图不可用"
+                : "没有缩略图"}
+          </Text>
+        </View>
       </If>
-      <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm, alignSelf: "flex-end" }}>
-        <Icon name={image() ? "image" : "file"} size={iconSize.sm} tint={color.mutedForeground} />
-        <Text style={{ numberOfLines: 1, fontSize: typeScale.sm, color: color.foreground }}>
-          {props.item.name}
+      <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm, flexWrap: "wrap" }}>
+        <Icon name={attachmentIcon(part().kind)} size={iconSize.sm} tint={color.mutedForeground} />
+        <Text
+          style={{ flexShrink: 1, minWidth: 0, numberOfLines: 1, fontSize: typeScale.sm, color: color.foreground }}
+        >
+          {name()}
         </Text>
-        <If when={!!props.item.size}>
+        <If when={!!sizeLabel()}>
           <Text style={{ fontSize: typeScale.xs, color: color.mutedForeground }}>{sizeLabel()}</Text>
         </If>
+        <If when={!!part().mime}>
+          <Text style={{ fontSize: typeScale.xs, color: color.mutedForeground }}>{part().mime}</Text>
+        </If>
+        <If when={!!download()}>
+          <Button
+            variant="ghost"
+            size="sm"
+            icon={accessDenied() ? "lock" : "download"}
+            label={accessDenied() ? "无权限下载" : "下载"}
+            accessibilityLabel={
+              accessDenied() ? `无权限下载附件 ${name()}` : `下载附件 ${name()}`
+            }
+            disabled={accessDenied()}
+            onPress={() => void openDownload()}
+          />
+        </If>
       </View>
+      <If when={!!part().delivery.reason && !part().delivery.native}>
+        <Text
+          style={{ fontSize: typeScale.xs, color: color.mutedForeground, numberOfLines: 2 }}
+          testID="attachment-delivery"
+        >
+          {deliveryLabel(part().delivery)}
+        </Text>
+      </If>
+      <If when={!!openNote()}>
+        <Text style={{ fontSize: typeScale.xs, color: color.danger }}>{openNote()}</Text>
+      </If>
     </Card>
   );
+}
+
+/** Attachment rows are deduplicated by `fileId` (or name+mime+size for an
+ * optimistic row): the transcript may carry the same file through both the
+ * explicit attachments array and an image content block, and the message row
+ * must not print it twice. */
+function uniqueAttachments(items: AttachmentRef[] | undefined): AttachmentRef[] {
+  if (!items?.length) return [];
+  const seen = new Set<string>();
+  const out: AttachmentRef[] = [];
+  for (const item of items) {
+    if (!item || typeof item.name !== "string") continue;
+    const identity = item.fileId ? `id:${item.fileId}` : `name:${item.name}\u0000${item.mime ?? ""}\u0000${item.size ?? 0}`;
+    if (seen.has(identity)) continue;
+    seen.add(identity);
+    out.push(item);
+  }
+  return out;
 }
 
 /** The guide states as the kit's own tokens: a landed guide is done, a queued
@@ -172,17 +465,29 @@ function AttachmentChip(props: { item: AttachmentRef }) {
 const guideVariant = (state: "consumed" | "pending" | "inert"): BadgeVariant =>
   state === "consumed" ? "success" : state === "pending" ? "warning" : "ghost";
 
-function UserInputRow(props: { turnId: string; input: InputView; attachments?: AttachmentRef[]; running?: boolean }) {
+function UserInputRow(props: {
+  turnId: string;
+  sessionId: string;
+  input: InputView;
+  attachments?: AttachmentRef[];
+  running?: boolean;
+}) {
   const guideState = (): "consumed" | "pending" | "inert" =>
     props.input.consumed ? "consumed" : props.running ? "pending" : "inert";
   const guideLabel = () =>
     guideState() === "consumed" ? "引导已生效" : guideState() === "pending" ? "引导排队中" : "引导未生效";
+  const rows = () => uniqueAttachments(props.attachments);
   return (
     <View style={{ alignItems: "flex-end", gap: space.sm, paddingVertical: space.sm }}>
-      {props.attachments?.length ? (
-        <View style={{ alignItems: "flex-end", gap: space.sm }}>
-          {props.attachments.map((item) => (
-            <AttachmentChip item={item} />
+      {rows().length ? (
+        <View style={{ alignItems: "flex-end", gap: space.sm, maxWidth: "100%" }}>
+          {rows().map((item, index) => (
+            <AttachmentRow
+              item={item}
+              index={index}
+              sessionId={props.sessionId}
+              seq={props.input.seq}
+            />
           ))}
         </View>
       ) : null}
@@ -1259,6 +1564,7 @@ export function TurnRow(props: {
           {props.turn().visibleInputs.map((input) => (
             <UserInputRow
               turnId={props.turn().turnId}
+              sessionId={props.sessionId()}
               input={input}
               attachments={props.attachmentsFor(input.requestId)}
               running={props.turn().status === "running"}

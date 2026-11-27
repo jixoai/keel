@@ -6,7 +6,7 @@
 // still proves the chunk form.
 import type { JSX } from "nsh";
 import { Text, View } from "nsh";
-import { color, font, radius, space, typeScale, weight } from "../../ui/kit";
+import { alpha, color, font, radius, space, typeScale, weight } from "../../ui/kit";
 import type { PluginChunkContext } from "../types";
 
 function caption(context: PluginChunkContext): string {
@@ -33,6 +33,52 @@ function detail(context: PluginChunkContext): string {
 /** The chunk's public entry: the host calls this inside a guarded getter. */
 export function render(context: PluginChunkContext): JSX.Element {
   const slot = context.contribution.slot;
+  const attachment = (
+    context.props as { part?: { name?: string; mime?: string; size?: number; kind?: string } } | undefined
+  )?.part;
+  if (slot.endsWith(".message-part") && attachment) {
+    return (
+      <View
+        testID={`plugin-chunk-${context.contribution.id}`}
+        style={{
+          minWidth: 0,
+          flexDirection: "row",
+          alignItems: "center",
+          gap: space.sm,
+          paddingHorizontal: space.sm,
+          paddingVertical: space.xs,
+          borderRadius: radius.sm,
+          backgroundColor: color.brandTint,
+          borderWidth: 1,
+          borderColor: alpha(color.brand, 0.3),
+        }}
+      >
+        <View style={{ width: 6, height: 6, borderRadius: radius.pill, backgroundColor: color.brand }} />
+        <View style={{ minWidth: 0, flexDirection: "column", gap: 1 }}>
+          <Text
+            style={{
+              fontSize: typeScale.sm,
+              fontWeight: weight.semibold,
+              color: color.foreground,
+              numberOfLines: 1,
+            }}
+          >
+            {`W12 附件预览 · ${attachment.name ?? "附件"}`}
+          </Text>
+          <Text
+            style={{
+              fontFamily: font.mono,
+              fontSize: typeScale.xs,
+              color: color.mutedForeground,
+              numberOfLines: 1,
+            }}
+          >
+            {`${attachment.mime ?? "?"} · ${attachment.kind ?? "file"} · chunk`}
+          </Text>
+        </View>
+      </View>
+    );
+  }
   if (slot.endsWith(".route") || slot.endsWith(".surface")) {
     return (
       <View

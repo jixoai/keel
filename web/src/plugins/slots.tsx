@@ -5,12 +5,14 @@
 // screen's guess. A chunk renders inside a guarded call: a throwing plugin
 // shows its code in place and leaves the rest of the page alone.
 import type { JSX } from "nsh";
-import { openUrl, Text, View, WebView } from "nsh";
-import { Button, Spinner, alpha, color, font, iconSize, radius, space, typeScale, weight } from "../ui/kit";
+import { cleanup, effect, openUrl, signal, Text, View, WebView } from "nsh";
+import { absoluteAttachmentUrl } from "../data/attachment-link";
+import type { AttachmentPart } from "../data/contract";
+import { Alert, Button, Spinner, alpha, color, font, iconSize, radius, space, typeScale, weight } from "../ui/kit";
 import { currentPluginTarget } from "./forms";
 import type { SlotRegistry } from "./registry";
 import { slots as globalRegistry } from "./registry";
-import type { MountedContribution, PluginChunkContext, SlotTarget } from "./types";
+import type { AttachmentPreviewProps, MountedContribution, PluginChunkContext, SlotTarget } from "./types";
 
 const registryOf = (registry?: SlotRegistry): SlotRegistry => registry ?? globalRegistry;
 
@@ -527,6 +529,163 @@ export function PluginMessagePartSlot(props: { partKind: string; props?: unknown
         )
       }
     </If>
+  );
+}
+
+/** How long a matching attachment contribution may stay in `declared/loading`
+ * before the host says so and falls back. Measured per attachment row; a slow
+ * plugin never blocks the message or another attachment. */
+const ATTACHMENT_PREVIEW_TIMEOUT_MS = 4000;
+
+/** The attachment preview slot (change keel-plugin-attachment, tasks 3.2-3.5).
+ *
+ * The host's default attachment line is drawn by the caller and is never
+ * replaced: this component adds a preview above it, and every failure face
+ * explains why the preview is absent. Selection is the registry's
+ * declaration-order answer for this MIME; a plugin without
+ * `part = attachment` is never a candidate.
+ *
+ * Forms: `chunk` renders in the host tree on every target (TUI included);
+ * `iframe` draws a labelled non-native frame on web/native and an explicit
+ * "terminal unavailable" face on TUI; `package` is an explicit unsupported
+ * face in this client. A throwing chunk and a load failure both leave the
+ * default row in place. */
+export function PluginAttachmentPreview(props: {
+  part: AttachmentPart;
+  registry?: SlotRegistry;
+  testID?: string;
+}) {
+  const registry = registryOf(props.registry);
+  const target = () => currentPluginTarget();
+  const selection = () => registry.attachmentSelection(props.part.mime, target());
+  const ready = () => selection().ready;
+  const unavailable = () => selection().unavailable[0];
+  const unavailableToShow = () => (ready() || timedOut() ? undefined : selection().unavailable[0]);
+  const loading = () => selection().loading.length > 0;
+  const timedOut = signal(false);
+  const openNote = signal<string | null>(null);
+  const retry = () => {
+    const entry = loading() ? selection().loading[0] : unavailable();
+    timedOut.set(false);
+    if (entry) void registry.reloadPlugin(entry.declaration.pluginId);
+  };
+  effect(() => {
+    if (ready() || !loading()) {
+      timedOut.set(false);
+      return;
+    }
+    const timer = setTimeout(() => {
+      if (!selection().ready && selection().loading.length > 0) timedOut.set(true);
+    }, ATTACHMENT_PREVIEW_TIMEOUT_MS);
+    cleanup(() => clearTimeout(timer));
+  });
+  const openExternal = async (url: string) => {
+    openNote.set(null);
+    try {
+      const absolute = await absoluteAttachmentUrl(url);
+      const result = await openUrl(absolute);
+      if (!result.opened) openNote.set(`没有应用能打开：${absolute}`);
+    } catch (error) {
+      openNote.set(error instanceof Error ? error.message : String(error));
+    }
+  };
+  const contextProps = (): AttachmentPreviewProps => ({
+    part: props.part,
+    target: target(),
+    withDefaultRow: true,
+  });
+  return (
+    <View testID={props.testID ?? `plugin-attachment-${props.part.fileId || "local"}`} style={{ minWidth: 0, gap: space.sm }}>
+      <If when={ready()}>
+        {(entry) => (
+          <View style={{ minWidth: 0 }}>
+            {entry().declaration.form === "iframe" ? (
+              <PluginIframeEntry entry={entry()} />
+            ) : entry().declaration.form === "package" ? (
+              <PluginUnavailable
+                code="ERR_UNSUPPORTED"
+                reason="附件预览使用签名包表面，本客户端还没有接线；已回退到默认附件行。"
+              />
+            ) : (
+              safeRender(
+                entry(),
+                entry().declaration.slot,
+                registry.slot("keel.ui.message-part"),
+                registry,
+                target(),
+                contextProps(),
+              )
+            )}
+          </View>
+        )}
+      </If>
+      <If when={!ready() && loading() && !timedOut()}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm }}>
+          <Spinner size={iconSize.xs} tint={color.mutedForeground} />
+          <Text style={{ fontSize: typeScale.xs, color: color.mutedForeground }}>正在装载附件预览…</Text>
+        </View>
+      </If>
+      <If when={!ready() && timedOut()}>
+        <Alert
+          variant="default"
+          icon="clock"
+          title="附件预览加载超时"
+          description={`预览插件在 ${ATTACHMENT_PREVIEW_TIMEOUT_MS / 1000} 秒内没有就绪，已回退到默认附件行；其他附件不受影响。`}
+          action={
+            <Button variant="ghost" size="sm" icon="refresh" label="重试" accessibilityLabel="重试附件预览" onPress={retry} />
+          }
+          testID="attachment-preview-timeout"
+        />
+      </If>
+      <If when={unavailableToShow()}>
+        {(entry) => (
+          <View style={{ minWidth: 0, gap: space.xs }}>
+            {entry().declaration.form === "iframe" &&
+            entry().code === "ERR_TARGET_UNAVAILABLE" &&
+            target() === "tui" ? (
+              <Alert
+                variant="default"
+                icon="terminal"
+                title="终端不可用（需要图形界面）"
+                description={`预览插件「${entry().declaration.pluginId}」使用 iframe；请在有图形界面的浏览器中打开。默认附件行仍可查看与下载。`}
+                action={
+                  entry().declaration.entry ? (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      icon="external"
+                      label="在浏览器打开"
+                      accessibilityLabel="在浏览器打开附件预览"
+                      onPress={() => void openExternal(entry().declaration.entry ?? "")}
+                    />
+                  ) : undefined
+                }
+                testID="attachment-preview-terminal"
+              />
+            ) : entry().status === "failed" ? (
+              <PluginFailure entry={entry()} registry={registry} compact />
+            ) : (
+              <PluginUnavailable code={entry().code} reason={entry().reason} />
+            )}
+            <If when={!!openNote()}>
+              <Text style={{ fontSize: typeScale.xs, color: color.mutedForeground }}>{openNote()}</Text>
+            </If>
+            <If when={!!entry().declaration.entry && entry().declaration.form === "iframe"}>
+              <Text
+                style={{
+                  fontFamily: font.mono,
+                  fontSize: typeScale.xs,
+                  color: color.mutedForeground,
+                  numberOfLines: 1,
+                }}
+              >
+                {entry().declaration.entry}
+              </Text>
+            </If>
+          </View>
+        )}
+      </If>
+    </View>
   );
 }
 

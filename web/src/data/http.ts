@@ -3,6 +3,7 @@
 // serve` hosts the web build, the API and the stream), so no CORS and no
 // tenant headers in the browser; a dev origin can be passed explicitly.
 import type {
+  AttachmentPart,
   AttachmentRef,
   CheckpointPolicyNarrowing,
   CheckpointPolicyUpdate,
@@ -2031,6 +2032,40 @@ export class KeelHttp implements SettingsApi {
       referenceHash: asText(body.referenceHash) || undefined,
       matchesReference:
         typeof body.matchesReference === "boolean" ? body.matchesReference : undefined,
+    };
+  }
+
+  /** `GET /v1/sessions/{id}/attachments/{fileId}/part?seq=` — the canonical
+   * attachment projection (metadata and same-origin URLs only). */
+  async attachmentPart(sessionId: string, fileId: string, seq: number): Promise<AttachmentPart> {
+    const response = await this.request(
+      `/v1/sessions/${encodeURIComponent(sessionId)}/attachments/${encodeURIComponent(fileId)}/part?seq=${encodeURIComponent(String(seq))}`,
+    );
+    const body = asRecord(await response.json());
+    const mime = asText(body.mime).trim().toLowerCase();
+    const kind = asText(body.kind);
+    const thumbStatus = asText(body.thumbStatus);
+    return {
+      fileId: asText(body.fileId),
+      name: asText(body.name) || undefined,
+      mime,
+      size: numberOr(body.size, 0),
+      kind:
+        kind === "image" || kind === "pdf" || kind === "audio" || kind === "video" || kind === "file"
+          ? kind
+          : "file",
+      width: numberOr(body.width, 0) || undefined,
+      height: numberOr(body.height, 0) || undefined,
+      thumbStatus:
+        thumbStatus === "pending" || thumbStatus === "ready" || thumbStatus === "failed" || thumbStatus === "none"
+          ? thumbStatus
+          : "none",
+      thumbnailUrl: asText(body.thumbnailUrl) || undefined,
+      downloadUrl: asText(body.downloadUrl),
+      delivery: {
+        native: (body.delivery as Record<string, unknown> | undefined)?.native === true,
+        reason: asText((body.delivery as Record<string, unknown> | undefined)?.reason) || undefined,
+      },
     };
   }
 

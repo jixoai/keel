@@ -74,8 +74,14 @@ export interface SlotContribution {
   capabilities: BridgeCapability[];
   /** Only this tool's calls use a `tool-renderer` contribution. */
   toolName?: string;
-  /** Only this part kind uses a `message-part` contribution. */
+  /** Only this part kind uses a `message-part` contribution. An attachment
+   * renderer MUST declare `partKind: "attachment"`; a contribution without a
+   * part kind is not an attachment renderer (it stays a wildcard only for the
+   * host's non-attachment part kinds). */
   partKind?: string;
+  /** Attachment-only MIME narrowing: `type/subtype` or `type/*`, lowercase.
+   * Absent/empty means "every attachment MIME" for an attachment claim. */
+  mime?: string[];
 }
 
 export type ContributionStatus = "declared" | "loading" | "ready" | "failed" | "unavailable";
@@ -168,6 +174,18 @@ export interface PluginEvent {
   pluginId: string;
   event: string;
   payload?: unknown;
+}
+
+/** What an attachment preview contribution receives (`props`). It is the
+ * canonical read-only projection plus the host's display facts; a renderer
+ * never sees bytes, base64, a CAS path or a tenant header. */
+export interface AttachmentPreviewProps {
+  part: import("../data/contract").AttachmentPart;
+  /** The host's target, repeated for a renderer that draws differently. */
+  target: SlotTarget;
+  /** `true` when the host had to draw the default attachment line under this
+   * preview (the renderer never hides it). */
+  withDefaultRow: true;
 }
 
 /** One field-level validation finding. `warning` does not reject; `error`

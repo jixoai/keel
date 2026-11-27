@@ -11,6 +11,13 @@ type ChunkFactory = () => Promise<PluginChunkModule>;
 export const BUNDLED_CHUNKS: Record<string, ChunkFactory> = {
   "fixture:w12-hello": () =>
     import("./fixtures/hello-chunk").then((module) => module as unknown as PluginChunkModule),
+  // The attachment fallback tests' broken renderer: a throwing chunk that must
+  // never remove the host's default line or affect another attachment.
+  "fixture:w12-throwing": () =>
+    import("./fixtures/throwing-chunk").then((module) => module as unknown as PluginChunkModule),
+  // A chunk that never finishes loading, for the preview timeout face. It is
+  // reachable only through the explicit `fixture:` prefix.
+  "fixture:w12-loading": () => new Promise<PluginChunkModule>(() => {}),
   // The OAR external-run card (change keel-oar-renderer): a first-party builtin
   // contribution, not inventory. Its key is the contribution's `entry`.
   "keel.oar:tool-renderer": () =>

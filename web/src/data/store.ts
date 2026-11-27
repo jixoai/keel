@@ -13,6 +13,7 @@ import type { AuthSessionView, WhoAmI } from "./identity";
 import type { IdentityApi } from "./identity-api";
 import { selectionForSend } from "./selection";
 import type {
+  AttachmentPart,
   AttachmentRef,
   CheckpointPolicyUpdate,
   CheckpointPolicyView,
@@ -132,6 +133,10 @@ type Client = SettingsApi &
   sessionTasks?(sessionId: string): Promise<SessionTasksView>;
   taskPanel?(sessionId: string, memberLimit?: number, eventLimit?: number): Promise<TaskPanelView>;
   filePreview?(sessionId: string, path: string, referenceHash?: string, offset?: number): Promise<FilePreviewView>;
+  /** `GET /v1/sessions/{id}/attachments/{fileId}/part?seq=` — the canonical
+   * attachment projection. Optional: a transport that predates the route (the
+   * development fixture) degrades to the event payload's display facts. */
+  attachmentPart?(sessionId: string, fileId: string, seq: number): Promise<AttachmentPart>;
   createSession(botId?: string): Promise<string>;
   deleteSession(sessionId: string): Promise<void>;
   source(sessionId: string): EventSource;
@@ -2140,6 +2145,21 @@ class KeelStore {
 
   attachmentsFor(requestId: string): AttachmentRef[] | undefined {
     return this.engine?.attachmentsFor(requestId);
+  }
+
+  /** True when the active transport can answer the canonical attachment
+   * projection. A fixture or an older deployment cannot; the row then keeps
+   * the event payload's display facts and names the degradation. */
+  attachmentPartAvailable(): boolean {
+    return typeof this.client?.attachmentPart === "function";
+  }
+
+  /** `GET /v1/sessions/{id}/attachments/{fileId}/part?seq=` — the one read the
+   * attachment row and its plugin preview consume. */
+  async attachmentPart(sessionId: string, fileId: string, seq: number): Promise<AttachmentPart> {
+    const client = this.client;
+    if (!client?.attachmentPart) throw new Error("此传输不提供附件投影");
+    return client.attachmentPart(sessionId, fileId, seq);
   }
 
   /** The complete `tool.result` payload one call produced. Reading

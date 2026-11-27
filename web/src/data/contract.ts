@@ -105,6 +105,44 @@ export interface AttachmentRef {
   url?: string;
 }
 
+/** What kind of thing an attachment is, classified by the blob's MIME (the
+ * authority; the display name is consulted only when the record has none). */
+export type AttachmentKind = "image" | "pdf" | "audio" | "video" | "file";
+
+/** The blob's thumbnail lifecycle. `none` is a terminal "no thumbnail was
+ * generated"; `failed` is a terminal failure and must not be retried by the
+ * UI in a loop. */
+export type AttachmentThumbStatus = "pending" | "ready" | "failed" | "none";
+
+/** The attempt's transport form. Delivered by the message projection; the
+ * server currently reports `native: false` with a reason because the attempt
+ * result is not stored with the message (see the change's design §11). */
+export interface AttachmentDelivery {
+  native: boolean;
+  reason?: string;
+}
+
+/** `GET /v1/sessions/{id}/attachments/{fileId}/part?seq=` — the canonical
+ * read-only attachment projection (change keel-plugin-attachment, task 3.1).
+ * Metadata and same-origin URLs only: no bytes, base64, CAS path, tenant
+ * header or credential ever appears here. */
+export interface AttachmentPart {
+  fileId: string;
+  name?: string;
+  /** The blob record's normalised MIME (authoritative). */
+  mime: string;
+  size: number;
+  kind: AttachmentKind;
+  width?: number;
+  height?: number;
+  thumbStatus: AttachmentThumbStatus;
+  /** Same-origin `/v1/files/{id}/thumbnail`, only when `thumbStatus=ready`. */
+  thumbnailUrl?: string;
+  /** Same-origin `/v1/files/{id}`. */
+  downloadUrl: string;
+  delivery: AttachmentDelivery;
+}
+
 /** One model identity: the tenant default selection, or a session's own input
  * fact. It carries no endpoint or credential data — those are resolved from
  * the tenant's configuration. */
@@ -956,6 +994,9 @@ export interface PluginContributionView {
   toolName?: string;
   part?: string;
   partKind?: string;
+  /** Attachment-only MIME narrowing (`extensibility.json`): `type/subtype` or
+   * `type/*`, lowercase. Absent/empty is the wildcard for `part=attachment`. */
+  mime?: string[];
 }
 
 export interface PluginExtensibilityView {

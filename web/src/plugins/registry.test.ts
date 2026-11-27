@@ -380,3 +380,180 @@ test("chunk specifier: a package entry is same-origin; a bundled entry stays a f
   );
   expect(chunkSpecifier("fixture:w12-hello", "demo.panel")).toBe("fixture:w12-hello");
 });
+
+// ---- attachment preview claims (change keel-plugin-attachment, W3) ----------
+
+test("attachment selection: only part=attachment claims; a plain message-part contribution is not a renderer", async () => {
+  const slots = registry();
+  const result = slots.registerPlugin({
+    pluginId: "demo.panel",
+    contributes: [
+      { id: "assistant-part", slot: "keel.ui.message-part", form: "chunk", entry: "fixture:w12-hello" },
+    ],
+  });
+  expect(result.ok).toBe(true);
+  await wait(30);
+  expect(slots.messagePart("assistant", "web")?.declaration.id).toBe("assistant-part");
+  expect(slots.attachmentSelection("image/png", "web").ready).toBe(undefined);
+  expect(slots.attachmentSelection("image/png", "web").unavailable.length).toBe(0);
+});
+
+test("attachment selection: declaration order, MIME narrowing, and no match", async () => {
+  const slots = registry();
+  const result = slots.registerPlugin({
+    pluginId: "demo.panel",
+    contributes: [
+      {
+        id: "pdf",
+        slot: "keel.ui.message-part",
+        form: "chunk",
+        entry: "fixture:w12-hello",
+        part: "attachment",
+        mime: ["application/pdf"],
+      },
+      {
+        id: "image-wild",
+        slot: "keel.ui.message-part",
+        form: "chunk",
+        entry: "fixture:w12-hello",
+        part: "attachment",
+        mime: ["image/*"],
+      },
+      {
+        id: "image-exact",
+        slot: "keel.ui.message-part",
+        form: "chunk",
+        entry: "fixture:w12-hello",
+        part: "attachment",
+        mime: ["image/png"],
+      },
+    ],
+  });
+  expect(result.ok).toBe(true);
+  await wait(40);
+  expect(slots.attachmentSelection("application/pdf", "web").ready?.declaration.id).toBe("pdf");
+  expect(slots.attachmentSelection("image/png", "web").ready?.declaration.id).toBe("image-wild");
+  expect(slots.attachmentSelection("image/webp", "web").ready?.declaration.id).toBe("image-wild");
+  expect(slots.attachmentSelection("text/plain", "web").ready).toBe(undefined);
+  expect(slots.attachmentSelection("", "web").ready).toBe(undefined);
+});
+
+test("attachment selection: an iframe claim is unavailable in the terminal, explicitly", () => {
+  const slots = registry();
+  const result = slots.registerPlugin({
+    pluginId: "demo.panel",
+    contributes: [
+      {
+        id: "pdf-frame",
+        slot: "keel.ui.message-part",
+        form: "iframe",
+        entry: "/plugins/demo.panel/ui/pdf.html",
+        part: "attachment",
+        mime: ["application/pdf"],
+      },
+    ],
+  });
+  expect(result.ok).toBe(true);
+  const terminal = slots.attachmentSelection("application/pdf", "tui");
+  expect(terminal.ready).toBe(undefined);
+  expect(terminal.unavailable[0]?.code).toBe("ERR_TARGET_UNAVAILABLE");
+  expect(terminal.unavailable[0]?.reason?.includes("终端")).toBe(true);
+  const web = slots.attachmentSelection("application/pdf", "web");
+  expect(web.ready?.declaration.id).toBe("pdf-frame");
+});
+
+test("attachment claims: bad MIME grammar, MIME without the claim, and repeats fail closed", () => {
+  const badGrammar = registry().registerPlugin({
+    pluginId: "demo.panel",
+    contributes: [
+      {
+        id: "bad",
+        slot: "keel.ui.message-part",
+        form: "chunk",
+        entry: "fixture:w12-hello",
+        part: "attachment",
+        mime: ["IMAGE/PNG"],
+      },
+    ],
+  });
+  expect(badGrammar.ok).toBe(false);
+  expect(badGrammar.issues.some((issue) => issue.field === "contributes[0].mime[0]")).toBe(true);
+
+  const noClaim = registry().registerPlugin({
+    pluginId: "demo.panel",
+    contributes: [
+      { id: "widen", slot: "keel.ui.message-part", form: "chunk", entry: "fixture:w12-hello", mime: ["image/png"] },
+    ],
+  });
+  expect(noClaim.ok).toBe(false);
+
+  const wrongPart = registry().registerPlugin({
+    pluginId: "demo.panel",
+    contributes: [
+      {
+        id: "other",
+        slot: "keel.ui.message-part",
+        form: "chunk",
+        entry: "fixture:w12-hello",
+        part: "assistant",
+      },
+    ],
+  });
+  expect(wrongPart.ok).toBe(false);
+
+  const duplicate = registry().registerPlugin({
+    pluginId: "demo.panel",
+    contributes: [
+      {
+        id: "first",
+        slot: "keel.ui.message-part",
+        form: "chunk",
+        entry: "fixture:w12-hello",
+        part: "attachment",
+        mime: ["image/png"],
+      },
+      {
+        id: "second",
+        slot: "keel.ui.message-part",
+        form: "chunk",
+        entry: "fixture:w12-hello",
+        part: "attachment",
+        mime: ["image/png"],
+      },
+    ],
+  });
+  expect(duplicate.ok).toBe(false);
+  expect(duplicate.issues.some((issue) => issue.field === "contributes[1].mime")).toBe(true);
+});
+
+test("attachment selection: unregistering the plugin withdraws the preview", async () => {
+  const slots = registry();
+  slots.registerPlugin({
+    pluginId: "demo.panel",
+    contributes: [
+      {
+        id: "image",
+        slot: "keel.ui.message-part",
+        form: "chunk",
+        entry: "fixture:w12-hello",
+        part: "attachment",
+        mime: ["image/*"],
+      },
+    ],
+  });
+  await wait(30);
+  expect(slots.attachmentSelection("image/png", "web").ready?.declaration.id).toBe("image");
+  slots.unregisterPlugin("demo.panel");
+  expect(slots.attachmentSelection("image/png", "web").ready).toBe(undefined);
+});
+
+test("messagePart: a no-part contribution is a wildcard for host kinds, never for attachments", async () => {
+  const slots = registry();
+  slots.registerPlugin({
+    pluginId: "demo.panel",
+    contributes: [{ id: "plain", slot: "keel.ui.message-part", form: "chunk", entry: "fixture:w12-hello" }],
+  });
+  await wait(30);
+  expect(slots.messagePart("assistant", "web")?.declaration.id).toBe("plain");
+  expect(slots.messagePart("attachment", "web")).toBe(undefined);
+});

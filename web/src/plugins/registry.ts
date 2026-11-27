@@ -14,6 +14,7 @@ import { BASE_SLOTS, KEEL_UI_PLUGIN } from "./base";
 import { createPluginBridge } from "./bridge";
 import { formAvailability, slotTargetAvailable } from "./forms";
 import { loadChunkModule } from "./loader";
+import { mimeMatches } from "./mime";
 import { normalizeContribution, normalizeSlot } from "./validation";
 import type {
   MountedContribution,
@@ -147,6 +148,9 @@ export class SlotRegistry {
       (entry) => entry.declaration.pluginId !== pluginId,
     );
     const nextContributions: MountedContribution[] = [];
+    /** One MIME pattern may be claimed once per plugin (the same rule the
+     * backend enforces); a repeat is a manifest error, not a first-match tie. */
+    const claimedAttachmentMime = new Map<string, number>();
     for (let index = 0; index < (input.contributes ?? []).length; index += 1) {
       const raw = (input.contributes ?? [])[index];
       const declaredSlot =
@@ -171,6 +175,22 @@ export class SlotRegistry {
           message: `贡献 id「${contribution.id}」已被插件「${duplicate.declaration.pluginId}」占用。`,
         });
         continue;
+      }
+      if (contribution.partKind === "attachment") {
+        for (const pattern of contribution.mime ?? []) {
+          const prior = claimedAttachmentMime.get(pattern);
+          if (prior !== undefined) {
+            issues.push({
+              severity: "error",
+              code: "ERR_CONTRIBUTION_INVALID",
+              pluginId,
+              field: `contributes[${index}].mime`,
+              message: `MIME 模式「${pattern}」已被 contributes[${prior}] 认领；同一插件内不得重复。`,
+            });
+            continue;
+          }
+          claimedAttachmentMime.set(pattern, index);
+        }
       }
       const slot = slotsByID.get(contribution.slot);
       if (slot?.arity === "single") {
@@ -375,12 +395,47 @@ export class SlotRegistry {
     );
   }
 
-  /** The first contribution for a message-part kind, if any. */
+  /** The first contribution for a message-part kind, if any. A contribution
+   * without a part kind is a wildcard for the host's own part kinds, never for
+   * attachments: an attachment renderer must opt in with
+   * `part = attachment`. */
   messagePart(partKind: string, target: SlotTarget): MountedContribution | undefined {
     const view = this.resolve("keel.ui.message-part", target);
     return view?.contributions.find(
-      (entry) => entry.status === "ready" && (!entry.declaration.partKind || entry.declaration.partKind === partKind),
+      (entry) =>
+        entry.status === "ready" &&
+        (entry.declaration.partKind === partKind ||
+          (partKind !== "attachment" && !entry.declaration.partKind)),
     );
+  }
+
+  /** The attachment preview selection for one MIME (change
+   * keel-plugin-attachment, task 3.2).
+   *
+   * Declaration order is the inventory's order: first `part=attachment` with a
+   * MIME match that is `ready` and runnable on this target. Loading entries
+   * and failed/unavailable entries are reported separately so the host can
+   * explain the wait or the degradation without stealing another attachment's
+   * row. An entry without `part=attachment` is never considered, and an empty
+   * `mime` narrowing is the wildcard **only for an attachment claim**. */
+  attachmentSelection(
+    mime: string,
+    target: SlotTarget,
+  ): {
+    ready?: MountedContribution;
+    loading: MountedContribution[];
+    unavailable: MountedContribution[];
+  } {
+    const current = this.stateSignal();
+    const ordered = current.contributions
+      .filter((entry) => entry.declaration.slot === "keel.ui.message-part")
+      .filter((entry) => entry.declaration.partKind === "attachment")
+      .filter((entry) => mimeMatches(entry.declaration.mime, mime))
+      .map((entry) => this.withAvailability(entry, target));
+    const ready = ordered.filter((entry) => entry.status === "ready");
+    const loading = ordered.filter((entry) => entry.status === "declared" || entry.status === "loading");
+    const unavailable = ordered.filter((entry) => entry.status === "failed" || entry.status === "unavailable");
+    return { ready: ready[0], loading, unavailable };
   }
 
   /** The plugin's own scoped bridge, opened with the union of its

@@ -30,3 +30,15 @@ test("TUI: 设置页渲染 action 与 settings-section 贡献", async () => {
   expect(app.shows("id:plugin-settings-sections")).toBe(true);
   expect(app.shows("id:plugin-action-buttons")).toBe(true);
 });
+
+test("TUI: 附件预览按插件贡献降级——chunk 渲染，iframe 说明需要图形界面，默认行保留", async () => {
+  const app = await openApp();
+  await app.press("label:打开会话 发布审批");
+  // The image attachment hits the chunk claim; the PDF hits the iframe claim,
+  // which the terminal cannot run and must say so explicitly.
+  await app.waitFor("text:/W12 附件预览 · demo-shot.png/", { timeout: 10_000 });
+  await app.waitFor("text:/终端不可用（需要图形界面）/");
+  // The host's default facts are never hidden by a preview or its absence.
+  expect(app.texts()).toContain("发布说明.pdf");
+  expect(app.texts()).toContain("application/pdf");
+});

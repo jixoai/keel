@@ -1617,7 +1617,30 @@ export class FixtureClient implements SettingsApi {
               form: "chunk",
               entry: "fixture:w12-hello",
               title: "W12 消息部件",
-              part: "assistant",
+            },
+            {
+              // The attachment claim (change keel-plugin-attachment): a chunk
+              // preview for images, declared in order before the PDF iframe.
+              id: "attachment-preview",
+              slot: "keel.ui.message-part",
+              form: "chunk",
+              entry: "fixture:w12-hello",
+              title: "W12 附件预览",
+              part: "attachment",
+              mime: ["image/*"],
+            },
+            {
+              // An iframe claim narrowed to the terminal target: the fixture
+              // cannot host a page, and the terminal must still show the
+              // explicit "graphical interface required" degradation.
+              id: "attachment-iframe",
+              slot: "keel.ui.message-part",
+              form: "iframe",
+              entry: "/plugins/keel.w12.fixture/ui/pdf.html",
+              title: "W12 PDF 预览",
+              part: "attachment",
+              mime: ["application/pdf"],
+              targets: ["tui"],
             },
             {
               id: "nav",
@@ -2557,6 +2580,12 @@ export class FixtureClient implements SettingsApi {
           timestamp: base - 240_000,
           attachments: [
             { name: "demo-shot.png", mime: "image/png", size: 39037, url: this.imageURL },
+            // The plugin fixture adds a PDF so the terminal's iframe
+            // degradation (and per-attachment failure isolation) is
+            // exercised without changing the product-shaped demo.
+            ...(this.pluginFixtures
+              ? [{ name: "发布说明.pdf", mime: "application/pdf", size: 128_000 }]
+              : []),
           ],
         },
       },
