@@ -162,10 +162,11 @@ export KEEL_BOARD_FILE_TIMEOUT=10s   # 可选；单个入站文件下载超时
   可收窄父级 editor）。
 - 创建频道（`POST /v1/board/channels`）成功 201 后，adapter 立即写创建者的 `owner` 关系；
   隐式子频道（父频道 editor 下 `POST /messages`/`/tasks` 首次出现）也在 201 后写。
-- **孤儿频道认领**：对已存在但**自身及整条祖先路径都零 relation** 的频道，
+- **孤儿频道认领**：对已存在但**自身、整条祖先路径和所有后代路径都零 relation** 的频道，
   `board.manage`（tenant/all scope）调用 `POST /v1/board/channels` 返回 200，并补写调用者
-  owner；自身或任一祖先已有 relation 时保持现状，不会借该路径夺取继承 ACL。board.write
-  调用者对无关系频道仍 404（不能探测存在性）。
+  owner；自身/祖先/后代已有 relation 时保持现状，不会借该路径夺取继承 ACL，也不会让父频道
+  owner 通过祖先继承覆盖已有精确 relation 的子频道。board.write 调用者对无关系频道仍 404
+  （不能探测存在性）。
   **正式偏离 design §11.2 的“同一事务”**：board 模块与 keel 关系表不能共享事务，因此
   owner 写入是非原子的；启动与周期扫描按 `channel.created` 和每个频道最早的
   `message.posted` root 补偿（崩溃窗口可用测试复现）。

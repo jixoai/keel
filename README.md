@@ -199,7 +199,7 @@ env 文件路径：`FDE2E_ENV_PERSONAL`，默认取主仓根目录的 `.env.pers
   `tenant_secrets`（`KEEL_SECRET_KEY`）加密存储。`POST/PATCH /v1/board/sync/entries`
   （`board.manage` + `secret.write`）创建/启停/轮换/路由；`routes` 目标频道必须已存在且
   自身或祖先至少有一条 `board_channel` relation，否则 400（先 `POST /v1/board/channels`
-  创建/认领；`enabled:false` 可先 staging）；
+  创建/认领；认领要求自身/祖先/后代均无 relation；`enabled:false` 可先 staging）；
   启停即时生效，创建/轮换/路由变更在重启后装载（变更期间 entry 在 board sync store 中停用，
   旧凭据不会继续服务）。
   inbox/outbox、board 事件订阅、watcher/schedule worker 随 `keel serve` 启动；

@@ -97,7 +97,7 @@
 - [x] 10.3 实现 RBAC/ReBAC：`board.read/write/manage` 权限键、频道 `resource_relations` viewer/editor/owner、最近祖先继承；真实 PG 测试。
 - [x] 10.4 接入 keel PG 与 RLS：keel-board migrations 在 keel 启动幂等执行，`tenant_id` 谓词 + RLS 双保险；A/B 租户测试。
 - [x] 10.5 接入 SSE hub 与 Last-Event-ID；keel 的 tenant 鉴权、心跳、多副本 NOTIFY/poll；集成测试。
-- [x] 10.6 接入 tenant secret store：`SecretResolver`、sync entries 的 POST/PATCH（创建/启停/轮换/路由，只传 secret_ref）、`board.sync.enabled`/`board.enabled` feature flag；测试关闭即 404/无 webhook，日志/事件/响应无 secret。（evidence: `evidence/phase-1-sync.md`；启停即时，创建/轮换/路由变更持久化后需重启装载，期间 entry 在 board sync store 停用；创建即 pending disabled。路由目标必须是已存在且有 `board_channel` relation 的频道，否则 400；历史坏 entry boot 时 disabled 且不启动 worker；零 relation 频道可由 tenant board.manage 显式认领）
+- [x] 10.6 接入 tenant secret store：`SecretResolver`、sync entries 的 POST/PATCH（创建/启停/轮换/路由，只传 secret_ref）、`board.sync.enabled`/`board.enabled` feature flag；测试关闭即 404/无 webhook，日志/事件/响应无 secret。（evidence: `evidence/phase-1-sync.md`；启停即时，创建/轮换/路由变更持久化后需重启装载，期间 entry 在 board sync store 停用；创建即 pending disabled。路由目标必须是已存在且有 `board_channel` relation 的频道，否则 400；历史坏 entry boot 时 disabled 且不启动 worker；零 relation（自身/祖先/后代路径）频道可由 tenant board.manage 显式认领）
 - [x] 10.7 接入 telemetry/audit：board/sync 指标、permission.denied、credential 状态；测试无 secret/正文。
 
 ## 11. Phase 1：superagent 适配
