@@ -1,0 +1,20 @@
+# Phase 1 evidence pin (keel-board-v1)
+
+- keel commit: e0cfe5e77e78aa71879bc61c8daf3c42bc016b47
+- board module: github.com/jixoai/keel-board v0.1.1
+- board commit: 70b503f0cdbd8f860ac1a373a6d1576175018ff0 (tag v0.1.1, recorded in NOTICE)
+- generated: 2026-11-27T16:18:08Z
+- budget: 4096 KiB per binary and target (keel; cmd/runtime adds no dependency)
+- binary-size base: 6ee7fe3
+
+Gates (run on the keel commit above, KEEL_TEST_DSN pointing at a dedicated test database):
+
+    KEEL_BOARD_BASE=6ee7fe3 scripts/keel-board-phase1-gate.sh
+    KEEL_BOARD_BASE=6ee7fe3 scripts/keel-board-phase1-sync-gate.sh
+    KEEL_BOARD_BASE=6ee7fe3 scripts/keel-board-phase1-superagent-gate.sh
+    go test -race ./internal/boardintegration ./internal/superagentboard ./internal/store ./cmd/keel -count=1
+    go test -p 1 ./... -count=1
+    go test github.com/jixoai/keel-board/conformance
+    go run ./cmd/board-sync-e2e -dsn "$KEEL_TEST_DSN" -out openspec/changes/keel-board-v1/evidence/phase-1-sync-e2e.html
+    (cd web && nsh check)
+    openspec validate keel-board-v1 --strict
