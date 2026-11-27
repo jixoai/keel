@@ -85,7 +85,7 @@ gate test env "KEEL_BOARD_TEST_DSN=$DSN" go test -count=1 ./...
 gate race env "KEEL_BOARD_TEST_DSN=$DSN" go test -race -count=1 ./...
 gate e2e go run ./scripts/e2e -report-dir "$OUT/e2e"
 if [ "$STRESS" -eq 1 ]; then
-  gate stress env "KEEL_BOARD_TEST_DSN=$DSN" go test -count=10 ./store ./log ./syncstore ./automation ./conformance
+  gate stress env "KEEL_BOARD_TEST_DSN=$DSN" go test -count=10 -timeout=30m ./store ./log ./syncstore ./automation ./conformance
 fi
 
 # The tag and a clean tree are part of the evidence, not a separate checklist.
