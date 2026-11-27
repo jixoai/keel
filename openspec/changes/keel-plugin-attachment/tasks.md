@@ -48,7 +48,7 @@
   > 前端：`web/src/screens/attachment-row.tsx` 实现加载/成功/错误/无权限/空（无附件不渲染
   > 区域）；pending 用非破坏性刷新并有终态；failed/none 一律占位，绝不把原图当缩略图；
   > `file.read` 以 `/meta` 探测（web 与 TUI 同源），403 显示无权限并禁用下载；
-  > `uniqueAttachments` 去掉重复行。
+  > `uniqueAttachments` 去掉重复行；TUI harness 覆盖重复/空两种渲染。
 - [x] 3.4 预览失败回退：贡献抛错/加载失败/超时 → 默认行 + 可解释提示；单个失败不影响
   其他附件与整轮对话；补渲染单测。
   > 前端：`PluginAttachmentPreview` 捕获抛错、装载失败与 4s 超时，失败面为中文
@@ -102,7 +102,7 @@
   provider）全绿；`nsh check` 与 `nsh test --target tui` 全绿。
   > 后端 `go test -race ./internal/attachment ./internal/httpapi` 全绿
   > （`evidence/go-test-attachment-httpapi-race.txt`；相关包总表见 `go-test-race.txt`）；
-  > 前端 `nsh check` 0 错（`evidence/nsh-check.txt`）；`nsh test --target tui` 476/476
+  > 前端 `nsh check` 0 错（`evidence/nsh-check.txt`）；`nsh test --target tui` 478/478
   > 全绿（`evidence/nsh-test-tui.txt`）；web 打包见 `evidence/web-build.txt`；
   > 反向变异证据（顺序/占位/退订各一条会变红）见 `evidence/mutation-attachment.txt`。
 - [x] 6.2 `openspec validate keel-plugin-attachment --strict` 通过；证据目录含校验输出。

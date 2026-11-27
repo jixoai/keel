@@ -114,3 +114,18 @@ test("TUI: 无匹配贡献——只有事实行，不留空白预览", async () 
   expect(app.texts().join("\n")).not.toContain("正在装载附件预览");
   expect(app.shows("label:下载附件 shot.png")).toBe(true);
 });
+
+test("TUI: 重复附件只渲染一行（fileId 去重）", async () => {
+  const app = await openHarness("duplicate");
+  await app.waitFor("id:facts-guard");
+  expect(app.texts().filter((text) => text === "shot.png").length).toBe(1);
+  expect(app.shows("label:下载附件 shot.png")).toBe(true);
+});
+
+test("TUI: 空附件不渲染空白占位", async () => {
+  const app = await openHarness("empty");
+  await app.waitFor("id:list-empty");
+  expect(app.texts().join("\n")).not.toContain("shot.png");
+  expect(app.texts().join("\n")).not.toContain("下载");
+  expect(app.shows("id:facts-guard")).toBe(false);
+});

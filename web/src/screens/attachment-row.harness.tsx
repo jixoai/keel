@@ -23,7 +23,7 @@ import { host, mount, Text, View } from "nsh";
 import type { AttachmentPart } from "../data/contract";
 import type { AttachmentAccess, AttachmentPartStatus } from "../data/attachments";
 import { SlotRegistry } from "../plugins/registry";
-import { AttachmentRow, type AttachmentRowSource } from "./attachment-row";
+import { AttachmentRow, type AttachmentRowSource, uniqueAttachments } from "./attachment-row";
 
 const scenario = (): string => String(host.params.scenario ?? "success");
 
@@ -96,18 +96,38 @@ registry.registerBaseSlots();
 const contributes = contributionsFor(scenario());
 if (contributes.length > 0) registry.registerPlugin({ pluginId: "demo.attach", contributes });
 const { source } = sourceFor(scenario());
+const baseItem = {
+  fileId: source.part.fileId,
+  name: source.part.name ?? "shot.png",
+  mime: source.part.mime,
+  size: source.part.size,
+};
+const items =
+  scenario() === "empty"
+    ? []
+    : scenario() === "duplicate"
+      ? [baseItem, { ...baseItem }]
+      : [baseItem];
+const rows = uniqueAttachments(items);
 
 function Harness() {
   return (
     <View testID="attachment-harness" style={{ padding: 16, gap: 12, flexDirection: "column" }}>
-      <AttachmentRow
-        item={{ fileId: source.part.fileId, name: source.part.name ?? "shot.png", mime: source.part.mime, size: source.part.size }}
-        index={0}
-        sessionId="harness-session"
-        source={source}
-        registry={registry}
-      />
-      <Text testID="facts-guard">{`事实行守卫 · ${source.part.name} · ${source.part.mime} · ${source.part.size}`}</Text>
+      <If when={rows.length === 0}>
+        <Text testID="list-empty">没有附件行</Text>
+      </If>
+      {rows.map((item, index) => (
+        <AttachmentRow
+          item={item}
+          index={index}
+          sessionId="harness-session"
+          source={source}
+          registry={registry}
+        />
+      ))}
+      <If when={rows.length > 0}>
+        <Text testID="facts-guard">{`事实行守卫 · ${source.part.name} · ${source.part.mime} · ${source.part.size}`}</Text>
+      </If>
     </View>
   );
 }
