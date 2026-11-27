@@ -1,7 +1,10 @@
-$ KEEL_TEST_DSN=<real PG> go test -race -p 1 ./internal/pluginpkg/ ./internal/harnessext/ ./internal/harnessapi/ ./internal/store/ ./internal/agent/ ./cmd/keel/ -run 'TestManifestCommand|TestReservedCommand|TestManifestReserved|TestCommandManifestFixture|TestManagerListCommands|TestPluginCommandRegistry|TestCommand|TestCompactRoute|TestPostgresCommand|TestCommandInvocations|TestSkillPreload|TestApplySkillPreload|TestPromptSummaryHash|TestCommandFacts' -count=1
-ok  	github.com/jixoai/keel/internal/pluginpkg	1.803s
-ok  	github.com/jixoai/keel/internal/harnessext	3.147s
-ok  	github.com/jixoai/keel/internal/harnessapi	4.576s
-ok  	github.com/jixoai/keel/internal/store	3.118s
-ok  	github.com/jixoai/keel/internal/agent	1.874s
-ok  	github.com/jixoai/keel/cmd/keel	2.244s
+$ KEEL_TEST_DSN=<real PG> go test -race -p 1 -timeout 20m ./internal/pluginpkg/ ./internal/harnessext/ ./internal/harnessapi/ ./internal/store/ ./internal/agent/ ./internal/accessgate/ ./internal/access/ ./internal/toolsurface/ ./cmd/keel/ -count=1
+ok  	github.com/jixoai/keel/internal/pluginpkg	1.516s
+ok  	github.com/jixoai/keel/internal/harnessext	30.084s
+ok  	github.com/jixoai/keel/internal/harnessapi	30.580s
+ok  	github.com/jixoai/keel/internal/store	11.652s
+ok  	github.com/jixoai/keel/internal/agent	28.714s
+ok  	github.com/jixoai/keel/internal/accessgate	1.402s
+ok  	github.com/jixoai/keel/internal/access	1.372s
+ok  	github.com/jixoai/keel/internal/toolsurface	1.583s
+ok  	github.com/jixoai/keel/cmd/keel	65.674s
