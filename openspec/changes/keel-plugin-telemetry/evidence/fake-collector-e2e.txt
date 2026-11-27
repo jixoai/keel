@@ -40,6 +40,8 @@ $ go test ./internal/harnessext -run "Telemetry|TurnTelemetry" -v (fake OTLP col
     --- PASS: TestTelemetryPluginEmptyTenantFailsClosed/hub_unbound (0.00s)
     --- PASS: TestTelemetryPluginEmptyTenantFailsClosed/plugin_unbound (0.00s)
     --- PASS: TestTelemetryPluginEmptyTenantFailsClosed/both_unbound (0.00s)
+=== RUN   TestTelemetryPluginConfigTenantMismatchFailsClosed
+--- PASS: TestTelemetryPluginConfigTenantMismatchFailsClosed (0.00s)
 === RUN   TestTelemetryPluginDisableFlushesQueuedBatch
 --- PASS: TestTelemetryPluginDisableFlushesQueuedBatch (0.00s)
 === RUN   TestTelemetryPluginSendsResolvedHeader
@@ -47,32 +49,32 @@ $ go test ./internal/harnessext -run "Telemetry|TurnTelemetry" -v (fake OTLP col
 === RUN   TestTelemetryStopContextCapsLongerCallerDeadline
 --- PASS: TestTelemetryStopContextCapsLongerCallerDeadline (0.00s)
 === RUN   TestTelemetryPluginTenantIsolation
---- PASS: TestTelemetryPluginTenantIsolation (0.01s)
+--- PASS: TestTelemetryPluginTenantIsolation (0.00s)
 === RUN   TestTurnTelemetryEmitsBoundedLog
 --- PASS: TestTurnTelemetryEmitsBoundedLog (0.00s)
 PASS
-ok  	github.com/jixoai/keel/internal/harnessext	1.150s
+ok  	github.com/jixoai/keel/internal/harnessext	1.091s
 
 $ go test ./cmd/keel -run "Telemetry" -v (serve wiring, fake collector)
 === RUN   TestTelemetryPluginShipsDisabledWithProvidesTelemetry
-2026/11/27 13:31:22 INFO creation plugin started tools=5 template=webview-react-solidglass
-2026/11/27 13:31:22 INFO example plugin started plugin=keel.example tools=2 hooks=3 triggers=0
-2026/11/27 13:31:22 INFO plugin assembly generation=1 plugins=11 active=11 pending=0
+2026/11/27 13:38:13 INFO creation plugin started tools=5 template=webview-react-solidglass
+2026/11/27 13:38:13 INFO example plugin started plugin=keel.example tools=2 hooks=3 triggers=0
+2026/11/27 13:38:13 INFO plugin assembly generation=1 plugins=11 active=11 pending=0
 --- PASS: TestTelemetryPluginShipsDisabledWithProvidesTelemetry (0.05s)
 === RUN   TestTenantTelemetryLoaderMergesStoredDocumentOverDefaults
 --- PASS: TestTenantTelemetryLoaderMergesStoredDocumentOverDefaults (0.00s)
 === RUN   TestTenantTelemetryLoaderSurfacesInvalidStoredDocument
 --- PASS: TestTenantTelemetryLoaderSurfacesInvalidStoredDocument (0.00s)
 === RUN   TestServeTelemetryConfigReachesApprovalAndCollector
-2026/11/27 13:31:22 INFO creation plugin started tools=5 template=webview-react-solidglass
-2026/11/27 13:31:22 INFO example plugin started plugin=keel.example tools=2 hooks=3 triggers=0
-2026/11/27 13:31:22 INFO plugin assembly generation=1 plugins=11 active=11 pending=0
-2026/11/27 13:31:22 INFO creation plugin started tools=5 template=webview-react-solidglass
-2026/11/27 13:31:22 INFO example plugin started plugin=keel.example tools=2 hooks=3 triggers=0
-2026/11/27 13:31:22 INFO plugin assembly generation=2 plugins=12 active=12 pending=0
-2026/11/27 13:31:22 INFO creation plugin started tools=5 template=webview-react-solidglass
-2026/11/27 13:31:22 INFO example plugin started plugin=keel.example tools=2 hooks=3 triggers=0
-2026/11/27 13:31:22 INFO plugin assembly generation=3 plugins=11 active=11 pending=0
---- PASS: TestServeTelemetryConfigReachesApprovalAndCollector (0.02s)
+2026/11/27 13:38:13 INFO creation plugin started tools=5 template=webview-react-solidglass
+2026/11/27 13:38:13 INFO example plugin started plugin=keel.example tools=2 hooks=3 triggers=0
+2026/11/27 13:38:13 INFO plugin assembly generation=1 plugins=11 active=11 pending=0
+2026/11/27 13:38:13 INFO creation plugin started tools=5 template=webview-react-solidglass
+2026/11/27 13:38:13 INFO example plugin started plugin=keel.example tools=2 hooks=3 triggers=0
+2026/11/27 13:38:13 INFO plugin assembly generation=2 plugins=12 active=12 pending=0
+2026/11/27 13:38:13 INFO creation plugin started tools=5 template=webview-react-solidglass
+2026/11/27 13:38:13 INFO example plugin started plugin=keel.example tools=2 hooks=3 triggers=0
+2026/11/27 13:38:13 INFO plugin assembly generation=3 plugins=11 active=11 pending=0
+--- PASS: TestServeTelemetryConfigReachesApprovalAndCollector (0.03s)
 PASS
-ok  	github.com/jixoai/keel/cmd/keel	0.793s
+ok  	github.com/jixoai/keel/cmd/keel	0.599s

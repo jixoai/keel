@@ -1,5 +1,5 @@
 $ KEEL_TEST_DSN=... go test -race ./internal/harnessext -run TestTelemetryPluginPersistenceWithPostgres -v
 === RUN   TestTelemetryPluginPersistenceWithPostgres
---- PASS: TestTelemetryPluginPersistenceWithPostgres (0.26s)
+--- PASS: TestTelemetryPluginPersistenceWithPostgres (0.17s)
 PASS
-ok  	github.com/jixoai/keel/internal/harnessext	2.104s
+ok  	github.com/jixoai/keel/internal/harnessext	1.737s
