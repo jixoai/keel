@@ -22,21 +22,21 @@ import {
   space,
   typeScale,
   weight,
-  type BadgeVariant,
 } from "../../ui/kit";
 import {
   boardClock,
+  boardEventRefLabel,
   boardFailureCopy,
+  boardPlatformLabel,
+  boardProviderErrorCopy,
   boardStore,
+  boardThreadRefLabel,
   type BoardSyncData,
 } from "../../data/board";
 import type { BoardSyncEntryView, BoardSyncFailure, BoardSyncInboxItem } from "../../data/board-wire";
 import { store } from "../../data/store";
 import { PageEmpty, PageError, PagePermission, StateNote, isMobile, touchStyle } from "../books/common";
 import { syncInboxOpen } from "./state";
-
-const platformLabel = (platform: string): string =>
-  platform === "slack" ? "Slack" : platform === "github" ? "GitHub" : platform === "linear" ? "Linear" : platform || "外部平台";
 
 function credentialBadge(entry: BoardSyncEntryView, data: BoardSyncData) {
   const credential = data.credentials[entry.key]?.credential ?? entry.credential ?? "unknown";
@@ -45,8 +45,6 @@ function credentialBadge(entry: BoardSyncEntryView, data: BoardSyncData) {
   if (credential === "valid") return <Badge variant="success" icon="check" label="凭据有效" />;
   return <Badge variant="outline" icon="info" label={data.credentialsKnown ? "凭据未知" : "凭据状态未知"} />;
 }
-
-const depthTone = (value: number): BadgeVariant => (value > 0 ? "warning" : "secondary");
 
 function Metric(props: { label: string; value: string; tone?: string; testID?: string }) {
   return (
@@ -69,7 +67,8 @@ function HealthSummary(props: { data: BoardSyncData }) {
     props.data.credentials[entry.key]?.credential ?? entry.credential;
   const invalid = () => entries().filter((entry) => credentialOf(entry) === "invalid").length;
   const missing = () => entries().filter((entry) => credentialOf(entry) === "missing").length;
-  const dead = () => props.data.dead.length + props.data.failures.length;
+  const deadLetters = () => props.data.dead.length;
+  const outboxFailures = () => props.data.failures.length;
   const last = () => {
     const times = entries()
       .map((entry) => Date.parse(entry.lastDeliveryAt ?? ""))
@@ -86,14 +85,16 @@ function HealthSummary(props: { data: BoardSyncData }) {
       <If when={missing() > 0}>
         <Badge variant="destructive" icon="alert" label={`${missing()} 个凭据缺失`} />
       </If>
-      <If when={dead() > 0}>
-        <Badge variant="warning" icon="alert" label={`${dead()} 条死信`} />
+      <If when={deadLetters() > 0}>
+        <Badge variant="destructive" icon="alert" label={`${deadLetters()} 条死信`} />
+      </If>
+      <If when={outboxFailures() > 0}>
+        <Badge variant="destructive" icon="alert" label={`${outboxFailures()} 个出站失败`} />
       </If>
       <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>
-        {dead() === 0 ? `全部正常${last() ? ` · 最后投递 ${boardClock(last())}` : ""}` : "故障只阻塞对应外部线程，board 主路径继续。"}
-      </Text>
-      <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>
-        滞后 = 最老待处理/待投递事件的年龄；当前后端只提供队列深度，因此显示「滞后未知」。
+        {deadLetters() + outboxFailures() === 0
+          ? `暂无已知故障${last() ? ` · 最后投递 ${boardClock(last())}` : ""}`
+          : "故障只阻塞对应外部线程，任务主路径继续。"}
       </Text>
     </View>
   );
@@ -104,6 +105,14 @@ function EntryCard(props: { entry: BoardSyncEntryView; data: BoardSyncData }) {
   const failures = () => props.data.failures.filter((item) => !item.key || item.key === props.entry.key);
   const targets = () => props.entry.targets ?? [];
   const inbox = () => props.entry.inbox ?? { pending: 0, leased: 0, done: 0, dead: 0 };
+  const missingTargets = () => targets().length === 0;
+  const missingStats = () => props.entry.failures24h === undefined;
+  const backendGap = () => {
+    if (missingTargets() && missingStats()) return "外部目标与 24h 统计暂未上报，页面不伪造。";
+    if (missingTargets()) return "外部目标暂未上报，页面不伪造。";
+    if (missingStats()) return "24h 统计暂未上报，页面不伪造。";
+    return "";
+  };
   const retrying = (id: string) => boardStore.syncRetrying()[id] === true;
   return (
     <Card
@@ -111,46 +120,58 @@ function EntryCard(props: { entry: BoardSyncEntryView; data: BoardSyncData }) {
       style={{ padding: space.lg, flexDirection: "column", gap: space.sm, backgroundColor: color.card }}
     >
       <View style={{ flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: space.sm }}>
-        <Badge variant="outline" label={platformLabel(props.entry.platform)} />
-        <Text style={{ fontFamily: font.mono, fontSize: typeScale.sm, color: color.foreground }}>{props.entry.key}</Text>
+        <Badge variant="outline" label={boardPlatformLabel(props.entry.platform)} />
+        <If when={props.entry.key !== props.entry.platform}>
+          <Text style={{ fontFamily: font.mono, fontSize: typeScale.sm, color: color.foreground }}>{props.entry.key}</Text>
+        </If>
         <Badge variant={props.entry.enabled ? "success" : "secondary"} label={props.entry.enabled ? "启用" : "已停用"} />
         {credentialBadge(props.entry, props.data)}
         <If when={props.entry.owned}>
           <Badge variant="info" label="本实例连接" />
         </If>
         <View style={{ flex: 1 }} />
-        <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>
-          {props.entry.lastDeliveryAt ? `最后投递 ${boardClock(props.entry.lastDeliveryAt)}` : "最后投递 未知"}
-        </Text>
+        <If when={!!props.entry.lastDeliveryAt}>
+          <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>
+            最后投递 {boardClock(props.entry.lastDeliveryAt)}
+          </Text>
+        </If>
       </View>
       <If when={(props.data.credentials[props.entry.key]?.credential ?? props.entry.credential) === "invalid"}>
         <StateNote
           testID={`board-sync-credential-${props.entry.key}`}
           tone="danger"
           icon="alert"
-          text="凭据失效，已停止收发（fail closed）。轮换凭据后会自动恢复；在轮换完成前不会重试投递。"
+          text="凭据失效，已停止收发。轮换凭据后会自动恢复；在轮换完成前不会重试投递。"
         />
       </If>
       <View style={{ flexDirection: "row", flexWrap: "wrap", gap: space.lg }}>
         <Metric
           label="入站"
-          value={`${inbox().pending} 待处理 · 滞后未知`}
-          tone={inbox().pending > 0 ? color.warning : undefined}
+          value={`${inbox().pending} 待处理`}
           testID={`board-sync-inbox-${props.entry.key}`}
         />
         <Metric
           label="出站"
-          value={`${props.data.status.outbox.pending} 待投递 · 滞后未知`}
-          tone={props.data.status.outbox.pending > 0 ? color.warning : undefined}
+          value={`${props.data.status.outbox.pending} 待投递`}
           testID={`board-sync-outbox-${props.entry.key}`}
         />
-        <Metric
-          label="24h 失败"
-          value={props.entry.failures24h === undefined ? "未知" : `${props.entry.failures24h} 次`}
-          tone={(props.entry.failures24h ?? 0) > 0 ? color.destructive : undefined}
-        />
-        <Metric label="死信" value={`${dead().length} 条`} tone={dead().length ? color.destructive : undefined} />
+        <If when={props.entry.failures24h !== undefined}>
+          <Metric
+            label="24h 失败"
+            value={`${props.entry.failures24h} 次`}
+            tone={(props.entry.failures24h ?? 0) > 0 ? color.destructive : undefined}
+          />
+        </If>
+        <Metric label="死信" value={`${dead().length} 条`} tone={dead().length > 0 ? color.destructive : undefined} />
       </View>
+      <If when={backendGap() !== ""}>
+        <Text
+          testID={`board-sync-backend-gap-${props.entry.key}`}
+          style={{ fontSize: typeScale.sm, color: color.mutedForeground }}
+        >
+          {backendGap()}
+        </Text>
+      </If>
       <If when={(props.entry.routes ?? []).length > 0}>
         <View style={{ flexDirection: "column", gap: 2 }}>
           <Text style={{ fontSize: typeScale.sm, fontWeight: weight.medium, color: color.foreground }}>路由</Text>
@@ -164,19 +185,14 @@ function EntryCard(props: { entry: BoardSyncEntryView; data: BoardSyncData }) {
           </Each>
         </View>
       </If>
-      <If when={targets().length === 0}>
-        <Text testID={`board-sync-targets-unknown-${props.entry.key}`} style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>
-          目标 · 未知（后端暂未提供 target 列表）
-        </Text>
-      </If>
       <If when={targets().length > 0}>
         <View style={{ flexDirection: "column", gap: 2 }}>
           <Text style={{ fontSize: typeScale.sm, fontWeight: weight.medium, color: color.foreground }}>目标</Text>
           <Each of={targets().slice(0, 3)} key={(target) => `${target.target}-${target.root ?? ""}`}>
             {(target) => (
               <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm, minWidth: 0 }}>
-                <Text style={{ flex: 1, minWidth: 0, fontFamily: font.mono, fontSize: typeScale.sm, color: color.mutedForeground, numberOfLines: 1, textOverflow: "ellipsis" }}>
-                  {target().target}
+                <Text style={{ flex: 1, minWidth: 0, fontSize: typeScale.sm, color: color.mutedForeground, numberOfLines: 1, textOverflow: "ellipsis" }}>
+                  {boardThreadRefLabel(target().target)}
                 </Text>
                 <If when={target().root !== undefined}>
                   <Button
@@ -202,13 +218,13 @@ function EntryCard(props: { entry: BoardSyncEntryView; data: BoardSyncData }) {
       </If>
       <If when={(props.entry.bridgeHost ?? "") !== ""}>
         <Text style={{ fontFamily: font.mono, fontSize: typeScale.sm, color: color.mutedForeground }}>
-          bridge host {props.entry.bridgeHost}
-          {props.entry.bridgeErrors ? ` · HMAC/nonce 错误 ${props.entry.bridgeErrors}` : ""}
+          命令桥 {props.entry.bridgeHost}
+          {props.entry.bridgeErrors ? ` · 校验失败 ${props.entry.bridgeErrors}` : ""}
         </Text>
       </If>
       <If when={props.entry.platform === "slack"}>
         <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>
-          Slack 没有幂等键；极端崩溃窗口可能重复一条消息。
+          Slack 偶发重复消息：极端崩溃窗口可能重复一条，其他平台不受影响。
         </Text>
       </If>
       <View style={{ flexDirection: "row", flexWrap: "wrap", gap: space.sm }}>
@@ -287,7 +303,7 @@ function DeadLetters(props: { data: BoardSyncData }) {
       </If>
       <If when={dead().length > 0}>
         <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>
-          死信只阻塞该外部线程；其他线程和 board 主路径继续。
+          死信只阻塞该外部线程；其他线程和任务主路径继续。
         </Text>
         <Each of={dead()} key={(item) => item.id}>
           {(item) => (
@@ -302,11 +318,11 @@ function DeadLetters(props: { data: BoardSyncData }) {
                 borderBottomColor: color.border,
               }}
             >
-              <Text style={{ fontFamily: font.mono, fontSize: typeScale.sm, color: color.foreground, minWidth: 140 }}>
-                {item().dedupe ?? item().id}
+              <Text style={{ fontSize: typeScale.sm, color: color.foreground, minWidth: 140 }}>
+                {boardEventRefLabel(item().dedupe ?? item().id)}
               </Text>
               <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground, flex: 1, minWidth: 0 }}>
-                {item().lastError ?? "没有错误详情"}
+                {boardProviderErrorCopy(item().lastError)}
               </Text>
               <Text style={{ fontFamily: font.mono, fontSize: typeScale.sm, color: color.mutedForeground }}>
                 {item().attempts} 次
@@ -317,7 +333,7 @@ function DeadLetters(props: { data: BoardSyncData }) {
                 size="sm"
                 label={retrying(item().id) ? "重新排队中…" : "重试"}
                 loading={retrying(item().id)}
-                accessibilityLabel={`重试死信 ${item().dedupe ?? item().id}`}
+                accessibilityLabel={`重试死信 ${boardEventRefLabel(item().dedupe ?? item().id)}`}
                 onPress={() => void boardStore.retryInbox(item().id, item().key)}
                 style={touchStyle()}
               />
@@ -341,10 +357,12 @@ function Failures(props: { failures: BoardSyncFailure[] }) {
           {(failure) => (
             <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm, paddingVertical: space.sm, borderBottomWidth: 1, borderBottomColor: color.border }}>
               <Text style={{ fontFamily: font.mono, fontSize: typeScale.sm, color: color.foreground, minWidth: 120 }}>
-                {failure().message}
+                #{failure().message}
               </Text>
-              <Text style={{ flex: 1, minWidth: 0, fontSize: typeScale.sm, color: color.mutedForeground }}>{failure().target}</Text>
-              <Text style={{ fontSize: typeScale.sm, color: color.destructive }}>{failure().error}</Text>
+              <Text style={{ flex: 1, minWidth: 0, fontSize: typeScale.sm, color: color.mutedForeground }}>
+                {boardThreadRefLabel(failure().target)}
+              </Text>
+              <Text style={{ fontSize: typeScale.sm, color: color.destructive }}>{boardProviderErrorCopy(failure().error)}</Text>
               <Button
                 variant="outline"
                 size="sm"
@@ -370,8 +388,8 @@ function InboxSheet(props: { data: BoardSyncData }) {
       testID="board-sync-inbox-sheet"
       open={key() !== null}
       side="right"
-      title={`收件箱 · ${key() ?? ""}`}
-      description="只显示脱敏的队列事实（dedupe、尝试次数、错误）；不显示正文或凭据。"
+      title={`收件箱 · ${boardPlatformLabel(key() ?? "")}`}
+      description="只显示事件、尝试次数和错误类型；不显示正文或凭据。"
       onOpenChange={(event) => {
         if (event.open) return;
         syncInboxOpen.set(null);
@@ -401,9 +419,9 @@ function InboxSheet(props: { data: BoardSyncData }) {
           <Each of={items()} key={(item) => item.id}>
             {(item) => (
               <View style={{ flexDirection: "column", gap: 2, paddingVertical: space.sm, borderBottomWidth: 1, borderBottomColor: color.border }}>
-                <Text style={{ fontFamily: font.mono, fontSize: typeScale.sm, color: color.foreground }}>{item().dedupe ?? item().id}</Text>
+                <Text style={{ fontSize: typeScale.sm, color: color.foreground }}>{boardEventRefLabel(item().dedupe ?? item().id)}</Text>
                 <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>
-                  {item().status ?? "dead"} · {item().attempts} 次 · {item().lastError ?? "没有错误详情"}
+                  死信 · {item().attempts} 次 · {boardProviderErrorCopy(item().lastError)}
                 </Text>
               </View>
             )}

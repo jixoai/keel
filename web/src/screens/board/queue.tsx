@@ -34,6 +34,7 @@ import {
   boardActorName,
   boardDeadlineText,
   boardLabelFacets,
+  boardLabelFilterTitle,
   boardNeedsText,
   boardQuerySummary,
   boardSearchOf,
@@ -41,6 +42,7 @@ import {
   boardStateLabel,
   boardStateTone,
   boardStore,
+  boardVisibleLabels,
   effectiveTaskState,
   emptyQuery,
   visibleQueue,
@@ -93,46 +95,24 @@ function StateBadge(props: { state: string; testID?: string }) {
 
 function StateTabs(props: { query: BoardQuery }) {
   return (
-    <If
-      when={isMobile()}
-      else={
-        <ScrollArea testID="board-state-tabs" horizontal style={{ width: "100%" }}>
-          <View style={{ flexDirection: "row", paddingBottom: space.xs }}>
-            <Tabs variant="line" accessibilityLabel="任务状态" testID="board-state-tablist">
-              <Each of={BOARD_STATE_TABS} key={(state) => state}>
-                {(state) => (
-                  <Tab
-                    testID={`board-state-tab-${state()}`}
-                    label={BOARD_STATE_TAB_LABEL[state()]}
-                    selected={props.query.state === state()}
-                    onPress={() => applyBoardQuery({ state: state() })}
-                    accessibilityLabel={`${BOARD_STATE_TAB_LABEL[state()]}${props.query.state === state() ? "，当前" : ""}`}
-                    style={{ minHeight: 36, paddingHorizontal: space.md }}
-                  />
-                )}
-              </Each>
-            </Tabs>
-          </View>
-        </ScrollArea>
-      }
-    >
-      <View testID="board-state-chips" style={{ flexDirection: "row", flexWrap: "wrap", gap: space.xs }}>
-        <Each of={BOARD_STATE_TABS} key={(state) => state}>
-          {(state) => (
-            <Button
-              testID={`board-state-tab-${state()}`}
-              variant={props.query.state === state() ? "default" : "ghost"}
-              size="sm"
-              label={BOARD_STATE_TAB_LABEL[state()]}
-              selected={props.query.state === state()}
-              accessibilityLabel={`${BOARD_STATE_TAB_LABEL[state()]}${props.query.state === state() ? "，当前" : ""}`}
-              onPress={() => applyBoardQuery({ state: state() })}
-              style={{ minHeight: 44, paddingHorizontal: space.md }}
-            />
-          )}
-        </Each>
+    <ScrollArea testID="board-state-tabs" horizontal style={{ width: "100%" }}>
+      <View style={{ flexDirection: "row", paddingBottom: space.xs }}>
+        <Tabs variant="line" accessibilityLabel="任务状态" testID="board-state-tablist">
+          <Each of={BOARD_STATE_TABS} key={(state) => state}>
+            {(state) => (
+              <Tab
+                testID={`board-state-tab-${state()}`}
+                label={BOARD_STATE_TAB_LABEL[state()]}
+                selected={props.query.state === state()}
+                onPress={() => applyBoardQuery({ state: state() })}
+                accessibilityLabel={`${BOARD_STATE_TAB_LABEL[state()]}${props.query.state === state() ? "，当前" : ""}`}
+                style={{ minHeight: isMobile() ? 44 : 36, paddingHorizontal: space.md }}
+              />
+            )}
+          </Each>
+        </Tabs>
       </View>
-    </If>
+    </ScrollArea>
   );
 }
 
@@ -148,7 +128,7 @@ function FilterBar(props: { query: BoardQuery; disabled?: boolean }) {
     const items = [{ value: "", title: "全部标签" }];
     for (const facet of facets()) {
       for (const value of facet.values) {
-        items.push({ value: `${facet.key}=${value}`, title: `${facet.key}=${value}` });
+        items.push({ value: `${facet.key}=${value}`, title: boardLabelFilterTitle(facet.key, value) });
       }
     }
     return items;
@@ -158,7 +138,7 @@ function FilterBar(props: { query: BoardQuery; disabled?: boolean }) {
     ...actors().map((actor) => ({ value: actor.id, title: actor.name || actor.handle || actor.id })),
   ];
   const forItems = () => [
-    { value: "all", title: "全部" },
+    { value: "all", title: "全部指派对象" },
     { value: "pool", title: "池中（未指派）" },
     ...actors().map((actor) => ({ value: actor.id, title: actor.name || actor.handle || actor.id })),
   ];
@@ -218,7 +198,7 @@ function FilterBar(props: { query: BoardQuery; disabled?: boolean }) {
           testID="board-filter-for"
           items={forItems()}
           value={props.query.for}
-          placeholder="全部"
+          placeholder="全部指派对象"
           disabled={props.disabled}
           height={isMobile() ? 44 : undefined}
           accessibilityLabel="按指派筛选"
@@ -235,9 +215,9 @@ function FilterBar(props: { query: BoardQuery; disabled?: boolean }) {
         disabled={props.disabled}
         accessibilityLabel={props.query.archived ? "只看归档任务，已开启" : "只看归档任务"}
         onPress={() => applyBoardQuery({ archived: !props.query.archived })}
-        style={touchStyle()}
+        style={isMobile() ? { width: "100%", minHeight: 44, height: 44 } : touchStyle()}
       />
-      <If when={!emptyQuery(props.query)}>
+      <If when={!emptyQuery(props.query) && !isMobile()}>
         <Button
           testID="board-filter-clear"
           variant="ghost"
@@ -261,7 +241,7 @@ function ActiveFilterChips(props: { query: BoardQuery }) {
     if (props.query.labelKey) {
       out.push({
         id: "label",
-        label: `标签 ${props.query.labelKey}${props.query.labelValue ? `=${props.query.labelValue}` : ""}`,
+        label: `标签 ${boardLabelFilterTitle(props.query.labelKey, props.query.labelValue)}`,
         clear: { labelKey: "", labelValue: "" },
       });
     }
@@ -305,10 +285,7 @@ function ActiveFilterChips(props: { query: BoardQuery }) {
 
 function RowMeta(props: { row: BoardQueueRow }) {
   const cache = () => boardStore.cache();
-  const labels = () =>
-    Object.entries(props.row.labels)
-      .filter(([key]) => !key.startsWith("board."))
-      .slice(0, 2);
+  const labels = () => boardVisibleLabels(props.row.labels).slice(0, 2);
   return (
     <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm, flexWrap: "wrap", minWidth: 0 }}>
       <Text style={{ fontFamily: font.mono, fontSize: typeScale.sm, color: color.mutedForeground }}>
@@ -327,9 +304,7 @@ function RowMeta(props: { row: BoardQueueRow }) {
       </Text>
       <If when={labels().length > 0}>
         <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>
-          {labels()
-            .map(([key, value]) => `${key}=${value}`)
-            .join(" · ")}
+          {labels().map((label) => label.text).join(" · ")}
         </Text>
       </If>
     </View>
@@ -354,7 +329,7 @@ function QueueRow(props: { row: BoardQueueRow; selected: boolean; onPress: () =>
       accessibilityLabel={`打开任务 #${props.row.id} ${firstLine()}`}
       selected={props.selected}
       onPress={props.onPress}
-      style={{ minHeight: isMobile() ? 92 : 68, paddingVertical: space.sm, gap: space.md }}
+      style={{ minHeight: isMobile() ? 92 : 60, paddingVertical: isMobile() ? space.sm : space.xs, gap: space.md }}
     >
       <View style={{ width: isMobile() ? 60 : 64, flexShrink: 0, flexDirection: "column", gap: 2 }}>
         <Text style={{ fontFamily: font.mono, fontSize: typeScale.sm, color: color.foreground }}>#{props.row.id}</Text>
@@ -419,8 +394,8 @@ function QueueSkeleton() {
               flexDirection: isMobile() ? "column" : "row",
               alignItems: isMobile() ? "flex-start" : "center",
               gap: space.sm,
-              minHeight: isMobile() ? 92 : 68,
-              paddingVertical: space.sm,
+              minHeight: isMobile() ? 92 : 60,
+              paddingVertical: space.xs,
               borderBottomWidth: 1,
               borderBottomColor: color.border,
             }}
@@ -503,7 +478,7 @@ function QueueEmpty(props: {
         title="还没有归档任务"
         description={
           boardStore.archiveUnsupported()
-            ? "当前后端没有返回 archived 标记（G11）；这里不会伪造归档记录。"
+            ? "归档标记暂未上报；这里不会伪造归档记录。"
             : "旧的超级助理工单归档后会出现在这里，只读保留；不会恢复旧看板。"
         }
         primaryLabel="返回队列"
@@ -616,16 +591,35 @@ export function BoardQueue(props: { onOpenTask: (id: string) => void; onNewTask:
         open={filterSheetOpen()}
         side="bottom"
         title="筛选任务"
-        description="频道含子树；标签排除 board.* 系统标签。"
+        description="按频道、标签、创建者或指派人收窄队列；条件可随时移除。"
         onOpenChange={(event) => !event.open && filterSheetOpen.set(false)}
         onClose={() => filterSheetOpen.set(false)}
         footer={
-          <Button
-            label="完成"
-            accessibilityLabel="关闭筛选"
-            onPress={() => filterSheetOpen.set(false)}
-            style={touchStyle()}
-          />
+          <>
+            <Button
+              testID="board-filter-reset"
+              variant="ghost"
+              label="重置"
+              accessibilityLabel="重置筛选"
+              disabled={activeFilterCount(query()) === 0}
+              onPress={() =>
+                applyBoardQuery({ channel: "", labelKey: "", labelValue: "", owner: "", for: "all", archived: false })
+              }
+              style={touchStyle()}
+            />
+            <Text
+              testID="board-filter-selected-count"
+              style={{ alignSelf: "center", fontSize: typeScale.sm, color: color.mutedForeground }}
+            >
+              已选 {activeFilterCount(query())} 项
+            </Text>
+            <Button
+              label="完成"
+              accessibilityLabel="关闭筛选"
+              onPress={() => filterSheetOpen.set(false)}
+              style={touchStyle()}
+            />
+          </>
         }
       >
         <ActiveFilterChips query={query()} />

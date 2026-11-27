@@ -54,30 +54,41 @@ test("TUI: 任务队列——状态 tabs、最早优先、行内状态/依赖/�
   expect(view.shows("id:board-row-812")).toBe(false);
 }, 120_000);
 
-test("TUI: 任务页——根任务卡、租约、动作按 moves、claim 丢失恢复、回复与完成", async () => {
+test("TUI: 任务页——claim 丢失单一真相，正常任务完成与回复", async () => {
   const view = await openBoard(1440);
   await openTask(view, "812");
   await view.waitFor("id:board-task-card");
   const texts = view.texts().join("\n");
   expect(texts).toContain("修复结算页偶发重复扣款");
   // The fixture's #812 is held by this account, but this tab has no token:
-  // complete/renew/release are not offered; takeover and force release are.
+  // one truth, no countdown/progress, and no token-bearing or endpoint-less
+  // action. takeover/force release have no board v0.1.1 endpoint.
   expect(view.shows("id:board-claim-lost")).toBe(true);
+  expect(view.shows("id:board-task-lease")).toBe(false);
+  expect(view.shows("id:board-task-lease-progress")).toBe(false);
+  expect(texts).not.toContain("剩余");
   expect(view.shows("id:board-action-complete")).toBe(false);
   expect(view.shows("id:board-action-renew")).toBe(false);
-  expect(texts).toContain("重新认领");
-  expect(texts).toContain("收回认领");
-  // Takeover is keyboard-reachable (the card's action row may sit below the
-  // terminal's viewport): `t` is the documented key for the lost-token case.
-  await view.keyboard.press("t");
+  expect(view.shows("id:board-action-fail")).toBe(false);
+  expect(view.shows("id:board-action-block")).toBe(false);
+  expect(view.shows("id:board-action-takeover")).toBe(false);
+  expect(view.shows("id:board-action-release.force")).toBe(false);
+  expect(texts).not.toContain("收回认领");
+  expect(texts).toContain("等待租约到期后可重新认领");
+  // A ready task keeps the normal journey: claim, complete, reply.
+  await view.press("id:board-task-back");
+  await view.waitFor("id:board-queue");
+  await openTask(view, "809");
+  await view.waitFor("id:board-task-card");
+  await view.keyboard.press("c");
   await view.waitFor("id:board-notice", { timeout: 20_000 });
-  expect(view.texts()).toContain("已重新认领 #812");
+  expect(view.texts()).toContain("已认领 #809");
   await view.keyboard.press("e");
   await view.waitFor("id:board-dialog-complete");
   await view.type("id:board-dialog-complete-input", "已修复并压测通过。");
   await view.press("id:board-dialog-complete-submit");
   await view.waitFor("id:board-notice", { timeout: 20_000 });
-  expect(view.texts()).toContain("已完成 #812");
+  expect(view.texts()).toContain("已完成 #809");
   expect(view.accessibility("id:board-task-state")?.label).toBe("已完成");
   // A finished task leaves the complete/renew actions; reply remains.
   expect(view.shows("id:board-action-complete")).toBe(false);
@@ -135,16 +146,23 @@ test("TUI: 同步——入口、lag/凭据/死信、重试与收件箱", async (
   expect(view.shows("id:board-sync-credential-github")).toBe(true);
   expect(texts).toContain("凭据失效");
   expect(texts).toContain("凭据缺失");
-  // v0.1.1 gives queue depths, not ages or target lists: the page says so.
-  expect(texts).toContain("滞后未知");
-  expect(texts).toContain("目标 · 未知");
+  // Missing backend fields are one honest note per card, not repeated metrics.
+  expect(texts).not.toContain("滞后未知");
+  expect(texts).not.toContain("目标 · 未知");
+  expect(texts).toContain("外部目标与 24h 统计暂未上报");
+  expect(view.shows("id:board-sync-backend-gap-slack")).toBe(true);
+  expect(view.shows("id:board-sync-targets-unknown-slack")).toBe(false);
+  // Raw provider errors are not product copy.
+  expect(texts).toContain("平台限流，稍后重试");
+  expect(texts).toContain("平台签名已过期");
+  expect(texts).not.toContain("provider answered 429");
   expect(texts).toContain("死信 · 2");
   expect(view.shows("id:board-sync-retry-all")).toBe(true);
   await view.press("id:board-sync-retry-all");
   await view.waitFor("id:board-notice", { timeout: 20_000 });
   await view.waitFor("text:/死信 · 0/", { timeout: 20_000 });
   await view.press("id:board-sync-inbox-open-slack");
-  await view.waitFor("text:/收件箱 · slack/", { timeout: 20_000 });
+  await view.waitFor("text:/收件箱 · Slack/", { timeout: 20_000 });
   expect(view.texts().join("\n")).toContain("不显示正文或凭据");
 }, 120_000);
 
@@ -158,6 +176,11 @@ test("TUI: 自动化——watcher 开关、schedule 权限被回收只能取消"
   expect(texts).toContain("定时任务");
   expect(view.shows("id:board-schedule-revoked-legacy-reminder")).toBe(true);
   expect(texts).toContain("已自动停发");
+  // Unknown run stats are hidden, not printed as a value; the canceled row
+  // has no cancel action, and the dead row's clear is the only destructive one.
+  expect(texts).not.toContain("最近 未知");
+  expect(view.shows("id:board-schedule-cancel-legacy-reminder")).toBe(false);
+  expect(view.shows("id:board-schedule-cancel-stuck-reminder")).toBe(true);
   await view.press("id:board-watcher-switch-triage-inbox");
   await view.waitFor("id:board-notice", { timeout: 20_000 });
   expect(view.texts()).toContain("已停用 triage-inbox");
@@ -221,7 +244,7 @@ test("TUI: 五态——loading/empty/error/disabled/404/迁移/只读权限", as
   expect(reader.shows("id:board-view-sync")).toBe(false);
   expect(reader.shows("id:board-new-task")).toBe(false);
   await openTask(reader, "812");
-  expect(reader.texts().join("\n")).toContain("只有查看权限");
+  expect(reader.texts().join("\n")).toContain("认领凭据不在本标签页");
   expect(reader.shows("id:board-action-complete")).toBe(false);
 
   const noMoves = await harness(1440, "no-moves");
@@ -238,7 +261,7 @@ test("TUI: 五态——loading/empty/error/disabled/404/迁移/只读权限", as
   await openTask(noMe, "812");
   await noMe.waitFor("id:board-task-card");
   expect(noMe.shows("id:board-identity-unknown")).toBe(true);
-  expect(noMe.texts().join("\n")).toContain("恢复完成/续租需重新认领");
+  expect(noMe.texts().join("\n")).toContain("续租或结算前需要重新认领");
 
   const syncReader = await harness(1440, "sync-reader");
   await syncReader.waitFor("id:board-sync-permission", { timeout: 20_000 });
@@ -280,10 +303,20 @@ test("TUI: 假时钟——认领租约到点，卡片按 ready 呈现并说明 l
   expect(view.texts().join("\n")).toContain("租约已到期");
 }, 120_000);
 
-test("TUI: 390 任务页——Composer 固定在内容底部，首屏可用并在 tab 之上", async () => {
+test("TUI: 390 任务页——线程根与已有回复首屏可读，Composer 固定在 tab 之上", async () => {
   const view = await openBoard(390);
   await openTask(view, "809");
   await view.waitFor("id:board-task-card");
+  await view.waitFor("id:board-thread-root", { timeout: 20_000 });
+  await view.waitFor("id:board-reply-8091", { timeout: 20_000 });
+  const root = view.layout("id:board-thread-root");
+  const reply = view.layout("id:board-reply-8091");
+  expect(root).toBeDefined();
+  expect(root?.y ?? -1).toBeGreaterThanOrEqual(0);
+  expect((root?.y ?? 0) + (root?.height ?? 0)).toBeLessThanOrEqual(844);
+  expect(reply).toBeDefined();
+  expect(reply?.y ?? -1).toBeGreaterThanOrEqual(0);
+  expect((reply?.y ?? 0) + (reply?.height ?? 0)).toBeLessThanOrEqual(844);
   const composer = view.layout("id:board-reply-input");
   expect(composer).toBeDefined();
   expect(composer?.y ?? 0).toBeGreaterThan(0);
@@ -307,21 +340,29 @@ test("TUI: 390 筛选参数——活动条件以 chips 展示，可逐个移除"
   expect(filtered.shows("id:board-row-812")).toBe(true);
 }, 120_000);
 
-test("TUI: 390 手机——单列队列、44px 控件、无横向溢出", async () => {
+test("TUI: 390 手机——单行横向 tabs、筛选收口、44px 控件、无横向溢出", async () => {
   const view = await openBoard(390);
   await view.waitFor("id:board-queue");
   // ≤767: no inline filter bar; one 44px 筛选 button opens the bottom sheet.
   expect(view.shows("id:board-filter-bar")).toBe(false);
   expect(view.shows("id:board-filter-open")).toBe(true);
-  await view.press("id:board-filter-open");
-  await view.waitFor("text:/筛选任务/", { timeout: 20_000 });
-  expect(view.shows("id:board-filter-bar")).toBe(true);
-  await view.keyboard.press("escape");
+  const tabs = view.layout("id:board-state-tabs");
+  expect(tabs?.height ?? 0).toBeLessThanOrEqual(56);
   const row = view.layout("id:board-row-812");
   expect(row?.width ?? 0).toBeLessThanOrEqual(390);
   expect(row?.x ?? 0).toBeGreaterThanOrEqual(0);
   // Rows meet the touch floor on a phone; the row is the primary target.
   expect(row?.height ?? 0).toBeGreaterThanOrEqual(44);
+  await view.press("id:board-filter-open");
+  await view.waitFor("text:/筛选任务/", { timeout: 20_000 });
+  expect(view.shows("id:board-filter-bar")).toBe(true);
+  expect(view.shows("id:board-filter-reset")).toBe(true);
+  expect(view.shows("id:board-filter-selected-count")).toBe(true);
+  const forField = view.layout("id:board-filter-for");
+  const archive = view.layout("id:board-filter-archive");
+  expect(forField).toBeDefined();
+  expect(archive).toBeDefined();
+  expect(Math.abs((forField?.width ?? 0) - (archive?.width ?? 0))).toBeLessThanOrEqual(1);
   // The archive toggle is reachable and switches the list in place.
   await view.press("id:board-filter-archive");
   await view.waitFor("id:board-row-826", { timeout: 20_000 });

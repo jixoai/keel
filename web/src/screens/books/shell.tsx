@@ -255,10 +255,16 @@ function BottomBar() {
                 alignItems: "center",
                 justifyContent: "center",
                 gap: 3,
-                borderTopWidth: 2,
-                borderTopColor: active() ? color.foreground : "transparent",
               }}
             >
+              <View
+                style={{
+                  width: 24,
+                  height: 2,
+                  borderRadius: 1,
+                  backgroundColor: active() ? color.foreground : "transparent",
+                }}
+              />
               <Icon name={chapter().icon} size={18} tint={active() ? color.foreground : color.mutedForeground} />
               <Text
                 style={{

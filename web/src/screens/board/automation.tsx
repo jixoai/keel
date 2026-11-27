@@ -19,7 +19,7 @@ import {
   typeScale,
   weight,
 } from "../../ui/kit";
-import { boardActorName, boardClock, boardFailureCopy, boardStore } from "../../data/board";
+import { boardActorName, boardClock, boardFailureCopy, boardProviderErrorCopy, boardStore, boardWatcherActionLabel } from "../../data/board";
 import type { BoardScheduleView, BoardWatcherView } from "../../data/board-wire";
 import { store } from "../../data/store";
 import { PageEmpty, PageError, PagePermission, StateNote, isMobile, touchStyle } from "../books/common";
@@ -47,6 +47,9 @@ const scheduleStatusTone = (status: string): "success" | "secondary" | "outline"
  * Nothing is inferred from last_error text. */
 const permissionRevoked = (schedule: BoardScheduleView): boolean => schedule.cancelReason === "revoked";
 
+const deliveryStateLabel = (state: string): string =>
+  state === "done" ? "已投递" : state === "pending" ? "待投递" : state === "dead" ? "死信" : state || "未知";
+
 const cadence = (schedule: BoardScheduleView): string => {
   if (!schedule.everySeconds) return schedule.untilAt ? `至 ${boardClock(schedule.untilAt)}` : "一次性";
   const seconds = schedule.everySeconds;
@@ -59,7 +62,15 @@ const cadence = (schedule: BoardScheduleView): string => {
 
 function WatcherRow(props: { watcher: BoardWatcherView }) {
   const busy = () => boardStore.automationBusy()[props.watcher.id] === true;
-  const issues = () => (props.watcher.dead ?? 0) > 0 || !!props.watcher.lastError;
+  const dead = () => props.watcher.dead ?? 0;
+  const stats = () => {
+    const parts: string[] = [];
+    if (props.watcher.lastDeliveryAt) parts.push(`最近 ${boardClock(props.watcher.lastDeliveryAt)}`);
+    if (props.watcher.successes24h !== undefined) {
+      parts.push(`24h ${props.watcher.successes24h} 成功 · ${props.watcher.failures24h ?? 0} 失败`);
+    }
+    return parts.join(" · ");
+  };
   return (
     <View
       testID={`board-watcher-${props.watcher.id}`}
@@ -76,22 +87,24 @@ function WatcherRow(props: { watcher: BoardWatcherView }) {
         <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm, flexWrap: "wrap" }}>
           <Text style={{ fontFamily: font.mono, fontSize: typeScale.base, color: color.foreground }}>{props.watcher.id}</Text>
           <Badge variant={props.watcher.enabled ? "success" : "secondary"} label={props.watcher.enabled ? "启用" : "已停用"} />
-          <If when={issues()}>
-            <Badge variant="warning" icon="alert" label={`${props.watcher.dead ?? 0} 死信`} />
+          <If when={dead() > 0}>
+            <Badge variant="destructive" icon="alert" label={`${dead()} 死信`} />
+          </If>
+          <If when={dead() === 0 && !!props.watcher.lastError}>
+            <Badge variant="destructive" icon="alert" label="最近失败" />
           </If>
         </View>
         <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground, numberOfLines: 2 }}>
-          {props.watcher.channel} · 动作 {props.watcher.action} · Bot{" "}
+          {props.watcher.channel} · 动作 {boardWatcherActionLabel(props.watcher.action)} · Bot{" "}
           {props.watcher.bot ? boardActorName(boardStore.cache(), props.watcher.bot) : "未记录"}
         </Text>
-        <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>
-          {props.watcher.lastDeliveryAt ? `最近 ${boardClock(props.watcher.lastDeliveryAt)}` : "最近 未知"} · 24h{" "}
-          {props.watcher.successes24h === undefined
-            ? "成功/失败 未知"
-            : `${props.watcher.successes24h} 成功 · ${props.watcher.failures24h ?? 0} 失败`}
-        </Text>
+        <If when={stats() !== ""}>
+          <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>{stats()}</Text>
+        </If>
         <If when={!!props.watcher.lastError}>
-          <Text style={{ fontSize: typeScale.sm, color: color.warning }}>最近一次失败：{props.watcher.lastError}</Text>
+          <Text style={{ fontSize: typeScale.sm, color: color.destructive }}>
+            最近一次失败：{boardProviderErrorCopy(props.watcher.lastError)}
+          </Text>
         </If>
       </View>
       <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm, flexWrap: "wrap" }}>
@@ -107,7 +120,7 @@ function WatcherRow(props: { watcher: BoardWatcherView }) {
           }}
           style={touchStyle()}
         />
-        <If when={(props.watcher.dead ?? 0) > 0}>
+        <If when={dead() > 0}>
           <Button
             testID={`board-watcher-retry-${props.watcher.id}`}
             variant="outline"
@@ -124,7 +137,6 @@ function WatcherRow(props: { watcher: BoardWatcherView }) {
           testID={`board-watcher-switch-${props.watcher.id}`}
           checked={props.watcher.enabled}
           disabled={busy()}
-          label={props.watcher.enabled ? "开" : "关"}
           accessibilityLabel={`${props.watcher.enabled ? "停用" : "启用"} ${props.watcher.id}`}
           onChange={(checked) => void boardStore.setWatcherEnabled(props.watcher.id, checked)}
           style={isMobile() ? { minHeight: 44 } : undefined}
@@ -137,6 +149,9 @@ function WatcherRow(props: { watcher: BoardWatcherView }) {
 function ScheduleRow(props: { schedule: BoardScheduleView }) {
   const busy = () => boardStore.automationBusy()[props.schedule.id] === true;
   const revoked = () => permissionRevoked(props.schedule);
+  const canSwitch = () => props.schedule.status === "pending" || props.schedule.status === "disabled";
+  const canCancel = () => props.schedule.status === "pending" || props.schedule.status === "disabled";
+  const canClear = () => props.schedule.status === "dead";
   return (
     <View
       testID={`board-schedule-${props.schedule.id}`}
@@ -167,33 +182,45 @@ function ScheduleRow(props: { schedule: BoardScheduleView }) {
           </Text>
         </If>
         <If when={!revoked() && !!props.schedule.lastError}>
-          <Text style={{ fontSize: typeScale.sm, color: color.warning }}>最近一次失败：{props.schedule.lastError}</Text>
+          <Text style={{ fontSize: typeScale.sm, color: color.destructive }}>
+            最近一次失败：{boardProviderErrorCopy(props.schedule.lastError)}
+          </Text>
         </If>
       </View>
       <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm, flexWrap: "wrap" }}>
+        <If when={canClear()}>
+          <Button
+            testID={`board-schedule-cancel-${props.schedule.id}`}
+            variant="destructive"
+            size="sm"
+            icon="trash"
+            label="清除"
+            accessibilityLabel={`清除 ${props.schedule.id}`}
+            disabled={busy()}
+            onPress={() => scheduleCancelId.set(props.schedule.id)}
+            style={touchStyle()}
+          />
+        </If>
+        <If when={canCancel()}>
+          <Button
+            testID={`board-schedule-cancel-${props.schedule.id}`}
+            variant="outline"
+            size="sm"
+            icon="x"
+            label="取消"
+            accessibilityLabel={`取消 ${props.schedule.id}`}
+            disabled={busy()}
+            onPress={() => scheduleCancelId.set(props.schedule.id)}
+            style={touchStyle()}
+          />
+        </If>
         <Switch
           testID={`board-schedule-switch-${props.schedule.id}`}
           checked={props.schedule.status === "pending"}
-          disabled={
-            busy() ||
-            revoked() ||
-            (props.schedule.status !== "pending" && props.schedule.status !== "disabled")
-          }
-          label={props.schedule.status === "disabled" ? "继续" : "暂停"}
+          disabled={busy() || revoked() || !canSwitch()}
           accessibilityLabel={`${props.schedule.status === "disabled" ? "继续" : "暂停"} ${props.schedule.id}`}
           onChange={(checked) => void boardStore.setScheduleEnabled(props.schedule.id, checked)}
           style={isMobile() ? { minHeight: 44 } : undefined}
-        />
-        <Button
-          testID={`board-schedule-cancel-${props.schedule.id}`}
-          variant="outline"
-          size="sm"
-          icon="x"
-          label={props.schedule.status === "dead" ? "清除" : "取消"}
-          accessibilityLabel={`${props.schedule.status === "dead" ? "清除" : "取消"} ${props.schedule.id}`}
-          disabled={busy() || props.schedule.status === "done"}
-          onPress={() => scheduleCancelId.set(props.schedule.id)}
-          style={touchStyle()}
         />
       </View>
     </View>
@@ -210,7 +237,7 @@ function WatcherSheet() {
       open={id() !== null}
       side="right"
       title={`投递 · ${id() ?? ""}`}
-      description="只读：event、状态、尝试次数、下次时间与最后错误。"
+      description="最近投递记录；只显示事件、状态、尝试次数和错误类型。"
       onOpenChange={(event) => !event.open && watcherSheetId.set(null)}
       onClose={() => watcherSheetId.set(null)}
       footer={<Button label="关闭" accessibilityLabel="关闭投递" onPress={() => watcherSheetId.set(null)} style={touchStyle()} />}
@@ -227,11 +254,11 @@ function WatcherSheet() {
             {(delivery) => (
               <View style={{ flexDirection: "column", gap: 2, paddingVertical: space.sm, borderBottomWidth: 1, borderBottomColor: color.border }}>
                 <Text style={{ fontFamily: font.mono, fontSize: typeScale.sm, color: color.foreground }}>
-                  #{delivery().event} · {delivery().state}
+                  #{delivery().event} · {deliveryStateLabel(delivery().state)}
                 </Text>
                 <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>
                   尝试 {delivery().attempts} 次 · 下次 {boardClock(delivery().nextAt)}
-                  {delivery().lastError ? ` · ${delivery().lastError}` : ""}
+                  {delivery().lastError ? ` · ${boardProviderErrorCopy(delivery().lastError)}` : ""}
                 </Text>
               </View>
             )}
@@ -253,7 +280,7 @@ function CancelScheduleDialog() {
       description={
         schedule()?.cancelReason === "revoked"
           ? "创建者已失去频道的编辑权限，服务端已自动停发；这里只清除这条计划，不会恢复发送。"
-          : `取消后不再发送；已发消息不会撤回。${schedule()?.lastError ? ` 当前失败：${schedule()?.lastError}` : ""}`
+          : `取消后不再发送；已发消息不会撤回。${schedule()?.lastError ? ` 当前失败：${boardProviderErrorCopy(schedule()?.lastError)}` : ""}`
       }
       confirmLabel={schedule()?.status === "dead" ? "清除" : "取消任务"}
       cancelLabel="保留"
@@ -343,7 +370,7 @@ function AutomationContent() {
               <View style={{ flexDirection: "column", gap: space.sm }}>
                 <Text style={{ fontSize: typeScale.section, fontWeight: weight.semibold, color: color.foreground }}>监视器</Text>
                 <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>
-                  动作与 URL 在部署时声明，界面不编辑任意运行时 URL。停用立即生效，可再切换。
+                  动作在部署时声明，界面只做启停；停用立即生效，可再切换。
                 </Text>
                 <If when={data()!.watchers.length === 0}>
                   <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>没有监视器。</Text>
@@ -355,7 +382,7 @@ function AutomationContent() {
               <View style={{ flexDirection: "column", gap: space.sm }}>
                 <Text style={{ fontSize: typeScale.section, fontWeight: weight.semibold, color: color.foreground }}>定时任务</Text>
                 <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>
-                  失败通常是永久权限/配置问题；只展示原因与取消，不提供强制重试。
+                  失败通常是永久权限或配置问题；只展示原因与处置，不提供强制重试。
                 </Text>
                 <If when={data()!.schedules.length === 0}>
                   <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>没有定时任务。</Text>

@@ -26,11 +26,33 @@ const inside = (app: { layout: (selector: string) => { x: number; width: number 
   }
 };
 
+/** A visible box must stay inside the viewport vertically too: "the DOM has a
+ * rect" is not evidence that the first screen can read it. */
+const onScreen = (
+  app: { layout: (selector: string) => { y: number; height: number } | null },
+  selector: string,
+  height: number,
+) => {
+  const box = app.layout(selector);
+  if (!box) throw new Error(`no layout for ${selector}`);
+  if (box.y < 0 || box.y + box.height > height + 1) {
+    throw new Error(`${selector} is off-screen: y=${box.y} height=${box.height} viewport=${height}`);
+  }
+};
+
+const noDebugCopy = (app: { texts: () => string[] }, where: string) => {
+  const text = app.texts().join("\n");
+  for (const token of ["priority=", "team=", "board:", "provider answered", "后端暂未提供", "滞后未知", "目标 · 未知"]) {
+    if (text.includes(token)) throw new Error(`${where} leaks debug copy: ${token}`);
+  }
+};
+
 test("board evidence: queue and five states", async () => {
   const queue = await view(1440, "success");
   await queue.waitFor("id:board-row-812", { timeout: 20_000 });
   inside(queue, "id:board-page", 1440);
   inside(queue, "id:board-row-812", 1440);
+  noDebugCopy(queue, "queue");
   await shot(queue, "01-queue-success-1440");
 
   const wide = await view(1024, "success");
@@ -47,6 +69,8 @@ test("board evidence: queue and five states", async () => {
   await phone.waitFor("id:board-queue");
   inside(phone, "id:board-page", 390);
   inside(phone, "id:board-row-798", 390);
+  onScreen(phone, "id:board-state-tabs", 844);
+  noDebugCopy(phone, "queue 390");
   await shot(phone, "04-queue-success-390");
 
   const loading = await view(1440, "loading");
@@ -92,16 +116,22 @@ test("board evidence: queue and five states", async () => {
   const phoneEmpty = await view(390, "empty");
   await phoneEmpty.waitFor("id:board-queue-empty");
   await shot(phoneEmpty, "14-queue-empty-390");
-}, 240_000);
+}, 300_000);
 
-test("board evidence: task states and claim recovery", async () => {
+test("board evidence: task states", async () => {
   const claimed = await view(1440, "success", { task: "812" });
   await claimed.waitFor("id:board-claim-lost");
+  await claimed.waitFor("id:board-thread-root", { timeout: 20_000 });
+  await claimed.waitFor("id:board-reply-8121", { timeout: 20_000 });
+  noDebugCopy(claimed, "claim lost");
   await shot(claimed, "20-task-claim-lost-1440");
 
   const ready = await view(1440, "success", { task: "809" });
   await ready.waitFor("id:board-task-card");
+  await ready.waitFor("id:board-thread-root", { timeout: 20_000 });
+  await ready.waitFor("id:board-reply-8091", { timeout: 20_000 });
   inside(ready, "id:board-task-page", 1440);
+  noDebugCopy(ready, "task ready");
   await shot(ready, "21-task-ready-1440");
 
   const blocked = await view(1440, "success", { task: "814" });
@@ -122,8 +152,13 @@ test("board evidence: task states and claim recovery", async () => {
 
   const phone = await view(390, "success", { task: "809" });
   await phone.waitFor("id:board-task-card");
+  await phone.waitFor("id:board-thread-root", { timeout: 20_000 });
+  await phone.waitFor("id:board-reply-8091", { timeout: 20_000 });
   inside(phone, "id:board-task-page", 390);
   inside(phone, "id:board-composer", 390);
+  onScreen(phone, "id:board-thread-root", 844);
+  onScreen(phone, "id:board-reply-8091", 844);
+  noDebugCopy(phone, "task 390");
   await shot(phone, "25-task-ready-390");
 
   const reading = await view(1440, "reader", { task: "812" });
@@ -137,7 +172,9 @@ test("board evidence: task states and claim recovery", async () => {
   const failedTask = await view(1440, "task-error");
   await failedTask.waitFor("id:board-task-error", { timeout: 20_000 });
   await shot(failedTask, "25d-task-error-1440");
+}, 300_000);
 
+test("board evidence: task dialogs", async () => {
   const known = await view(1440, "success", { task: "809" });
   await known.waitFor("id:board-task-card");
   await known.press("id:board-action-assign");
@@ -153,17 +190,18 @@ test("board evidence: task states and claim recovery", async () => {
   await known.press("id:board-action-cancel");
   await known.waitFor("id:board-dialog-cancel");
   await shot(known, "28-dialog-cancel-1440");
-}, 240_000);
+}, 300_000);
 
-test("board evidence: sync, automation and the retired address", async () => {
+test("board evidence: sync", async () => {
   const sync = await view(1440, "success");
   await sync.waitFor("id:board-row-812");
   await sync.press("id:board-view-sync");
   await sync.waitFor("id:board-sync-entry-slack");
   inside(sync, "id:board-sync", 1440);
+  noDebugCopy(sync, "sync");
   await shot(sync, "30-sync-success-1440");
   await sync.press("id:board-sync-inbox-open-slack");
-  await sync.waitFor("text:/收件箱 · slack/");
+  await sync.waitFor("text:/收件箱 · Slack/");
   await shot(sync, "31-sync-inbox-1440");
 
   const syncPhone = await view(390, "success");
@@ -187,12 +225,16 @@ test("board evidence: sync, automation and the retired address", async () => {
   const syncEmpty = await view(1440, "sync-empty");
   await syncEmpty.waitFor("id:board-sync-empty", { timeout: 20_000 });
   await shot(syncEmpty, "33c-sync-empty-1440");
+}, 300_000);
 
+test("board evidence: automation and the retired address", async () => {
   const auto = await view(1440, "success");
   await auto.waitFor("id:board-row-812");
   await auto.press("id:board-view-automation");
   await auto.waitFor("id:board-watcher-triage-inbox");
   inside(auto, "id:board-automation", 1440);
+  noDebugCopy(auto, "automation");
+  if (auto.texts().join("\n").includes("最近 未知")) throw new Error("automation still prints an unknown run time");
   await shot(auto, "34-automation-success-1440");
 
   const autoError = await view(1440, "automation-error");
@@ -221,7 +263,7 @@ test("board evidence: sync, automation and the retired address", async () => {
   await phoneAuto.waitFor("id:board-watcher-triage-inbox");
   inside(phoneAuto, "id:board-automation", 390);
   await shot(phoneAuto, "37-automation-390");
-}, 240_000);
+}, 300_000);
 
 test("board evidence: before/after action transitions", async () => {
   const claim = await view(1440, "success", { task: "809" });
@@ -266,5 +308,14 @@ test("board evidence: before/after action transitions", async () => {
   await shot(phone, "48-before-filter-390");
   await phone.press("id:board-filter-open");
   await phone.waitFor("text:/筛选任务/", { timeout: 20_000 });
+  await phone.waitFor("id:board-filter-reset", { timeout: 20_000 });
+  inside(phone, "id:board-filter-reset", 390);
+  inside(phone, "id:board-filter-selected-count", 390);
+  const forField = phone.layout("id:board-filter-for");
+  const archiveField = phone.layout("id:board-filter-archive");
+  if (!forField || !archiveField) throw new Error("filter sheet fields are missing");
+  if (Math.abs(forField.width - archiveField.width) > 1) {
+    throw new Error(`archive width ${archiveField.width} != select width ${forField.width}`);
+  }
   await shot(phone, "49-filter-sheet-390");
-}, 240_000);
+}, 300_000);

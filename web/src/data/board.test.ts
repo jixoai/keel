@@ -8,9 +8,15 @@ import {
   boardFailureCopy,
   boardFailureOf,
   boardAvailableMoves,
+  boardEventRefLabel,
+  boardLabelFilterTitle,
+  boardLabelView,
   boardLeaseFacts,
   boardNeedsFact,
+  boardPlatformLabel,
+  boardProviderErrorCopy,
   boardQueryFromSearch,
+  boardRenderableMoves,
   boardSearchOf,
   boardStateLabel,
   boardStore,
@@ -160,21 +166,50 @@ test("board：筛选 search 往返一致，任务查询按 board 的 label=key=v
   expect(queryToTaskQuery(defaultBoardQuery()).labels).toBeUndefined();
 });
 
-test("board：租约过期后 complete/renew/release 即使有 token 也不可用，claim 为首选", () => {
+test("board：租约过期后 token 动作即使有 token 也不可用，claim 为首选", () => {
   const claimed = task({
     state: "claimed",
     claim: { actor: "acct-chenmo", until: "2026-11-27T10:00:00.000Z" },
     moves: ["claim", "renew", "release", "release.force", "takeover", "complete", "fail", "block", "reply"],
   });
   const expired = boardAvailableMoves(claimed, { hasToken: true, mine: true, now: NOW + 1000 });
-  expect(expired).toEqual(["claim", "release.force", "takeover", "fail", "block", "reply"]);
+  expect(expired).toEqual(["claim", "release.force", "takeover", "reply"]);
   expect(expired).not.toContain("complete");
   expect(expired).not.toContain("renew");
   expect(expired).not.toContain("release");
+  expect(expired).not.toContain("fail");
+  expect(expired).not.toContain("block");
   // Before expiry the token holder keeps the settlement moves.
   const live = boardAvailableMoves(claimed, { hasToken: true, mine: true, now: NOW - 1000 });
   expect(live).toContain("complete");
   expect(live).toContain("renew");
+});
+
+test("board：UI 动作去掉 takeover/force-release，丢失 token 只留可执行动作", () => {
+  const claimed = task({
+    state: "claimed",
+    claim: { actor: "acct-chenmo", until: "2026-11-27T10:00:00.000Z" },
+    moves: ["renew", "release", "release.force", "takeover", "complete", "fail", "block", "reply"],
+  });
+  const lost = boardRenderableMoves(claimed, { hasToken: false, mine: true, now: NOW - 1000 });
+  expect(lost).toEqual(["reply"]);
+  const holder = boardRenderableMoves(claimed, { hasToken: true, mine: true, now: NOW - 1000 });
+  expect(holder).toContain("complete");
+  expect(holder).not.toContain("takeover");
+  expect(holder).not.toContain("release.force");
+});
+
+test("board：标签与平台错误只出产品文案，不出 key=value/provider 原文", () => {
+  expect(boardLabelView("board.task", "ready")).toBeNull();
+  expect(boardLabelView("priority", "high")?.text).toBe("高优先级");
+  expect(boardLabelView("team", "payments")?.text).toBe("支付团队");
+  expect(boardLabelView("foo", "bar")?.text).toBe("bar");
+  expect(boardLabelFilterTitle("priority", "high")).toBe("优先级 · 高优先级");
+  expect(boardEventRefLabel("slack:evt_9a1c")).toBe("Slack 事件 9a1c");
+  expect(boardPlatformLabel("slack")).toBe("Slack");
+  expect(boardProviderErrorCopy("provider answered 429")).toBe("平台限流，稍后重试");
+  expect(boardProviderErrorCopy("provider timeout")).toBe("平台响应超时");
+  expect(boardProviderErrorCopy("signature window expired")).toBe("平台签名已过期，等待重新投递");
 });
 
 test("board：moves 是唯一动作来源；缺失时只读，未知动作被忽略", () => {

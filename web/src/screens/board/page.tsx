@@ -32,6 +32,7 @@ import {
 import { can } from "../../data/permissions";
 import { store } from "../../data/store";
 import {
+  BOOK_PAPER_MAX_WIDTH_PX,
   PageEmpty,
   PagePermission,
   PageUnavailable,
@@ -142,7 +143,7 @@ function HealthBadge() {
     <If when={total() > 0}>
       <Badge
         testID="board-health"
-        variant="warning"
+        variant="destructive"
         icon="alert"
         label={`故障 ${total()}`}
         onPress={() => store.openBoard("sync")}
@@ -324,7 +325,7 @@ function NewTaskSheet(props: { onCreated: (id: string) => void }) {
       .filter((entry) => entry.task && entry.message)
       .slice(0, 40);
   const labelError = () =>
-    newTaskLabelKey().trim().startsWith("board.") ? "系统标签（board.*）由任务状态维护，不能手动设置。" : "";
+    newTaskLabelKey().trim().startsWith("board.") ? "系统标签由任务状态维护，不能手动设置。" : "";
   const valid = () =>
     !!newTaskChannel().trim() &&
     !!newTaskText().trim() &&
@@ -659,7 +660,7 @@ function BoardContent() {
       <View
         style={{
           width: "100%",
-          maxWidth: 1180,
+          maxWidth: BOOK_PAPER_MAX_WIDTH_PX,
           alignSelf: "center",
           flex: 1,
           minHeight: 0,
@@ -674,7 +675,7 @@ function BoardContent() {
           view={view()}
           taskId={taskId()}
           title={title()}
-          purpose={purpose()}
+          purpose={isMobile() && taskId() ? "" : purpose()}
           kicker={kicker()}
           onRefresh={refresh}
           refreshing={refreshing()}

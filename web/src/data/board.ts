@@ -302,7 +302,7 @@ export const emptyQuery = (query: BoardQuery): boolean =>
 export function boardQuerySummary(query: BoardQuery, actorName?: (id: string) => string): string {
   const parts: string[] = [];
   if (query.channel) parts.push(`频道 ${query.channel}`);
-  if (query.labelKey) parts.push(`标签 ${query.labelKey}${query.labelValue ? `=${query.labelValue}` : ""}`);
+  if (query.labelKey) parts.push(`标签 ${boardLabelFilterTitle(query.labelKey, query.labelValue)}`);
   if (query.owner) parts.push(`创建者 ${actorName ? actorName(query.owner) : query.owner}`);
   if (query.for !== "all") parts.push(query.for === "pool" ? "池中" : `指派 ${actorName ? actorName(query.for) : query.for}`);
   if (query.archived) parts.push("归档");
@@ -475,7 +475,9 @@ export function boardDeadlineText(
     return facts.expired ? "租约已到期" : facts.text;
   }
   if (state === "waiting") {
-    return task.needs.length ? `前置 ${task.needs.length}` : "等待依赖";
+    const created = message?.createdAt;
+    const age = boardAgeText(created, now);
+    return age ? `${age}前` : "等待依赖";
   }
   if (state === "blocked") {
     return task.blocked?.kind === "awaiting_approval" ? "等待审批" : "等待回复";
@@ -597,6 +599,182 @@ export function boardTaskLabels(task: BoardTaskView, message: BoardMessageView |
   return { system, user };
 }
 
+// ---- label presentation ---------------------------------------------------
+
+const boardHumanize = (value: string): string => value.replace(/[_-]+/g, " ").trim();
+
+const BOARD_LABEL_KEY_NAMES: Record<string, string> = {
+  priority: "优先级",
+  team: "团队",
+  source: "来源",
+  ticket: "工单",
+  channel: "频道",
+  owner: "创建者",
+  for: "指派给",
+};
+
+const BOARD_PRIORITY_LABELS: Record<string, string> = {
+  urgent: "紧急",
+  high: "高优先级",
+  medium: "中优先级",
+  normal: "普通",
+  low: "低优先级",
+};
+
+const BOARD_TEAM_LABELS: Record<string, string> = {
+  payments: "支付团队",
+  growth: "增长团队",
+  release: "发布团队",
+  archive: "归档团队",
+  ops: "运维团队",
+  work: "工作团队",
+};
+
+const BOARD_SOURCE_LABELS: Record<string, string> = {
+  superagent: "超级助理",
+  slack: "Slack",
+  github: "GitHub",
+  linear: "Linear",
+  chatsdk: "Chat SDK",
+  board: "任务面",
+};
+
+export interface BoardLabelView {
+  key: string;
+  value: string;
+  /** Human-facing text; never `key=value`. */
+  text: string;
+  tone: BoardTone;
+}
+
+/** A user label in product words. `board.*` is system state, not content, so
+ * it is omitted; an unknown key keeps only its value as a light tag. */
+export function boardLabelView(key: string, rawValue: string | undefined): BoardLabelView | null {
+  if (!key || key.startsWith("board.")) return null;
+  const value = (rawValue ?? "").trim();
+  if (!value) return null;
+  if (key === "priority") {
+    return {
+      key,
+      value,
+      text: BOARD_PRIORITY_LABELS[value.toLowerCase()] ?? `优先级 · ${boardHumanize(value)}`,
+      tone: value.toLowerCase() === "high" || value.toLowerCase() === "urgent" ? "secondary" : "outline",
+    };
+  }
+  if (key === "team") {
+    return { key, value, text: BOARD_TEAM_LABELS[value.toLowerCase()] ?? `团队 · ${boardHumanize(value)}`, tone: "outline" };
+  }
+  if (key === "source") {
+    return { key, value, text: BOARD_SOURCE_LABELS[value.toLowerCase()] ?? `来源 · ${boardHumanize(value)}`, tone: "outline" };
+  }
+  if (key === "ticket") {
+    return { key, value, text: `工单 #${value.replace(/^#/, "")}`, tone: "outline" };
+  }
+  return { key, value, text: boardHumanize(value), tone: "outline" };
+}
+
+export function boardVisibleLabels(labels: Record<string, string> | undefined): BoardLabelView[] {
+  const out: BoardLabelView[] = [];
+  for (const [key, value] of Object.entries(labels ?? {})) {
+    const view = boardLabelView(key, value);
+    if (view) out.push(view);
+  }
+  return out;
+}
+
+/** The filter facet's human title; the raw key=value stays in the form value
+ * only, never in what the reader sees. */
+export function boardLabelFilterTitle(key: string, value: string): string {
+  const view = boardLabelView(key, value);
+  const keyName = BOARD_LABEL_KEY_NAMES[key] ?? "标签";
+  return view ? `${keyName} · ${view.text}` : `${keyName} · ${boardHumanize(value) || value}`;
+}
+
+export function boardPlatformLabel(platform: string | undefined): string {
+  switch ((platform ?? "").toLowerCase()) {
+    case "slack":
+      return "Slack";
+    case "github":
+      return "GitHub";
+    case "linear":
+      return "Linear";
+    case "chatsdk":
+      return "Chat SDK";
+    case "superagent":
+      return "超级助理";
+    case "board":
+      return "任务面";
+    default:
+      return platform ? boardHumanize(platform) : "外部平台";
+  }
+}
+
+/** An inbound event reference (`slack:evt_9a1c`) becomes a short product
+ * reference; the provider's raw id never reaches the reader. */
+export function boardEventRefLabel(ref: string | undefined): string {
+  const raw = (ref ?? "").trim();
+  if (!raw) return "入站事件";
+  const cut = raw.indexOf(":");
+  const platform = cut > 0 ? raw.slice(0, cut) : "";
+  const rest = cut > 0 ? raw.slice(cut + 1) : raw;
+  const short = rest.replace(/^evt[_-]?/i, "").slice(0, 8);
+  if (!short) return "入站事件";
+  return platform ? `${boardPlatformLabel(platform)} 事件 ${short}` : `事件 ${short}`;
+}
+
+/** A platform thread target (`slack:C08:…`) becomes "Slack 线程"; the opaque
+ * provider coordinates are not a product value. */
+export function boardThreadRefLabel(ref: string | undefined): string {
+  const raw = (ref ?? "").trim();
+  if (!raw) return "外部线程";
+  const cut = raw.indexOf(":");
+  return cut > 0 ? `${boardPlatformLabel(raw.slice(0, cut))} 线程` : raw;
+}
+
+/** Provider errors are operator facts, not UI copy. Keep the category and
+ * discard the raw provider sentence. */
+export function boardProviderErrorCopy(error: string | undefined | null): string {
+  const raw = (error ?? "").trim();
+  if (!raw) return "";
+  const lower = raw.toLowerCase();
+  if (lower.includes("429") || lower.includes("rate limit") || lower.includes("rate limited")) {
+    return "平台限流，稍后重试";
+  }
+  if (lower.includes("timeout") || lower.includes("timed out")) return "平台响应超时";
+  if (lower.includes("signature") && lower.includes("expired")) return "平台签名已过期，等待重新投递";
+  if (lower.includes("401") || lower.includes("403") || lower.includes("unauthorized") || lower.includes("forbidden")) {
+    return "平台凭据被拒绝";
+  }
+  if (
+    lower.includes("5xx") ||
+    lower.includes("500") ||
+    lower.includes("502") ||
+    lower.includes("503") ||
+    lower.includes("504") ||
+    lower.includes("server error")
+  ) {
+    return "平台暂时不可用";
+  }
+  if (lower.includes("hmac") || lower.includes("nonce")) return "桥接签名校验失败";
+  if (lower.includes("connection") || lower.includes("network") || lower.includes("refused")) return "无法连接平台";
+  return "平台返回错误，详情见服务端日志";
+}
+
+export function boardWatcherActionLabel(action: string | undefined): string {
+  switch ((action ?? "").toLowerCase()) {
+    case "assign-by-label":
+      return "按标签指派";
+    case "notify-owner":
+      return "通知负责人";
+    case "wake-session":
+      return "唤醒会话";
+    case "run-tool":
+      return "执行工具";
+    default:
+      return action ? "已声明的动作" : "未记录动作";
+  }
+}
+
 // ---- moves ----------------------------------------------------------------
 
 /** Every action the UI knows how to render. `moves` is the authority: an
@@ -664,9 +842,18 @@ export function interimMovesForState(cached: BoardTaskView, incoming: BoardTaskV
   return taskMoves(cached).filter((move) => list.includes(move));
 }
 
+/** Moves that need the claim token itself. A reload loses the token, and an
+ * expired lease has no holder, so none of these can be fenced from this tab. */
+const TOKEN_BEARING_MOVES: BoardMove[] = ["renew", "release", "complete", "fail", "block"];
+
+/** Moves this board version cannot execute: v0.1.1/keel exposes no takeover or
+ * force-release endpoint, so the UI never renders them. They may still appear
+ * in a server list; that is a protocol token, not a product action. */
+const UI_UNSUPPORTED_MOVES: BoardMove[] = ["takeover", "release.force"];
+
 /** The moves this tab may actually render: the server's list minus the
  * token-bearing ones when the claim is mine but its credential is not in this
- * tab (a reload). Takeover and force release remain, so recovery is offered. */
+ * tab (a reload) or the lease has expired. */
 export function boardAvailableMoves(
   task: BoardTaskView | undefined,
   opts: { hasToken: boolean; mine: boolean; now: number },
@@ -675,12 +862,20 @@ export function boardAvailableMoves(
   if (!task || task.state !== "claimed" || !task.claim) return moves;
   const until = Date.parse(task.claim.until);
   const expired = Number.isFinite(until) && until <= opts.now;
-  // An expired lease has no holder: complete/renew/release can no longer be
-  // fenced, even if this tab still has a stale token. Claim becomes primary
-  // when the server lists it (the queue presents the task as ready).
-  if (expired) return moves.filter((move) => move !== "complete" && move !== "renew" && move !== "release");
+  // An expired lease has no holder: no token-bearing move can be fenced, even
+  // if this tab still has a stale token. Claim becomes primary when the server
+  // lists it (the queue presents the task as ready).
+  if (expired) return moves.filter((move) => !TOKEN_BEARING_MOVES.includes(move));
   if (!opts.mine || opts.hasToken) return moves;
-  return moves.filter((move) => move !== "complete" && move !== "renew" && move !== "release");
+  return moves.filter((move) => !TOKEN_BEARING_MOVES.includes(move));
+}
+
+/** `boardAvailableMoves` filtered to what this board version can execute. */
+export function boardRenderableMoves(
+  task: BoardTaskView | undefined,
+  opts: { hasToken: boolean; mine: boolean; now: number },
+): BoardMove[] {
+  return boardAvailableMoves(task, opts).filter((move) => !UI_UNSUPPORTED_MOVES.includes(move));
 }
 
 export const BOARD_MOVE_LABEL: Record<BoardMove, string> = {
@@ -702,7 +897,7 @@ export const BOARD_MOVE_LABEL: Record<BoardMove, string> = {
 };
 
 /** The primary action: at most one, in product order. */
-export const BOARD_PRIMARY_ORDER: BoardMove[] = ["complete", "claim", "takeover", "unblock", "reopen", "answer"];
+export const BOARD_PRIMARY_ORDER: BoardMove[] = ["complete", "claim", "unblock", "reopen", "answer"];
 
 export function boardPrimaryMove(task: BoardTaskView | undefined): BoardMove | undefined {
   const moves = taskMoves(task);
@@ -714,7 +909,6 @@ export const BOARD_KEY_MOVES: Record<string, BoardMove> = {
   c: "claim",
   r: "renew",
   l: "release",
-  t: "takeover",
   e: "complete",
   f: "fail",
   b: "block",

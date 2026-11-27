@@ -15,7 +15,6 @@ export type BoardDialogKind =
   | "needs"
   | "cancel"
   | "release"
-  | "force-release"
   | "answer"
   | "access"
   | "shortcuts";

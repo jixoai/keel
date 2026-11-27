@@ -4,8 +4,8 @@
 // The task page is a working log, not a dashboard: the root task card sits
 // above/next to its thread, the actions come from the server's `moves` only,
 // and every dangerous action asks once with its consequence spelled out. The
-// claim token lives in the data layer's memory; a reload shows「认领凭据不在
-// 本标签页」and offers takeover/force release instead of pretending.
+// claim token lives in the data layer's memory; a reload shows one truth —
+// 「认领凭据不在本标签页」— and waits for expiry or an owner action.
 import { effect, keymap, Text, View, windowSize } from "nsh";
 import {
   AlertDialog,
@@ -38,18 +38,21 @@ import {
   BOARD_MOVE_LABEL,
   BOARD_KEY_MOVES,
   boardActorName,
-  boardAvailableMoves,
   boardAgeText,
   boardClock,
   boardDeadlineText,
   boardFailureCopy,
   boardLeaseFacts,
   boardNeedsFact,
+  boardPlatformLabel,
+  boardRenderableMoves,
   boardStateIcon,
   boardStateLabel,
   boardStateTone,
   boardStore,
+  boardThreadRefLabel,
   boardTimeShort,
+  boardVisibleLabels,
   effectiveTaskState,
   hasMove,
   type BoardMove,
@@ -165,40 +168,70 @@ function NeedsList(props: { taskId: string; task: BoardTaskView; onOpenTask: (id
   const facts = () => boardNeedsFact(boardStore.cache(), props.task);
   return (
     <View style={{ flexDirection: "column", gap: space.xs }}>
-      <SectionLabel text="前置依赖" note={facts().length ? `${facts().filter((fact) => fact.done).length}/${facts().length} 完成` : "无前置"} />
-      <If when={facts().length === 0}>
-        <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>无前置</Text>
+      <SectionLabel
+        text="前置依赖"
+        note={facts().length ? `${facts().filter((fact) => fact.done).length}/${facts().length} 完成` : "无前置"}
+      />
+      <If when={facts().length > 0}>
+        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: space.xs }}>
+          <Each of={facts()} key={(fact) => fact.id}>
+            {(fact) => (
+              <Badge
+                testID={`board-need-${fact().id}`}
+                variant={fact().done ? "success" : fact().state === "failed" || fact().state === "canceled" ? "destructive" : "outline"}
+                icon={fact().done ? "check" : fact().state === "failed" ? "alert" : "clock"}
+                label={`#${fact().id} ${boardStateLabel(fact().state)}`}
+                onPress={() => props.onOpenTask(fact().id)}
+              />
+            )}
+          </Each>
+        </View>
       </If>
-      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: space.xs }}>
-        <Each of={facts()} key={(fact) => fact.id}>
-          {(fact) => (
-            <Badge
-              testID={`board-need-${fact().id}`}
-              variant={fact().done ? "success" : fact().state === "failed" || fact().state === "canceled" ? "destructive" : "outline"}
-              icon={fact().done ? "check" : fact().state === "failed" ? "alert" : "clock"}
-              label={`#${fact().id} ${boardStateLabel(fact().state)}`}
-              onPress={() => props.onOpenTask(fact().id)}
-            />
-          )}
-        </Each>
-      </View>
     </View>
   );
 }
 
 function TaskFacts(props: { task: BoardTaskView; message: BoardMessageView }) {
   const cache = () => boardStore.cache();
+  const owner = () => boardActorName(cache(), props.task.owner);
+  const by = () => boardActorName(cache(), props.task.by);
   const source = () => {
     const origin = props.task.origin;
     const copy = props.task.copies?.[0];
-    if (origin?.platform) return `${origin.platform}${origin.ref ? ` · ${origin.ref}` : ""}`;
-    if (copy?.platform) return copy.platform;
+    if (origin?.platform === "superagent") return "超级助理工单";
+    if (origin?.platform) return `${boardPlatformLabel(origin.platform)} 线程`;
+    if (copy?.platform) return boardPlatformLabel(copy.platform);
     return "任务面";
   };
+  if (isMobile()) {
+    return (
+      <View style={{ flexDirection: "row", flexWrap: "wrap", columnGap: space.md, rowGap: 2 }}>
+        <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>
+          创建者 <Text style={{ color: color.foreground }}>{owner()}</Text>
+        </Text>
+        <If when={by() !== owner()}>
+          <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>
+            发起 <Text style={{ color: color.foreground }}>{by()}</Text>
+          </Text>
+        </If>
+        <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>
+          指派 <Text style={{ color: color.foreground }}>{boardActorName(cache(), props.task.for)}</Text>
+        </Text>
+        <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>
+          来源 <Text style={{ color: color.foreground }}>{source()}</Text>
+        </Text>
+        <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>
+          频道 <Text style={{ fontFamily: font.mono, color: color.foreground }}>{props.message.channel}</Text>
+        </Text>
+      </View>
+    );
+  }
   return (
     <View style={{ flexDirection: "column", gap: space.xs }}>
-      <FactLine label="创建者" value={boardActorName(cache(), props.task.owner)} />
-      <FactLine label="发起" value={boardActorName(cache(), props.task.by)} />
+      <FactLine label="创建者" value={owner()} />
+      <If when={by() !== owner()}>
+        <FactLine label="发起" value={by()} />
+      </If>
       <FactLine label="指派给" value={boardActorName(cache(), props.task.for)} />
       <FactLine label="来源" value={source()} />
       <FactLine label="频道" value={props.message.channel} mono />
@@ -215,8 +248,8 @@ function CopiesList(props: { task: BoardTaskView }) {
         <Each of={copies} key={(copy) => `${copy.target}-${copy.status}`}>
           {(copy) => (
             <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm, minWidth: 0 }}>
-              <Text style={{ flex: 1, minWidth: 0, fontFamily: font.mono, fontSize: typeScale.sm, color: color.mutedForeground, numberOfLines: 1, textOverflow: "ellipsis" }}>
-                {copy().target ?? copy().platform ?? "外部线程"}
+              <Text style={{ flex: 1, minWidth: 0, fontSize: typeScale.sm, color: color.mutedForeground, numberOfLines: 1, textOverflow: "ellipsis" }}>
+                {copy().target ? boardThreadRefLabel(copy().target) : boardPlatformLabel(copy().platform)}
               </Text>
               <Badge
                 variant={copy().status === "synced" || copy().status === "已同步" ? "success" : copy().status === "failed" ? "destructive" : "warning"}
@@ -233,17 +266,33 @@ function CopiesList(props: { task: BoardTaskView }) {
 function TaskActions(props: { taskId: string; task: BoardTaskView; onOpenTask: (id: string) => void }) {
   const now = () => boardStore.clock();
   const stale = () => boardStore.threadStale();
+  const claimLost = () =>
+    effectiveTaskState(props.task, now()) === "claimed" &&
+    boardStore.isMyActor(props.task.claim?.actor) &&
+    !boardStore.heldByThisTab(props.taskId, now()) &&
+    !boardLeaseFacts(props.task, now(), {
+      hasToken: false,
+      mine: true,
+    }).expired;
   const moves = () =>
-    boardAvailableMoves(props.task, {
+    boardRenderableMoves(props.task, {
       hasToken: boardStore.heldByThisTab(props.taskId, now()),
       mine: boardStore.isMyActor(props.task.claim?.actor),
       now: now(),
     });
+  const actionMoves = (): BoardMove[] => moves().filter((move) => move !== "reply");
   const primary = () =>
-    (["complete", "claim", "takeover", "unblock", "reopen", "answer"] as BoardMove[]).find((move) => moves().includes(move));
+    (["complete", "claim", "unblock", "reopen", "answer"] as BoardMove[]).find((move) => actionMoves().includes(move));
   const secondary = () =>
-    (["renew", "release", "block", "fail", "assign", "needs", "cancel"] as BoardMove[]).filter((move) => moves().includes(move));
-  const overflow = () => moves().filter((move) => move !== "reply" && move !== primary() && !secondary().includes(move));
+    (["renew", "release", "block", "assign", "needs"] as BoardMove[]).filter((move) => actionMoves().includes(move));
+  const dangerous = () => (["fail", "cancel"] as BoardMove[]).filter((move) => actionMoves().includes(move));
+  const overflow = () =>
+    actionMoves().filter(
+      (move) =>
+        move !== primary() &&
+        !secondary().includes(move) &&
+        !dangerous().includes(move),
+    );
   const run = (move: BoardMove) => {
     switch (move) {
       case "claim":
@@ -264,20 +313,14 @@ function TaskActions(props: { taskId: string; task: BoardTaskView; onOpenTask: (
       case "answer":
         openDialog(move, props.taskId);
         break;
-      case "release.force":
-        openDialog("force-release", props.taskId);
-        break;
-      case "takeover":
-        void boardStore.takeover(props.taskId);
-        break;
       default:
         break;
     }
   };
-  const buttonFor = (move: BoardMove) => (
+  const buttonFor = (move: BoardMove, tier: "primary" | "secondary" | "danger" | "overflow") => (
     <Button
       testID={`board-action-${move}`}
-      variant={move === primary() ? "default" : "outline"}
+      variant={tier === "primary" ? "default" : tier === "danger" ? "destructive" : "outline"}
       size="sm"
       label={BOARD_MOVE_LABEL[move]}
       accessibilityLabel={`${BOARD_MOVE_LABEL[move]} #${props.taskId}`}
@@ -298,11 +341,21 @@ function TaskActions(props: { taskId: string; task: BoardTaskView; onOpenTask: (
           testID="board-moves-missing"
           tone="warning"
           icon="alert"
-          text="后端没有返回 moves：任务面按只读处理。后端契约落地后动作才会出现。"
+          text="服务端没有返回可执行动作；任务面按只读处理，动作开放后会自动出现。"
         />
       </If>
-      <If when={props.task.moves !== undefined && props.task.archived !== true && props.task.mirror?.readOnly !== true && moves().length === 0}>
-        <StateNote tone="info" icon="lock" text="只有查看权限：频道编辑者或任务创建者可以推进状态。" />
+      <If
+        when={
+          props.task.moves !== undefined &&
+          props.task.archived !== true &&
+          props.task.mirror?.readOnly !== true &&
+          actionMoves().length === 0 &&
+          !claimLost() &&
+          effectiveTaskState(props.task, now()) !== "completed" &&
+          effectiveTaskState(props.task, now()) !== "canceled"
+        }
+      >
+        <StateNote tone="info" icon="lock" text="当前没有可执行的动作；需要由创建者或管理员推进。" />
       </If>
       <If when={stale()}>
         <StateNote
@@ -312,15 +365,25 @@ function TaskActions(props: { taskId: string; task: BoardTaskView; onOpenTask: (
           text="实时更新中断：写操作暂不可用，先刷新任务再继续。"
         />
       </If>
-      <If when={!stale() && props.task.archived !== true && props.task.mirror?.readOnly !== true && moves().length > 0}>
-        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: space.sm }}>
-          <If when={primary() !== undefined}>{buttonFor(primary()!)}</If>
-          <Each of={secondary()} key={(move) => move}>
-            {(move) => buttonFor(move())}
-          </Each>
-          <Each of={overflow()} key={(move) => move}>
-            {(move) => buttonFor(move())}
-          </Each>
+      <If when={!stale() && props.task.archived !== true && props.task.mirror?.readOnly !== true && actionMoves().length > 0}>
+        <View style={{ flexDirection: "column", gap: space.sm }}>
+          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: space.sm }}>
+            <If when={primary() !== undefined}>{buttonFor(primary()!, "primary")}</If>
+            <Each of={secondary()} key={(move) => move}>
+              {(move) => buttonFor(move(), "secondary")}
+            </Each>
+            <Each of={overflow()} key={(move) => move}>
+              {(move) => buttonFor(move(), "overflow")}
+            </Each>
+          </View>
+          <If when={dangerous().length > 0}>
+            <Hairline />
+            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: space.sm }}>
+              <Each of={dangerous()} key={(move) => move}>
+                {(move) => buttonFor(move(), "danger")}
+              </Each>
+            </View>
+          </If>
         </View>
       </If>
     </View>
@@ -337,21 +400,31 @@ export function BoardTaskCard(props: { taskId: string; task: BoardTaskView; mess
   const claimLost = () =>
     state() === "claimed" && boardStore.isMyActor(props.task.claim?.actor) && !boardStore.heldByThisTab(props.taskId, now()) && !lease().expired;
   return (
-    <Card testID="board-task-card" style={{ padding: space.lg, gap: space.md, flexDirection: "column", backgroundColor: color.card }}>
+    <Card
+      testID="board-task-card"
+      style={{
+        padding: isMobile() ? space.md : space.lg,
+        gap: isMobile() ? space.sm : space.md,
+        flexDirection: "column",
+        backgroundColor: color.card,
+      }}
+    >
       <View style={{ flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: space.sm }}>
         <Text style={{ fontFamily: font.mono, fontSize: typeScale.base, color: color.mutedForeground }}>#{props.taskId}</Text>
         <StateBadge state={state()} testID="board-task-state" />
-        <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>{boardDeadlineText(props.task, props.message, now())}</Text>
+        <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>
+          {claimLost() ? "认领凭据不在本标签页" : boardDeadlineText(props.task, props.message, now())}
+        </Text>
       </View>
       <If when={!boardStore.meLoaded() && boardStore.meFailure() !== null}>
         <StateNote
           testID="board-identity-unknown"
           tone="warning"
           icon="alert"
-          text="身份未知：无法确认这个认领是否属于你。恢复完成/续租需重新认领（takeover），或由创建者/管理员收回。"
+          text="身份未知：无法确认这个认领是否属于你。续租或结算前需要重新认领，或由创建者/管理员指派/取消。"
         />
       </If>
-      <If when={state() === "claimed"}>
+      <If when={state() === "claimed" && !claimLost()}>
         <LeaseBlock taskId={props.taskId} task={props.task} />
       </If>
       <If when={props.task.state === "claimed" && state() === "ready"}>
@@ -367,7 +440,7 @@ export function BoardTaskCard(props: { taskId: string; task: BoardTaskView; mess
           testID="board-claim-lost"
           tone="warning"
           icon="alert"
-          text="认领凭据不在本标签页（刷新或换了标签页）。可重新认领，或由创建者/管理员收回。"
+          text="认领凭据不在本标签页，无法续租或结算。等待租约到期后可重新认领，或由创建者/管理员指派/取消。"
         />
       </If>
       <TaskFacts task={props.task} message={props.message} />
@@ -392,30 +465,22 @@ export function BoardTaskCard(props: { taskId: string; task: BoardTaskView; mess
         <StateNote testID="board-task-failure" tone="danger" icon="alert" text={`失败原因：${props.task.reason}`} />
       </If>
       <CopiesList task={props.task} />
-      <If when={Object.keys(props.message.labels ?? {}).filter((key) => !key.startsWith("board.")).length > 0}>
-        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: space.xs }}>
-          <Each
-            of={Object.entries(props.message.labels ?? {}).filter(([key]) => !key.startsWith("board."))}
-            key={([key, value]) => `${key}=${value}`}
-          >
-            {(entry) => <Badge variant="outline" label={entry()[0] + "=" + entry()[1]} />}
-          </Each>
-        </View>
-      </If>
       <Hairline />
       <TaskActions taskId={props.taskId} task={props.task} onOpenTask={props.onOpenTask} />
-      <View style={{ flexDirection: "row", gap: space.sm }}>
-        <Button
-          testID="board-task-copy-link"
-          variant="ghost"
-          size="sm"
-          icon="copy"
-          label="复制链接"
-          accessibilityLabel={`复制任务 #${props.taskId} 的链接`}
-          onPress={() => void copyText(`#${props.taskId} ${props.message.channel}`)}
-          style={touchStyle()}
-        />
-      </View>
+      <If when={!isMobile()}>
+        <View style={{ flexDirection: "row", gap: space.sm }}>
+          <Button
+            testID="board-task-copy-link"
+            variant="ghost"
+            size="sm"
+            icon="copy"
+            label="复制链接"
+            accessibilityLabel={`复制任务 #${props.taskId} 的链接`}
+            onPress={() => void copyText(`#${props.taskId} ${props.message.channel}`)}
+            style={touchStyle()}
+          />
+        </View>
+      </If>
     </Card>
   );
 }
@@ -485,7 +550,7 @@ function Composer(props: { taskId: string; task: BoardTaskView }) {
           testID="board-reply-input"
           value={replyDraft()}
           placeholder="写下第一条工作日志，说明你看到了什么、准备怎么做。"
-          rows={3}
+          rows={isMobile() ? 2 : 3}
           maxLength={10000}
           disabled={sending() || boardStore.threadStale()}
           accessibilityLabel="回复任务"
@@ -601,7 +666,7 @@ export function BoardTaskPage(props: { taskId: string; onBack: () => void; onOpe
               behind a fixed overlay. */}
           <View style={{ flex: 1, minHeight: 0, flexDirection: "column", gap: space.sm }}>
             <ScrollArea testID="board-task-scroll" style={{ flex: 1, minHeight: 0 }}>
-              <View style={{ flexDirection: "column", gap: space.lg, paddingBottom: space.md }}>
+              <View style={{ flexDirection: "column", gap: isMobile() ? space.sm : space.lg, paddingBottom: space.md }}>
                 <BoardTaskCard taskId={props.taskId} task={row()!.task} message={root()!} onOpenTask={props.onOpenTask} />
                 <ThreadBody taskId={props.taskId} root={root()!} replies={replies()} onOpenTask={props.onOpenTask} />
               </View>
@@ -625,12 +690,22 @@ function ThreadBody(props: {
   const pending = () => boardStore.pendingReplies();
   const empty = () => props.replies.length === 0 && pending().length === 0;
   const older = () => boardStore.cache().threads[props.taskId]?.older ?? null;
-  const labels = () => Object.entries(props.root.labels ?? {}).filter(([key]) => !key.startsWith("board."));
+  const labels = () => boardVisibleLabels(props.root.labels);
+  const heading = () => props.root.text.split("\n")[0] ?? "";
+  const body = () => props.root.text.split("\n").slice(1).join("\n");
   return (
     <View testID="board-thread" style={{ flexDirection: "column", gap: space.sm }}>
       <View
         testID="board-thread-root"
-        style={{ flexDirection: "column", gap: space.sm, padding: space.lg, borderRadius: radius.lg, backgroundColor: color.muted, borderWidth: 1, borderColor: color.border }}
+        style={{
+          flexDirection: "column",
+          gap: space.sm,
+          padding: isMobile() ? space.md : space.lg,
+          borderRadius: radius.lg,
+          backgroundColor: color.muted,
+          borderWidth: 1,
+          borderColor: color.border,
+        }}
       >
         <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm, flexWrap: "wrap" }}>
           <BookAvatar name={props.root.by?.name ?? "?"} size="sm" />
@@ -640,13 +715,33 @@ function ThreadBody(props: {
           <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>{formatWhen(props.root.createdAt)}</Text>
           <Text style={{ fontFamily: font.mono, fontSize: typeScale.sm, color: color.mutedForeground }}>{props.root.channel}</Text>
         </View>
-        <Text style={{ fontSize: typeScale.lg, lineHeight: Math.round(typeScale.lg * lineHeight.normal), color: color.foreground }}>
-          {props.root.text}
-        </Text>
+        <View style={{ flexDirection: "column", gap: 2 }}>
+          <Text
+            style={{
+              fontSize: typeScale.lg,
+              lineHeight: Math.round(typeScale.lg * lineHeight.normal),
+              fontWeight: weight.medium,
+              color: color.foreground,
+            }}
+          >
+            {heading()}
+          </Text>
+          <If when={body() !== ""}>
+            <Text
+              style={{
+                fontSize: typeScale.base,
+                lineHeight: Math.round(typeScale.base * lineHeight.normal),
+                color: color.foreground,
+              }}
+            >
+              {body()}
+            </Text>
+          </If>
+        </View>
         <If when={labels().length > 0}>
           <View style={{ flexDirection: "row", flexWrap: "wrap", gap: space.xs }}>
-            <Each of={labels()} key={([key, value]) => `${key}=${value}`}>
-              {(entry) => <Badge variant="outline" label={`${entry()[0]}=${entry()[1]}`} />}
+            <Each of={labels()} key={(label) => `${label.key}:${label.value}`}>
+              {(label) => <Badge variant={toneVariant(label().tone)} label={label().text} />}
             </Each>
           </View>
         </If>
@@ -677,7 +772,7 @@ function ThreadBody(props: {
       </Each>
       <If when={older() !== null}>
         <Text testID="board-thread-older" style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>
-          更早的回复需要后端 before 游标（G3）；当前只显示最新 50 条。
+          更早的回复暂未加载；当前只显示最新 50 条。
         </Text>
       </If>
     </View>
@@ -1025,22 +1120,6 @@ export function TaskDialogs(props: { taskId: string }) {
       />
 
       <AlertDialog
-        testID="board-dialog-force-release"
-        open={dialog()?.kind === "force-release"}
-        title={`收回 #${number()} 的认领？`}
-        description="当前持有者会失去完成/续租能力；如果对方正在执行，请先沟通。收回会写入审计。"
-        confirmLabel="收回认领"
-        cancelLabel="取消"
-        destructive
-        onCancel={close}
-        onConfirm={() =>
-          requireMove("release.force", () => {
-            void boardStore.forceRelease(number()).then((ok) => ok && close());
-          })
-        }
-      />
-
-      <AlertDialog
         testID="board-dialog-reopen"
         open={dialog()?.kind === "reopen"}
         title={`重新打开 #${number()}？`}
@@ -1159,7 +1238,6 @@ function ShortcutHelp() {
     ["c", "认领"],
     ["r", "续租"],
     ["l", "释放"],
-    ["t", "重新认领（凭据丢失）"],
     ["e", "完成"],
     ["f", "标记失败"],
     ["b", "阻塞"],
@@ -1213,7 +1291,7 @@ export function bindTaskKeys(
     const id = taskId();
     if (!id || !task()) return false;
     if (boardStore.threadStale()) return false;
-    return boardAvailableMoves(task(), {
+    return boardRenderableMoves(task(), {
       hasToken: boardStore.heldByThisTab(id, boardStore.clock()),
       mine: boardStore.isMyActor(task()?.claim?.actor),
       now: boardStore.clock(),
@@ -1231,15 +1309,7 @@ export function bindTaskKeys(
         void boardStore.renew(id);
         return;
       }
-      if (move === "release.force") {
-        openDialog("force-release", id);
-        return;
-      }
-      if (move === "takeover") {
-        void boardStore.takeover(id);
-        return;
-      }
-      if (move === "reply") return;
+      if (move === "reply" || move === "release.force" || move === "takeover") return;
       openDialog(move, id);
     }, { when: "notEditing" });
   }
