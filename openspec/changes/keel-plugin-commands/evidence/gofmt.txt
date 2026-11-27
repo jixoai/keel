@@ -1,0 +1,1 @@
+$ gofmt -l internal/pluginpkg internal/harnessext internal/harnessapi internal/store internal/agent internal/accessgate cmd/keel

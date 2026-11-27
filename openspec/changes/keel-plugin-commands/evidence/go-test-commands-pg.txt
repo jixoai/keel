@@ -1,0 +1,57 @@
+$ KEEL_TEST_DSN=<real PG> go test -race -p 1 ./internal/harnessapi/ ./internal/store/ -run "TestCommand|TestPostgresCommandInvocations" -v -count=1
+=== RUN   TestCommandPGTenantBoundaryAndAudit
+--- PASS: TestCommandPGTenantBoundaryAndAudit (0.08s)
+=== RUN   TestCommandPGConcurrentRequestID
+--- PASS: TestCommandPGConcurrentRequestID (0.16s)
+=== RUN   TestCommandPGDestructiveRowPersistsDecision
+--- PASS: TestCommandPGDestructiveRowPersistsDecision (0.07s)
+=== RUN   TestCommandCatalogOrderAndAvailability
+--- PASS: TestCommandCatalogOrderAndAvailability (0.00s)
+=== RUN   TestCommandCatalogMarksMissingPermissions
+--- PASS: TestCommandCatalogMarksMissingPermissions (0.00s)
+=== RUN   TestCommandCatalogCrossTenantAndPermission
+--- PASS: TestCommandCatalogCrossTenantAndPermission (0.00s)
+=== RUN   TestCommandExecuteCompactDelegatesAndReplays
+--- PASS: TestCommandExecuteCompactDelegatesAndReplays (0.00s)
+=== RUN   TestCommandExecuteRefusals
+--- PASS: TestCommandExecuteRefusals (0.00s)
+=== RUN   TestCommandExecuteFailureReplaysFirstFailure
+--- PASS: TestCommandExecuteFailureReplaysFirstFailure (0.00s)
+=== RUN   TestCommandExecutePluginToolAndAudit
+--- PASS: TestCommandExecutePluginToolAndAudit (0.00s)
+=== RUN   TestCommandExecutePluginUnavailableAndToolErrors
+--- PASS: TestCommandExecutePluginUnavailableAndToolErrors (0.00s)
+=== RUN   TestCommandDestructiveDecisionFlow
+--- PASS: TestCommandDestructiveDecisionFlow (0.00s)
+=== RUN   TestCommandDestructiveDecisionRefused
+--- PASS: TestCommandDestructiveDecisionRefused (0.00s)
+=== RUN   TestCommandDestructiveDecisionTimeout
+--- PASS: TestCommandDestructiveDecisionTimeout (0.07s)
+=== RUN   TestCommandSkillLoadsForNextTurnAndReplays
+--- PASS: TestCommandSkillLoadsForNextTurnAndReplays (0.01s)
+=== RUN   TestCommandSkillRequiresSkillRead
+--- PASS: TestCommandSkillRequiresSkillRead (0.00s)
+=== RUN   TestCommandConcurrentSameRequestIDSerializes
+--- PASS: TestCommandConcurrentSameRequestIDSerializes (0.11s)
+=== RUN   TestCommandSessionWriteRequired
+--- PASS: TestCommandSessionWriteRequired (0.01s)
+=== RUN   TestCommandResultTruncatesAtBound
+--- PASS: TestCommandResultTruncatesAtBound (0.01s)
+=== RUN   TestCommandPluginInvokePermissionIsRequired
+--- PASS: TestCommandPluginInvokePermissionIsRequired (0.01s)
+=== RUN   TestCommandCatalogTruncatesAtBounds
+--- PASS: TestCommandCatalogTruncatesAtBounds (0.12s)
+=== RUN   TestCommandCatalogCapsSkillsAtHalf
+--- PASS: TestCommandCatalogCapsSkillsAtHalf (0.02s)
+=== RUN   TestCommandSkillIgnoresDisableModelInvocation
+--- PASS: TestCommandSkillIgnoresDisableModelInvocation (0.01s)
+=== RUN   TestCommandDestructiveDecisionCancelled
+--- PASS: TestCommandDestructiveDecisionCancelled (0.00s)
+=== RUN   TestCommandApprovalPromptsFromViewIgnoresInvalidView
+--- PASS: TestCommandApprovalPromptsFromViewIgnoresInvalidView (0.00s)
+PASS
+ok  	github.com/jixoai/keel/internal/harnessapi	2.094s
+=== RUN   TestPostgresCommandInvocations
+--- PASS: TestPostgresCommandInvocations (0.08s)
+PASS
+ok  	github.com/jixoai/keel/internal/store	1.357s

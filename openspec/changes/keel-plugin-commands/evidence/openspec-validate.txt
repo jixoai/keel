@@ -1,0 +1,2 @@
+$ openspec validate keel-plugin-commands --strict
+Change 'keel-plugin-commands' is valid
