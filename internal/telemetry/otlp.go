@@ -13,9 +13,11 @@ package telemetry
 //
 // No OpenTelemetry SDK is involved: the wire encoding below is the plain JSON
 // shape, and the binary-size gate (scripts/binary-size.sh) is the reason.
-// At-least-once semantics: a crashed process may resend batches from before its
-// last confirmed cursor; a live exporter never re-POSTs a batch that already
-// received 2xx because the queue removes it exactly when the cursor advances.
+// Delivery semantics: there is no persistent queue. A crash loses unflushed
+// batches and a restart does not replay acked ones (at-most-once across a
+// restart). Within one live exporter, a batch whose response was lost after the
+// collector processed it may be retried, so a collector should deduplicate by
+// trace/span id.
 
 import (
 	"bytes"
@@ -35,6 +37,9 @@ import (
 	"sync"
 	"time"
 )
+
+// MaxWarnKeys bounds the once-only warning memo.
+const MaxWarnKeys = 256
 
 // Queue limits (defaults from design §5).
 type QueueLimits struct {
@@ -293,6 +298,9 @@ func NewOTLPExporter(options OTLPExporterOptions) (*OTLPExporter, error) {
 	if endpoint == "" {
 		return nil, &ConfigErrors{Errors: []ConfigError{{Field: "endpoint", Message: "OTLP endpoint is empty"}}}
 	}
+	if len(endpoint) > MaxEndpointBytes {
+		return nil, &ConfigErrors{Errors: []ConfigError{{Field: "endpoint", Message: fmt.Sprintf("must be at most %d bytes", MaxEndpointBytes)}}}
+	}
 	parsed, err := url.Parse(endpoint)
 	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
 		return nil, &ConfigErrors{Errors: []ConfigError{{Field: "endpoint", Message: "must be an absolute http(s) URL"}}}
@@ -306,14 +314,23 @@ func NewOTLPExporter(options OTLPExporterOptions) (*OTLPExporter, error) {
 	if parsed.RawQuery != "" || parsed.Fragment != "" {
 		return nil, &ConfigErrors{Errors: []ConfigError{{Field: "endpoint", Message: "must not carry a query or fragment"}}}
 	}
+	if err := endpointPolicy(parsed); err != nil {
+		return nil, &ConfigErrors{Errors: []ConfigError{{Field: "endpoint", Message: err.Error()}}}
+	}
 	service := strings.TrimSpace(options.ServiceName)
 	if service == "" {
 		service = "keel"
 	}
+	if len(service) > MaxServiceNameBytes {
+		return nil, &ConfigErrors{Errors: []ConfigError{{Field: "serviceName", Message: fmt.Sprintf("must be at most %d bytes", MaxServiceNameBytes)}}}
+	}
+	if len(options.Headers) > MaxConfigHeaders {
+		return nil, &ConfigErrors{Errors: []ConfigError{{Field: "headers", Message: fmt.Sprintf("at most %d headers are allowed", MaxConfigHeaders)}}}
+	}
 	headers := make(map[string]string, len(options.Headers))
 	for name, value := range options.Headers {
-		if name == "" || strings.ContainsAny(name, "\r\n") || strings.ContainsAny(value, "\r\n") {
-			return nil, &ConfigErrors{Errors: []ConfigError{{Field: "headers", Message: "header name/value must not be empty or contain a newline"}}}
+		if name == "" || len(name) > MaxHeaderNameBytes || strings.ContainsAny(name, "\r\n") || strings.ContainsAny(value, "\r\n") {
+			return nil, &ConfigErrors{Errors: []ConfigError{{Field: "headers", Message: "header name/value must be non-empty, bounded and newline-free"}}}
 		}
 		headers[name] = value
 	}
@@ -405,6 +422,13 @@ func NewOTLPExporter(options OTLPExporterOptions) (*OTLPExporter, error) {
 	if client == nil {
 		client = &http.Client{Timeout: 10 * time.Second}
 		ownHTTP = true
+	} else {
+		// Do not mutate the caller's client; redirects are refused below.
+		copied := *client
+		client = &copied
+	}
+	client.CheckRedirect = func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
 	}
 	perName := options.MaxSeriesPerMetric
 	if perName <= 0 {
@@ -600,6 +624,11 @@ func (e *OTLPExporter) recordSeriesDrop(name, reason string) {
 
 func (e *OTLPExporter) warnOnceLocked(key, message string, args ...any) {
 	if e.warned[key] {
+		return
+	}
+	// A hostile/buggy metric name space must not grow the warn map without
+	// bound; the counters stay accurate past this cap.
+	if len(e.warned) >= MaxWarnKeys {
 		return
 	}
 	e.warned[key] = true
@@ -893,10 +922,13 @@ func (e *OTLPExporter) postWithRetry(ctx context.Context, kind signalKind, recor
 			e.recordSuccess(kind, endSeq, len(records))
 			return nil
 		}
-		if err == nil && status >= 400 && status < 500 && status != http.StatusTooManyRequests {
-			// Other 4xx: the collector rejected this batch; retrying cannot fix
-			// it, so drop and count instead of looping. The collector is
-			// reachable, so the breaker closes even though the batch is lost.
+		if err == nil && status >= 300 && status < 500 && status != http.StatusTooManyRequests {
+			// Other 3xx/4xx: the collector refused or redirected this batch;
+			// retrying cannot fix it, so drop and count instead of looping. The
+			// collector is reachable, so the breaker closes even though the
+			// batch is lost. Redirects are never followed: an OTLP collector
+			// must be the configured origin, or headers could be forwarded
+			// elsewhere.
 			e.recordReachable()
 			e.dropRecords(len(records), class)
 			return nil
@@ -943,6 +975,10 @@ func (e *OTLPExporter) sendOnce(ctx context.Context, path string, body []byte) (
 		return response.StatusCode, parseRetryAfter(response.Header.Get("Retry-After"), e.now(), e.retry.MaxDelay), "http_429", nil
 	case response.StatusCode >= 500:
 		return response.StatusCode, 0, "http_5xx", nil
+	case response.StatusCode >= 400:
+		return response.StatusCode, 0, "http_4xx", nil
+	case response.StatusCode >= 300:
+		return response.StatusCode, 0, "http_3xx", nil
 	default:
 		return response.StatusCode, 0, "http_4xx", nil
 	}
@@ -1058,7 +1094,7 @@ func (e *OTLPExporter) Status() ExporterStatus {
 }
 
 // confirmedSequence returns the last acknowledged record sequence for a signal
-// (tests and at-least-once diagnostics).
+// (tests and in-process diagnostics). It is not persisted across restarts.
 func (e *OTLPExporter) confirmedSequence(kind signalKind) int64 {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -1243,7 +1279,14 @@ func (e *OTLPExporter) metricPayload(measurements []RecordedMeasurement) map[str
 				for index := range counts {
 					counts[index] = "0"
 				}
-				counts[len(counts)-1] = "1"
+				bucket := len(measurement.Boundaries) // +Inf unless a bound is larger
+				for index, bound := range measurement.Boundaries {
+					if measurement.Value < bound {
+						bucket = index
+						break
+					}
+				}
+				counts[bucket] = "1"
 				point["explicitBounds"] = measurement.Boundaries
 			} else {
 				point["bucketCounts"] = []string{"1"}
@@ -1274,12 +1317,14 @@ func (e *OTLPExporter) metricPayload(measurements []RecordedMeasurement) map[str
 		}
 		if agg.kind == MetricKindHistogram {
 			metric["histogram"] = map[string]any{
-				"aggregationTemporality": 2,
+				// Each data point is one measurement delta, not a cumulative sum:
+				// declaring CUMULATIVE would make consumers under-count.
+				"aggregationTemporality": 1,
 				"dataPoints":             agg.points,
 			}
 		} else {
 			metric["sum"] = map[string]any{
-				"aggregationTemporality": 2,
+				"aggregationTemporality": 1,
 				"isMonotonic":            agg.kind == MetricKindCounter,
 				"dataPoints":             agg.points,
 			}

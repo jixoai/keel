@@ -132,6 +132,9 @@ type HubStatus struct {
 	Dropped             uint64           `json:"dropped"`
 	Exported            uint64           `json:"exported"`
 	MetricSeriesDropped uint64           `json:"metricSeriesDropped"`
+	AttributesDropped   uint64           `json:"attributesDropped"`
+	EventsDropped       uint64           `json:"eventsDropped"`
+	LinksDropped        uint64           `json:"linksDropped"`
 	LastErrorClass      string           `json:"lastErrorClass,omitempty"`
 	Exporters           []ExporterStatus `json:"exporters,omitempty"`
 }
@@ -151,6 +154,11 @@ type Hub struct {
 	state       PluginState
 	reason      string
 	config      ConfigSummary
+	closed      bool
+
+	attributesDropped uint64
+	eventsDropped     uint64
+	linksDropped      uint64
 
 	nextSpanID atomic.Int64
 }
@@ -298,6 +306,9 @@ func (h *Hub) RegisterExporter(exporter Exporter) error {
 	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	if h.closed {
+		return fmt.Errorf("telemetry: hub is closed")
+	}
 	for _, existing := range h.exporters {
 		if existing.Name() == name {
 			return fmt.Errorf("telemetry: exporter %q is already registered", name)
@@ -356,6 +367,7 @@ func (h *Hub) Flush(ctx context.Context) error {
 func (h *Hub) Close(ctx context.Context) error {
 	exporters := h.exporterSnapshot()
 	h.mu.Lock()
+	h.closed = true
 	h.exporters = nil
 	h.mu.Unlock()
 	var firstErr error
@@ -375,20 +387,26 @@ func (h *Hub) Status() HubStatus {
 	config := h.config
 	sampleRatio := h.sampleRatio
 	logRatio := h.logRatio
+	attributesDropped := h.attributesDropped
+	eventsDropped := h.eventsDropped
+	linksDropped := h.linksDropped
 	exporters := append([]Exporter(nil), h.exporters...)
 	h.mu.RUnlock()
 
 	status := HubStatus{
-		TenantID:    h.tenantID,
-		PluginID:    "keel.telemetry",
-		State:       state,
-		Reason:      reason,
-		Config:      config,
-		Signals:     []Signal{},
-		SampleRatio: sampleRatio,
-		LogRatio:    logRatio,
-		HeaderNames: append([]string(nil), config.HeaderNames...),
-		HeaderCount: len(config.HeaderNames),
+		TenantID:          h.tenantID,
+		PluginID:          "keel.telemetry",
+		State:             state,
+		Reason:            reason,
+		Config:            config,
+		Signals:           []Signal{},
+		SampleRatio:       sampleRatio,
+		LogRatio:          logRatio,
+		HeaderNames:       append([]string(nil), config.HeaderNames...),
+		HeaderCount:       len(config.HeaderNames),
+		AttributesDropped: attributesDropped,
+		EventsDropped:     eventsDropped,
+		LinksDropped:      linksDropped,
 	}
 	if config.EndpointHost != "" {
 		status.EndpointHost = config.EndpointHost
@@ -478,7 +496,9 @@ func (h *Hub) Log(record LogRecord) {
 	if _, ok := ParseLogLevel(string(record.Level)); !ok {
 		record.Level = LogLevelInfo
 	}
-	record.Attributes, _ = SanitizeSpanAttributes(record.Attributes)
+	var dropped int
+	record.Attributes, dropped = SanitizeSpanAttributes(record.Attributes)
+	h.noteDrops(dropped, 0, 0)
 	for _, exporter := range exporters {
 		if !hasSignal(exporter.Signals(), SignalLogs) {
 			continue
@@ -586,6 +606,13 @@ type spanIdentityProvider interface {
 	telemetrySpanIdentity() (spanID, traceID, parentID string)
 }
 
+const (
+	// MaxSpanEvents bounds one span's exported event list.
+	MaxSpanEvents = 128
+	// MaxSpanLinks bounds one span's exported link list.
+	MaxSpanLinks = 32
+)
+
 type hubSpan struct {
 	hub       *Hub
 	base      Span
@@ -606,6 +633,7 @@ type hubSpan struct {
 	links          []StoredLink
 	status         SpanStatus
 	explicitStatus bool
+	errorKind      string
 	settled        bool
 }
 
@@ -648,12 +676,19 @@ func newHubSpan(hub *Hub, parent *hubSpan, base Span, exporters []Exporter, opti
 		attributes: SpanAttributes{},
 	}
 	if sampled {
-		attributes, _ := SanitizeSpanAttributes(options.Attributes)
+		attributes, dropped := SanitizeSpanAttributes(options.Attributes)
 		if len(attributes) > 0 {
 			span.attributes = attributes
 		}
+		hub.noteDrops(dropped, 0, 0)
 		for _, link := range options.Links {
-			if recorded, ok := hubLink(link); ok {
+			if len(span.links) >= MaxSpanLinks {
+				hub.noteDrops(0, 0, 1)
+				continue
+			}
+			recorded, ok, linkDropped := hubLink(link)
+			hub.noteDrops(linkDropped, 0, 0)
+			if ok {
 				span.links = append(span.links, recorded)
 			}
 		}
@@ -661,9 +696,20 @@ func newHubSpan(hub *Hub, parent *hubSpan, base Span, exporters []Exporter, opti
 	return span
 }
 
-func hubLink(link SpanLink) (StoredLink, bool) {
+func (h *Hub) noteDrops(attributes, events, links int) {
+	if attributes == 0 && events == 0 && links == 0 {
+		return
+	}
+	h.mu.Lock()
+	h.attributesDropped += uint64(attributes)
+	h.eventsDropped += uint64(events)
+	h.linksDropped += uint64(links)
+	h.mu.Unlock()
+}
+
+func hubLink(link SpanLink) (StoredLink, bool, int) {
 	if link.Context == nil {
-		return StoredLink{}, false
+		return StoredLink{}, false, 0
 	}
 	spanID, traceID := "", ""
 	switch typed := link.Context.(type) {
@@ -677,10 +723,10 @@ func hubLink(link SpanLink) (StoredLink, bool) {
 		traceID = carrier[carrierTraceKey]
 	}
 	if spanID == "" && traceID == "" {
-		return StoredLink{}, false
+		return StoredLink{}, false, 0
 	}
-	attributes, _ := SanitizeSpanAttributes(link.Attributes)
-	return StoredLink{TraceID: traceID, SpanID: spanID, Attributes: attributes}, true
+	attributes, dropped := SanitizeSpanAttributes(link.Attributes)
+	return StoredLink{TraceID: traceID, SpanID: spanID, Attributes: attributes}, true, dropped
 }
 
 func (s *hubSpan) Metrics() Metrics { return s.hub.Metrics() }
@@ -707,13 +753,18 @@ func (s *hubSpan) AddLink(link SpanLink) {
 	if !s.sampled {
 		return
 	}
-	recorded, ok := hubLink(link)
+	recorded, ok, dropped := hubLink(link)
+	s.hub.noteDrops(dropped, 0, 0)
 	if !ok {
 		return
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.settled {
+		return
+	}
+	if len(s.links) >= MaxSpanLinks {
+		s.hub.noteDrops(0, 0, 1)
 		return
 	}
 	s.links = append(s.links, recorded)
@@ -730,10 +781,26 @@ func (s *hubSpan) AddEvent(name string, attributes SpanAttributes) {
 	if cleanName == "" {
 		return
 	}
-	cleanAttributes, _ := SanitizeSpanAttributes(attributes)
+	s.mu.Lock()
+	if s.settled {
+		s.mu.Unlock()
+		return
+	}
+	if len(s.events) >= MaxSpanEvents {
+		s.mu.Unlock()
+		s.hub.noteDrops(0, 1, 0)
+		return
+	}
+	s.mu.Unlock()
+	cleanAttributes, dropped := SanitizeSpanAttributes(attributes)
+	s.hub.noteDrops(dropped, 0, 0)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.settled {
+		return
+	}
+	if len(s.events) >= MaxSpanEvents {
+		s.hub.noteDrops(0, 1, 0)
 		return
 	}
 	s.events = append(s.events, StoredEvent{
@@ -750,13 +817,18 @@ func (s *hubSpan) SetAttributes(attributes SpanAttributes) {
 	if !s.sampled {
 		return
 	}
-	clean, _ := SanitizeSpanAttributes(attributes)
+	clean, dropped := SanitizeSpanAttributes(attributes)
+	s.hub.noteDrops(dropped, 0, 0)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.settled {
 		return
 	}
 	for name, value := range clean {
+		if _, exists := s.attributes[name]; !exists && len(s.attributes) >= MaxAttributesPerRecord {
+			s.hub.noteDrops(1, 0, 0)
+			continue
+		}
 		s.attributes[name] = value
 	}
 }
@@ -774,6 +846,15 @@ func (s *hubSpan) SetStatus(status SpanStatus) {
 		return
 	}
 	s.status = exportableStatus(status)
+	if status.Status == SpanStatusError {
+		s.errorKind = "error"
+		if status.Error != nil && strings.TrimSpace(status.Error.Name) != "" {
+			s.errorKind = SanitizeEventName(status.Error.Name)
+			if s.errorKind == "" {
+				s.errorKind = "error"
+			}
+		}
+	}
 	s.explicitStatus = true
 }
 
@@ -802,8 +883,18 @@ func (s *hubSpan) finish(callbackErr error, panicValue any) {
 		switch {
 		case panicValue != nil, callbackErr != nil:
 			s.status = SpanStatus{Status: SpanStatusError}
+			s.errorKind = "error"
 		default:
 			s.status = OK()
+		}
+	}
+	if s.status.Status == SpanStatusError {
+		if _, exists := s.attributes["error.kind"]; !exists {
+			kind := s.errorKind
+			if kind == "" {
+				kind = "error"
+			}
+			s.attributes["error.kind"] = kind
 		}
 	}
 	status := copyStatus(s.status)
@@ -931,7 +1022,9 @@ func (h *Hub) recordMeasurement(measurement RecordedMeasurement) {
 		return
 	}
 	measurement.TimeMs = h.now().UnixMilli()
-	measurement.Attributes, _ = SanitizeMetricLabels(measurement.Attributes)
+	var dropped int
+	measurement.Attributes, dropped = SanitizeMetricLabels(measurement.Attributes)
+	h.noteDrops(dropped, 0, 0)
 	for _, exporter := range exporters {
 		if !hasSignal(exporter.Signals(), SignalMetrics) {
 			continue

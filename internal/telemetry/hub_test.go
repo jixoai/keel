@@ -303,6 +303,87 @@ func TestHubManualSpan(t *testing.T) {
 	}
 }
 
+func TestHubClosedRejectsRegistration(t *testing.T) {
+	hub := NewHub(HubOptions{})
+	if err := hub.Close(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := hub.RegisterExporter(&captureExporter{signals: allSignals()}); err == nil {
+		t.Fatal("a closed hub accepted an exporter")
+	}
+}
+
+func TestHubCapturesExportersAtSpanStart(t *testing.T) {
+	hub := NewHub(HubOptions{Base: NewMemory()})
+	first := &captureExporter{name: "first", signals: allSignals()}
+	if err := hub.RegisterExporter(first); err != nil {
+		t.Fatal(err)
+	}
+	root, endRoot := hub.StartManualSpan(SpanOptions{Name: "run"})
+	if !hub.UnregisterExporter(first.Name()) {
+		t.Fatal("unregister failed")
+	}
+	second := &captureExporter{name: "second", signals: allSignals()}
+	if err := hub.RegisterExporter(second); err != nil {
+		t.Fatal(err)
+	}
+	root.AddEvent("turn_end", nil)
+	endRoot()
+	firstSpans, _, _ := first.snapshot()
+	secondSpans, _, _ := second.snapshot()
+	if len(firstSpans) != 1 {
+		t.Fatalf("the exporter captured at span start got %d spans, want 1", len(firstSpans))
+	}
+	if len(secondSpans) != 0 {
+		t.Fatalf("a late exporter received an in-flight span: %d", len(secondSpans))
+	}
+}
+
+func TestHubBoundsEventsLinksAndCountsDrops(t *testing.T) {
+	hub := NewHub(HubOptions{Base: NewMemory()})
+	exporter := &captureExporter{signals: allSignals()}
+	if err := hub.RegisterExporter(exporter); err != nil {
+		t.Fatal(err)
+	}
+	err := hub.StartSpan(SpanOptions{Name: "run", Attributes: SpanAttributes{"prompt": "forbidden"}}, func(span Span) error {
+		for index := 0; index < MaxSpanEvents+3; index++ {
+			span.AddEvent("turn_end", SpanAttributes{"prompt": "forbidden"})
+		}
+		for index := 0; index < MaxSpanLinks+3; index++ {
+			span.AddLink(SpanLink{Context: span})
+		}
+		span.SetStatus(SpanStatus{Status: SpanStatusError, Error: &SpanError{Name: "provider_error", Message: "secret prompt"}})
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	spans, _, _ := exporter.snapshot()
+	if len(spans) != 1 {
+		t.Fatalf("spans = %d", len(spans))
+	}
+	span := spans[0]
+	if len(span.Events) != MaxSpanEvents {
+		t.Fatalf("events = %d, want %d", len(span.Events), MaxSpanEvents)
+	}
+	if len(span.Links) != MaxSpanLinks {
+		t.Fatalf("links = %d, want %d", len(span.Links), MaxSpanLinks)
+	}
+	if span.Attributes["error.kind"] != "provider_error" {
+		t.Fatalf("error.kind = %#v", span.Attributes["error.kind"])
+	}
+	if span.Status.Error != nil {
+		t.Fatalf("raw status error travelled: %#v", span.Status)
+	}
+	status := hub.Status()
+	if status.EventsDropped != 3 || status.LinksDropped != 3 {
+		t.Fatalf("status = %#v", status)
+	}
+	if status.AttributesDropped == 0 {
+		t.Fatalf("attribute drops were not counted: %#v", status)
+	}
+}
+
 func capturedSpan(t *testing.T, spans []StoredSpan, name string) StoredSpan {
 	t.Helper()
 	for _, span := range spans {

@@ -19,9 +19,20 @@ package telemetry
 
 import (
 	"fmt"
+	"net"
 	"net/url"
 	"strconv"
 	"strings"
+)
+
+// Configuration bounds. They keep one tenant document from turning a status
+// line or an HTTP request into an unbounded allocation.
+const (
+	MaxEndpointBytes        = 2048
+	MaxServiceNameBytes     = 128
+	MaxConfigHeaders        = 16
+	MaxHeaderNameBytes      = 128
+	MaxHeaderReferenceBytes = 256
 )
 
 // LogLevel is the closed log severity set.
@@ -163,6 +174,8 @@ func ParseConfig(config Config) (EffectiveConfig, error) {
 	}
 	if effective.ServiceName == "" {
 		effective.ServiceName = "keel"
+	} else if len(effective.ServiceName) > MaxServiceNameBytes {
+		add("serviceName", "must be at most %d bytes", MaxServiceNameBytes)
 	}
 	adapter := strings.ToLower(strings.TrimSpace(config.Adapter))
 	switch adapter {
@@ -196,6 +209,8 @@ func ParseConfig(config Config) (EffectiveConfig, error) {
 		endpoint := strings.TrimSpace(config.Endpoint)
 		if endpoint == "" {
 			add("endpoint", "adapter otlp requires an absolute http(s) endpoint")
+		} else if len(endpoint) > MaxEndpointBytes {
+			add("endpoint", "must be at most %d bytes", MaxEndpointBytes)
 		} else if parsed, err := url.Parse(endpoint); err != nil || parsed.Scheme == "" || parsed.Host == "" {
 			add("endpoint", "must be an absolute http(s) URL")
 		} else if parsed.Scheme != "http" && parsed.Scheme != "https" {
@@ -204,6 +219,8 @@ func ParseConfig(config Config) (EffectiveConfig, error) {
 			add("endpoint", "must not carry userinfo")
 		} else if parsed.RawQuery != "" || parsed.Fragment != "" {
 			add("endpoint", "must not carry a query or fragment")
+		} else if err := endpointPolicy(parsed); err != nil {
+			add("endpoint", "%v", err)
 		} else {
 			effective.Endpoint = strings.TrimRight(endpoint, "/")
 			effective.EndpointHost = parsed.Host
@@ -225,6 +242,29 @@ func ParseConfig(config Config) (EffectiveConfig, error) {
 		return effective, &failures
 	}
 	return effective, nil
+}
+
+// endpointPolicy refuses plaintext collector endpoints outside loopback or a
+// literal private IP. A tenant document is admin-controlled, but a public
+// plaintext endpoint would send telemetry (and its headers) in clear text; the
+// intent is a local dev collector or an in-VPC collector, never the open
+// internet. Redirects are refused separately by the HTTP client.
+func endpointPolicy(parsed *url.URL) error {
+	if parsed.Scheme != "http" {
+		return nil
+	}
+	host := strings.TrimSpace(parsed.Hostname())
+	if host == "localhost" {
+		return nil
+	}
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return fmt.Errorf("plaintext endpoint must use a loopback/private IP literal or https")
+	}
+	if !ip.IsLoopback() && !ip.IsPrivate() {
+		return fmt.Errorf("plaintext endpoint must target a loopback or private address")
+	}
+	return nil
 }
 
 func parseSignalConfig(raw []string, add func(string, string, ...any)) []Signal {
@@ -257,6 +297,9 @@ func parseHeaderRefs(headers map[string]string) (map[string]string, []string, er
 	if len(headers) == 0 {
 		return nil, nil, nil
 	}
+	if len(headers) > MaxConfigHeaders {
+		return nil, nil, fmt.Errorf("at most %d headers are allowed", MaxConfigHeaders)
+	}
 	refs := make(map[string]string, len(headers))
 	names := make([]string, 0, len(headers))
 	for name, value := range headers {
@@ -264,7 +307,13 @@ func parseHeaderRefs(headers map[string]string) (map[string]string, []string, er
 		if !validHeaderName(trimmed) {
 			return nil, nil, fmt.Errorf("header name %q is not an HTTP token", name)
 		}
+		if len(trimmed) > MaxHeaderNameBytes {
+			return nil, nil, fmt.Errorf("header name must be at most %d bytes", MaxHeaderNameBytes)
+		}
 		reference := strings.TrimSpace(value)
+		if len(reference) > MaxHeaderReferenceBytes {
+			return nil, nil, fmt.Errorf("header %s reference must be at most %d bytes", trimmed, MaxHeaderReferenceBytes)
+		}
 		if !strings.HasPrefix(reference, "secret:") {
 			return nil, nil, fmt.Errorf("header %s must reference a secret (secret:NAME); plaintext values are refused", trimmed)
 		}
@@ -293,9 +342,11 @@ func (c EffectiveConfig) ResolveHeaders(lookup func(string) (string, bool)) (map
 		secretName := strings.TrimPrefix(reference, "secret:")
 		value, ok := lookup(secretName)
 		if !ok || strings.TrimSpace(value) == "" {
+			// The secret NAME is not part of the status/audit surface: it can
+			// disclose infrastructure naming. The field still names the header.
 			return nil, &ConfigErrors{Errors: []ConfigError{{
 				Field:   "headers." + name,
-				Message: "secret reference " + secretName + " is not available",
+				Message: "the referenced secret is not available",
 			}}}
 		}
 		resolved[name] = value

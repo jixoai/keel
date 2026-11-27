@@ -32,8 +32,9 @@ type fakeCollector struct {
 }
 
 type collectorRequest struct {
-	path string
-	body []byte
+	path    string
+	body    []byte
+	headers http.Header
 }
 
 func newFakeCollector(t *testing.T) *fakeCollector {
@@ -42,7 +43,7 @@ func newFakeCollector(t *testing.T) *fakeCollector {
 	collector.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		collector.mu.Lock()
-		collector.requests = append(collector.requests, collectorRequest{path: r.URL.Path, body: body})
+		collector.requests = append(collector.requests, collectorRequest{path: r.URL.Path, body: body, headers: r.Header.Clone()})
 		status := collector.status
 		header := collector.header.Clone()
 		delay := collector.delay
@@ -94,6 +95,15 @@ func (c *fakeCollector) count() int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return len(c.requests)
+}
+
+func (c *fakeCollector) lastHeaders() http.Header {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if len(c.requests) == 0 {
+		return nil
+	}
+	return c.requests[len(c.requests)-1].headers.Clone()
 }
 
 func (c *fakeCollector) all() []collectorRequest {
@@ -598,6 +608,226 @@ func TestOTLPExporterLogFiltering(t *testing.T) {
 	}
 }
 
+func TestOTLPExporterMetricShapeIsDeltaWithCorrectBuckets(t *testing.T) {
+	options := testExporterOptions("https://collector.example:4318", []Signal{SignalMetrics})
+	exporter, err := NewOTLPExporter(options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload := exporter.metricPayload([]RecordedMeasurement{
+		{Kind: MetricKindCounter, Name: "keel.agent.runs", Value: 2, Attributes: SpanAttributes{"model": "m"}},
+		{Kind: MetricKindHistogram, Name: "keel.agent.run.duration", Value: 3, Boundaries: []float64{1, 5}, Attributes: SpanAttributes{"model": "m"}},
+	})
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded struct {
+		ResourceMetrics []struct {
+			ScopeMetrics []struct {
+				Metrics []struct {
+					Name string `json:"name"`
+					Sum  *struct {
+						Temporality int `json:"aggregationTemporality"`
+					} `json:"sum"`
+					Histogram *struct {
+						Temporality int `json:"aggregationTemporality"`
+						DataPoints  []struct {
+							BucketCounts   []string  `json:"bucketCounts"`
+							ExplicitBounds []float64 `json:"explicitBounds"`
+						} `json:"dataPoints"`
+					} `json:"histogram"`
+				} `json:"metrics"`
+			} `json:"scopeMetrics"`
+		} `json:"resourceMetrics"`
+	}
+	if err := json.Unmarshal(encoded, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	metrics := decoded.ResourceMetrics[0].ScopeMetrics[0].Metrics
+	if len(metrics) != 2 {
+		t.Fatalf("metrics = %d: %s", len(metrics), encoded)
+	}
+	for _, metric := range metrics {
+		if metric.Sum != nil && metric.Sum.Temporality != 1 {
+			t.Fatalf("%s sum temporality = %d, want DELTA(1)", metric.Name, metric.Sum.Temporality)
+		}
+		if metric.Histogram != nil {
+			if metric.Histogram.Temporality != 1 {
+				t.Fatalf("%s histogram temporality = %d, want DELTA(1)", metric.Name, metric.Histogram.Temporality)
+			}
+			point := metric.Histogram.DataPoints[0]
+			if len(point.BucketCounts) != 3 || point.BucketCounts[0] != "0" || point.BucketCounts[1] != "1" || point.BucketCounts[2] != "0" {
+				t.Fatalf("%s bucketCounts = %v (value 3 belongs in [1,5))", metric.Name, point.BucketCounts)
+			}
+			if len(point.ExplicitBounds) != 2 || point.ExplicitBounds[0] != 1 || point.ExplicitBounds[1] != 5 {
+				t.Fatalf("%s explicitBounds = %v", metric.Name, point.ExplicitBounds)
+			}
+		}
+	}
+}
+
+func TestOTLPExporterRefusesRedirects(t *testing.T) {
+	collector := newFakeCollector(t)
+	collector.setStatus(http.StatusFound)
+	exporter, err := NewOTLPExporter(testExporterOptions(collector.server.URL, []Signal{SignalTraces}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	exporter.Start()
+	defer exporter.Close(context.Background())
+	exporter.ExportSpan(testSpan("redirected"))
+	if err := exporter.Flush(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	status := exporter.Status()
+	if collector.count() != 1 {
+		t.Fatalf("a redirect was followed: %d requests", collector.count())
+	}
+	if status.Dropped != 1 || status.LastErrorClass != "http_3xx" {
+		t.Fatalf("status = %#v", status)
+	}
+}
+
+func TestEndpointPolicyAndBounds(t *testing.T) {
+	private := []string{"http://127.0.0.1:4318", "http://localhost:4318", "http://10.1.2.3:4318", "https://collector.example:4318"}
+	for _, endpoint := range private {
+		if _, err := ParseConfig(Config{Adapter: "otlp", Endpoint: endpoint}); err != nil {
+			t.Fatalf("%s rejected: %v", endpoint, err)
+		}
+		if _, err := NewOTLPExporter(OTLPExporterOptions{Endpoint: endpoint}); err != nil {
+			t.Fatalf("%s rejected by exporter: %v", endpoint, err)
+		}
+	}
+	if _, err := ParseConfig(Config{Adapter: "otlp", Endpoint: "http://collector.example:4318"}); err == nil {
+		t.Fatal("public plaintext endpoint was accepted")
+	}
+	if _, err := NewOTLPExporter(OTLPExporterOptions{Endpoint: "http://collector.example:4318"}); err == nil {
+		t.Fatal("public plaintext endpoint was accepted by the exporter")
+	}
+	longService := strings.Repeat("s", MaxServiceNameBytes+1)
+	if _, err := ParseConfig(Config{Adapter: "otlp", Endpoint: "https://c.example", ServiceName: longService}); err == nil {
+		t.Fatal("oversized service name was accepted")
+	}
+	headers := map[string]string{}
+	for index := 0; index < MaxConfigHeaders+1; index++ {
+		headers[fmt.Sprintf("X-%d", index)] = "secret:S"
+	}
+	if _, err := ParseConfig(Config{Adapter: "otlp", Endpoint: "https://c.example", Headers: headers}); err == nil {
+		t.Fatal("too many headers were accepted")
+	}
+	if _, err := ParseConfig(Config{Adapter: "otlp", Endpoint: "https://c.example", Headers: map[string]string{
+		"Authorization": "secret:" + strings.Repeat("A", MaxHeaderReferenceBytes),
+	}}); err == nil {
+		t.Fatal("oversized header reference was accepted")
+	}
+}
+
+func TestResolveHeadersDoesNotExposeSecretName(t *testing.T) {
+	effective, err := ParseConfig(Config{
+		Adapter: "otlp", Endpoint: "https://c.example",
+		Headers: map[string]string{"Authorization": "secret:VERY_SECRET_NAME"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = effective.ResolveHeaders(func(string) (string, bool) { return "", false })
+	if err == nil {
+		t.Fatal("missing secret was accepted")
+	}
+	if strings.Contains(err.Error(), "VERY_SECRET_NAME") {
+		t.Fatalf("error exposes the secret name: %v", err)
+	}
+	if !strings.Contains(err.Error(), "headers.Authorization") {
+		t.Fatalf("error does not name the header: %v", err)
+	}
+}
+
+func TestOTLPExporterSendsConfiguredHeaders(t *testing.T) {
+	collector := newFakeCollector(t)
+	options := testExporterOptions(collector.server.URL, []Signal{SignalTraces})
+	options.Headers = map[string]string{"Authorization": "Bearer test-token", "X-Scope": "tenant"}
+	exporter, err := NewOTLPExporter(options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	exporter.Start()
+	defer exporter.Close(context.Background())
+	exporter.ExportSpan(testSpan("with-headers"))
+	if err := exporter.Flush(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	headers := collector.lastHeaders()
+	if headers.Get("Authorization") != "Bearer test-token" || headers.Get("X-Scope") != "tenant" {
+		t.Fatalf("collector headers = %v", headers)
+	}
+}
+
+func TestOTLPExporterPerFamilyAndGlobalSeriesCaps(t *testing.T) {
+	collector := newFakeCollector(t)
+	perFamily, err := NewOTLPExporter(OTLPExporterOptions{
+		Endpoint: collector.server.URL, Signals: []Signal{SignalMetrics},
+		MaxSeriesPerMetric: 2, MaxSeriesGlobal: 100,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for index := 0; index < 5; index++ {
+		perFamily.ExportMetric(RecordedMeasurement{Kind: MetricKindCounter, Name: "keel.agent.runs", Value: 1,
+			Attributes: SpanAttributes{"model": fmt.Sprintf("m-%d", index)}})
+	}
+	status := perFamily.Status()
+	if status.QueueDepth != 2 || status.SeriesDropped != 3 {
+		t.Fatalf("per-family status = %#v", status)
+	}
+
+	global, err := NewOTLPExporter(OTLPExporterOptions{
+		Endpoint: collector.server.URL, Signals: []Signal{SignalMetrics},
+		MaxSeriesPerMetric: 100, MaxSeriesGlobal: 3,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	global.ExportMetric(RecordedMeasurement{Kind: MetricKindCounter, Name: "keel.agent.runs", Value: 1, Attributes: SpanAttributes{"model": "a"}})
+	global.ExportMetric(RecordedMeasurement{Kind: MetricKindCounter, Name: "keel.agent.runs", Value: 1, Attributes: SpanAttributes{"model": "b"}})
+	global.ExportMetric(RecordedMeasurement{Kind: MetricKindHistogram, Name: "keel.agent.run.duration", Value: 1, Attributes: SpanAttributes{"model": "c"}})
+	global.ExportMetric(RecordedMeasurement{Kind: MetricKindHistogram, Name: "keel.agent.run.duration", Value: 1, Attributes: SpanAttributes{"model": "d"}})
+	status = global.Status()
+	if status.QueueDepth != 3 || status.SeriesDropped != 1 {
+		t.Fatalf("global status = %#v", status)
+	}
+}
+
+func TestOTLPExporterLiveRetryMayDuplicate(t *testing.T) {
+	collector := newFakeCollector(t)
+	collector.setResponder(func(http.ResponseWriter, *http.Request) (int, http.Header) {
+		collector.mu.Lock()
+		count := len(collector.requests)
+		collector.mu.Unlock()
+		if count == 1 {
+			return http.StatusInternalServerError, nil
+		}
+		return http.StatusOK, nil
+	})
+	exporter, err := NewOTLPExporter(testExporterOptions(collector.server.URL, []Signal{SignalTraces}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	exporter.Start()
+	defer exporter.Close(context.Background())
+	exporter.ExportSpan(testSpan("ambiguous"))
+	if err := exporter.Flush(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	bodies := collector.bodies("/v1/traces")
+	if len(bodies) != 2 || !strings.Contains(bodies[0], "ambiguous") || !strings.Contains(bodies[1], "ambiguous") {
+		t.Fatalf("ambiguous retry bodies = %d; a live retry may duplicate a batch", len(bodies))
+	}
+	if got := exporter.Status().Exported; got != 1 {
+		t.Fatalf("exported = %d", got)
+	}
+}
+
 func TestParseRetryAfter(t *testing.T) {
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	if got := parseRetryAfter("7", now, time.Minute); got != 7*time.Second {
@@ -614,17 +844,18 @@ func TestParseRetryAfter(t *testing.T) {
 	}
 }
 
-// TestOTLPExporterKillRestartAtLeastOnce runs a real child process, lets it
-// export one confirmed batch, then SIGKILLs it. A restarted exporter sends the
-// same record again (at-least-once), and no goroutine is left behind in the
-// parent.
-func TestOTLPExporterKillRestartAtLeastOnce(t *testing.T) {
+// TestOTLPExporterKillRestartDoesNotReplay runs a real child process, lets it
+// export one confirmed batch, then SIGKILLs it. There is no durable queue: a
+// restarted exporter starts with an empty queue and does NOT replay the killed
+// process's confirmed batch. Unflushed records are lost (at-most-once across a
+// crash); a live exporter's ambiguous retry is the only duplicate window.
+func TestOTLPExporterKillRestartDoesNotReplay(t *testing.T) {
 	if os.Getenv("KEEL_OTLP_CRASH_HELPER") == "1" {
 		runCrashHelper()
 		return
 	}
 	collector := newFakeCollector(t)
-	command := exec.Command(os.Args[0], "-test.run=TestOTLPExporterKillRestartAtLeastOnce", "-test.v=false")
+	command := exec.Command(os.Args[0], "-test.run=TestOTLPExporterKillRestartDoesNotReplay", "-test.v=false")
 	command.Env = append(os.Environ(), "KEEL_OTLP_CRASH_HELPER=1", "KEEL_OTLP_CRASH_ENDPOINT="+collector.server.URL)
 	stdout, err := command.StdoutPipe()
 	if err != nil {
@@ -647,22 +878,27 @@ func TestOTLPExporterKillRestartAtLeastOnce(t *testing.T) {
 		t.Fatal("the killed process exported nothing")
 	}
 
-	// Restart: a fresh exporter has no confirmed cursor, so the same record is
-	// sent again. This is the documented at-least-once window.
+	// Restart with a new record. The confirmed batch from the killed process is
+	// not replayed: a crash loses unflushed data and does not duplicate acked
+	// data (no persistent queue).
 	restarted, err := NewOTLPExporter(testExporterOptions(collector.server.URL, []Signal{SignalTraces}))
 	if err != nil {
 		t.Fatal(err)
 	}
 	restarted.Start()
-	restarted.ExportSpan(testSpan("crash-run"))
+	restarted.ExportSpan(testSpan("after-restart"))
 	if err := restarted.Flush(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if err := restarted.Close(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if collector.count() < 2 {
-		t.Fatalf("requests after restart = %d, want >= 2", collector.count())
+	all := strings.Join(collector.bodies("/v1/traces"), "\n")
+	if strings.Count(all, "crash-run") != 1 {
+		t.Fatalf("the confirmed crash batch was replayed: %s", all)
+	}
+	if !strings.Contains(all, "after-restart") {
+		t.Fatalf("the restarted record was not exported: %s", all)
 	}
 }
 
