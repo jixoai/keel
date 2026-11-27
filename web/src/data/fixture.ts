@@ -15,6 +15,10 @@ import type {
   CheckpointPolicyValues,
   CheckpointPolicyView,
   CliCapabilityView,
+  CommandCatalogView,
+  CommandExecutionView,
+  CommandTarget,
+  CommandView,
   ConnectionState,
   Delivery,
   EventSource,
@@ -138,6 +142,19 @@ type Peer = {
   timers: number[];
   subscribers: Subscriber[];
   drainPaused: boolean;
+};
+
+/** One durable command invocation of the demo transport. The real host keeps
+ * this in PostgreSQL; the fixture keeps the same state machine in memory so a
+ * replay and a destructive decision are exercised, not faked. */
+type FixtureCommandInvocation = {
+  requestId: string;
+  command: string;
+  source: string;
+  args: Record<string, unknown>;
+  status: string;
+  decisionId: string;
+  result?: CommandExecutionView;
 };
 
 // ---- settings demo state --------------------------------------------------
@@ -510,6 +527,9 @@ export class FixtureClient implements SettingsApi {
   ];
   private triggerFires = 12;
 
+  /** Command invocations by `<session>/<requestId>`; see the type above. */
+  private commandInvocations = new Map<string, FixtureCommandInvocation>();
+
   /** The development transport's super-agent board: one ticket per headline
    * state (待人工 / 执行中 / 完成 / 失败), plus a second blocked ticket whose
    * Attention has expired. It is a working in-memory service: answer, resume
@@ -836,6 +856,9 @@ export class FixtureClient implements SettingsApi {
         // the editor's discovery and direct-entry actions are exercised.
         "settings.models": true,
         "settings.secrets": true,
+        // The development transport answers the same command catalog and
+        // execution route a live host does (builtin + plugin + skill rows).
+        commands: true,
       },
       limits: {},
       hooks: [],
@@ -926,6 +949,332 @@ export class FixtureClient implements SettingsApi {
       answerDecision: async (decisionId, answer) => this.answer(peer, decisionId, answer),
       upload: async () => ({ fileId: `fixture-file-${++this.sequence}` }),
     };
+  }
+
+  // ---- chat commands (change keel-plugin-commands) ----------------------
+
+  /**
+   * The demo catalog, the same shape the server publishes. The order is
+   * builtin → plugin → skill, exactly like the host. `demo.workflow:audit`
+   * deliberately declares `targets: [web, native]`: the terminal must show it
+   * unavailable with a reason instead of hiding it.
+   */
+  private fixtureCommands(): CommandView[] {
+    const objectSchema = (properties: Record<string, unknown>, required: string[] = []) => ({
+      type: "object",
+      properties,
+      ...(required.length ? { required } : {}),
+    });
+    return [
+      {
+        name: "compact",
+        source: "builtin",
+        summary: "压缩当前会话上下文",
+        argsSchema: objectSchema({}),
+        danger: "write",
+        idempotent: true,
+        targets: ["web", "native", "tui"],
+        requiredPermissions: ["session.write", "model.invoke"],
+        available: true,
+      },
+      {
+        name: "demo.workflow:plan",
+        source: "plugin",
+        summary: "把目标拆成可执行的计划",
+        argsSchema: objectSchema(
+          {
+            goal: { type: "string", minLength: 2, description: "要拆解的目标" },
+            depth: { type: "integer", minimum: 1, maximum: 9, default: 3 },
+            dryRun: { type: "boolean", default: false },
+          },
+          ["goal"],
+        ),
+        danger: "write",
+        idempotent: false,
+        targets: ["web", "native", "tui"],
+        requiredPermissions: ["session.write", "plugin.invoke"],
+        available: true,
+      },
+      {
+        name: "demo.workflow:note",
+        source: "plugin",
+        summary: "把一句备注写入计划",
+        argsSchema: objectSchema({ text: { type: "string", description: "备注内容" } }),
+        danger: "write",
+        idempotent: false,
+        targets: ["web", "native", "tui"],
+        requiredPermissions: ["session.write", "plugin.invoke"],
+        available: true,
+      },
+      {
+        name: "demo.workflow:status",
+        source: "plugin",
+        summary: "读取当前计划与各步骤状态",
+        argsSchema: objectSchema({}),
+        danger: "read",
+        idempotent: true,
+        targets: ["web", "native", "tui"],
+        requiredPermissions: ["session.write", "plugin.invoke"],
+        available: true,
+      },
+      {
+        name: "demo.workflow:purge",
+        source: "plugin",
+        summary: "清空本工作区的计划",
+        argsSchema: objectSchema({}),
+        danger: "destructive",
+        idempotent: false,
+        targets: ["web", "native", "tui"],
+        requiredPermissions: ["session.write", "plugin.invoke"],
+        available: true,
+      },
+      {
+        name: "demo.workflow:audit",
+        source: "plugin",
+        summary: "导出计划审计记录（仅图形客户端）",
+        argsSchema: objectSchema({}),
+        danger: "read",
+        idempotent: true,
+        targets: ["web", "native"],
+        requiredPermissions: ["session.write", "plugin.invoke"],
+        available: true,
+      },
+      {
+        name: "skill:deploy-flow",
+        source: "skill",
+        summary: "Load skill deploy-flow for the next turn.",
+        argsSchema: objectSchema({}),
+        danger: "read",
+        idempotent: true,
+        targets: ["web", "native", "tui"],
+        requiredPermissions: ["session.write", "skill.read"],
+        available: true,
+      },
+    ];
+  }
+
+  async commandCatalog(sessionId: string, target: CommandTarget): Promise<CommandCatalogView> {
+    this.need(sessionId);
+    // The client applies target availability too; the fixture mirrors the
+    // server so the TUI gate reads the same reason it would live.
+    const commands = this.fixtureCommands().map((command) => {
+      if (command.targets.includes(target)) return command;
+      return { ...command, available: false, reason: "target_unsupported" };
+    });
+    return { commands, truncated: false, generation: 1 };
+  }
+
+  async executeCommand(
+    sessionId: string,
+    name: string,
+    args: Record<string, unknown>,
+    requestId: string,
+  ): Promise<CommandExecutionView> {
+    const peer = this.need(sessionId);
+    const key = `${sessionId}/${requestId}`;
+    const existing = this.commandInvocations.get(key);
+    if (existing) {
+      if (existing.command !== name || JSON.stringify(existing.args) !== JSON.stringify(args)) {
+        throw new KeelApiError(
+          409,
+          "requestId was already used by a different command or arguments",
+          [],
+          undefined,
+          "request_id_conflict",
+        );
+      }
+      if (existing.status === "pending_decision") return this.pendingCommandResult(existing);
+      if (existing.status === "ok" && existing.result) return existing.result;
+      throw this.terminalCommandError(existing);
+    }
+    const command = this.fixtureCommands().find((candidate) => candidate.name === name);
+    if (!command) {
+      throw new KeelApiError(404, "unknown command", [], undefined, "unknown_command");
+    }
+    const fields = this.validateFixtureCommandArgs(command, args);
+    if (fields.length) {
+      throw new KeelApiError(400, "the command arguments are invalid", fields, undefined, "invalid_arguments");
+    }
+    const invocation: FixtureCommandInvocation = {
+      requestId,
+      command: name,
+      source: command.source,
+      args,
+      status: "running",
+      decisionId: "",
+    };
+    this.commandInvocations.set(key, invocation);
+    if (command.danger === "destructive") {
+      const decisionId = `dec-cmd-${requestId}`;
+      invocation.status = "pending_decision";
+      invocation.decisionId = decisionId;
+      const seq = this.appendCommandInvoked(peer, invocation, "pending_decision", {
+        decisionId,
+      });
+      const event = this.append(peer, "decision", {
+        decisionId,
+        question: `Run the destructive command /${name}? It is declared danger=destructive; approving it will execute the command once.`,
+        options: [
+          { optionId: "allow", label: "执行" },
+          { optionId: "deny", label: "取消" },
+        ],
+        status: "open",
+        timeoutAt: Date.now() + 5 * 60 * 1000,
+        timestamp: Date.now(),
+      });
+      invocation.result = {
+        requestId,
+        command: name,
+        source: command.source,
+        status: "pending_decision",
+        decisionId,
+        pending: true,
+        eventSeq: seq,
+        timeoutMs: 5 * 60 * 1000,
+      };
+      // The decision's own event carries the durable question id; keep the
+      // projection's decision row in step with the invocation.
+      invocation.result.eventSeq = seq || event.seq;
+      return this.pendingCommandResult(invocation);
+    }
+    return this.runFixtureCommand(peer, invocation);
+  }
+
+  private pendingCommandResult(invocation: FixtureCommandInvocation): CommandExecutionView {
+    return {
+      requestId: invocation.requestId,
+      command: invocation.command,
+      source: invocation.source,
+      status: "pending_decision",
+      decisionId: invocation.decisionId,
+      pending: true,
+      timeoutMs: 5 * 60 * 1000,
+      ...(invocation.result?.eventSeq ? { eventSeq: invocation.result.eventSeq } : {}),
+    };
+  }
+
+  private terminalCommandError(invocation: FixtureCommandInvocation): KeelApiError {
+    switch (invocation.status) {
+      case "refused":
+        return new KeelApiError(403, "the destructive command was refused", [], undefined, "decision_refused");
+      case "timed_out":
+        return new KeelApiError(408, "the destructive command's decision timed out", [], undefined, "decision_timeout");
+      case "cancelled":
+        return new KeelApiError(409, "the destructive command's decision was cancelled", [], undefined, "decision_cancelled");
+      default:
+        return new KeelApiError(
+          502,
+          invocation.result?.error || "the command failed",
+          [],
+          undefined,
+          invocation.result?.errorCode || "tool_error",
+        );
+    }
+  }
+
+  private validateFixtureCommandArgs(
+    command: CommandView,
+    args: Record<string, unknown>,
+  ): Array<{ field: string; message: string }> {
+    const schema = command.argsSchema as { properties?: Record<string, unknown>; required?: string[] };
+    const properties = schema.properties ?? {};
+    const fields: Array<{ field: string; message: string }> = [];
+    for (const key of Object.keys(args)) {
+      if (!(key in properties)) fields.push({ field: `args.${key}`, message: "unknown argument" });
+    }
+    for (const key of schema.required ?? []) {
+      if (args[key] === undefined) fields.push({ field: `args.${key}`, message: "is required" });
+    }
+    if (command.name === "demo.workflow:note" && args.text !== undefined) {
+      if (typeof args.text !== "string") fields.push({ field: "args.text", message: "must be a string" });
+    }
+    if (command.name === "demo.workflow:plan" && args.goal !== undefined) {
+      if (typeof args.goal !== "string") fields.push({ field: "args.goal", message: "must be a string" });
+      else if (args.goal.trim().length < 2) fields.push({ field: "args.goal", message: "must be at least 2 characters" });
+    }
+    if (command.name === "demo.workflow:plan" && args.depth !== undefined) {
+      if (typeof args.depth !== "number" || !Number.isInteger(args.depth) || args.depth < 1 || args.depth > 9) {
+        fields.push({ field: "args.depth", message: "must be an integer between 1 and 9" });
+      }
+    }
+    return fields;
+  }
+
+  private runFixtureCommand(peer: Peer, invocation: FixtureCommandInvocation): CommandExecutionView {
+    invocation.status = "ok";
+    let data: unknown;
+    if (invocation.command === "compact") {
+      // The compact command drives the existing compaction seam, so the
+      // transcript shows the same divider a manual compact always showed.
+      this.append(peer, "compaction", {
+        summary: "上下文已压缩（命令 /compact）",
+        status: "started",
+        manual: true,
+        timestamp: Date.now(),
+      });
+      this.append(peer, "compaction", {
+        summary: "上下文已压缩（命令 /compact）",
+        status: "completed",
+        manual: true,
+        timestamp: Date.now(),
+      });
+      data = { status: "ok", summary: "fixture compaction" };
+    } else if (invocation.command === "demo.workflow:plan") {
+      data = {
+        plan: {
+          goal: invocation.args.goal ?? "",
+          steps: ["确认目标", "拆解步骤", "写入计划"],
+          depth: invocation.args.depth ?? 3,
+          dryRun: invocation.args.dryRun === true,
+        },
+      };
+    } else if (invocation.command === "demo.workflow:note") {
+      data = { note: invocation.args.text ?? "", saved: true };
+    } else if (invocation.command === "demo.workflow:status") {
+      data = { plan: { state: "active", steps: 3, done: 1 } };
+    } else if (invocation.command === "demo.workflow:audit") {
+      data = { records: 2 };
+    } else if (invocation.command.startsWith("skill:")) {
+      data = {
+        skill: invocation.command.slice("skill:".length),
+        hash: demoHash("deploy-flow-v1"),
+        loadedFor: "next-turn",
+      };
+    } else {
+      data = { ok: true };
+    }
+    const seq = this.appendCommandInvoked(peer, invocation, "ok", { data, durationMs: 12 });
+    const result: CommandExecutionView = {
+      requestId: invocation.requestId,
+      command: invocation.command,
+      source: invocation.source,
+      status: "ok",
+      data,
+      eventSeq: seq,
+      durationMs: 12,
+    };
+    invocation.result = result;
+    return result;
+  }
+
+  /** Record one command.invoked projection line and return its seq. */
+  private appendCommandInvoked(
+    peer: Peer,
+    invocation: FixtureCommandInvocation,
+    status: string,
+    extra: Record<string, unknown>,
+  ): number {
+    const event = this.append(peer, "command.invoked", {
+      requestId: invocation.requestId,
+      command: invocation.command,
+      source: invocation.source,
+      status,
+      actor: fixtureCurrentAccountId,
+      argsHash: `sha256:${demoHash(invocation.command + JSON.stringify(invocation.args))}`,
+      argsBytes: JSON.stringify(invocation.args).length,
+      ...extra,
+    });
+    return event.seq;
   }
 
   // ---- settings demo -----------------------------------------------------
@@ -2982,6 +3331,35 @@ export class FixtureClient implements SettingsApi {
       answer,
       timestamp: Date.now(),
     });
+    // A command's approval question is answered by finishing the invocation —
+    // never by injecting an assistant message. A replay of the same requestId
+    // reads the stored terminal state and does not execute twice.
+    const command = [...this.commandInvocations.values()].find(
+      (invocation) => invocation.decisionId === decisionId,
+    );
+    if (command) {
+      if (command.status !== "pending_decision") return;
+      if (answer === "allow") {
+        this.runFixtureCommand(peer, command);
+      } else {
+        command.status = "refused";
+        command.result = {
+          requestId: command.requestId,
+          command: command.command,
+          source: command.source,
+          status: "refused",
+          decisionId,
+          errorCode: "decision_refused",
+          error: "the destructive command was refused",
+        };
+        this.appendCommandInvoked(peer, command, "refused", {
+          decisionId,
+          errorCode: "decision_refused",
+          error: "the destructive command was refused",
+        });
+      }
+      return;
+    }
     this.schedule(peer, 600, () => {
       this.append(peer, "assistant.message", {
         role: "assistant",

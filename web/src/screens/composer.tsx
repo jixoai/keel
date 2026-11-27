@@ -15,7 +15,18 @@
 // and everything either draws with is a token.
 import { cleanup, effect, host, Picker, platform, signal, Text, type InputRef, untracked, View } from "nsh";
 import { createRichEditor, Input, markdown, RichEditor, type RichEditorSession, starterKit } from "nsh/base";
-import type { ConversationView, Delivery, QueueItemView } from "../data/contract";
+import type { CommandRunOutcome, CommandView, ConversationView, Delivery, QueueItemView } from "../data/contract";
+import type { CommandValues } from "../data/commands";
+import {
+  buildCommandArgs,
+  commandAvailabilityText,
+  commandDraft,
+  commandFields,
+  commandMenuQuery,
+  commandNeedsForm,
+  commandUsesFreeText,
+  initialCommandValues,
+} from "../data/commands";
 import type { PendingAttachment } from "../data/store";
 import { store } from "../data/store";
 import {
@@ -46,6 +57,7 @@ import {
   insertCompletion,
   parseLearnCommand,
 } from "./composer-completion";
+import { CommandForm, CommandMenu, commandLaunch } from "./composer-commands";
 
 const draft = signal("");
 const mode = signal<Delivery>("queue");
@@ -67,6 +79,19 @@ const composerWidth = signal(0);
  * editor's Markdown normalisation drops the trailing space the plain input
  * used to end a token, so the revision (not the text) is the close signal. */
 const completionDismissedAt = signal(0);
+/** The command whose args_schema form is open (the catalog row itself), the
+ * form's values, its field errors and a whole-command failure. */
+const commandFormCommand = signal<CommandView | null>(null);
+const commandValues = signal<CommandValues>({});
+const commandErrors = signal<Record<string, string>>({});
+const commandFormError = signal<string>("");
+/** True while a command invocation is in flight (its own button/row state). */
+const commandSubmitting = signal(false);
+/** The menu-open transition tracker for the catalog read (module state: the
+ * read happens once per menu opening, not once per keystroke). */
+let lastMenuOpen = false;
+let menuLoadSession: string | null = null;
+let menuLoadTimer: number | undefined;
 /** True while a draft change is being written into the editor: the editor's
  * change callback must not echo it back. */
 let applyingRichDraft = false;
@@ -231,6 +256,158 @@ export function Composer(props: { view: ConversationView | null; compact?: boole
     cleanup(() => clearTimeout(timer));
   });
 
+  // ---- chat commands (change keel-plugin-commands) -----------------------
+
+  const catalogCommands = (): CommandView[] => store.commandCatalog()?.commands ?? [];
+  const findCommand = (name: string): CommandView | null =>
+    catalogCommands().find((command) => command.name === name) ?? null;
+  const formCommand = (): CommandView | null => commandFormCommand();
+
+  /** One programmatic draft write, the rich editor included (the editor does
+   * not hear the signal). Empty text uses the fresh-document form. */
+  const setDraftText = (text: string) => {
+    draft.set(text);
+    if (!rich) return;
+    untracked(() => {
+      applyingRichDraft = true;
+      rich.setContent(text ? text : EMPTY_DOC, text ? "markdown" : "json");
+      applyingRichDraft = false;
+    });
+  };
+  const focusComposer = () => {
+    untracked(() => {
+      if (rich) rich.focus();
+      else input?.focus();
+    });
+  };
+
+  const closeCommandForm = () => {
+    commandFormCommand.set(null);
+    commandValues.set({});
+    commandErrors.set({});
+    commandFormError.set("");
+  };
+
+  const openCommandForm = (command: CommandView) => {
+    commandFormCommand.set(command);
+    commandValues.set(initialCommandValues(commandFields(command)));
+    commandErrors.set({});
+    commandFormError.set("");
+    setDraftText("");
+  };
+
+  /** Submit one command through the store; the form's field errors and a
+   * whole-command failure are kept visible. Returns the outcome so the caller
+   * can restore a draft after a failure. */
+  const submitCommand = async (
+    command: CommandView,
+    args: Record<string, unknown>,
+  ): Promise<CommandRunOutcome | null> => {
+    if (commandSubmitting()) return null;
+    commandSubmitting.set(true);
+    commandErrors.set({});
+    commandFormError.set("");
+    const outcome = await store.runCommand(command.name, args);
+    commandSubmitting.set(false);
+    if (outcome.status === "error") {
+      if (outcome.fields) commandErrors.set(outcome.fields);
+      if (commandFormCommand()?.name === command.name) {
+        commandFormError.set(outcome.message ?? "命令执行失败");
+      } else {
+        store.flash({ tone: "danger", text: outcome.message ?? "命令执行失败" });
+      }
+      return outcome;
+    }
+    if (commandFormCommand()?.name === command.name) closeCommandForm();
+    // A pending invocation needs no toast: its command row says 等待审批 and the
+    // approval card is the action. A toast here would outlive the answer and
+    // keep claiming "waiting" after the refusal/result.
+    return outcome;
+  };
+
+  /** Choose a catalog row: run it, take its free text, or open its form. */
+  const activateCommand = (command: CommandView) => {
+    if (!command.available) {
+      store.flash({
+        tone: "warn",
+        text: `/${command.name} 不可用：${commandAvailabilityText(command)}`,
+      });
+      return;
+    }
+    if (commandUsesFreeText(command)) {
+      setDraftText(`/${command.name} `);
+      focusComposer();
+      return;
+    }
+    if (commandNeedsForm(command)) {
+      openCommandForm(command);
+      return;
+    }
+    setDraftText("");
+    void submitCommand(command, {});
+  };
+
+  const executeCommandForm = () => {
+    const command = formCommand();
+    if (!command) return;
+    const built = buildCommandArgs(commandFields(command), commandValues());
+    if (Object.keys(built.errors).length > 0) {
+      commandErrors.set(built.errors);
+      commandFormError.set("");
+      return;
+    }
+    void submitCommand(command, built.args);
+  };
+
+  // The menu opening (not every keystroke) reads the catalog. A forced read
+  // keeps a plugin installed elsewhere in step; the old rows stay visible while
+  // it lands.
+  effect(() => {
+    const query = commandMenuQuery(draft());
+    const sessionId = store.activeId();
+    if (query === null || !sessionId) {
+      lastMenuOpen = false;
+      return;
+    }
+    if (lastMenuOpen && menuLoadSession === sessionId) return;
+    lastMenuOpen = true;
+    menuLoadSession = sessionId;
+    if (menuLoadTimer !== undefined) clearTimeout(menuLoadTimer);
+    menuLoadTimer = setTimeout(() => {
+      menuLoadTimer = undefined;
+      void store.loadCommands({ force: true });
+    }, 0) as unknown as number;
+  });
+
+  // The Mod+K palette hands a form/free-text command here. The catalog is
+  // already loaded (the palette lists it); a row that vanished closes.
+  effect(() => {
+    const request = commandLaunch();
+    if (!request) return;
+    const command = findCommand(request.name);
+    if (!command) {
+      // A command that left the catalog before the Composer could act on it:
+      // drop the hand-off instead of firing it if the name ever returns.
+      if (store.commandCatalog()) {
+        untracked(() => commandLaunch.set(null));
+        store.flash({ tone: "warn", text: `/${request.name} 已不在命令目录中。` });
+      }
+      return;
+    }
+    untracked(() => commandLaunch.set(null));
+    setTimeout(() => activateCommand(command), 0) as unknown as number;
+  });
+
+  // A form whose command left the catalog (a plugin was disabled) closes
+  // instead of running a stale name.
+  effect(() => {
+    const form = commandFormCommand();
+    if (!form) return;
+    if (!store.commandCatalog()) return;
+    if (findCommand(form.name)) return;
+    setTimeout(() => closeCommandForm(), 0) as unknown as number;
+  });
+
   /** Replace the active `$token` with the chosen row; never send it. */
   const pickCompletion = (insert: string) => {
     const active = completionTrigger(draft());
@@ -288,12 +465,64 @@ export function Composer(props: { view: ConversationView | null; compact?: boole
   };
 
   const send = async () => {
-    if (!canSend() || stopping() || sending()) return;
+    if (!canSend() || stopping() || sending() || commandSubmitting()) return;
     const raw = draft();
+    // `/learn` is a client prompt template, deliberately NOT a catalog command:
+    // it keeps the ordinary-message path below.
+    const learn = parseLearnCommand(raw);
+    // A command is a named action, never a message: `/name` maps to the
+    // catalog entry and its arguments, or opens the schema form.
+    const trimmed = raw.trim();
+    const drafted = learn ? null : commandDraft(trimmed, catalogCommands());
+    if (drafted?.kind === "command") {
+      const command = drafted.command;
+      if (!command.available) {
+        store.flash({
+          tone: "warn",
+          text: `/${command.name} 不可用：${commandAvailabilityText(command)}`,
+        });
+        return;
+      }
+      if (commandNeedsForm(command)) {
+        openCommandForm(command);
+        return;
+      }
+      sending.set(true);
+      setDraftText("");
+      let args: Record<string, unknown> = {};
+      if (commandUsesFreeText(command)) {
+        const field = commandFields(command)[0]!;
+        const value = drafted.rest.trim();
+        if (field.required && !value) {
+          sending.set(false);
+          setDraftText(raw);
+          store.flash({ tone: "warn", text: `/${command.name} 需要填写 ${field.name}。` });
+          return;
+        }
+        if (value) args = { [field.name]: value };
+      }
+      const outcome = await submitCommand(command, args);
+      sending.set(false);
+      if (outcome?.status === "error") setDraftText(raw);
+      return;
+    }
+    if (drafted?.kind === "menu") {
+      // The first token is still a command word: Enter must not send it as a
+      // message. An exact name runs; a prefix waits for a row choice.
+      const exact = catalogCommands().find((command) => `/${command.name}` === trimmed);
+      if (exact) {
+        activateCommand(exact);
+        return;
+      }
+      if (!store.commandCatalog() && !store.commandCatalogLoading()) {
+        void store.loadCommands({ force: true });
+        store.flash({ tone: "info", text: "正在读取命令目录，稍后再发送一次。" });
+      }
+      return;
+    }
     // `/learn` is one message that asks the agent for a skills.manage create;
     // the tool result is the only success signal, so the composer says what it
     // sent, never "learned".
-    const learn = parseLearnCommand(raw);
     const text = learn ? buildLearnInstruction(learn.prompt) : raw;
     const pending = attachments();
     draft.set("");
@@ -388,6 +617,40 @@ export function Composer(props: { view: ConversationView | null; compact?: boole
             </View>
           ))}
         </View>
+      </If>
+      {/* The command form replaces the composer's own input for a schema
+          command: the arguments are a form, never guessed prose. */}
+      <If when={!!formCommand()}>
+        <CommandForm
+          command={formCommand()!}
+          values={commandValues()}
+          errors={commandErrors()}
+          error={commandFormError() || undefined}
+          executing={commandSubmitting() || sending()}
+          onChange={(field, value) => {
+            commandValues.update((map) => ({ ...map, [field]: value }));
+            if (commandErrors()[field]) {
+              commandErrors.update((map) => {
+                const next = { ...map };
+                delete next[field];
+                return next;
+              });
+            }
+            if (commandFormError()) commandFormError.set("");
+          }}
+          onExecute={() => executeCommandForm()}
+          onCancel={() => {
+            closeCommandForm();
+            focusComposer();
+          }}
+        />
+      </If>
+      <If when={commandMenuQuery(draft()) !== null && !formCommand()}>
+        <CommandMenu
+          query={commandMenuQuery(draft()) ?? ""}
+          busy={commandSubmitting()}
+          onPick={(command) => activateCommand(command)}
+        />
       </If>
       <If
         when={
@@ -585,7 +848,7 @@ export function Composer(props: { view: ConversationView | null; compact?: boole
             size="icon"
             icon="arrow-up"
             loading={sending()}
-            disabled={!canSend() || stopping() || sending()}
+            disabled={!canSend() || stopping() || sending() || commandSubmitting()}
             accessibilityLabel="发送"
             onPress={() => void send()}
             tooltip={submitOnEnter() ? sendHint() : undefined}

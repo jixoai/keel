@@ -1,0 +1,105 @@
+{
+  "commands": [
+    {
+      "name": "compact",
+      "source": "builtin",
+      "summary": "Compact the current session context.",
+      "argsSchema": {
+        "type": "object"
+      },
+      "danger": "write",
+      "idempotent": true,
+      "targets": [
+        "web",
+        "native",
+        "tui"
+      ],
+      "requiredPermissions": [
+        "session.write",
+        "model.invoke"
+      ],
+      "available": true
+    },
+    {
+      "name": "e2e.commands:refresh",
+      "source": "plugin",
+      "summary": "Rebuild the E2E index.",
+      "argsSchema": {
+        "properties": {
+          "path": {
+            "description": "Directory to index.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "type": "object"
+      },
+      "danger": "write",
+      "idempotent": true,
+      "targets": [
+        "web",
+        "native",
+        "tui"
+      ],
+      "requiredPermissions": [
+        "session.write",
+        "plugin.invoke"
+      ],
+      "available": true
+    },
+    {
+      "name": "e2e.commands:note",
+      "source": "plugin",
+      "summary": "Save one note into the E2E plan.",
+      "argsSchema": {
+        "properties": {
+          "text": {
+            "description": "The note.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "type": "object"
+      },
+      "danger": "write",
+      "idempotent": false,
+      "targets": [
+        "web",
+        "native",
+        "tui"
+      ],
+      "requiredPermissions": [
+        "session.write",
+        "plugin.invoke"
+      ],
+      "available": true
+    },
+    {
+      "name": "e2e.commands:purge",
+      "source": "plugin",
+      "summary": "Delete every E2E index document.",
+      "argsSchema": {
+        "type": "object"
+      },
+      "danger": "destructive",
+      "idempotent": false,
+      "targets": [
+        "web",
+        "native",
+        "tui"
+      ],
+      "requiredPermissions": [
+        "session.write",
+        "plugin.invoke"
+      ],
+      "available": true
+    }
+  ],
+  "truncated": false,
+  "generation": 2
+}

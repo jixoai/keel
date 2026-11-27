@@ -30,10 +30,11 @@
 // signal/prop is read inside JSX or an `<If>`, never copied into a local at the
 // top of a component (that would freeze the value).
 import { cleanup, effect, List, type ListRef, platform, signal, Text, untracked, View, windowSize } from "nsh";
-import type { ConversationView, DecisionView, QueueItemView, ScrollState, TurnView } from "../data/contract";
+import type { CommandInvocationView, ConversationView, DecisionView, QueueItemView, ScrollState, TurnView } from "../data/contract";
 import { store } from "../data/store";
 import { Badge, color, ComposerDock, ConversationColumn, row, Skeleton, space, typeScale } from "../ui/kit";
 import { ApprovalCard, EmptyConversation, GuideWaitingRow, OfflineBanner, TurnErrorBanner, TurnRow } from "./messages";
+import { CommandInvocationRow } from "./command-invocation";
 import { Composer, prefillComposer } from "./composer";
 import { ImageSurface } from "../surfaces/image";
 import { RealtimeSurface } from "../surfaces/realtime";
@@ -42,11 +43,12 @@ import { UnsupportedSurface } from "../surfaces/unsupported";
 import { resolveSelectionSurface, type SurfaceDescriptor } from "../surfaces/registry";
 
 interface Row {
-  kind: "turn" | "decision" | "guide";
+  kind: "turn" | "decision" | "guide" | "command";
   id: string;
   turn?: TurnView;
   decision?: DecisionView;
   guide?: QueueItemView;
+  command?: CommandInvocationView;
 }
 
 const submitting = signal<Record<string, boolean>>({});
@@ -70,6 +72,12 @@ const rowsOf = (view: ConversationView | null): Row[] => {
   if (!view) return [];
   return [
     ...view.turns.map((turn): Row => ({ kind: "turn", id: turn.turnId, turn })),
+    // Commands are top-level invocation records, never messages. They follow
+    // the turn list (commands run on an idle session, so they are the newest
+    // ledger facts) and sit before the approval cards they may have opened.
+    ...(view.commands ?? []).map(
+      (command): Row => ({ kind: "command", id: `command-${command.requestId}`, command }),
+    ),
     ...view.decisions.map((decision): Row => ({ kind: "decision", id: `decision-${decision.decisionId}`, decision })),
     // Guides still waiting for a boundary show at the stream's tail (C12):
     // the place they will be injected.
@@ -114,6 +122,11 @@ function RowCell(props: { row: () => Row }) {
           waiting={() => store.waiting()}
           now={() => now()}
         />
+      </If>
+      <If when={props.row().kind === "command"}>
+        <View style={{ paddingVertical: space.sm }}>
+          <CommandInvocationRow invocation={() => props.row().command!} />
+        </View>
       </If>
       <If when={props.row().kind === "decision"}>
         <View style={{ paddingVertical: space.md }}>

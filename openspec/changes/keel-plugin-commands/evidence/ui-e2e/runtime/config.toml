@@ -1,0 +1,11 @@
+version = 1
+
+# Manual compaction is the command under test; the automatic threshold is out
+# of reach so /compact is the only thing that compacts during the run.
+[compaction]
+enabled = true
+thresholdTokens = 1000000
+keepRecentTokens = 100
+maxCheckpoints = 3
+ttlHours = 168
+manualCompact = true

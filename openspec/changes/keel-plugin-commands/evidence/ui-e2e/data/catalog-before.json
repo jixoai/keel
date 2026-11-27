@@ -1,0 +1,26 @@
+{
+  "commands": [
+    {
+      "name": "compact",
+      "source": "builtin",
+      "summary": "Compact the current session context.",
+      "argsSchema": {
+        "type": "object"
+      },
+      "danger": "write",
+      "idempotent": true,
+      "targets": [
+        "web",
+        "native",
+        "tui"
+      ],
+      "requiredPermissions": [
+        "session.write",
+        "model.invoke"
+      ],
+      "available": true
+    }
+  ],
+  "truncated": false,
+  "generation": 1
+}

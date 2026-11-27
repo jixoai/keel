@@ -109,6 +109,37 @@ export interface QueueItemView {
   immediate?: boolean;
 }
 
+/** One command invocation as the chat renders it (`command.invoked`).
+ *
+ * A command is a named USER action, not a message: this row never enters the
+ * model context and is never drawn as a user/assistant bubble. The durable
+ * invocation ledger is the server's; this view is its projection. One
+ * requestId shows one row — a destructive command's pending_decision phase is
+ * replaced by its terminal phase, never duplicated. */
+export interface CommandInvocationView {
+  requestId: string;
+  /** The published name (`compact`, `skill:<n>`, `<plugin-id>:<name>`). */
+  command: string;
+  /** builtin | plugin | skill. */
+  source: string;
+  /** ok | error | refused | timed_out | cancelled | pending_decision. */
+  status: string;
+  /** The seq of the event this row shows (the terminal one after a replay). */
+  seq: number;
+  actor?: string;
+  decisionId?: string;
+  /** The argument document's hash and length — never its text. */
+  argsHash?: string;
+  argsBytes?: number;
+  durationMs?: number;
+  /** The command's bounded structured result. */
+  data?: unknown;
+  /** The result exceeded the server's bound and was replaced by a marker. */
+  truncated?: boolean;
+  errorCode?: string;
+  error?: string;
+}
+
 export interface ConnectionState {
   status: "connecting" | "open" | "reconnecting" | "closed";
   lastSeq: number;
@@ -119,6 +150,8 @@ export interface ConversationView {
   turns: TurnView[];
   decisions: DecisionView[];
   queue: QueueItemView[];
+  /** Command invocations in ledger order (one row per requestId). */
+  commands: CommandInvocationView[];
   /** 运行中（session 未 ready）时 true。 */
   busy: boolean;
   /** 用户已请求停止、等待权威确认。 */

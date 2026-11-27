@@ -14,6 +14,9 @@
 //                       context, model, provider, durationMs, stopReason }
 //   decision          { decisionId, question, options, recommendation?,
 //                       status, answer?, timeoutAt? }
+//   command.invoked   { requestId, command, source, status, actor?, decisionId?,
+//                       argsHash, argsBytes, durationMs, data?, errorCode?,
+//                       error? }
 //   goal.*            { status/phase, target?, ... }
 //   external.event    opaque backend fact (compat log)
 //
@@ -422,4 +425,61 @@ function answerTextOf(value: unknown): string | undefined {
     return str(rec.optionId) ?? str(rec.text) ?? str(rec.value) ?? str(rec.answer);
   }
   return undefined;
+}
+
+// ---- command.invoked ------------------------------------------------------
+
+/** The stable command statuses the server records. An unknown future value
+ * stays a string (the renderer says it verbatim rather than guessing "ok"). */
+export type CommandStatus =
+  | "pending_decision"
+  | "ok"
+  | "error"
+  | "refused"
+  | "timed_out"
+  | "cancelled";
+
+export interface ParsedCommandInvoked {
+  requestId: string;
+  command: string;
+  source: string;
+  status: string;
+  actor?: string;
+  decisionId?: string;
+  argsHash?: string;
+  argsBytes?: number;
+  durationMs?: number;
+  data?: unknown;
+  truncated?: boolean;
+  errorCode?: string;
+  error?: string;
+}
+
+/**
+ * One `command.invoked` projection line. The payload never carries the argument
+ * document (only its hash/length), so a row cannot leak what the user typed.
+ * A destructive command's first event is `pending_decision`; its terminal
+ * event replaces that row (the projection keys by requestId).
+ */
+export function parseCommandInvoked(payload: unknown): ParsedCommandInvoked {
+  const p = asRecord(payload);
+  const status = (str(p.status) ?? "unknown").toLowerCase();
+  const argsHash = str(p.argsHash);
+  const argsBytes = num(p.argsBytes);
+  const durationMs = num(p.durationMs);
+  return {
+    requestId: str(p.requestId) ?? "",
+    command: str(p.command) ?? "",
+    source: str(p.source) ?? "",
+    status,
+    actor: str(p.actor),
+    decisionId: str(p.decisionId),
+    argsHash,
+    argsBytes,
+    durationMs,
+    data: p.data,
+    truncated: bool(p.truncated) ?? false,
+    errorCode: str(p.errorCode),
+    error: str(p.error),
+  };
 }

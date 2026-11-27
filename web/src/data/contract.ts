@@ -6,6 +6,7 @@
 // UI-side shapes the contract does not cover (session list rows, attachment
 // chips, the extended command set). None of this changes the frozen contract.
 export type {
+  CommandInvocationView,
   ConversationView,
   ConnectionState,
   DecisionView,
@@ -181,6 +182,89 @@ export interface SendOptions {
 
 export interface UiCommands extends SurfaceCommands {
   sendWithAttachments?(text: string, opts: SendOptions): Promise<void>;
+}
+
+// ---- chat commands (change keel-plugin-commands) -------------------------
+
+/** Where a command comes from. Unknown values travel verbatim. */
+export type CommandSource = "builtin" | "plugin" | "skill";
+
+/** The client surfaces a catalog can be read for. */
+export type CommandTarget = "web" | "native" | "tui";
+
+export type CommandDanger = "read" | "write" | "destructive";
+
+/** One catalog entry as `GET /v1/sessions/{id}/commands` publishes it. The
+ * server order is authoritative: the client MUST NOT sort a second time. */
+export interface CommandView {
+  /** compact, skill:<name> or <plugin-id>:<name> (send without the '/'). */
+  name: string;
+  source: string;
+  summary: string;
+  /** The JSON object schema of the command's arguments. */
+  argsSchema: Record<string, unknown>;
+  danger: string;
+  idempotent: boolean;
+  targets: string[];
+  /** Permission keys an invocation needs (server-derived for plugins). */
+  requiredPermissions: string[];
+  available: boolean;
+  /** A stable unavailability code (missing_permissions, target_unsupported, …). */
+  reason?: string;
+  /** The missing permission keys, when reason is missing_permissions. */
+  missingPermissions?: string[];
+}
+
+/** `GET /v1/sessions/{id}/commands?target=…`. */
+export interface CommandCatalogView {
+  commands: CommandView[];
+  truncated: boolean;
+  generation?: number;
+  /** Stable degradation codes (for example skills_unavailable). */
+  warnings?: string[];
+}
+
+/** The 200 body of a command execution, and the 202 body of a destructive one
+ * (status pending_decision, pending true). */
+export interface CommandExecutionView {
+  requestId: string;
+  command: string;
+  source: string;
+  status: string;
+  data?: unknown;
+  eventSeq?: number;
+  durationMs?: number;
+  truncated?: boolean;
+  decisionId?: string;
+  pending?: boolean;
+  timeoutMs?: number;
+  errorCode?: string;
+  error?: string;
+}
+
+/** What the store reports to the Composer after one invocation attempt. */
+export interface CommandRunOutcome {
+  status: "ok" | "pending" | "error";
+  requestId: string;
+  result?: CommandExecutionView;
+  message?: string;
+  code?: string;
+  /** Field-level errors (`args.path` → message), merged from a 400. */
+  fields?: Record<string, string>;
+  statusCode?: number;
+  requiredKey?: string;
+}
+
+/** The transport seam a command surface reads (KeelHttp and the fixture both
+ * implement it; a test harness can answer it in memory). */
+export interface CommandApi {
+  commandCatalog(sessionId: string, target: CommandTarget): Promise<CommandCatalogView>;
+  executeCommand(
+    sessionId: string,
+    name: string,
+    args: Record<string, unknown>,
+    requestId: string,
+  ): Promise<CommandExecutionView>;
 }
 
 // ---- settings face (change keel-model-settings) --------------------------

@@ -45,15 +45,15 @@
 
 ## 4. 客户端（web/TUI）
 
-- [ ] 4.1 Composer：首 token `/` 打开命令菜单（数据来自目录）；选择后按 §7 规则映射
+- [x] 4.1 Composer：首 token `/` 打开命令菜单（数据来自目录）；选择后按 §7 规则映射
   `args.text` 或展示 schema 表单；执行走 `POST .../commands/{name}`；补纯函数单测。
-- [ ] 4.2 命令结果行：以 `command.invoked` 呈现，不伪装 user/assistant；`compact` 仍按
+- [x] 4.2 命令结果行：以 `command.invoked` 呈现，不伪装 user/assistant；`compact` 仍按
   `compaction` 事件呈现；补投影测试。
-- [ ] 4.3 命令面板 Mod+K 增加“命令”分组，与 Composer 同目录；无会话时提示先选会话；
+- [x] 4.3 命令面板 Mod+K 增加“命令”分组，与 Composer 同目录；无会话时提示先选会话；
   选择即执行；补面板测试。
-- [ ] 4.4 五态：加载/空/错误/无权限/成功；`targets` 不支持显示原因；TUI 与 web 同序、
+- [x] 4.4 五态：加载/空/错误/无权限/成功；`targets` 不支持显示原因；TUI 与 web 同序、
   同可用性；补 `nsh test --target tui` 用例。
-- [ ] 4.5 视觉：菜单/表单/结果行使用宿主 kit 与主题令牌，390/768/1024/1440 无横向溢出；
+- [x] 4.5 视觉：菜单/表单/结果行使用宿主 kit 与主题令牌，390/768/1024/1440 无横向溢出；
   补截图。
 
 ## 5. 测试与 E2E
@@ -64,14 +64,14 @@
   requestId 并发。
 - [x] 5.3 内置命令：`/compact` 与 HTTP 端点等价；`/skill:<name>` 下一轮生效、缺失/缺权；
   `/learn` 不在目录且模板仍工作。
-- [ ] 5.4 真实浏览器 E2E（8 步起）：打开目录 → 执行内置 `/compact` → 安装插件命令 →
+- [x] 5.4 真实浏览器 E2E（8 步起）：打开目录 → 执行内置 `/compact` → 安装插件命令 →
   执行成功 → 重放同 requestId → 拒绝 destructive → 停用插件 → 回退；每步截图，
   `UNCOVERED=0`，生成 HTML 报告并挂公网。
-- [ ] 5.5 TUI E2E：同一目录/顺序/可用性；命令菜单与结果行文本降级正确。
+- [x] 5.5 TUI E2E：同一目录/顺序/可用性；命令菜单与结果行文本降级正确。
 
 ## 6. 验收与归档
 
-- [ ] 6.1 `go test -race` 相关包（pluginpkg/harnessext/harnessapi/access/toolsurface/
+- [x] 6.1 `go test -race` 相关包（pluginpkg/harnessext/harnessapi/access/toolsurface/
   web 构建）全绿；`nsh check`、`nsh test --target tui` 全绿。
 - [x] 6.2 `openspec validate keel-plugin-commands --strict` 通过；证据目录含输出。
 - [ ] 6.3 独立 reviewer（子代理）复核 P0/P1 清零；重点审“命令不是 prompt 模板”与权限派生。

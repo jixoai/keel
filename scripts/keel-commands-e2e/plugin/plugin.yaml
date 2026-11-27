@@ -1,0 +1,54 @@
+id: e2e.commands
+version: 1.0.0
+kind: sidecar
+layer: provider
+description: "E2E fixture plugin: three chat commands backed by one sidecar tool provider."
+engines:
+  keel: ">=0.1.0 <1.0.0"
+provides:
+  tools:
+    - refresh
+    - note
+    - purge
+  commands:
+    - name: refresh
+      summary: Rebuild the E2E index.
+      description: Rebuilds the demo index under a path; does not change user files.
+      args_schema:
+        type: object
+        properties:
+          path:
+            type: string
+            minLength: 1
+            description: Directory to index.
+        required: [path]
+      tool: refresh
+      danger: write
+      idempotent: true
+      targets: [web, native, tui]
+    - name: note
+      summary: Save one note into the E2E plan.
+      args_schema:
+        type: object
+        properties:
+          text:
+            type: string
+            description: The note.
+        required: [text]
+      tool: note
+      danger: write
+      targets: [web, native, tui]
+    - name: purge
+      summary: Delete every E2E index document.
+      tool: purge
+      danger: destructive
+      targets: [web, native, tui]
+permissions:
+  fs:
+    - plugin-data
+entry:
+  command:
+    - node
+    - sidecar.mjs
+  env:
+    - KEEL_COMMANDS_E2E_STATE

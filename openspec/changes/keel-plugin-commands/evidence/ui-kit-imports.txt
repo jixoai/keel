@@ -1,0 +1,8 @@
+# node scripts/kit-imports.mjs --web web
+# exit=1: both reported paths are pre-existing baseline violations (untouched by this change)
+web/src/screens/books/groups.tsx:899 writes a shell width (264/320/480/360/45%/65%) — the shell's numbers belong to the kit's layout blocks
+web/src/ui/kit/components/styles.tsx:53 writes a raw colour — colours come from web/theme.json through the kit tokens
+kit-imports: 2 violation(s) in web/src/screens, web/App.tsx and web/src/ui/kit
+
+# changed-file filter:
+(no violation in changed files)

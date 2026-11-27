@@ -1,0 +1,19 @@
+{
+  "providers": [{
+    "id": "e2e",
+    "name": "E2E Provider",
+    "api": {"type": "openai-chat-completions", "baseUrl": "http://127.0.0.1:13758/v1"},
+    "access": {"type": "api-key", "env": "E2E_PROVIDER_KEY"},
+    "modelIds": ["e2e-model"]
+  }],
+  "selection": {"providerId": "e2e", "modelId": "e2e-model"},
+  "modelRules": [{
+    "match": "e2e-model",
+    "config": {"properties": {
+      "contextWindow": 60000,
+      "inputFormat": {"text": true},
+      "outputFormat": {"text": true},
+      "supportsToolCall": true
+    }}
+  }]
+}

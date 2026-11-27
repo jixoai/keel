@@ -145,7 +145,7 @@ describe("AG-UI mapping", () => {
   });
 
   test("state snapshot from the view and state events from payloads", () => {
-    const view = { sessionId: "s", turns: [], decisions: [], queue: [], busy: false, stopping: false, connection: { status: "open", lastSeq: 1 } } as ConversationView;
+    const view = { sessionId: "s", turns: [], decisions: [], queue: [], commands: [], busy: false, stopping: false, connection: { status: "open", lastSeq: 1 } } as ConversationView;
     const events: WireEvent[] = [
       userMessage(1, "hi", { requestId: "r1" }),
       { seq: 2, kind: "state.snapshot", payload: { state: { mode: "x" } } },

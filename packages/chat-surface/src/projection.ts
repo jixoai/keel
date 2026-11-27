@@ -6,6 +6,7 @@
 // fixture always produces the same view (byte-identical JSON).
 
 import type {
+  CommandInvocationView,
   ConnectionState,
   ConversationView,
   DecisionView,
@@ -23,6 +24,7 @@ import {
   asRecord,
   outcomeForStopReason,
   parseAssistantMessage,
+  parseCommandInvoked,
   parseCompaction,
   parseDecision,
   parseRunFinished,
@@ -35,6 +37,9 @@ export const DEFAULT_WINDOW_TURNS = 200;
 const KNOWN_REQUESTS_LIMIT = 10_000;
 const GAP_BUFFER_LIMIT = 4_096;
 const NOTE_LIMIT = 500;
+/** The newest command rows a view keeps. Commands are idle-only user actions;
+ * an old one is history, not the running conversation. */
+const COMMAND_LIMIT = 200;
 
 export type ApplyResult = "applied" | "duplicate" | "buffered";
 
@@ -107,6 +112,8 @@ export class ConversationProjection {
   private pendingOrder: string[] = [];
   private decisions: DecisionView[] = [];
   private readonly decisionById = new Map<string, DecisionView>();
+  private commands: CommandInvocationView[] = [];
+  private readonly commandByRequest = new Map<string, CommandInvocationView>();
 
   private lastSeqValue = 0;
   private ordinal = 0;
@@ -346,6 +353,8 @@ export class ConversationProjection {
     this.pendingOrder = [];
     this.decisions = [];
     this.decisionById.clear();
+    this.commands = [];
+    this.commandByRequest.clear();
     this.lastSeqValue = 0;
     this.ordinal = 0;
     this.compactionActive = false;
@@ -377,6 +386,7 @@ export class ConversationProjection {
       turns: this.turns,
       decisions: this.decisions,
       queue,
+      commands: this.commands,
       busy: this.isBusy(),
       stopping: this.stoppingValue,
       connection: { status: this.connectionStatus, lastSeq: this.lastSeqValue },
@@ -452,6 +462,9 @@ export class ConversationProjection {
           return;
         case "external.event":
           this.onExternal(event);
+          return;
+        case "command.invoked":
+          this.onCommandInvoked(event);
           return;
         default:
           if (event.kind.startsWith("goal")) this.onGoal(event);
@@ -873,6 +886,49 @@ export class ConversationProjection {
     const turn = this.newestOpenTurn() ?? this.turns[this.turns.length - 1];
     if (!turn) return;
     this.pushPostTurn(turn, event.kind, event.seq, payloadNote(event.payload));
+  }
+
+  // ---------------------------------------------------------------------
+  // command.invoked
+  // ---------------------------------------------------------------------
+
+  /**
+   * One command invocation row. Keyed by requestId: a destructive command's
+   * `pending_decision` row is replaced by its terminal event in place, so one
+   * call never renders twice. A command is not a prompt: nothing is added to a
+   * turn's inputs/assistant text, and no user/assistant event is synthesized.
+   */
+  private onCommandInvoked(event: WireEvent): void {
+    const parsed = parseCommandInvoked(event.payload);
+    if (!parsed.requestId || !parsed.command) return;
+    const row: CommandInvocationView = {
+      requestId: parsed.requestId,
+      command: parsed.command,
+      source: parsed.source,
+      status: parsed.status,
+      seq: event.seq,
+      ...(parsed.actor !== undefined ? { actor: parsed.actor } : {}),
+      ...(parsed.decisionId !== undefined ? { decisionId: parsed.decisionId } : {}),
+      ...(parsed.argsHash !== undefined ? { argsHash: parsed.argsHash } : {}),
+      ...(parsed.argsBytes !== undefined ? { argsBytes: parsed.argsBytes } : {}),
+      ...(parsed.durationMs !== undefined ? { durationMs: parsed.durationMs } : {}),
+      ...(parsed.data !== undefined ? { data: parsed.data } : {}),
+      ...(parsed.truncated ? { truncated: true } : {}),
+      ...(parsed.errorCode !== undefined ? { errorCode: parsed.errorCode } : {}),
+      ...(parsed.error !== undefined ? { error: parsed.error } : {}),
+    };
+    const existing = this.commandByRequest.get(parsed.requestId);
+    if (existing) {
+      // Keep the row's place: the terminal phase answers the pending one.
+      Object.assign(existing, row);
+      return;
+    }
+    this.commandByRequest.set(parsed.requestId, row);
+    this.commands.push(row);
+    if (this.commands.length > COMMAND_LIMIT) {
+      const dropped = this.commands.splice(0, this.commands.length - COMMAND_LIMIT);
+      for (const row of dropped) this.commandByRequest.delete(row.requestId);
+    }
   }
 
   private onUnknown(event: WireEvent): void {

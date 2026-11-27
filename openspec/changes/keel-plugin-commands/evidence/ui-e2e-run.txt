@@ -1,0 +1,96 @@
+creating database keel_commands_e2e_1795762581
+starting fake provider on 127.0.0.1:13758
+starting keel serve…
+  ok   keel serve healthy
+  ok   local-only super admin session
+  ok   bot-owned session created
+  ok   three settled turns before compact
+  ok   session retain budget narrowed to 1
+session c2d65adc-4778-4317-bdaa-e91d79ea7fa0 warmed up
+
+== catalog-builtin · 打开目录：内置命令可发现，顺序来自服务端
+  ok   builtin catalog has compact
+  ok   no plugin command before install
+  ok   rendered rows match the server order
+  shot shots/01-catalog-builtin.png · 内置命令目录
+  ok   catalog-builtin: no horizontal overflow
+-- catalog-builtin: passed (4/4)
+
+== compact · 执行内置 /compact：命令行 + 既有压缩分隔线
+  ok   durable command.invoked ok for compact
+  ok   compact performed (a real compaction, not a no-op)
+  ok   compaction divider rendered
+  ok   no user/assistant message pretends to be the command
+  shot shots/02-compact-result.png · /compact 命令行与压缩分隔线
+-- compact: passed (4/4)
+
+== install-plugin · 安装插件命令：真实两阶段审批（install + enable）
+  ok   plugin installed
+  ok   plugin enabled
+  ok   plugin commands are in the catalog
+  ok   catalog order is builtin → plugin
+  ok   UI rows match the fresh catalog
+  shot shots/03-catalog-with-plugin.png · 安装后目录（内置 → 插件）
+  ok   catalog-with-plugin: no horizontal overflow
+-- install-plugin: passed (6/6)
+
+== plugin-form · 执行插件命令：args_schema 生成表单 → 结构化结果
+  ok   plugin command result row
+  ok   result row carries a requestId
+  ok   sidecar executed refresh once
+  shot shots/04-plugin-result.png · 插件命令结果行
+-- plugin-form: passed (3/3)
+
+== replay · 重放同 requestId：同结果、不二次执行
+  ok   replay answers 200
+  ok   replay result is the first result
+  ok   replay did not execute the tool again
+  ok   one durable invocation row for the requestId
+  shot shots/05-replay-row.png · 重放后的对话（仍只有一行）
+-- replay: passed (4/4)
+
+== destructive-denied · 破坏性命令：审批拒绝 → 已拒绝行，无副作用
+  shot shots/06-destructive-pending.png · 破坏性命令等待审批
+  ok   refusal is a durable command row
+  ok   denied command never ran the tool
+  shot shots/07-destructive-refused.png · 审批拒绝后的命令行
+-- destructive-denied: passed (2/2)
+
+== destructive-approved · 破坏性命令：审批允许 → 只执行一次并给出结果
+  ok   approved command executed exactly once
+  shot shots/08-destructive-result.png · 审批允许后的结果行
+-- destructive-approved: passed (1/1)
+
+== viewports · 4.5 视觉：390/768/1024/1440 目录与表单无横向溢出
+  shot shots/09-catalog-390.png · 390 命令目录
+  ok   catalog-390: no horizontal overflow
+  shot shots/10-form-390.png · 390 参数表单
+  ok   form-390: no horizontal overflow
+  shot shots/11-catalog-768.png · 768 命令目录
+  ok   catalog-768: no horizontal overflow
+  shot shots/12-form-768.png · 768 参数表单
+  ok   form-768: no horizontal overflow
+  shot shots/13-catalog-1024.png · 1024 命令目录
+  ok   catalog-1024: no horizontal overflow
+  shot shots/14-form-1024.png · 1024 参数表单
+  ok   form-1024: no horizontal overflow
+  shot shots/15-catalog-1440.png · 1440 命令目录
+  ok   catalog-1440: no horizontal overflow
+  shot shots/16-form-1440.png · 1440 参数表单
+  ok   form-1440: no horizontal overflow
+  shot shots/17-workspace-final.png · 最终工作区
+-- viewports: passed (8/8)
+
+== disable-uninstall · 停用/卸载插件：目录与执行入口一起撤销
+  ok   disabled plugin commands are gone
+  ok   UI no longer draws the disabled commands
+  shot shots/18-catalog-after-disable.png · 停用后的目录
+  ok   execution entry is 404 after disable
+  ok   uninstall keeps the command gone
+  shot shots/19-after-uninstall.png · 卸载后的工作区
+-- disable-uninstall: passed (4/4)
+
+result: PASS · failures=0
+report: /Users/kzf/Development/GitHub/jixoai/fde2e/.worktrees/keel-plugin-commands-ui/openspec/changes/keel-plugin-commands/evidence/ui-e2e/report.html
+evidence: /Users/kzf/Development/GitHub/jixoai/fde2e/.worktrees/keel-plugin-commands-ui/openspec/changes/keel-plugin-commands/evidence/ui-e2e
+steps exit: 0

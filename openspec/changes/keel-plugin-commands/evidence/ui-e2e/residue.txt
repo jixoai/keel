@@ -1,0 +1,7 @@
+run=keel_commands_e2e_1795762581
+serve_port=13757
+model_port=13758
+serve_port=free
+model_port=free
+sidecar=gone
+fake_provider=gone

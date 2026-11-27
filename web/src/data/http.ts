@@ -9,6 +9,9 @@ import type {
   CheckpointPolicyUpdate,
   CheckpointPolicyValues,
   CheckpointPolicyView,
+  CommandCatalogView,
+  CommandExecutionView,
+  CommandTarget,
   ConnectionState,
   DecisionView,
   Delivery,
@@ -81,6 +84,7 @@ import type {
   WireEvent,
 } from "./contract";
 import { parseQueueFacts } from "./queue";
+import { parseCommandCatalog } from "./commands";
 import { parseExternalProjection, type ExternalProjectionView } from "./oar-projection";
 import {
   APP_ID_PATTERN,
@@ -371,6 +375,9 @@ async function readErrorBody(
       if (typeof body.error === "string" && body.error) message = body.error;
       else if (typeof body.message === "string" && body.message) message = body.message;
       issues.push(...issueList(body.issues));
+      // Commands answer a field-level 400 as `fields` (`args.path`); settings
+      // answer `issues`. One carrier, so a form renders both the same way.
+      issues.push(...issueList(body.fields));
       if (typeof body.revision === "number" && Number.isFinite(body.revision)) revision = body.revision;
       if (typeof body.code === "string" && body.code) code = body.code;
       if (typeof body.reason === "string" && body.reason) reason = body.reason;
@@ -1374,6 +1381,53 @@ export class KeelHttp implements SettingsApi {
 
   commands(sessionId: string): HttpCommands {
     return new HttpCommands(this, sessionId);
+  }
+
+  // ---- chat commands (change keel-plugin-commands) -----------------------
+
+  /** `GET /v1/sessions/{id}/commands?target=…` — the session's command catalog.
+   * `target` is the surface the caller renders; the server marks a command
+   * that do not support it unavailable (with a reason), never hides it. */
+  async commandCatalog(sessionId: string, target: CommandTarget): Promise<CommandCatalogView> {
+    const response = await this.request(
+      `/v1/sessions/${encodeURIComponent(sessionId)}/commands?target=${encodeURIComponent(target)}`,
+    );
+    return parseCommandCatalog(await response.json());
+  }
+
+  /** `POST /v1/sessions/{id}/commands/{name}` — one durable invocation. A
+   * destructive command answers 202 with its decision; the same requestId is
+   * replayed after the answer. */
+  async executeCommand(
+    sessionId: string,
+    name: string,
+    args: Record<string, unknown>,
+    requestId: string,
+  ): Promise<CommandExecutionView> {
+    const response = await this.request(
+      `/v1/sessions/${encodeURIComponent(sessionId)}/commands/${encodeURIComponent(name)}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ args, requestId }),
+      },
+    );
+    const body = asRecord(await response.json());
+    return {
+      requestId: typeof body.requestId === "string" ? body.requestId : requestId,
+      command: typeof body.command === "string" ? body.command : name,
+      source: typeof body.source === "string" ? body.source : "",
+      status: typeof body.status === "string" ? body.status : response.status === 202 ? "pending_decision" : "ok",
+      data: body.data,
+      ...(typeof body.eventSeq === "number" ? { eventSeq: body.eventSeq } : {}),
+      ...(typeof body.durationMs === "number" ? { durationMs: body.durationMs } : {}),
+      ...(body.truncated === true ? { truncated: true } : {}),
+      ...(typeof body.decisionId === "string" && body.decisionId ? { decisionId: body.decisionId } : {}),
+      ...(body.pending === true ? { pending: true } : {}),
+      ...(typeof body.timeoutMs === "number" ? { timeoutMs: body.timeoutMs } : {}),
+      ...(typeof body.errorCode === "string" && body.errorCode ? { errorCode: body.errorCode } : {}),
+      ...(typeof body.error === "string" && body.error ? { error: body.error } : {}),
+    };
   }
 
   // ---- settings (change keel-model-settings) ----------------------------

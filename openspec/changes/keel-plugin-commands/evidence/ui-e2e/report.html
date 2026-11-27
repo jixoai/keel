@@ -1,0 +1,494 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>keel-plugin-commands E2E — 2026-11-27T06:56:22.750Z</title>
+<style>
+:root { color-scheme: light dark; --bg:#f7f8fa; --card:#fff; --ink:#16181d; --muted:#626b7a; --line:#e3e6ec; --ok:#0a7a3d; --bad:#b42318; --warn:#8a5a00; --accent:#0b5ed7; }
+@media (prefers-color-scheme: dark) { :root { --bg:#111318; --card:#181b22; --ink:#e8ebf1; --muted:#9aa4b2; --line:#2a2f39; --ok:#4ade80; --bad:#f87171; --warn:#fbbf24; --accent:#60a5fa; } }
+* { box-sizing: border-box; }
+body { margin:0; padding:28px; background:var(--bg); color:var(--ink); font:14px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans SC",sans-serif; }
+main { max-width:1180px; margin:0 auto; }
+h1 { font-size:24px; margin:0 0 4px; }
+h2 { font-size:17px; margin:0 0 6px; display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+p { margin:8px 0; }
+.muted { color:var(--muted); }
+.meta { color:var(--muted); font-size:12px; }
+.badge { display:inline-block; padding:2px 8px; border-radius:999px; font-size:11px; font-weight:700; letter-spacing:.04em; }
+.badge.ok { background:rgba(10,122,61,.12); color:var(--ok); }
+.badge.bad { background:rgba(180,35,24,.12); color:var(--bad); }
+.card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:18px 20px; margin:16px 0; }
+.grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:12px; margin:12px 0; }
+.kpi { border:1px solid var(--line); border-radius:10px; padding:12px; }
+.kpi b { display:block; font-size:22px; }
+.banner { border-left:4px solid var(--warn); background:rgba(138,90,0,.08); padding:10px 14px; border-radius:6px; margin:12px 0; }
+table { width:100%; border-collapse:collapse; margin:10px 0; font-size:13px; }
+th, td { text-align:left; vertical-align:top; border-bottom:1px solid var(--line); padding:7px 8px; }
+th { color:var(--muted); font-weight:600; }
+tr.failed td { background:rgba(180,35,24,.06); }
+code { font:12px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace; background:rgba(127,127,127,.1); padding:1px 4px; border-radius:4px; word-break:break-word; }
+pre { white-space:pre-wrap; word-break:break-word; background:rgba(127,127,127,.08); padding:10px; border-radius:8px; font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace; max-height:520px; overflow:auto; }
+pre.error { border-left:3px solid var(--bad); }
+.shots { display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:14px; margin:12px 0; }
+figure { margin:0; border:1px solid var(--line); border-radius:10px; overflow:hidden; background:var(--bg); }
+figure img { display:block; width:100%; height:auto; }
+figcaption { padding:6px 8px; font-size:11px; color:var(--muted); }
+details { margin:10px 0; }
+summary { cursor:pointer; color:var(--accent); }
+ul { margin:6px 0 6px 20px; padding:0; }
+a { color:var(--accent); }
+.step { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:18px 20px; margin:18px 0; }
+</style>
+</head>
+<body>
+<main>
+<h1>keel-plugin-commands · 真实栈 E2E 报告</h1>
+<p class="meta">生成于 2026-11-27T06:56:22.750Z → 2026-11-27T06:56:43.278Z · 耗时 21s · commit <code>891639382bf0956cab224436f1f99db17f07ec42-dirty</code></p>
+<div class="banner">公网：<strong>未部署</strong>：本报告只来自本地 <code>127.0.0.1</code> 真实栈，没有公网链接。</div>
+<div class="grid">
+  <div class="kpi"><b>PASS</b>总结果</div>
+  <div class="kpi"><b>36</b>断言（失败 0）</div>
+  <div class="kpi"><b>9</b>步骤</div>
+  <div class="kpi"><b>19</b>截图</div>
+</div>
+
+
+
+<div class="card">
+  <h2>环境</h2>
+  <table><tbody><tr><th>database</th><td>keel_commands_e2e_1795762581</td></tr>
+<tr><th>postgres</th><td>psql (PostgreSQL) 18.7 (Homebrew)</td></tr>
+<tr><th>node</th><td>v22.23.3</td></tr>
+<tr><th>chrome</th><td>/Applications/Google Chrome.app/Contents/MacOS/Google Chrome</td></tr>
+<tr><th>models</th><td>e2e-model (deterministic loopback provider; /compact summary included)</td></tr>
+<tr><th>plugin</th><td>/Users/kzf/Development/GitHub/jixoai/fde2e/.worktrees/keel-plugin-commands-ui/scripts/keel-commands-e2e/plugin</td></tr>
+<tr><th>databaseRowProbe</th><td>command_invocations (tenant, session, request_id)</td></tr>
+<tr><th>publicDeployment</th><td>未部署（仅本地 127.0.0.1 证据）</td></tr>
+<tr><th>durationSeconds</th><td>21</td></tr></tbody></table>
+  <p class="muted">真实 PostgreSQL 临时库 + 真实 <code>keel serve --auth local-only</code>（13600–13799 临时端口）+ 真实插件安装/审批；无 Docker、无夹具命令。数据库与临时密钥已由 cleanup 删除。</p>
+  
+</div>
+
+<div class="card">
+  <h2>进程回收验证 <span class="badge ok">CLEAN</span></h2>
+  <p class="muted">由 <code>run.sh</code> 在报告生成前写入 <code>residue.txt</code>：serve/model 端口必须 free，sidecar 与 fake provider 必须 gone。这里的标记同时参与总结果（STILL_* 即失败）。</p>
+  <pre>run=keel_commands_e2e_1795762581
+serve_port=13757
+model_port=13758
+serve_port=free
+model_port=free
+sidecar=gone
+fake_provider=gone
+</pre>
+</div>
+
+<div class="card">
+  <h2>步骤索引</h2>
+  <table><thead><tr><th>#</th><th>步骤</th><th>结果</th><th>断言</th><th>图</th></tr></thead><tbody>
+  <tr><td>1</td><td><a href="#step-catalog-builtin">打开目录：内置命令可发现，顺序来自服务端</a></td><td><span class="badge ok">PASS</span></td><td>4/4</td><td>1</td></tr>
+<tr><td>2</td><td><a href="#step-compact">执行内置 /compact：命令行 + 既有压缩分隔线</a></td><td><span class="badge ok">PASS</span></td><td>4/4</td><td>1</td></tr>
+<tr><td>3</td><td><a href="#step-install-plugin">安装插件命令：真实两阶段审批（install + enable）</a></td><td><span class="badge ok">PASS</span></td><td>6/6</td><td>1</td></tr>
+<tr><td>4</td><td><a href="#step-plugin-form">执行插件命令：args_schema 生成表单 → 结构化结果</a></td><td><span class="badge ok">PASS</span></td><td>3/3</td><td>1</td></tr>
+<tr><td>5</td><td><a href="#step-replay">重放同 requestId：同结果、不二次执行</a></td><td><span class="badge ok">PASS</span></td><td>4/4</td><td>1</td></tr>
+<tr><td>6</td><td><a href="#step-destructive-denied">破坏性命令：审批拒绝 → 已拒绝行，无副作用</a></td><td><span class="badge ok">PASS</span></td><td>2/2</td><td>2</td></tr>
+<tr><td>7</td><td><a href="#step-destructive-approved">破坏性命令：审批允许 → 只执行一次并给出结果</a></td><td><span class="badge ok">PASS</span></td><td>1/1</td><td>1</td></tr>
+<tr><td>8</td><td><a href="#step-viewports">4.5 视觉：390/768/1024/1440 目录与表单无横向溢出</a></td><td><span class="badge ok">PASS</span></td><td>8/8</td><td>9</td></tr>
+<tr><td>9</td><td><a href="#step-disable-uninstall">停用/卸载插件：目录与执行入口一起撤销</a></td><td><span class="badge ok">PASS</span></td><td>4/4</td><td>2</td></tr>
+  </tbody></table>
+</div>
+
+<section class="step" id="step-catalog-builtin">
+  <h2>01 · 打开目录：内置命令可发现，顺序来自服务端 <span class="badge ok">PASS</span></h2>
+  <p class="meta">catalog-builtin · 1719 ms · 4 条断言 · 1 张图</p>
+  
+  <table><thead><tr><th>断言</th><th>结果</th><th>实际</th><th>期望</th></tr></thead><tbody>
+<tr class="">
+  <td>builtin catalog has compact</td>
+  <td>PASS</td>
+  <td><code>compact</code></td>
+  <td><code>[&quot;compact&quot;]</code></td>
+</tr>
+<tr class="">
+  <td>no plugin command before install</td>
+  <td>PASS</td>
+  <td><code></code></td>
+  <td><code>[]</code></td>
+</tr>
+<tr class="">
+  <td>rendered rows match the server order</td>
+  <td>PASS</td>
+  <td><code>compact</code></td>
+  <td><code>[&quot;compact&quot;]</code></td>
+</tr>
+<tr class="">
+  <td>catalog-builtin: no horizontal overflow</td>
+  <td>PASS</td>
+  <td><code>[object Object]</code></td>
+  <td><code>{&quot;docScrollWidth&quot;:&quot;&lt;= innerWidth&quot;}</code></td>
+</tr>
+</tbody></table>
+  <div class="shots"><figure><a href="shots/01-catalog-builtin.png"><img src="shots/01-catalog-builtin.png" loading="lazy" alt="shots/01-catalog-builtin.png"></a><figcaption>shots/01-catalog-builtin.png</figcaption></figure></div>
+  <details><summary>结构化细节</summary><pre>{
+  &quot;overflow-catalog-builtin&quot;: {
+    &quot;innerWidth&quot;: 1440,
+    &quot;docScrollWidth&quot;: 1440,
+    &quot;bodyScrollWidth&quot;: 1440
+  }
+}</pre></details>
+</section>
+<section class="step" id="step-compact">
+  <h2>02 · 执行内置 /compact：命令行 + 既有压缩分隔线 <span class="badge ok">PASS</span></h2>
+  <p class="meta">compact · 778 ms · 4 条断言 · 1 张图</p>
+  
+  <table><thead><tr><th>断言</th><th>结果</th><th>实际</th><th>期望</th></tr></thead><tbody>
+<tr class="">
+  <td>durable command.invoked ok for compact</td>
+  <td>PASS</td>
+  <td><code>ok</code></td>
+  <td><code>&quot;ok&quot;</code></td>
+</tr>
+<tr class="">
+  <td>compact performed (a real compaction, not a no-op)</td>
+  <td>PASS</td>
+  <td><code>[object Object]</code></td>
+  <td><code>{&quot;performed&quot;:true}</code></td>
+</tr>
+<tr class="">
+  <td>compaction divider rendered</td>
+  <td>PASS</td>
+  <td><code>present</code></td>
+  <td><code>&quot;present&quot;</code></td>
+</tr>
+<tr class="">
+  <td>no user/assistant message pretends to be the command</td>
+  <td>PASS</td>
+  <td><code>absent</code></td>
+  <td><code>&quot;absent&quot;</code></td>
+</tr>
+</tbody></table>
+  <div class="shots"><figure><a href="shots/02-compact-result.png"><img src="shots/02-compact-result.png" loading="lazy" alt="shots/02-compact-result.png"></a><figcaption>shots/02-compact-result.png</figcaption></figure></div>
+  
+</section>
+<section class="step" id="step-install-plugin">
+  <h2>03 · 安装插件命令：真实两阶段审批（install + enable） <span class="badge ok">PASS</span></h2>
+  <p class="meta">install-plugin · 481 ms · 6 条断言 · 1 张图</p>
+  
+  <table><thead><tr><th>断言</th><th>结果</th><th>实际</th><th>期望</th></tr></thead><tbody>
+<tr class="">
+  <td>plugin installed</td>
+  <td>PASS</td>
+  <td><code>{&quot;plugin&quot;:{&quot;id&quot;:&quot;e2e.commands&quot;,&quot;version&quot;:&quot;1.0.0&quot;,&quot;kind&quot;:&quot;sidecar&quot;,&quot;description&quot;:&quot;E2E fixture plugin: three chat commands backed by one sidecar tool provider.&quot;,&quot;state&quot;:&quot;installed&quot;,&quot;bundled&quot;:false,&quot;source&quot;:{&quot;type&quot;:&quot;local&quot;,&quot;path&quot;:&quot;/Users/kzf/Development/GitHub/jixoai/fde2e/.worktrees/keel-plugin-commands-ui/scripts/keel-commands-e2e/plugin&quot;},&quot;path&quot;:&quot;/Users/kzf/Development/GitHub/jixoai/fde2e/.worktrees/keel-plugin-comma…</code></td>
+  <td><code>&quot;installed&quot;</code></td>
+</tr>
+<tr class="">
+  <td>plugin enabled</td>
+  <td>PASS</td>
+  <td><code>{&quot;plugin&quot;:{&quot;id&quot;:&quot;e2e.commands&quot;,&quot;version&quot;:&quot;1.0.0&quot;,&quot;kind&quot;:&quot;sidecar&quot;,&quot;description&quot;:&quot;E2E fixture plugin: three chat commands backed by one sidecar tool provider.&quot;,&quot;state&quot;:&quot;enabled&quot;,&quot;bundled&quot;:false,&quot;source&quot;:{&quot;type&quot;:&quot;local&quot;,&quot;path&quot;:&quot;/Users/kzf/Development/GitHub/jixoai/fde2e/.worktrees/keel-plugin-commands-ui/scripts/keel-commands-e2e/plugin&quot;},&quot;path&quot;:&quot;/Users/kzf/Development/GitHub/jixoai/fde2e/.worktrees/keel-plugin-command…</code></td>
+  <td><code>&quot;e2e.commands enabled&quot;</code></td>
+</tr>
+<tr class="">
+  <td>plugin commands are in the catalog</td>
+  <td>PASS</td>
+  <td><code>e2e.commands:refresh,e2e.commands:note,e2e.commands:purge</code></td>
+  <td><code>[&quot;e2e.commands:refresh&quot;,&quot;e2e.commands:note&quot;,&quot;e2e.commands:purge&quot;]</code></td>
+</tr>
+<tr class="">
+  <td>catalog order is builtin → plugin</td>
+  <td>PASS</td>
+  <td><code>compact,e2e.commands:refresh,e2e.commands:note,e2e.commands:purge</code></td>
+  <td><code>[&quot;compact&quot;,&quot;e2e.commands:refresh&quot;,&quot;e2e.commands:note&quot;,&quot;e2e.commands:purge&quot;]</code></td>
+</tr>
+<tr class="">
+  <td>UI rows match the fresh catalog</td>
+  <td>PASS</td>
+  <td><code>compact,e2e.commands:refresh,e2e.commands:note,e2e.commands:purge</code></td>
+  <td><code>[&quot;compact&quot;,&quot;e2e.commands:refresh&quot;,&quot;e2e.commands:note&quot;,&quot;e2e.commands:purge&quot;]</code></td>
+</tr>
+<tr class="">
+  <td>catalog-with-plugin: no horizontal overflow</td>
+  <td>PASS</td>
+  <td><code>[object Object]</code></td>
+  <td><code>{&quot;docScrollWidth&quot;:&quot;&lt;= innerWidth&quot;}</code></td>
+</tr>
+</tbody></table>
+  <div class="shots"><figure><a href="shots/03-catalog-with-plugin.png"><img src="shots/03-catalog-with-plugin.png" loading="lazy" alt="shots/03-catalog-with-plugin.png"></a><figcaption>shots/03-catalog-with-plugin.png</figcaption></figure></div>
+  <details><summary>结构化细节</summary><pre>{
+  &quot;overflow-catalog-with-plugin&quot;: {
+    &quot;innerWidth&quot;: 1440,
+    &quot;docScrollWidth&quot;: 1440,
+    &quot;bodyScrollWidth&quot;: 1440
+  }
+}</pre></details>
+</section>
+<section class="step" id="step-plugin-form">
+  <h2>04 · 执行插件命令：args_schema 生成表单 → 结构化结果 <span class="badge ok">PASS</span></h2>
+  <p class="meta">plugin-form · 611 ms · 3 条断言 · 1 张图</p>
+  
+  <table><thead><tr><th>断言</th><th>结果</th><th>实际</th><th>期望</th></tr></thead><tbody>
+<tr class="">
+  <td>plugin command result row</td>
+  <td>PASS</td>
+  <td><code>e2e.commands:refresh</code></td>
+  <td><code>&quot;e2e.commands:refresh&quot;</code></td>
+</tr>
+<tr class="">
+  <td>result row carries a requestId</td>
+  <td>PASS</td>
+  <td><code>cmd_3bf1c0fa-d2f7-4098-a987-3af19f54b4d7</code></td>
+  <td></td>
+</tr>
+<tr class="">
+  <td>sidecar executed refresh once</td>
+  <td>PASS</td>
+  <td><code>refresh</code></td>
+  <td><code>[&quot;refresh&quot;]</code></td>
+</tr>
+</tbody></table>
+  <div class="shots"><figure><a href="shots/04-plugin-result.png"><img src="shots/04-plugin-result.png" loading="lazy" alt="shots/04-plugin-result.png"></a><figcaption>shots/04-plugin-result.png</figcaption></figure></div>
+  
+</section>
+<section class="step" id="step-replay">
+  <h2>05 · 重放同 requestId：同结果、不二次执行 <span class="badge ok">PASS</span></h2>
+  <p class="meta">replay · 402 ms · 4 条断言 · 1 张图</p>
+  
+  <table><thead><tr><th>断言</th><th>结果</th><th>实际</th><th>期望</th></tr></thead><tbody>
+<tr class="">
+  <td>replay answers 200</td>
+  <td>PASS</td>
+  <td><code>200</code></td>
+  <td><code>200</code></td>
+</tr>
+<tr class="">
+  <td>replay result is the first result</td>
+  <td>PASS</td>
+  <td><code>[object Object]</code></td>
+  <td><code>{&quot;indexed&quot;:7,&quot;requestId&quot;:&quot;cmd_3bf1c0fa-d2f7-4098-a987-3af19f54b4d7&quot;}</code></td>
+</tr>
+<tr class="">
+  <td>replay did not execute the tool again</td>
+  <td>PASS</td>
+  <td><code>1</code></td>
+  <td><code>1</code></td>
+</tr>
+<tr class="">
+  <td>one durable invocation row for the requestId</td>
+  <td>PASS</td>
+  <td><code>1</code></td>
+  <td><code>1</code></td>
+</tr>
+</tbody></table>
+  <div class="shots"><figure><a href="shots/05-replay-row.png"><img src="shots/05-replay-row.png" loading="lazy" alt="shots/05-replay-row.png"></a><figcaption>shots/05-replay-row.png</figcaption></figure></div>
+  
+</section>
+<section class="step" id="step-destructive-denied">
+  <h2>06 · 破坏性命令：审批拒绝 → 已拒绝行，无副作用 <span class="badge ok">PASS</span></h2>
+  <p class="meta">destructive-denied · 1855 ms · 2 条断言 · 2 张图</p>
+  
+  <table><thead><tr><th>断言</th><th>结果</th><th>实际</th><th>期望</th></tr></thead><tbody>
+<tr class="">
+  <td>refusal is a durable command row</td>
+  <td>PASS</td>
+  <td><code>refused</code></td>
+  <td><code>&quot;refused&quot;</code></td>
+</tr>
+<tr class="">
+  <td>denied command never ran the tool</td>
+  <td>PASS</td>
+  <td><code>0</code></td>
+  <td><code>0</code></td>
+</tr>
+</tbody></table>
+  <div class="shots"><figure><a href="shots/06-destructive-pending.png"><img src="shots/06-destructive-pending.png" loading="lazy" alt="shots/06-destructive-pending.png"></a><figcaption>shots/06-destructive-pending.png</figcaption></figure>
+<figure><a href="shots/07-destructive-refused.png"><img src="shots/07-destructive-refused.png" loading="lazy" alt="shots/07-destructive-refused.png"></a><figcaption>shots/07-destructive-refused.png</figcaption></figure></div>
+  <details><summary>结构化细节</summary><pre>{
+  &quot;expectedConsole&quot;: [
+    &quot;Failed to load resource: the server responded with a status of 403 (Forbidden)&quot;
+  ]
+}</pre></details>
+</section>
+<section class="step" id="step-destructive-approved">
+  <h2>07 · 破坏性命令：审批允许 → 只执行一次并给出结果 <span class="badge ok">PASS</span></h2>
+  <p class="meta">destructive-approved · 1285 ms · 1 条断言 · 1 张图</p>
+  
+  <table><thead><tr><th>断言</th><th>结果</th><th>实际</th><th>期望</th></tr></thead><tbody>
+<tr class="">
+  <td>approved command executed exactly once</td>
+  <td>PASS</td>
+  <td><code>1</code></td>
+  <td><code>1</code></td>
+</tr>
+</tbody></table>
+  <div class="shots"><figure><a href="shots/08-destructive-result.png"><img src="shots/08-destructive-result.png" loading="lazy" alt="shots/08-destructive-result.png"></a><figcaption>shots/08-destructive-result.png</figcaption></figure></div>
+  
+</section>
+<section class="step" id="step-viewports">
+  <h2>08 · 4.5 视觉：390/768/1024/1440 目录与表单无横向溢出 <span class="badge ok">PASS</span></h2>
+  <p class="meta">viewports · 8135 ms · 8 条断言 · 9 张图</p>
+  
+  <table><thead><tr><th>断言</th><th>结果</th><th>实际</th><th>期望</th></tr></thead><tbody>
+<tr class="">
+  <td>catalog-390: no horizontal overflow</td>
+  <td>PASS</td>
+  <td><code>[object Object]</code></td>
+  <td><code>{&quot;docScrollWidth&quot;:&quot;&lt;= innerWidth&quot;}</code></td>
+</tr>
+<tr class="">
+  <td>form-390: no horizontal overflow</td>
+  <td>PASS</td>
+  <td><code>[object Object]</code></td>
+  <td><code>{&quot;docScrollWidth&quot;:&quot;&lt;= innerWidth&quot;}</code></td>
+</tr>
+<tr class="">
+  <td>catalog-768: no horizontal overflow</td>
+  <td>PASS</td>
+  <td><code>[object Object]</code></td>
+  <td><code>{&quot;docScrollWidth&quot;:&quot;&lt;= innerWidth&quot;}</code></td>
+</tr>
+<tr class="">
+  <td>form-768: no horizontal overflow</td>
+  <td>PASS</td>
+  <td><code>[object Object]</code></td>
+  <td><code>{&quot;docScrollWidth&quot;:&quot;&lt;= innerWidth&quot;}</code></td>
+</tr>
+<tr class="">
+  <td>catalog-1024: no horizontal overflow</td>
+  <td>PASS</td>
+  <td><code>[object Object]</code></td>
+  <td><code>{&quot;docScrollWidth&quot;:&quot;&lt;= innerWidth&quot;}</code></td>
+</tr>
+<tr class="">
+  <td>form-1024: no horizontal overflow</td>
+  <td>PASS</td>
+  <td><code>[object Object]</code></td>
+  <td><code>{&quot;docScrollWidth&quot;:&quot;&lt;= innerWidth&quot;}</code></td>
+</tr>
+<tr class="">
+  <td>catalog-1440: no horizontal overflow</td>
+  <td>PASS</td>
+  <td><code>[object Object]</code></td>
+  <td><code>{&quot;docScrollWidth&quot;:&quot;&lt;= innerWidth&quot;}</code></td>
+</tr>
+<tr class="">
+  <td>form-1440: no horizontal overflow</td>
+  <td>PASS</td>
+  <td><code>[object Object]</code></td>
+  <td><code>{&quot;docScrollWidth&quot;:&quot;&lt;= innerWidth&quot;}</code></td>
+</tr>
+</tbody></table>
+  <div class="shots"><figure><a href="shots/09-catalog-390.png"><img src="shots/09-catalog-390.png" loading="lazy" alt="shots/09-catalog-390.png"></a><figcaption>shots/09-catalog-390.png</figcaption></figure>
+<figure><a href="shots/10-form-390.png"><img src="shots/10-form-390.png" loading="lazy" alt="shots/10-form-390.png"></a><figcaption>shots/10-form-390.png</figcaption></figure>
+<figure><a href="shots/11-catalog-768.png"><img src="shots/11-catalog-768.png" loading="lazy" alt="shots/11-catalog-768.png"></a><figcaption>shots/11-catalog-768.png</figcaption></figure>
+<figure><a href="shots/12-form-768.png"><img src="shots/12-form-768.png" loading="lazy" alt="shots/12-form-768.png"></a><figcaption>shots/12-form-768.png</figcaption></figure>
+<figure><a href="shots/13-catalog-1024.png"><img src="shots/13-catalog-1024.png" loading="lazy" alt="shots/13-catalog-1024.png"></a><figcaption>shots/13-catalog-1024.png</figcaption></figure>
+<figure><a href="shots/14-form-1024.png"><img src="shots/14-form-1024.png" loading="lazy" alt="shots/14-form-1024.png"></a><figcaption>shots/14-form-1024.png</figcaption></figure>
+<figure><a href="shots/15-catalog-1440.png"><img src="shots/15-catalog-1440.png" loading="lazy" alt="shots/15-catalog-1440.png"></a><figcaption>shots/15-catalog-1440.png</figcaption></figure>
+<figure><a href="shots/16-form-1440.png"><img src="shots/16-form-1440.png" loading="lazy" alt="shots/16-form-1440.png"></a><figcaption>shots/16-form-1440.png</figcaption></figure>
+<figure><a href="shots/17-workspace-final.png"><img src="shots/17-workspace-final.png" loading="lazy" alt="shots/17-workspace-final.png"></a><figcaption>shots/17-workspace-final.png</figcaption></figure></div>
+  <details><summary>结构化细节</summary><pre>{
+  &quot;overflow-catalog-390&quot;: {
+    &quot;innerWidth&quot;: 390,
+    &quot;docScrollWidth&quot;: 390,
+    &quot;bodyScrollWidth&quot;: 390
+  },
+  &quot;overflow-form-390&quot;: {
+    &quot;innerWidth&quot;: 390,
+    &quot;docScrollWidth&quot;: 390,
+    &quot;bodyScrollWidth&quot;: 390
+  },
+  &quot;overflow-catalog-768&quot;: {
+    &quot;innerWidth&quot;: 768,
+    &quot;docScrollWidth&quot;: 768,
+    &quot;bodyScrollWidth&quot;: 768
+  },
+  &quot;overflow-form-768&quot;: {
+    &quot;innerWidth&quot;: 768,
+    &quot;docScrollWidth&quot;: 768,
+    &quot;bodyScrollWidth&quot;: 768
+  },
+  &quot;overflow-catalog-1024&quot;: {
+    &quot;innerWidth&quot;: 1024,
+    &quot;docScrollWidth&quot;: 1024,
+    &quot;bodyScrollWidth&quot;: 1024
+  },
+  &quot;overflow-form-1024&quot;: {
+    &quot;innerWidth&quot;: 1024,
+    &quot;docScrollWidth&quot;: 1024,
+    &quot;bodyScrollWidth&quot;: 1024
+  },
+  &quot;overflow-catalog-1440&quot;: {
+    &quot;innerWidth&quot;: 1440,
+    &quot;docScrollWidth&quot;: 1440,
+    &quot;bodyScrollWidth&quot;: 1440
+  },
+  &quot;overflow-form-1440&quot;: {
+    &quot;innerWidth&quot;: 1440,
+    &quot;docScrollWidth&quot;: 1440,
+    &quot;bodyScrollWidth&quot;: 1440
+  }
+}</pre></details>
+</section>
+<section class="step" id="step-disable-uninstall">
+  <h2>09 · 停用/卸载插件：目录与执行入口一起撤销 <span class="badge ok">PASS</span></h2>
+  <p class="meta">disable-uninstall · 1340 ms · 4 条断言 · 2 张图</p>
+  
+  <table><thead><tr><th>断言</th><th>结果</th><th>实际</th><th>期望</th></tr></thead><tbody>
+<tr class="">
+  <td>disabled plugin commands are gone</td>
+  <td>PASS</td>
+  <td><code></code></td>
+  <td><code>[]</code></td>
+</tr>
+<tr class="">
+  <td>UI no longer draws the disabled commands</td>
+  <td>PASS</td>
+  <td><code>compact</code></td>
+  <td><code>[]</code></td>
+</tr>
+<tr class="">
+  <td>execution entry is 404 after disable</td>
+  <td>PASS</td>
+  <td><code>404</code></td>
+  <td><code>404</code></td>
+</tr>
+<tr class="">
+  <td>uninstall keeps the command gone</td>
+  <td>PASS</td>
+  <td><code>compact</code></td>
+  <td><code>[&quot;compact&quot;]</code></td>
+</tr>
+</tbody></table>
+  <div class="shots"><figure><a href="shots/18-catalog-after-disable.png"><img src="shots/18-catalog-after-disable.png" loading="lazy" alt="shots/18-catalog-after-disable.png"></a><figcaption>shots/18-catalog-after-disable.png</figcaption></figure>
+<figure><a href="shots/19-after-uninstall.png"><img src="shots/19-after-uninstall.png" loading="lazy" alt="shots/19-after-uninstall.png"></a><figcaption>shots/19-after-uninstall.png</figcaption></figure></div>
+  
+</section>
+
+<div class="card">
+  <h2>浏览器诊断</h2>
+  <h3>console error</h3>
+  <p class="muted">无 console error。</p>
+  <h3>page error</h3>
+  <p class="muted">无 page error。</p>
+  <h3>失败请求</h3>
+  <p class="muted">无失败请求（favicon 除外）。</p>
+  <p class="muted">kill -9 步骤的 checkpoint 读取失败请求是预期错误态；它由步骤内的断言与截图确认。</p>
+</div>
+
+<div class="card">
+  <h2>TUI 降级验证</h2>
+  <p class="muted">同一份 TSX 在 <code>nsh test --target tui</code> 的终端宿主上验证：分区可进入、生效策略是一句可读文本、收窄与恢复可操作。TUI 证据是测试日志（终端 cell 不是位图）。</p>
+  <p class="muted">本次未运行 TUI 测试。</p>
+</div>
+
+<div class="card">
+  <h2>范围与限制</h2>
+  <ul>
+    <li>自动压缩、手动压缩、requestId 幂等回放、kill -9 重启恢复与策略收窄均在真实 PG + 本地 <code>keel serve</code> 上执行。</li>
+    <li>无权限 UI 态用拦截 <code>/v1/auth/whoami</code> 的只读身份展示；服务端 403 另由无 <code>session.read</code> 的 Bot key 实测断言。</li>
+    <li>501/503「未接线」态没有单独制造：生产 <code>serve</code> 始终装配策略服务；网络断开错误态已覆盖同一错误块与重试。</li>
+    <li>未部署公网；报告与截图只在本机 <code>.agents/reports</code>，不入库。</li>
+  </ul>
+</div>
+</main>
+</body>
+</html>

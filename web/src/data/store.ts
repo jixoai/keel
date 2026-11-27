@@ -3,10 +3,16 @@
 // the data layer talks to fetch. The fixture transport exists for development
 // only (`?fixture=1` on the page, `host.params.fixture` elsewhere): a failed
 // connection is an offline face with a retry, never a demo standing in for it.
-import { host, signal } from "nsh";
+import { host, platform, signal } from "nsh";
 import { createCoreEngine, type CoreEngine } from "./core";
 import { FixtureClient } from "./fixture";
 import { KeelApiError, KeelHttp, errorMessageOf, type FetchLike } from "./http";
+import {
+  applyTargetAvailability,
+  commandFieldErrors,
+  commandStatusLabel,
+  commandTargetFor,
+} from "./commands";
 import { setEffectivePermissions, resetPermissions } from "./permissions";
 import { playApprovalCue } from "./sound";
 import type { AuthSessionView, WhoAmI } from "./identity";
@@ -17,6 +23,11 @@ import type {
   AttachmentRef,
   CheckpointPolicyUpdate,
   CheckpointPolicyView,
+  CommandApi,
+  CommandCatalogView,
+  CommandExecutionView,
+  CommandRunOutcome,
+  CommandTarget,
   ConnectionState,
   ConversationView,
   DecisionView,
@@ -145,8 +156,20 @@ type Client = SettingsApi &
    * events the chat core consumes (the decision journal is not a kernel event
    * kind). Optional: a transport without it keeps only streamed decisions. */
   decisions?(sessionId: string): Promise<DecisionView[]>;
+  /** The chat command surface (change keel-plugin-commands). Optional: a
+   * transport without it shows the catalog-error state instead of a fake row. */
+  commandCatalog?(sessionId: string, target: CommandTarget): Promise<CommandCatalogView>;
+  executeCommand?(
+    sessionId: string,
+    name: string,
+    args: Record<string, unknown>,
+    requestId: string,
+  ): Promise<CommandExecutionView>;
   tail?(sessionId: string, lastSeq: number, count?: number): Promise<WireEvent[]>;
 };
+
+/** The command surface alone, for a test harness (`setCommandTransport`). */
+type CommandTransport = CommandApi;
 
 /** The plugin/trigger read seam (`GET /v1/plugins`, `GET /v1/triggers`). The
  * harness answers it so the plugins page's 403 face is exercised through the
@@ -450,6 +473,22 @@ class KeelStore {
   readonly completionError = signal<string | null>(null);
   readonly completionSession = signal<string | null>(null);
 
+  // ---- chat commands (change keel-plugin-commands) -----------------------
+
+  /** The open session's catalog, the surface it was read for, and the five
+   * faces the menu draws (loading/empty/error/permission/success). The catalog
+   * is the only command list the client renders. */
+  readonly commandCatalog = signal<CommandCatalogView | null>(null);
+  readonly commandCatalogSession = signal<string | null>(null);
+  readonly commandCatalogTarget = signal<CommandTarget>(
+    commandTargetFor(platform.idiom, platform.os),
+  );
+  readonly commandCatalogLoading = signal(false);
+  readonly commandCatalogError = signal<string | null>(null);
+  readonly commandCatalogErrorStatus = signal<number | null>(null);
+  /** The requestId of the invocation in flight (one at a time from this UI). */
+  readonly commandExecuting = signal<string | null>(null);
+
   readonly plugins = signal<PluginsView | null>(null);
   readonly pluginsLoading = signal(false);
   readonly pluginsError = signal<string | null>(null);
@@ -482,6 +521,21 @@ class KeelStore {
    * so the page's five states and write feedback run through the real store).
    * `null` uses the app's transport. */
   private superagentClient: SuperagentApi | null = null;
+  /** Test/host seam for the command surface (the states harness answers the
+   * catalog/execution in memory). `null` uses the app's transport. */
+  private commandClient: CommandTransport | null = null;
+  /** The argument document of every requestId still able to run (a destructive
+   * command awaiting its decision). Never logged; dropped at terminal state. */
+  private commandRequests = new Map<string, { name: string; args: Record<string, unknown> }>();
+  /** decisionId → the requestId whose replay it authorizes. Answering the
+   * decision resumes the same command with the same requestId. */
+  private commandDecisionRequests = new Map<string, string>();
+  /** decisionId → busy-replay attempts (a turn started while the question was
+   * open; approval never bypasses the idle rule). */
+  private commandReplayAttempts = new Map<string, number>();
+  /** The catalog read generation: a late answer for a previous session/target
+   * must not draw into the current menu. */
+  private commandCatalogToken = 0;
   /** Bumped per boot probe; a probe that loses the race must not overwrite a
    * stage a caller (a harness, a reconnect) has since decided. */
   private detectToken = 0;
@@ -1595,6 +1649,280 @@ class KeelStore {
     }
   }
 
+  // ---- chat commands (change keel-plugin-commands) -----------------------
+
+  /** The transport the command surface reads: the harness seam, or the app's
+   * own client when it offers the methods. `null` = unsupported transport. */
+  private commandApi(): CommandTransport | null {
+    if (this.commandClient) return this.commandClient;
+    const client = this.client;
+    const catalog = client.commandCatalog?.bind(client);
+    const execute = client.executeCommand?.bind(client);
+    if (!catalog || !execute) return null;
+    return { commandCatalog: catalog, executeCommand: execute };
+  }
+
+  /** The target this client renders: web, terminal or a native host. */
+  commandTarget(): CommandTarget {
+    return commandTargetFor(platform.idiom, platform.os);
+  }
+
+  /**
+   * Read the open session's command catalog. Cached per (session, target);
+   * `force` re-reads after a lifecycle change (a plugin installed/disabled,
+   * a terminal failure that may have changed availability). A cached catalog
+   * stays visible while a refresh is in flight, so the menu never flashes
+   * empty on its own.
+   */
+  async loadCommands(options: { force?: boolean } = {}): Promise<void> {
+    const sessionId = this.activeId();
+    const target = this.commandTarget();
+    if (!sessionId) {
+      this.commandCatalog.set(null);
+      this.commandCatalogSession.set(null);
+      this.commandCatalogError.set(null);
+      this.commandCatalogErrorStatus.set(null);
+      return;
+    }
+    if (
+      !options.force &&
+      this.commandCatalogSession() === sessionId &&
+      this.commandCatalogTarget() === target &&
+      (this.commandCatalog() !== null || this.commandCatalogLoading())
+    ) {
+      return;
+    }
+    const token = ++this.commandCatalogToken;
+    this.commandCatalogTarget.set(target);
+    this.commandCatalogLoading.set(true);
+    this.commandCatalogError.set(null);
+    this.commandCatalogErrorStatus.set(null);
+    const api = this.commandApi();
+    if (!api) {
+      this.commandCatalog.set(null);
+      this.commandCatalogSession.set(sessionId);
+      this.commandCatalogLoading.set(false);
+      this.commandCatalogError.set("当前传输不支持命令目录");
+      this.commandCatalogErrorStatus.set(501);
+      return;
+    }
+    try {
+      const catalog = await api.commandCatalog(sessionId, target);
+      if (token !== this.commandCatalogToken || this.activeId() !== sessionId) return;
+      this.commandCatalog.set(applyTargetAvailability(catalog, target));
+      this.commandCatalogSession.set(sessionId);
+    } catch (error) {
+      if (token !== this.commandCatalogToken || this.activeId() !== sessionId) return;
+      const status = error instanceof KeelApiError ? error.status : null;
+      // A failed REFRESH keeps the last good catalog on screen (with the error
+      // beside it); only a first load with nothing to show is the bare error
+      // face. The menu never flashes empty because a retry failed.
+      this.commandCatalogSession.set(sessionId);
+      this.commandCatalogErrorStatus.set(status);
+      this.commandCatalogError.set(
+        status === 403
+          ? errorMessageOf(error)
+          : `命令目录读取失败：${errorMessageOf(error)}`,
+      );
+    } finally {
+      if (token === this.commandCatalogToken) this.commandCatalogLoading.set(false);
+    }
+  }
+
+  /** Reset the catalog when the session boundary moves. */
+  private resetCommands(): void {
+    this.commandCatalogToken += 1;
+    this.commandCatalog.set(null);
+    this.commandCatalogSession.set(null);
+    this.commandCatalogError.set(null);
+    this.commandCatalogErrorStatus.set(null);
+    this.commandCatalogLoading.set(false);
+    this.commandExecuting.set(null);
+    this.commandRequests.clear();
+    this.commandDecisionRequests.clear();
+    this.commandReplayAttempts.clear();
+  }
+
+  /**
+   * Execute one command. The requestId is the idempotency identity: a
+   * destructive command's 202 is replayed with the SAME id after its decision
+   * is answered (`resumeCommandDecision`), which is what makes the host execute
+   * it once. Field-level 400s are returned as `fields` for the form.
+   */
+  async runCommand(
+    name: string,
+    args: Record<string, unknown> = {},
+    options: { requestId?: string } = {},
+  ): Promise<CommandRunOutcome> {
+    const sessionId = this.activeId();
+    const requestId = options.requestId ?? `cmd_${newRequestId()}`;
+    if (!sessionId) {
+      return { status: "error", requestId, message: "先选择一个会话再执行命令。" };
+    }
+    if (this.commandExecuting()) {
+      return { status: "error", requestId, message: "另一个命令正在执行，等它完成后再试。" };
+    }
+    const api = this.commandApi();
+    if (!api) {
+      return { status: "error", requestId, message: "当前传输不支持命令执行。" };
+    }
+    this.commandExecuting.set(requestId);
+    this.commandRequests.set(requestId, { name, args });
+    try {
+      const result = await api.executeCommand(sessionId, name, args, requestId);
+      if (this.activeId() !== sessionId) {
+        return { status: "ok", requestId, result };
+      }
+      if (result.status === "pending_decision" || result.pending) {
+        if (result.decisionId) this.commandDecisionRequests.set(result.decisionId, requestId);
+        // The durable journal is where the approval card comes from; the
+        // command's own streamed row already says 等待审批.
+        void this.syncDecisions(sessionId);
+        return { status: "pending", requestId, result };
+      }
+      this.finishCommandRequest(requestId);
+      if (result.status !== "ok") {
+        return {
+          status: "error",
+          requestId,
+          result,
+          message: result.error || `命令${commandStatusLabel(result.status)}`,
+          code: result.errorCode,
+        };
+      }
+      // A plugin command may have changed its availability; refresh lazily so
+      // the next menu open tells the truth.
+      void this.loadCommands({ force: true });
+      return { status: "ok", requestId, result };
+    } catch (error) {
+      const status = error instanceof KeelApiError ? error.status : undefined;
+      const issues = error instanceof KeelApiError ? error.issues : [];
+      const fields = commandFieldErrors(issues);
+      const code = error instanceof KeelApiError ? error.code : undefined;
+      const message = this.commandErrorMessage(name, error, status, code, Object.keys(fields).length > 0);
+      // A 202 decision may be answered later only while the row is pending; a
+      // terminal refusal/timeout/cancel means this requestId is done. A busy
+      // replay is the one 409 that can settle: the decision is answered and
+      // the same requestId may run once the active turn settles, so it keeps
+      // its argument document (bounded retries live in resumeCommandDecision).
+      const awaitingDecision = [...this.commandDecisionRequests.values()].includes(requestId);
+      const busyReplay = awaitingDecision && (code === "session_busy" || code === "command_in_progress");
+      if (
+        status !== undefined &&
+        [403, 408, 409, 404, 503, 502, 500].includes(status) &&
+        !busyReplay
+      ) {
+        this.finishCommandRequest(requestId);
+      }
+      if (code === "plugin_unavailable" || status === 502 || status === 503) {
+        void this.loadCommands({ force: true });
+      }
+      return {
+        status: "error",
+        requestId,
+        message,
+        ...(code ? { code } : {}),
+        ...(Object.keys(fields).length ? { fields } : {}),
+        ...(status !== undefined ? { statusCode: status } : {}),
+        ...(error instanceof KeelApiError && error.requiredKey
+          ? { requiredKey: error.requiredKey }
+          : {}),
+      };
+    } finally {
+      if (this.commandExecuting() === requestId) {
+        this.commandExecuting.set(null);
+      }
+    }
+  }
+
+  /** Forget a terminal requestId's stored document and decision link. */
+  private finishCommandRequest(requestId: string): void {
+    this.commandRequests.delete(requestId);
+    for (const [decisionId, linked] of this.commandDecisionRequests) {
+      if (linked === requestId) this.commandDecisionRequests.delete(decisionId);
+    }
+  }
+
+  /** The sentence a failed invocation shows. Stable codes win over a generic
+   * status sentence; the server's message is appended when it adds detail. */
+  private commandErrorMessage(
+    name: string,
+    error: unknown,
+    status: number | undefined,
+    code: string | undefined,
+    hasFields: boolean,
+  ): string {
+    if (hasFields) return "命令参数不合法，请按字段提示修改。";
+    switch (code) {
+      case "session_busy":
+        return "会话正忙：当前任务结束后再执行命令。";
+      case "unknown_command":
+        return `命令 /${name} 不在当前目录中。`;
+      case "permission_denied":
+        return `没有执行 /${name} 的权限。`;
+      case "decision_refused":
+        return "审批被拒绝，命令没有执行。";
+      case "decision_timeout":
+        return "审批超时，命令没有执行。";
+      case "decision_cancelled":
+        return "审批已取消，命令没有执行。";
+      case "plugin_unavailable":
+        return "插件当前不可用，命令没有执行。";
+      case "tool_error":
+        return "命令执行失败（工具错误）。";
+      case "not_wired":
+        return "此部署未接通命令执行。";
+      case "compaction_disabled":
+        return "压缩策略已关闭，无法手动压缩。";
+      case "compaction_conflict":
+        return "当前上下文无法安全压缩。";
+      case "quota_exceeded":
+        return "运行配额已用尽，命令没有执行。";
+      case "request_id_conflict":
+        return "requestId 已用于另一条命令或参数。";
+      case "command_in_progress":
+        return "同一 requestId 的命令仍在执行。";
+      default:
+        break;
+    }
+    if (status === 403) {
+      return error instanceof KeelApiError && error.requiredKey
+        ? `权限不足：需要 ${error.requiredKey}`
+        : `没有执行 /${name} 的权限。`;
+    }
+    if (status === 409) return `命令冲突：${errorMessageOf(error)}`;
+    return `命令执行失败：${errorMessageOf(error)}`;
+  }
+
+  /**
+   * The replay a destructive command's answered decision authorizes: the same
+   * requestId, the same arguments, exactly one execution. Called after the
+   * answer was accepted; a denied answer replays too (the host answers 403 and
+   * records the refusal), so the row is terminal either way.
+   */
+  private resumeCommandDecision(decisionId: string): void {
+    const requestId = this.commandDecisionRequests.get(decisionId);
+    if (!requestId) return;
+    const request = this.commandRequests.get(requestId);
+    if (!request) {
+      this.commandDecisionRequests.delete(decisionId);
+      return;
+    }
+    void this.runCommand(request.name, request.args, { requestId }).then((outcome) => {
+      if (outcome.status === "pending") return;
+      if (outcome.status === "error" && outcome.code === "session_busy") {
+        const attempts = (this.commandReplayAttempts.get(decisionId) ?? 0) + 1;
+        if (attempts <= 5) {
+          this.commandReplayAttempts.set(decisionId, attempts);
+          setTimeout(() => this.resumeCommandDecision(decisionId), 2_000 * attempts) as unknown as number;
+          return;
+        }
+      }
+      this.commandReplayAttempts.delete(decisionId);
+      this.commandDecisionRequests.delete(decisionId);
+    });
+  }
+
   // ---- plugins & triggers -------------------------------------------------
 
   async loadPlugins() {
@@ -1800,6 +2128,12 @@ class KeelStore {
     this.superagentClient = client;
   }
 
+  /** Test/host seam: answer the command catalog/execution without a network.
+   * `null` restores the app's own transport. */
+  setCommandTransport(client: CommandTransport | null): void {
+    this.commandClient = client;
+  }
+
   /** The super-agent board transport in force, or null when this transport
    * does not serve the surface (the page then says so instead of rendering
    * invented rows). The fixture and `KeelHttp` both implement it. */
@@ -1955,6 +2289,7 @@ class KeelStore {
     if (this.activeId() === sessionId) return;
     const token = ++this.openToken;
     this.closeStream();
+    this.resetCommands();
     this.activeId.set(sessionId);
     // The session's own model selection (kept in memory while the app runs).
     this.sessionSelection.set(this.sessionSelections.get(sessionId) ?? null);
@@ -2138,6 +2473,7 @@ class KeelStore {
   closeSession() {
     this.openToken += 1;
     this.closeStream();
+    this.resetCommands();
     this.activeId.set(null);
     this.conversation.set(null);
     this.partial.set(undefined);
@@ -2339,6 +2675,9 @@ class KeelStore {
     try {
       await this.client.commands(sessionId).answerDecision(decisionId, answer);
       this.engine?.answerDecisionLocal(decisionId, answer);
+      // A destructive command's question is answered: replay the SAME
+      // requestId so the host executes it once (or records the refusal).
+      this.resumeCommandDecision(decisionId);
     } catch (error) {
       this.answered.delete(decisionId);
       this.notice.set({ tone: "danger", text: `提交答案失败：${messageOf(error)}` });

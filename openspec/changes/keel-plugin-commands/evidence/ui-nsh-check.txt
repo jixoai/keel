@@ -1,0 +1,2 @@
+the Rust crate nsh-extra: built already (/Users/kzf/.nsh/target/debug/nsh-app-nsh-extra-describe)
+ info nsh::check no type errors in /Users/kzf/Dev/GitHub/jixoai/fde2e/.worktrees/keel-plugin-commands-ui/web

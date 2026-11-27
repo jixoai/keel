@@ -31,14 +31,16 @@
 // so the app cannot bind Escape over it, and the dialog layer hears nothing
 // to close on. A one-press close needs the native command to give Escape up
 // (a prop or an nsh change), which this screen cannot do.
-import { keymap, openUrl, platform, signal, View, windowSize } from "nsh";
+import { cleanup, effect, keymap, openUrl, platform, signal, View, windowSize } from "nsh";
 import type { CommandItem } from "../ui/kit";
 import { Command, Dialog, Empty, EmptyDescription, EmptyTitle, space } from "../ui/kit";
 import { store } from "../data/store";
 import { can } from "../data/permissions";
+import { commandAvailabilityText, commandNeedsForm, commandUsesFreeText } from "../data/commands";
 import { sessionTitle } from "../ui/session-title";
 import { pluginPaletteEntries, pluginSlots, type PluginActionHandlers } from "../plugins";
 import { openModelPicker } from "./model-picker";
+import { launchCommand } from "./composer-commands";
 
 /** Whether the palette is up. Module-level like the app's other overlay
  * signals (`pickerOpen`, `deleteRequest`), so the shortcut and any future
@@ -67,6 +69,7 @@ const CLOSE_SETTLE_MS = 400;
 const GROUP = {
   sessions: "会话",
   tasks: "任务",
+  commands: "命令",
   model: "模型",
   settings: "设置",
   plugins: "插件",
@@ -139,6 +142,54 @@ const pluginHandlers = (): PluginActionHandlers => ({
   notice: (text) => store.flash({ tone: "info", text }),
 });
 
+/** The command section: the same session catalog the Composer's `/` menu
+ * reads. A command with arguments hands off to the Composer (its generated
+ * form); a no-argument command runs through the same store route here. */
+const commandActions = (): PaletteAction[] => {
+  const status = (label: string): PaletteAction[] => [
+    {
+      item: {
+        id: "command:status",
+        label,
+        keywords: ["命令", "command", "斜杠", "/"],
+        group: GROUP.commands,
+        disabled: true,
+      },
+      run: () => {},
+    },
+  ];
+  if (!store.activeId() || store.route() !== "workspace") {
+    return status("命令：先选择一个会话");
+  }
+  const catalog = store.commandCatalog();
+  if (!catalog) {
+    if (store.commandCatalogError()) {
+      return status("命令：目录读取失败，打开输入框的 / 菜单重试");
+    }
+    return status(store.commandCatalogLoading() ? "命令：正在读取…" : "命令：输入 / 打开目录");
+  }
+  if (catalog.commands.length === 0) return status("命令：当前会话没有可用命令");
+  return catalog.commands.map((command) => ({
+    item: {
+      id: `command:${command.name}`,
+      label: command.available
+        ? `/${command.name}  ${command.summary}`
+        : `/${command.name}（不可用：${commandAvailabilityText(command)}）`,
+      keywords: [command.summary, command.source, "命令", "command"],
+      group: GROUP.commands,
+      disabled: !command.available,
+    },
+    run: () => {
+      if (!command.available) return;
+      if (commandNeedsForm(command) || commandUsesFreeText(command)) {
+        launchCommand(command.name);
+        return;
+      }
+      void store.runCommand(command.name, {});
+    },
+  }));
+};
+
 /** Every row, from the one source: the store's sessions first (its own order),
  * then the model picker, the settings page and the plugin page. */
 const paletteActions = (openSession: OpenPaletteSession): PaletteAction[] => {
@@ -156,6 +207,7 @@ const paletteActions = (openSession: OpenPaletteSession): PaletteAction[] => {
   }));
   return [
     ...sessions,
+    ...commandActions(),
     {
       item: {
         id: "model:session",
@@ -238,6 +290,17 @@ export function CommandPalette(props: {
   // platforms and Control elsewhere.
   keymap.bind("mod+k", () => openPalette());
 
+  // Opening the palette refreshes the session's command catalog: a plugin
+  // installed/disabled meanwhile is in step on the next open. The Composer's
+  // `/` menu reads the same signal.
+  effect(() => {
+    if (!paletteOpen()) return;
+    const sessionId = store.activeId();
+    if (!sessionId) return;
+    const timer = setTimeout(() => void store.loadCommands({ force: true }), 0);
+    cleanup(() => clearTimeout(timer));
+  });
+
   // The row chosen while the modal goes. On the web a modal owns a browser
   // history entry, and the close steps back over it — the host reports the
   // previous URL, and the store's route listener follows it. A route action
@@ -286,7 +349,7 @@ export function CommandPalette(props: {
         // command's own cancel both end at the same flag. With a query the
         // native command clears it first (the header note).
         onCancel={closePalette}
-        placeholder="搜索会话、模型、设置或插件…"
+        placeholder="搜索会话、命令、模型、设置或插件…"
         accessibilityLabel="命令面板"
         searchAccessibilityLabel="搜索命令"
         maxHeight={listCap()}
@@ -296,7 +359,7 @@ export function CommandPalette(props: {
         empty={
           <Empty accessibilityLabel="没有匹配的命令">
             <EmptyTitle label="没有匹配的命令" />
-            <EmptyDescription label="换个关键词试试：会话、模型、设置、插件。" />
+            <EmptyDescription label="换个关键词试试：会话、命令、模型、设置、插件。" />
           </Empty>
         }
         // The Dialog is the card; a standalone Command draws its own surface.

@@ -5,6 +5,7 @@
 // injected by the host.
 
 export type {
+  CommandInvocationView,
   ConnectionState,
   ConversationView,
   DecisionView,
@@ -70,12 +71,15 @@ export {
 
 export {
   parseAssistantMessage,
+  parseCommandInvoked,
   parseCompaction,
   parseDecision,
   parseRunFinished,
   parseToolResult,
   parseUserMessage,
+  type CommandStatus,
   type ParsedAssistantMessage,
+  type ParsedCommandInvoked,
   type ParsedCompaction,
   type ParsedDecision,
   type ParsedRunFinished,
