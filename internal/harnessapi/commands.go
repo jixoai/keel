@@ -126,6 +126,9 @@ type CommandInvocationStore interface {
 // deployment contributes no plugin commands (builtins and skills still work).
 type CommandPluginRegistry interface {
 	ListCommands() harnessext.CommandRegistry
+	// TenantID is the tenant this live registry is bound to. The catalog and
+	// the execution route refuse a registry bound to another tenant.
+	TenantID() uuid.UUID
 }
 
 // CommandSkills is the skill catalog and loader behind `/skill:<name>`.
@@ -535,13 +538,8 @@ func commandSchemaJSON(schema map[string]any) json.RawMessage {
 // resolve an execution for it.
 func (s *Server) commandPluginsForTenant(tenantID uuid.UUID) CommandPluginRegistry {
 	registry := s.cfg.CommandPlugins
-	if registry == nil {
+	if registry == nil || registry.TenantID() != tenantID {
 		return nil
-	}
-	if bound, ok := registry.(interface{ TenantID() uuid.UUID }); ok {
-		if bound.TenantID() != tenantID {
-			return nil
-		}
 	}
 	return registry
 }

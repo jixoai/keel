@@ -26,6 +26,7 @@ import type {
   CommandApi,
   CommandCatalogView,
   CommandExecutionView,
+  CommandLocalOutcome,
   CommandRunOutcome,
   CommandTarget,
   ConnectionState,
@@ -157,7 +158,7 @@ const COMMAND_DECISION_POLL_MS = 1_000;
 /** A lost/5xx command answer is replayed with the same requestId. */
 const COMMAND_RESEND_MS = 1_500;
 const COMMAND_MAX_RESEND_ATTEMPTS = 3;
-const COMMAND_MAX_BUSY_RETRIES = 5;
+const COMMAND_MAX_BUSY_RETRIES = 3;
 
 /** Everything the store's transport must answer. The identity/access surface
  * (A4.3/A4.4a) is optional: a transport that predates it answers nothing, and
@@ -533,6 +534,11 @@ class KeelStore {
   readonly commandCatalogErrorStatus = signal<number | null>(null);
   /** The requestId of the invocation in flight (one at a time from this UI). */
   readonly commandExecuting = signal<string | null>(null);
+  /** Local (non-durable) command failures by requestId: a request-phase 4xx
+   * before a claim, a revoked permission/plugin, or an exhausted busy retry.
+   * The row overlays its status with this outcome; it is never written to the
+   * ledger. Cleared by a later successful replay or logout. */
+  readonly commandLocalOutcomes = signal<Record<string, CommandLocalOutcome>>({});
 
   readonly plugins = signal<PluginsView | null>(null);
   readonly pluginsLoading = signal(false);
@@ -1714,6 +1720,48 @@ class KeelStore {
     return commandTargetFor(platform.idiom, platform.os);
   }
 
+  /** The local failure overlay for a requestId, when one exists. */
+  commandLocalOutcome(requestId: string): CommandLocalOutcome | undefined {
+    return this.commandLocalOutcomes()[requestId];
+  }
+
+  private setCommandLocalOutcome(requestId: string, outcome: CommandLocalOutcome): void {
+    this.commandLocalOutcomes.update((map) => ({ ...map, [requestId]: outcome }));
+  }
+
+  private clearCommandLocalOutcome(requestId: string): void {
+    const current = this.commandLocalOutcomes();
+    if (!(requestId in current)) return;
+    const next = { ...current };
+    delete next[requestId];
+    this.commandLocalOutcomes.set(next);
+  }
+
+  /** A failure that produced no durable command.invoked row. It must be
+   * visible: forgetting it silently would make the UI claim a command simply
+   * vanished. The event row (when a 202 had created one) renders this overlay.
+   */
+  private markCommandLocalFailure(
+    record: PendingCommandRecord,
+    error: unknown,
+    status: number | undefined,
+    code: string | undefined,
+  ): void {
+    this.setCommandLocalOutcome(record.requestId, {
+      status: "error",
+      ...(code ? { errorCode: code } : {}),
+      error: this.commandErrorMessage(record.name, error, status, code, false),
+      local: true,
+    });
+    if (this.activeId() === record.sessionId) {
+      this.flash({ tone: "danger", text: this.commandErrorMessage(record.name, error, status, code, false) });
+    }
+  }
+
+  private commandErrorIsDurable(error: unknown): boolean {
+    return error instanceof KeelApiError && typeof error.eventSeq === "number" && error.eventSeq > 0;
+  }
+
   /**
    * Read the open session's command catalog. Cached per (session, target);
    * `force` re-reads after a lifecycle change (a plugin installed/disabled,
@@ -1868,6 +1916,7 @@ class KeelStore {
   }
 
   private rememberPending(record: PendingCommandRecord): void {
+    this.clearCommandLocalOutcome(record.requestId);
     this.pendingCommands.set(this.pendingKey(record.sessionId, record.requestId), record);
     this.persistPending();
     this.watchPending(record);
@@ -2006,6 +2055,7 @@ class KeelStore {
         return;
       }
       this.forgetPending(record);
+      this.clearCommandLocalOutcome(record.requestId);
       if (this.activeId() === record.sessionId) {
         // The durable command.invoked row is the feedback; a second toast would
         // outlive an approval and read as a second outcome.
@@ -2023,22 +2073,50 @@ class KeelStore {
           this.schedulePendingResend(record, COMMAND_RESEND_MS);
           return;
         }
-      }
-      if ((code === "session_busy" || code === "command_in_progress") && attempts <= COMMAND_MAX_BUSY_RETRIES) {
-        this.schedulePendingResend(record, 2_000 * attempts);
+        // Retries exhausted with no answer: the command's outcome is unknown.
+        // Do not claim a durable row; surface the local failure explicitly.
+        this.forgetPending(record);
+        this.setCommandLocalOutcome(record.requestId, {
+          status: "error",
+          errorCode: code ?? "transport_error",
+          error: "连接中断，命令结果未知；请检查会话后重新执行。",
+          local: true,
+        });
+        if (this.activeId() === record.sessionId) {
+          this.flash({ tone: "danger", text: "连接中断，命令结果未知；请检查会话后重新执行。" });
+        }
         return;
       }
-      this.forgetPending(record);
-      // A typed 4xx is already a durable command.invoked row (refused,
-      // timed_out, cancelled); only an untyped transport/5xx failure with no
-      // row left needs a notice.
-      const typedTerminal = status !== undefined && status >= 400 && status < 500;
-      if (!typedTerminal && this.activeId() === record.sessionId) {
-        this.flash({
-          tone: "danger",
-          text: this.commandErrorMessage(record.name, error, status, code, false),
+      if (code === "session_busy" || code === "command_in_progress") {
+        if (attempts <= COMMAND_MAX_BUSY_RETRIES) {
+          this.schedulePendingResend(record, 1_000 * attempts);
+          return;
+        }
+        this.forgetPending(record);
+        this.setCommandLocalOutcome(record.requestId, {
+          status: "error",
+          errorCode: code,
+          error: "会话持续繁忙，命令仍未执行；请稍后重新执行。",
+          local: true,
         });
+        if (this.activeId() === record.sessionId) {
+          this.flash({ tone: "danger", text: "会话持续繁忙，命令仍未执行；请稍后重新执行。" });
+        }
+        return;
       }
+      const durable = this.commandErrorIsDurable(error);
+      this.forgetPending(record);
+      if (durable) {
+        // The server wrote a terminal command.invoked row; the transcript is
+        // the feedback and no local overlay is needed.
+        this.clearCommandLocalOutcome(record.requestId);
+        if (this.activeId() === record.sessionId) void this.loadCommands({ force: true });
+        return;
+      }
+      // A request-phase refusal (403/404/409 before ClaimCommandInvocation) has
+      // no command.invoked row. Keep it visible and never pretend it is durable.
+      this.markCommandLocalFailure(record, error, status, code);
+      if (this.activeId() === record.sessionId) void this.loadCommands({ force: true });
     } finally {
       this.pendingReplayInFlight.delete(key);
     }
@@ -2057,6 +2135,7 @@ class KeelStore {
     this.pendingReplayAttempts.clear();
     this.pendingResendAttempts.clear();
     this.pendingReplayInFlight.clear();
+    this.commandLocalOutcomes.set({});
     this.persistPending();
   }
 
@@ -2109,6 +2188,7 @@ class KeelStore {
       this.forgetPending(this.pendingCommands.get(this.pendingKey(sessionId, requestId)) ?? {
         sessionId, requestId, name, args, decisionId: "", timeoutMs: 0, deadline: 0, createdAt: 0,
       });
+      this.clearCommandLocalOutcome(requestId);
       if (result.status !== "ok") {
         return {
           status: "error",
@@ -2149,12 +2229,22 @@ class KeelStore {
       }
       const pending = this.pendingCommands.get(this.pendingKey(sessionId, requestId));
       if (pending && (code === "session_busy" || code === "command_in_progress")) {
-        this.schedulePendingResend(pending, 2_000);
+        this.schedulePendingResend(pending, 1_000);
         return { status: "error", requestId, message, code, fields, statusCode: status };
       }
       this.forgetPending(pending ?? {
         sessionId, requestId, name, args, decisionId: "", timeoutMs: 0, deadline: 0, createdAt: 0,
       });
+      const durable = this.commandErrorIsDurable(error);
+      if (durable) this.clearCommandLocalOutcome(requestId);
+      else {
+        this.setCommandLocalOutcome(requestId, {
+          status: "error",
+          ...(code ? { errorCode: code } : {}),
+          error: message,
+          local: true,
+        });
+      }
       if (code === "plugin_unavailable" || status === 502 || status === 503) {
         void this.loadCommands({ force: true });
       }

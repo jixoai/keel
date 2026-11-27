@@ -1,0 +1,7 @@
+--- FAIL: TestCommandPGDestructiveRowPersistsDecision (0.21s)
+    commands_pg_test.go:223: destructive open = 404 map[code:unknown_command error:unknown command]
+--- FAIL: TestCommandPGDestructiveApprovedConcurrentReplay (0.04s)
+    commands_pg_test.go:261: destructive open = 404 map[code:unknown_command error:unknown command]
+FAIL
+FAIL	github.com/jixoai/keel/internal/harnessapi	0.835s
+FAIL

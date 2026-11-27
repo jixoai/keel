@@ -177,6 +177,13 @@ provides:
   仍按既有 `compaction` 事件呈现。
 - `command.invoked` 是审计/投影行，不进入模型上下文；会话事实仍以事件日志为准，命令
   MUST NOT 伪造 user/assistant 事件，`/compact` 只产生既有 compaction 事件。
+- **target 只决定目录展示**：执行路由不接收 `target`；客户端 MUST NOT 执行
+  `target_unsupported` 的行，但 target 不是授权边界（授权仍由 session/命令权限决定）。
+- **客户端持久化边界**：服务端审计不存参数正文，因此未决 destructive 命令的
+  requestId/args 只能由发起客户端保存。web 端 MAY 写入本 tab 的 `sessionStorage`
+  以支持切会话/刷新后的同 requestId 重放；MUST 在终态、登出/401 清除，MUST NOT
+  写入日志、审计或跨用户共享。标签页永久关闭且无其他持有者时，该命令在服务端保持
+  pending（无参数可执行），这是审计约束的已知边界。
 
 ## 8. 权限、租户与安全
 

@@ -68,9 +68,10 @@ const waitFor = async (predicate: () => boolean, timeoutMs = 5000): Promise<void
 function fakeTransport(options: {
   calls: Call[];
   decisionStatus: () => DecisionView["status"];
+  decisionId?: string;
   onExecute: (call: Call, attempt: number) => Promise<CommandExecutionView>;
 }): CommandApi {
-  let decisionId = "dec-1";
+  const decisionId = options.decisionId ?? "dec-1";
   return {
     commandCatalog: async (): Promise<CommandCatalogView> => ({ commands: [], truncated: false }),
     executeCommand: async (sessionId, name, args, requestId) => {
@@ -131,7 +132,16 @@ test("pending: 决策超时自动重放一次 → timed_out，不会永久 pendi
     decisionStatus: () => status,
     onExecute: async (call, attempt) => {
       if (attempt === 1) return pendingResult("dec-1", 100);
-      throw new KeelApiError(408, "the destructive command's decision timed out", [], undefined, "decision_timeout");
+      throw new KeelApiError(
+        408,
+        "the destructive command's decision timed out",
+        [],
+        undefined,
+        "decision_timeout",
+        {},
+        undefined,
+        7,
+      );
     },
   });
   store.setCommandTransport(api);
@@ -210,6 +220,131 @@ test("pending: 本客户端点击允许 → answerDecision 立即用原 requestI
     store.resetCommandStateForTest();
     store.useHTTPForTest(null);
     delete (globalThis as { sessionStorage?: MemoryStorage }).sessionStorage;
+  }
+});
+
+test("pending: 审批后 403 无审计行 → 本地错误可见，不静默丢弃", async () => {
+  const storage = installStorage();
+  store.resetCommandStateForTest();
+  store.activeId.set("session-a");
+  const calls: Call[] = [];
+  const api = fakeTransport({
+    calls,
+    decisionId: "dec-403",
+    decisionStatus: () => "open",
+    onExecute: async (call, attempt) => {
+      if (attempt === 1) return pendingResult("dec-403");
+      throw new KeelApiError(403, "permission denied", [], undefined, "permission_denied");
+    },
+  });
+  const http = new KeelHttp("http://keel.test", async () =>
+    new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } }),
+  );
+  store.useHTTPForTest(http);
+  store.setCommandTransport(api);
+  try {
+    const outcome = await store.runCommand("e2e.commands:purge", { confirm: true });
+    await store.answerDecision("dec-403", "allow");
+    await waitFor(() => calls.length >= 2, 3000);
+    const local = store.commandLocalOutcome(outcome.requestId);
+    expect(local?.local).toBe(true);
+    expect(local?.errorCode).toBe("permission_denied");
+    expect(local?.error).toContain("权限");
+    await waitFor(() => storage.getItem("keel.commands.pending.v1") === null, 2000);
+  } finally {
+    store.resetCommandStateForTest();
+    store.useHTTPForTest(null);
+    delete (globalThis as { sessionStorage?: MemoryStorage }).sessionStorage;
+  }
+});
+
+test("pending: 插件卸载/未知命令 404 → 本地错误可见，不静默丢弃", async () => {
+  installStorage();
+  store.resetCommandStateForTest();
+  store.activeId.set("session-a");
+  const calls: Call[] = [];
+  const api = fakeTransport({
+    calls,
+    decisionId: "dec-404",
+    decisionStatus: () => "open",
+    onExecute: async (call, attempt) => {
+      if (attempt === 1) return pendingResult("dec-404");
+      throw new KeelApiError(404, "unknown command", [], undefined, "unknown_command");
+    },
+  });
+  const http = new KeelHttp("http://keel.test", async () =>
+    new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } }),
+  );
+  store.useHTTPForTest(http);
+  store.setCommandTransport(api);
+  try {
+    const outcome = await store.runCommand("e2e.commands:purge", {});
+    await store.answerDecision("dec-404", "allow");
+    await waitFor(() => calls.length >= 2, 3000);
+    const local = store.commandLocalOutcome(outcome.requestId);
+    expect(local?.errorCode).toBe("unknown_command");
+    expect(local?.error).toContain("不在当前目录");
+  } finally {
+    store.resetCommandStateForTest();
+    store.useHTTPForTest(null);
+    delete (globalThis as { sessionStorage?: MemoryStorage }).sessionStorage;
+  }
+});
+
+test("pending: 忙等重试耗尽 → 中文错误可见，可重新执行", async () => {
+  const storage = installStorage();
+  store.resetCommandStateForTest();
+  store.activeId.set("session-a");
+  const calls: Call[] = [];
+  const api = fakeTransport({
+    calls,
+    decisionId: "dec-busy",
+    decisionStatus: () => "open",
+    onExecute: async (call, attempt) => {
+      if (attempt === 1) return pendingResult("dec-busy");
+      throw new KeelApiError(409, "session is busy", [], undefined, "session_busy");
+    },
+  });
+  const http = new KeelHttp("http://keel.test", async () =>
+    new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } }),
+  );
+  store.useHTTPForTest(http);
+  store.setCommandTransport(api);
+  try {
+    const outcome = await store.runCommand("e2e.commands:purge", {});
+    await store.answerDecision("dec-busy", "allow");
+    await waitFor(() => calls.length >= 5, 12000);
+    const local = store.commandLocalOutcome(outcome.requestId);
+    expect(local?.errorCode).toBe("session_busy");
+    expect(local?.error).toContain("会话持续繁忙");
+    await waitFor(() => storage.getItem("keel.commands.pending.v1") === null, 2000);
+  } finally {
+    store.resetCommandStateForTest();
+    store.useHTTPForTest(null);
+    delete (globalThis as { sessionStorage?: MemoryStorage }).sessionStorage;
+  }
+});
+
+test("pending: 初始 403（未产生审计行）也留下本地错误", async () => {
+  installStorage();
+  store.resetCommandStateForTest();
+  store.activeId.set("session-a");
+  const calls: Call[] = [];
+  const api = fakeTransport({
+    calls,
+    decisionStatus: () => "open",
+    onExecute: async () => {
+      throw new KeelApiError(403, "permission denied", [], undefined, "permission_denied");
+    },
+  });
+  store.setCommandTransport(api);
+  try {
+    const outcome = await store.runCommand("e2e.commands:purge", {});
+    expect(outcome.status).toBe("error");
+    await waitFor(() => store.commandLocalOutcome(outcome.requestId) !== undefined, 1000);
+    expect(store.commandLocalOutcome(outcome.requestId)?.local).toBe(true);
+  } finally {
+    store.resetCommandStateForTest();
   }
 });
 

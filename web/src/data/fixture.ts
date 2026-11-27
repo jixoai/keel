@@ -1154,13 +1154,43 @@ export class FixtureClient implements SettingsApi {
   }
 
   private terminalCommandError(invocation: FixtureCommandInvocation): KeelApiError {
+    // A terminal invocation already appended a command.invoked projection;
+    // the error carries its seq so the client knows the durable row exists
+    // (the same distinction the real host makes).
     switch (invocation.status) {
       case "refused":
-        return new KeelApiError(403, "the destructive command was refused", [], undefined, "decision_refused");
+        return new KeelApiError(
+          403,
+          "the destructive command was refused",
+          [],
+          undefined,
+          "decision_refused",
+          {},
+          undefined,
+          1,
+        );
       case "timed_out":
-        return new KeelApiError(408, "the destructive command's decision timed out", [], undefined, "decision_timeout");
+        return new KeelApiError(
+          408,
+          "the destructive command's decision timed out",
+          [],
+          undefined,
+          "decision_timeout",
+          {},
+          undefined,
+          1,
+        );
       case "cancelled":
-        return new KeelApiError(409, "the destructive command's decision was cancelled", [], undefined, "decision_cancelled");
+        return new KeelApiError(
+          409,
+          "the destructive command's decision was cancelled",
+          [],
+          undefined,
+          "decision_cancelled",
+          {},
+          undefined,
+          1,
+        );
       default:
         return new KeelApiError(
           502,
@@ -1168,6 +1198,9 @@ export class FixtureClient implements SettingsApi {
           [],
           undefined,
           invocation.result?.errorCode || "tool_error",
+          {},
+          undefined,
+          1,
         );
     }
   }

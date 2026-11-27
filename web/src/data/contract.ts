@@ -255,6 +255,19 @@ export interface CommandRunOutcome {
   requiredKey?: string;
 }
 
+/** A command failure the client observed before/without a durable
+ * `command.invoked` row (a request-phase 403/404, a permission/plugin change,
+ * an exhausted busy retry). It overlays the row/session for display only; the
+ * server ledger remains the audit truth. */
+export interface CommandLocalOutcome {
+  /** The outcome to render in place of the event row's status. */
+  status: string;
+  errorCode?: string;
+  error: string;
+  /** Always true: this outcome has no durable command.invoked row. */
+  local: true;
+}
+
 /** The transport seam a command surface reads (KeelHttp and the fixture both
  * implement it; a test harness can answer it in memory). */
 export interface CommandApi {

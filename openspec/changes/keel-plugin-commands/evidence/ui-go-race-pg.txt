@@ -1,0 +1,12 @@
+=== RUN   TestCommandPGTenantBoundaryAndAudit
+--- PASS: TestCommandPGTenantBoundaryAndAudit (0.21s)
+=== RUN   TestCommandPGConcurrentRequestID
+--- PASS: TestCommandPGConcurrentRequestID (0.14s)
+=== RUN   TestCommandPGDestructiveRowPersistsDecision
+--- PASS: TestCommandPGDestructiveRowPersistsDecision (0.06s)
+=== RUN   TestCommandPGDestructiveApprovedConcurrentReplay
+--- PASS: TestCommandPGDestructiveApprovedConcurrentReplay (0.26s)
+=== RUN   TestCommandPGReclaimsExpiredRunningLease
+--- PASS: TestCommandPGReclaimsExpiredRunningLease (0.27s)
+PASS
+ok  	github.com/jixoai/keel/internal/harnessapi	2.372s

@@ -207,8 +207,9 @@ export function commandWord(draft: string): CommandWord | null {
  *     (the rest of the draft is its free-text remainder).
  *
  * Only the FIRST token is a command word. A slash in prose (`请看 /compact`)
- * is not a command, and an unknown first token is not one either (it stays a
- * plain message; `/learn` is handled before this function by the composer).
+ * is not a command. An unknown first token returns null here; the Composer
+ * MUST treat a first-token slash as a blocked command attempt (show why), not
+ * as a plain prompt. `/learn` is handled before this function by the Composer.
  */
 export function commandDraft(draft: string, commands: readonly CommandView[]): CommandDraft | null {
   if (!draft.startsWith("/")) return null;

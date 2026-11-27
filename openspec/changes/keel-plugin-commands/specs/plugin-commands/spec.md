@@ -162,7 +162,10 @@ web 与 TUI MUST 使用同一服务端目录、同一命令名解析与同一执
 MUST NOT 猜测参数。命令面板 MUST 增加“命令”分组，与 Composer 使用同一目录。界面 MUST
 覆盖加载、空、错误、无权限、成功五态；`targets` 不含当前目标的命令 MUST 显示不可用原因，
 MUST NOT 静默隐藏。执行结果 MUST 以 `command.invoked` 行呈现，MUST NOT 伪装成
-user/assistant 消息。
+user/assistant 消息。`targets` 只决定目录中的可用性，执行路由不接收 target，target
+MUST NOT 被当作授权边界。客户端 MAY 为本标签页的未决 destructive 命令持久化
+requestId 与 args 以支持切会话/刷新后的同 requestId 重放；MUST 在终态、登出或 401
+时清除，MUST NOT 写入日志或审计；服务端审计仍只保存参数哈希与长度。
 
 #### Scenario: 两端同序
 

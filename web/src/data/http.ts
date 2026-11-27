@@ -172,6 +172,10 @@ export class KeelApiError extends Error {
   /** The server's request id (`X-Request-ID`), when the edge answered one. A
    * failed page prints it so a reader can quote it to the administrator. */
   readonly requestId: string | undefined;
+  /** The durable `command.invoked` seq this failure wrote, when the server
+   * recorded one. Zero/absent means the request was refused before a command
+   * row existed; the client must not treat that as a durable outcome. */
+  readonly eventSeq: number | undefined;
   constructor(
     status: number,
     message: string,
@@ -180,6 +184,7 @@ export class KeelApiError extends Error {
     code?: string,
     detail: KeelErrorDetail = {},
     requestId?: string,
+    eventSeq?: number,
   ) {
     super(message);
     this.status = status;
@@ -191,6 +196,7 @@ export class KeelApiError extends Error {
     this.scope = detail.scope;
     this.retryAfterSeconds = detail.retryAfterSeconds;
     this.requestId = requestId;
+    this.eventSeq = eventSeq;
   }
 }
 
@@ -359,6 +365,7 @@ async function readErrorBody(
   issues: SettingsIssue[];
   revision: number | undefined;
   code: string | undefined;
+  eventSeq: number | undefined;
   detail: KeelErrorDetail;
 }> {
   const issues: SettingsIssue[] = [];
@@ -368,6 +375,7 @@ async function readErrorBody(
   let reason: string | undefined;
   let requiredKey: string | undefined;
   let scope: string | undefined;
+  let eventSeq: number | undefined;
   try {
     const text = await response.text();
     try {
@@ -380,6 +388,9 @@ async function readErrorBody(
       issues.push(...issueList(body.fields));
       if (typeof body.revision === "number" && Number.isFinite(body.revision)) revision = body.revision;
       if (typeof body.code === "string" && body.code) code = body.code;
+      if (typeof body.eventSeq === "number" && Number.isFinite(body.eventSeq) && body.eventSeq > 0) {
+        eventSeq = body.eventSeq;
+      }
       if (typeof body.reason === "string" && body.reason) reason = body.reason;
       if (typeof body.requiredKey === "string" && body.requiredKey) requiredKey = body.requiredKey;
       if (typeof body.key === "string" && body.key) requiredKey = requiredKey ?? body.key;
@@ -397,6 +408,7 @@ async function readErrorBody(
     issues,
     revision,
     code,
+    eventSeq,
     detail: {
       reason,
       requiredKey,
@@ -1040,9 +1052,9 @@ export class KeelHttp implements SettingsApi {
       headers: this.headersFor(init, method),
     });
     if (!response.ok) {
-      const { message, issues, revision, code, detail } = await readErrorBody(response);
+      const { message, issues, revision, code, eventSeq, detail } = await readErrorBody(response);
       const requestId = response.headers.get("x-request-id") ?? response.headers.get("x-keel-request-id") ?? undefined;
-      const error = new KeelApiError(response.status, message, issues, revision, code, detail, requestId ?? undefined);
+      const error = new KeelApiError(response.status, message, issues, revision, code, detail, requestId ?? undefined, eventSeq);
       // A 401 from a real endpoint is the session ending. Login/bootstrap 401s
       // are credential answers for the form, and a password change's 401 is the
       // current password being wrong: neither may throw the reader out.

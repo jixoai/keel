@@ -1,0 +1,14 @@
+✓ src/data/commands.pending.test.ts › pending: 切走后另一客户端允许审批 → 同 requestId 只执行一次 (2.2s)
+✓ src/data/commands.pending.test.ts › pending: 决策超时自动重放一次 → timed_out，不会永久 pending (1.7s)
+✓ src/data/commands.pending.test.ts › pending: 丢掉 202 响应 → 同 requestId 重发并接回审批 (2.5s)
+✓ src/data/commands.pending.test.ts › pending: 本客户端点击允许 → answerDecision 立即用原 requestId 重放 (2ms)
+✗ src/data/commands.pending.test.ts › pending: 审批后 403 无审计行 → 本地错误可见，不静默丢弃 (0ms)
+    expected undefined to be true
+    at <anonymous> (src/data/commands.pending.test.ts:250:31)
+✗ src/data/commands.pending.test.ts › pending: 插件卸载/未知命令 404 → 本地错误可见，不静默丢弃 (0ms)
+    expected undefined to be "unknown_command"
+    at <anonymous> (src/data/commands.pending.test.ts:285:30)
+✓ src/data/commands.pending.test.ts › pending: 忙等重试耗尽 → 中文错误可见，可重新执行 (6.0s)
+✓ src/data/commands.pending.test.ts › pending: 初始 403（未产生审计行）也留下本地错误 (0ms)
+✓ src/data/commands.pending.test.ts › pending: 重载后从 sessionStorage 恢复并用原参数重放 (1.0s)
+error 9 tests: 7 passed, 2 failed (13.6s)

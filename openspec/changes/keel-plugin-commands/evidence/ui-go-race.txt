@@ -1,5 +1,7 @@
-ok  	github.com/jixoai/keel/internal/pluginpkg	(cached)
-ok  	github.com/jixoai/keel/internal/harnessext	(cached)
-ok  	github.com/jixoai/keel/internal/harnessapi	(cached)
-ok  	github.com/jixoai/keel/internal/access	(cached)
-ok  	github.com/jixoai/keel/internal/toolsurface	(cached)
+# KEEL_TEST_DSN=<local throwaway PostgreSQL; password not recorded> go test -race -count=1 ./internal/pluginpkg ./internal/harnessext ./internal/harnessapi ./internal/access ./internal/toolsurface
+ok  	github.com/jixoai/keel/internal/pluginpkg	1.547s
+ok  	github.com/jixoai/keel/internal/harnessext	31.257s
+ok  	github.com/jixoai/keel/internal/harnessapi	25.440s
+ok  	github.com/jixoai/keel/internal/access	1.359s
+ok  	github.com/jixoai/keel/internal/toolsurface	1.773s
+exit=0

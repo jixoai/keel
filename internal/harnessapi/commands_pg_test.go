@@ -62,7 +62,7 @@ func newCommandPGHarness(t *testing.T, mutate ...func(*Config)) *commandPGHarnes
 	compact := &fakeCompact{result: CompactResult{CheckpointID: 11, Performed: true, TokensBefore: 50, TokensAfter: 5}}
 	broker := harnessext.NewDecisionBroker(harnessext.DecisionBrokerOptions{Logger: testLogger()})
 	t.Cleanup(broker.Close)
-	plugins := &fakeCommandPlugins{}
+	plugins := &fakeCommandPlugins{tenantID: tenant}
 	tools := &fakeCommandTools{result: json.RawMessage(`{"ok":true}`)}
 	cfg := Config{
 		Access: commandAccess(),

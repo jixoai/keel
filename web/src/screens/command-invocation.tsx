@@ -39,8 +39,10 @@ const copiedRow = signal<string | null>(null);
 
 export function CommandInvocationRow(props: { invocation: () => CommandInvocationView }) {
   const row = () => props.invocation();
+  const local = () => store.commandLocalOutcome(row().requestId);
+  const status = () => local()?.status ?? row().status;
   const detail = () => commandResultDetail(row().data);
-  const errorText = () => commandErrorText(row().errorCode, row().error);
+  const errorText = () => local()?.error ?? commandErrorText(row().errorCode, row().error);
   const copyText = () => detail() || errorText();
   const expanded = () => !!expandedRows()[row().requestId];
   const toggleExpanded = () => {
@@ -62,18 +64,18 @@ export function CommandInvocationRow(props: { invocation: () => CommandInvocatio
       },
     );
   };
-  const pending = () => row().status === "pending_decision" || row().status === "running";
+  const pending = () => status() === "pending_decision" || status() === "running";
   const failed = () =>
-    row().status === "error" ||
-    row().status === "refused" ||
-    row().status === "timed_out" ||
-    row().status === "cancelled";
+    status() === "error" ||
+    status() === "refused" ||
+    status() === "timed_out" ||
+    status() === "cancelled";
   const summary = () => commandResultSummary(row().data);
   return (
     <Card
       size="sm"
       testID={`command-invocation-${row().requestId}`}
-      accessibilityLabel={`命令 /${row().command} ${commandStatusLabel(row().status)}`}
+      accessibilityLabel={`命令 /${row().command} ${commandStatusLabel(status())}`}
     >
       <View style={{ gap: space.sm }}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm, flexWrap: "wrap" }}>
@@ -94,11 +96,19 @@ export function CommandInvocationRow(props: { invocation: () => CommandInvocatio
             accessibilityLabel={`来源 ${cleanDisplayText(commandSourceLabel(row().source))}`}
           />
           <Badge
-            variant={commandStatusTone(row().status)}
-            label={commandStatusLabel(row().status)}
-            accessibilityLabel={`状态 ${commandStatusLabel(row().status)}`}
+            variant={commandStatusTone(status())}
+            label={commandStatusLabel(status())}
+            accessibilityLabel={`状态 ${commandStatusLabel(status())}`}
             testID={`command-invocation-status-${row().requestId}`}
           />
+          <If when={!!local()}>
+            <Badge
+              variant="outline"
+              label="本地记录"
+              accessibilityLabel="本地错误：该请求未产生审计行"
+              testID={`command-invocation-local-${row().requestId}`}
+            />
+          </If>
           <If when={!!formatDuration(row().durationMs)}>
             <Text
               style={{
@@ -193,7 +203,7 @@ export function CommandInvocationRow(props: { invocation: () => CommandInvocatio
               color: color.info,
             }}
           >
-            {row().status === "pending_decision"
+            {status() === "pending_decision"
               ? "等待审批：允许后自动执行一次；拒绝或超时都不产生副作用。"
               : "命令正在执行。"}
           </Text>

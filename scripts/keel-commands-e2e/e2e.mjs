@@ -569,6 +569,9 @@ async function main() {
   await openSession(page, sessionId);
   await typeDraft(page, '/');
   await page.waitForSelector('[data-testid="composer-commands"]', { timeout: 15000 });
+  // The menu mounts before its first catalog read settles; wait for the row
+  // (the assertion below then compares the rendered order, not a loading face).
+  await page.waitForSelector('[data-testid="composer-commands-row-compact"]', { timeout: 15000 });
   const before = await catalog(sessionId, 'web');
   check('builtin catalog has compact', before.commands.some((row) => row.name === 'compact' && row.source === 'builtin'), before.commands.map((row) => row.name), ['compact']);
   check('no plugin command before install', !before.commands.some((row) => row.source === 'plugin'), before.commands.filter((row) => row.source === 'plugin').map((row) => row.name), []);

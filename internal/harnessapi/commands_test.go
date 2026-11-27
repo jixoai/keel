@@ -828,6 +828,10 @@ func TestCommandSessionWriteRequired(t *testing.T) {
 func TestCommandPluginRegistryIsTenantBound(t *testing.T) {
 	harness := newCommandHarness(t, nil)
 	harness.addPluginCommands(pluginCommandFixture("vendor.one", "refresh", pluginpkg.DangerWrite, true, ""))
+	// Positive: the manager's own tenant sees its command.
+	if code, catalog := harness.catalog(t, ""); code != http.StatusOK || len(catalog.Commands) == 0 {
+		t.Fatalf("same-tenant catalog = %d %+v", code, catalog.Commands)
+	}
 	// The same server answering tenant A must not expose a manager bound to B.
 	harness.plugins.tenantID = uuid.New()
 	code, catalog := harness.catalog(t, "")
