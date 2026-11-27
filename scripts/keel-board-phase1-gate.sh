@@ -20,11 +20,13 @@ if [ -z "${KEEL_TEST_DSN:-}" ]; then
 fi
 mkdir -p "$(dirname "$evidence")"
 cd "$repo_root"
+failures=0
 
 section() { printf '\n## %s\n\n' "$1" >>"$evidence"; }
 # block records a command's output and exit status without aborting the rest of
-# the evidence run. A failing gate (for example the 2048 KiB binary-size budget)
-# must be visible in the report, not stop it.
+# the evidence run. A failing command (a test, vet, or the binary-size budget)
+# must be visible in the report, and the script exits non-zero at the end: an
+# evidence generator that always returns 0 is not a gate.
 block() {
   local status
   {
@@ -36,6 +38,9 @@ block() {
     printf '```\n'
     printf 'exit=%d\n' "$status"
   } >>"$evidence" 2>&1
+  if [ "$status" -ne 0 ]; then
+    failures=$((failures + 1))
+  fi
 }
 
 cat >"$evidence" <<EOF
@@ -71,4 +76,8 @@ block go vet ./...
 section "Binary size (keel + runtime, linux/amd64+arm64, 2048 KiB budget)"
 block scripts/binary-size.sh --budget-kb 2048 --base "$base_ref"
 
+if [ "$failures" -ne 0 ]; then
+  printf 'keel-board-phase1-gate: %d command(s) failed; see %s\n' "$failures" "$evidence" >&2
+  exit 1
+fi
 printf '\nEvidence written to %s\n' "$evidence"

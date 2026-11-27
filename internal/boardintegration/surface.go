@@ -187,6 +187,7 @@ func New(ctx context.Context, opts Options) (*Surface, error) {
 	surface := &Surface{
 		handler: &handler{
 			next:   server,
+			board:  board,
 			owners: owners,
 			sse:    &sseHandler{next: server, heartbeat: opts.Heartbeat, lifetime: opts.StreamLifetime, logger: opts.Logger},
 			logger: opts.Logger,
@@ -317,6 +318,24 @@ func openError(what string, err error, dsn string) error {
 		}
 	}
 	return fmt.Errorf("boardintegration: %s: %s", what, text)
+}
+
+// RoleBypassesRLS reports whether the board DSN's current role is a superuser
+// or has BYPASSRLS. Both bypass FORCE ROW LEVEL SECURITY; a deployment using
+// one still works, but its board tables are not protected at the database layer.
+// The caller logs a warning and does not refuse to start.
+func RoleBypassesRLS(ctx context.Context, dsn string) (bool, error) {
+	conn, err := pgx.Connect(ctx, dsn)
+	if err != nil {
+		return false, err
+	}
+	defer conn.Close(context.Background())
+	var bypass bool
+	if err := conn.QueryRow(ctx,
+		`SELECT rolsuper OR rolbypassrls FROM pg_roles WHERE rolname = current_user`).Scan(&bypass); err != nil {
+		return false, err
+	}
+	return bypass, nil
 }
 
 // DisabledHandler answers every board path with 404 board_disabled. It is the

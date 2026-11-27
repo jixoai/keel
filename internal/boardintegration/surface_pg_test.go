@@ -220,6 +220,166 @@ func TestBoardHTTPIdentityRBACAndCrossTenant(t *testing.T) {
 	}
 }
 
+// TestBoardManageDoesNotBypassChannelRead proves board.manage is tenant
+// administration, not a content grant: the manager can run the projection
+// check but cannot read or write a channel without a relation.
+func TestBoardManageDoesNotBypassChannelRead(t *testing.T) {
+	env := newTestEnv(t, nil)
+	server := env.server()
+	if resp := env.do(t, server, "POST", "/v1/board/channels", "alice", map[string]any{"path": "work"}); resp.status != 201 {
+		t.Fatalf("create work: %d: %s", resp.status, resp.body)
+	}
+	if resp := env.do(t, server, "POST", "/v1/board/messages", "alice", map[string]any{"channel": "work", "text": "manager cannot read"}); resp.status != 201 {
+		t.Fatalf("seed message: %d", resp.status)
+	}
+	if resp := env.do(t, server, "GET", "/v1/board/messages?channel=work", "manager", nil); resp.status != 404 {
+		t.Fatalf("manager read = %d: %s", resp.status, resp.body)
+	}
+	if resp := env.do(t, server, "POST", "/v1/board/messages", "manager", map[string]any{"channel": "work", "text": "nope"}); resp.status != 404 {
+		t.Fatalf("manager write = %d: %s", resp.status, resp.body)
+	}
+	if resp := env.do(t, server, "POST", "/v1/board/admin/projection/check", "manager", map[string]any{}); resp.status != 200 {
+		t.Fatalf("manager admin check = %d: %s", resp.status, resp.body)
+	}
+}
+
+// TestBoardEditorCanClaim covers a successful claim by an editor relation (the
+// ordinary worker path), not only the owner/manage path.
+func TestBoardEditorCanClaim(t *testing.T) {
+	env := newTestEnv(t, nil)
+	server := env.server()
+	if resp := env.do(t, server, "POST", "/v1/board/channels", "alice", map[string]any{"path": "work"}); resp.status != 201 {
+		t.Fatalf("create work: %d", resp.status)
+	}
+	env.relation(env.tenant, "work", keelstore.RelationEditor, env.bob.record.ID)
+	task := env.do(t, server, "POST", "/v1/board/tasks", "alice", map[string]any{"channel": "work", "text": "claim by editor"})
+	var created struct {
+		Task protocol.MessageView `json:"task"`
+	}
+	env.decode(t, task, &created)
+	claim := env.do(t, server, "POST", "/v1/board/tasks/"+created.Task.ID+"/claim", "bob", map[string]any{})
+	var claimed struct {
+		Task  protocol.MessageView `json:"task"`
+		Claim protocol.TaskClaim   `json:"claim"`
+	}
+	env.decode(t, claim, &claimed)
+	if claimed.Claim.Token == "" || claimed.Task.Task == nil || claimed.Task.Task.State != "claimed" {
+		t.Fatalf("editor claim = %+v", claimed)
+	}
+	done := env.do(t, server, "POST", "/v1/board/tasks/"+created.Task.ID+"/complete", "bob",
+		map[string]any{"epoch": claimed.Claim.Epoch, "token": claimed.Claim.Token})
+	var completed struct {
+		Task protocol.MessageView `json:"task"`
+	}
+	env.decode(t, done, &completed)
+	if completed.Task.Task == nil || completed.Task.Task.State != "completed" {
+		t.Fatalf("editor complete = %+v", completed.Task.Task)
+	}
+}
+
+// TestBoardAuthorizeAnywhereUpload covers the upload seam: board.post or
+// board.sync may be authorized before a channel is named, while a read-only
+// caller is refused.
+func TestBoardAuthorizeAnywhereUpload(t *testing.T) {
+	env := newTestEnv(t, nil)
+	authorizer, err := NewAuthorizer(env.bridge, nil, env.surf.board, env.surf.logger)
+	if err != nil {
+		t.Fatalf("authorizer: %v", err)
+	}
+	for _, who := range []string{"alice", "bob", "manager"} {
+		ctx, actor := env.contextAndActor(who)
+		if err := authorizer.AuthorizeAnywhere(ctx, env.tenant.String(), actor, protocol.PermissionSync); err != nil {
+			t.Fatalf("AuthorizeAnywhere(%s) = %v, want allow", who, err)
+		}
+	}
+	ctx, actor := env.contextAndActor("carol")
+	if err := authorizer.AuthorizeAnywhere(ctx, env.tenant.String(), actor, protocol.PermissionSync); err == nil {
+		t.Fatal("AuthorizeAnywhere(carol) was allowed without board.write")
+	}
+}
+
+// TestBoardAuthorizerRejectsForgedActorAndForeignTenant pins the two identity
+// checks: a request cannot name another Account's Actor, and a board tenant
+// string cannot disagree with the authenticated principal's tenant.
+func TestBoardAuthorizerRejectsForgedActorAndForeignTenant(t *testing.T) {
+	env := newTestEnv(t, nil)
+	authorizer, err := NewAuthorizer(env.bridge, nil, env.surf.board, env.surf.logger)
+	if err != nil {
+		t.Fatalf("authorizer: %v", err)
+	}
+	ctx, aliceActor := env.contextAndActor("alice")
+	forged := protocol.Actor{
+		ID: AccountActorID(env.bob.record.ID), Principal: AccountActorID(env.bob.record.ID),
+		Kind: protocol.ActorPerson,
+	}
+	if err := authorizer.Authorize(ctx, env.tenant.String(), forged, "work", protocol.PermissionRead); err == nil {
+		t.Fatal("Authorize accepted an actor for another account")
+	}
+	if err := authorizer.ValidateRequest(ctx, env.other.String(), aliceActor); err == nil {
+		t.Fatal("ValidateRequest accepted a foreign tenant")
+	}
+	if err := authorizer.ValidateRequest(ctx, env.tenant.String(), forged); err == nil {
+		t.Fatal("ValidateRequest accepted an actor for another account")
+	}
+	profile := BotProfileToken(env.bot.ID)
+	humanWithProfile := aliceActor
+	humanWithProfile.Profile = &profile
+	if err := authorizer.ValidateRequest(ctx, env.tenant.String(), humanWithProfile); err == nil {
+		t.Fatal("ValidateRequest accepted a Bot profile on a human principal")
+	}
+}
+
+// TestBoardNoRelationDenialIsAudited covers P1-1: a private channel's read and
+// write are 404 to the caller, but each refusal is still permission.denied in
+// keel's auth_events (no body, no token).
+func TestBoardNoRelationDenialIsAudited(t *testing.T) {
+	env := newTestEnv(t, nil)
+	ctx := context.Background()
+	server := env.server()
+	if resp := env.do(t, server, "POST", "/v1/board/channels", "alice", map[string]any{"path": "private"}); resp.status != 201 {
+		t.Fatalf("create private: %d: %s", resp.status, resp.body)
+	}
+	// Bob holds board.read/write but deliberately has no relation on private.
+	if read := env.do(t, server, "GET", "/v1/board/messages?channel=private", "bob", nil); read.status != 404 {
+		t.Fatalf("private read = %d: %s", read.status, read.body)
+	}
+	if write := env.do(t, server, "POST", "/v1/board/messages", "bob", map[string]any{"channel": "private", "text": "PRIVATE-BODY"}); write.status != 404 {
+		t.Fatalf("private write = %d: %s", write.status, write.body)
+	}
+
+	events, err := env.st.ListAuthEvents(ctx, env.tenant, keelstore.AuthEventFilter{Kind: keelstore.AuthEventPermissionDenied}, 100)
+	if err != nil {
+		t.Fatalf("list auth events: %v", err)
+	}
+	found := 0
+	keys := map[string]bool{}
+	for _, event := range events {
+		if event.Detail["resource_id"] != "private" {
+			continue
+		}
+		if event.Detail["account_id"] != env.bob.record.ID.String() {
+			continue
+		}
+		if event.Detail["reason"] != string(access.ReasonMissingRelation) {
+			continue
+		}
+		found++
+		if key, ok := event.Detail["key"].(string); ok {
+			keys[key] = true
+		}
+		raw, _ := json.Marshal(event.Detail)
+		if strings.Contains(string(raw), "PRIVATE-BODY") {
+			t.Fatalf("denial audit leaked the message body: %s", raw)
+		}
+	}
+	if found < 2 {
+		t.Fatalf("no-relation denials audited = %d, want read and write", found)
+	}
+	if !keys[access.KeyBoardRead] || !keys[access.KeyBoardWrite] {
+		t.Fatalf("denial audit keys = %v, want board.read and board.write", keys)
+	}
+}
+
 // TestBoardCrossTenantAuthorizationIsNotReachable calls the authorizer with
 // another tenant directly: the edge principal's tenant is authoritative, so a
 // forged board tenant string must be refused before any relation is read.
@@ -361,6 +521,78 @@ func TestBoardDisabled(t *testing.T) {
 	resp := envDo(t, server, "GET", "/v1/board/channels")
 	if resp.status != 404 || !strings.Contains(string(resp.body), "board_disabled") {
 		t.Fatalf("disabled board = %d: %s", resp.status, resp.body)
+	}
+}
+
+// TestBoardImplicitChannelOwner covers the implicit creation path: a child
+// channel first seen by a root message under an editor parent is owned by that
+// message's creator, and the reconciler restores the relation after a crash
+// window. A top-level channel still needs the explicit create route.
+func TestBoardImplicitChannelOwner(t *testing.T) {
+	env := newTestEnv(t, nil)
+	ctx := context.Background()
+	server := env.server()
+	if resp := env.do(t, server, "POST", "/v1/board/channels", "alice", map[string]any{"path": "work"}); resp.status != 201 {
+		t.Fatalf("create work: %d: %s", resp.status, resp.body)
+	}
+	env.relation(env.tenant, "work", keelstore.RelationEditor, env.bob.record.ID)
+
+	// A top-level channel cannot be created by a message: explicit /channels is
+	// required, and no owner relation is written for the failed post.
+	if top := env.do(t, server, "POST", "/v1/board/messages", "bob", map[string]any{"channel": "top", "text": "top"}); top.status != 404 {
+		t.Fatalf("implicit top-level create = %d: %s", top.status, top.body)
+	}
+	if has, _ := env.st.HasResourceRelation(ctx, env.tenant, BoardChannelResourceType, "top", keelstore.RelationOwner, keelstore.RelationSubjectAccount, env.bob.record.ID.String()); has {
+		t.Fatal("a rejected top-level post wrote an owner relation")
+	}
+
+	// A child under work inherits Bob's editor relation; the first root makes
+	// Bob the child's owner.
+	child := env.do(t, server, "POST", "/v1/board/messages", "bob", map[string]any{"channel": "work/child", "text": "child root"})
+	if child.status != 201 {
+		t.Fatalf("implicit child create = %d: %s", child.status, child.body)
+	}
+	owned := func() bool {
+		has, err := env.st.HasResourceRelation(ctx, env.tenant, BoardChannelResourceType, "work/child", keelstore.RelationOwner, keelstore.RelationSubjectAccount, env.bob.record.ID.String())
+		return err == nil && has
+	}
+	if !owned() {
+		t.Fatal("the implicit child creator did not receive the owner relation")
+	}
+
+	// The same implicit path applies to a task's new thread.
+	if task := env.do(t, server, "POST", "/v1/board/tasks", "bob", map[string]any{"channel": "work/taskchild", "text": "task child"}); task.status != 201 {
+		t.Fatalf("implicit task child create = %d: %s", task.status, task.body)
+	}
+	if has, _ := env.st.HasResourceRelation(ctx, env.tenant, BoardChannelResourceType, "work/taskchild", keelstore.RelationOwner, keelstore.RelationSubjectAccount, env.bob.record.ID.String()); !has {
+		t.Fatal("the implicit task channel creator did not receive the owner relation")
+	}
+
+	// Simulate the crash window: the request-path write is lost, and the
+	// reconciler reconstructs it from the first message.posted root.
+	if err := env.st.DeleteResourceRelation(ctx, env.tenant, BoardChannelResourceType, "work/child", keelstore.RelationOwner, keelstore.RelationSubjectAccount, env.bob.record.ID.String()); err != nil {
+		t.Fatalf("delete implicit owner: %v", err)
+	}
+	env.surf.owners.scan(ctx)
+	if !owned() {
+		t.Fatal("the reconciler did not restore the implicit channel owner")
+	}
+
+	// A reply in the explicit work channel must not make Bob its owner.
+	if resp := env.do(t, server, "POST", "/v1/board/messages", "alice", map[string]any{"channel": "work", "text": "root for reply"}); resp.status != 201 {
+		t.Fatalf("work root: %d", resp.status)
+	}
+	var root struct {
+		Message protocol.MessageView `json:"message"`
+	}
+	posted := env.do(t, server, "POST", "/v1/board/messages", "alice", map[string]any{"channel": "work", "text": "another root"})
+	env.decode(t, posted, &root)
+	if reply := env.do(t, server, "POST", "/v1/board/messages", "bob", map[string]any{"re": root.Message.ID, "text": "a reply"}); reply.status != 201 {
+		t.Fatalf("reply = %d: %s", reply.status, reply.body)
+	}
+	env.surf.owners.scan(ctx)
+	if has, _ := env.st.HasResourceRelation(ctx, env.tenant, BoardChannelResourceType, "work", keelstore.RelationOwner, keelstore.RelationSubjectAccount, env.bob.record.ID.String()); has {
+		t.Fatal("a reply made its author a channel owner")
 	}
 }
 

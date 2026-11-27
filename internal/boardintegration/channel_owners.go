@@ -19,6 +19,7 @@ import (
 	"github.com/jixoai/keel/internal/accesswire"
 	"github.com/jixoai/keel/internal/store"
 
+	boardlog "github.com/jixoai/keel-board/log"
 	"github.com/jixoai/keel-board/protocol"
 )
 
@@ -28,6 +29,7 @@ import (
 // lifetime policy.
 type handler struct {
 	next   http.Handler
+	board  *boardlog.Board
 	owners *ChannelOwners
 	sse    *sseHandler
 	logger *slog.Logger
@@ -44,6 +46,10 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.Method == http.MethodPost && path == "/v1/board/channels" {
 		h.createChannel(w, r)
+		return
+	}
+	if r.Method == http.MethodPost && (path == "/v1/board/messages" || path == "/v1/board/tasks") {
+		h.createThreadRoot(w, r)
 		return
 	}
 	h.next.ServeHTTP(w, r)
@@ -83,6 +89,66 @@ func (h *handler) createChannel(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// createThreadRoot forwards a new thread (POST /messages or POST /tasks) and
+// records the channel's creator as owner when the target channel did not exist
+// before the request. Board v0.1.x does not emit channel.created for a channel
+// that first appears in message.posted; the board projection creates the
+// channel implicitly under a parent whose editor may post, and the reconciler
+// repairs the same fact from the first root message. A reply never creates a
+// channel.
+func (h *handler) createThreadRoot(w http.ResponseWriter, r *http.Request) {
+	body, readErr := io.ReadAll(io.LimitReader(r.Body, channelCreateBodyLimit+1))
+	r.Body = io.NopCloser(bytes.NewReader(body))
+	if readErr != nil || len(body) > channelCreateBodyLimit {
+		h.next.ServeHTTP(w, r)
+		return
+	}
+	var request struct {
+		Channel string  `json:"channel"`
+		Re      *string `json:"re"`
+	}
+	_ = json.Unmarshal(body, &request)
+	channel := strings.Trim(strings.TrimSpace(request.Channel), "/")
+	if request.Re != nil || channel == "" {
+		h.next.ServeHTTP(w, r)
+		return
+	}
+	principal, ok := EdgePrincipal(r)
+	if !ok {
+		h.next.ServeHTTP(w, r)
+		return
+	}
+	existed := h.channelExists(principal.TenantID.String(), channel)
+
+	recorder := &statusWriter{ResponseWriter: w}
+	h.next.ServeHTTP(recorder, r)
+	if recorder.status != http.StatusCreated || existed {
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+	defer cancel()
+	if err := h.owners.GrantOwner(ctx, principal.TenantID.String(), channel, principal.AccountID, principal.AccountID); err != nil {
+		h.logger.Warn("implicit board channel owner relation was not recorded",
+			"channel", channel, "err", err)
+	}
+}
+
+func (h *handler) channelExists(tenant, channel string) bool {
+	if h.board == nil {
+		return true
+	}
+	exists := false
+	if err := h.board.Read(tenant, func(snapshot *boardlog.Snapshot) error {
+		exists = snapshot.Channel(channel) != nil
+		return nil
+	}); err != nil {
+		// Do not guess "new" on a read failure: the reconciler will repair the
+		// relation from the committed event.
+		return true
+	}
+	return exists
+}
+
 // statusWriter observes the status without buffering the body, so a normal
 // JSON response still streams to the client.
 type statusWriter struct {
@@ -113,12 +179,15 @@ func (w *statusWriter) Flush() {
 func (w *statusWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
 
 // ChannelOwners records and repairs the owner relation a board channel needs.
-// board itself has no keel identity; the channel.created event names the actor,
-// and the actor's principal is the Account that owns the new channel.
+// board itself has no keel identity; a channel.created event or the first root
+// message.posted in a channel names the actor, and the actor's principal is the
+// Account that owns the channel.
 //
 // The write is idempotent: the same (tenant, channel, owner) tuple inserted
 // twice changes nothing, so the request path and the reconciler can race
-// safely.
+// safely. The relation write cannot share board's transaction across the module
+// boundary; the request path writes immediately after a 201 and this reconciler
+// repairs a crash window.
 type ChannelOwners struct {
 	Store  *store.Store
 	Audit  *accesswire.Bridge
@@ -176,11 +245,12 @@ func (c *ChannelOwners) GrantOwner(ctx context.Context, tenant string, channel s
 	return nil
 }
 
-// Run is the repair loop. It scans every channel.created event once at startup
-// and then periodically; a channel whose request-path grant succeeded is
-// skipped in-process. The scan is an operator read: it sets keel.bypass_rls for
-// its single connection because it is cross-tenant by nature (one channel per
-// tenant), and the connection is closed before the next pass.
+// Run is the repair loop. It scans every channel.created event and the earliest
+// root message.posted of each channel once at startup and then periodically; a
+// channel whose request-path grant succeeded is skipped in-process. The scan is
+// an operator read: it sets keel.bypass_rls for its single connection because
+// it is cross-tenant by nature (one channel per tenant), and the connection is
+// closed before the next pass.
 func (c *ChannelOwners) Run(ctx context.Context, interval time.Duration) {
 	if c == nil || c.Store == nil {
 		return
@@ -219,35 +289,51 @@ type channelCreatedEvent struct {
 }
 
 func (c *ChannelOwners) scan(ctx context.Context) {
-	events, err := c.channelCreatedEvents(ctx)
+	explicit, implicit, err := c.channelEvents(ctx)
 	if err != nil {
 		if ctx.Err() == nil {
 			c.Logger.Warn("board channel owner scan failed", "err", openError("scan channel events", err, c.DSN))
 		}
 		return
 	}
-	for _, event := range events {
-		key := event.tenant + "\x00" + event.seq
-		c.mu.Lock()
-		already := c.seen[key]
-		c.mu.Unlock()
-		if already {
-			continue
-		}
-		accountID, ok := accountFromPrincipal(event.payload.By.Principal)
-		if !ok {
-			// A platform-originated channel has no keel Account principal; the
-			// sync entry's actor owns it, and keel grants nothing on its behalf.
-			c.markSeen(key)
-			continue
-		}
-		if err := c.GrantOwner(ctx, event.tenant, event.payload.Channel, accountID, accountID); err != nil {
-			c.Logger.Warn("board channel owner repair failed",
-				"channel", event.payload.Channel, "err", err)
-			continue
-		}
-		c.markSeen(key)
+	explicitChannels := make(map[string]bool, len(explicit))
+	for _, event := range explicit {
+		key := event.tenant + "\x00" + event.payload.Channel
+		explicitChannels[key] = true
+		c.grantFromEvent(ctx, event, event.tenant+"\x00"+event.seq, "channel.created")
 	}
+	for _, event := range implicit {
+		key := event.tenant + "\x00" + event.payload.Channel
+		if explicitChannels[key] {
+			// An explicit channel.created owns this channel; the first root is
+			// ordinary content, not a second creator.
+			continue
+		}
+		c.grantFromEvent(ctx, event, event.tenant+"\x00implicit\x00"+event.payload.Channel, "first message.posted")
+	}
+}
+
+// grantFromEvent records one event's creator as owner. It is the shared half of
+// both repair paths; a platform actor has no keel Account and is marked seen so
+// the scan does not retry it every pass.
+func (c *ChannelOwners) grantFromEvent(ctx context.Context, event channelCreatedRow, key, source string) {
+	c.mu.Lock()
+	already := c.seen[key]
+	c.mu.Unlock()
+	if already {
+		return
+	}
+	accountID, ok := accountFromPrincipal(event.payload.By.Principal)
+	if !ok {
+		c.markSeen(key)
+		return
+	}
+	if err := c.GrantOwner(ctx, event.tenant, event.payload.Channel, accountID, accountID); err != nil {
+		c.Logger.Warn("board channel owner repair failed",
+			"channel", event.payload.Channel, "source", source, "err", err)
+		return
+	}
+	c.markSeen(key)
 }
 
 func (c *ChannelOwners) markSeen(key string) {
@@ -262,31 +348,54 @@ type channelCreatedRow struct {
 	payload channelCreatedEvent
 }
 
-func (c *ChannelOwners) channelCreatedEvents(ctx context.Context) ([]channelCreatedRow, error) {
+// channelEvents reads both repair sources on one operator connection: every
+// explicit channel.created, and the earliest root message.posted per channel
+// (which is the implicit creation board derives when a child channel first
+// appears under a parent's editor). A reply has `re` set and is excluded in
+// SQL, so an ordinary reply can never name a creator.
+func (c *ChannelOwners) channelEvents(ctx context.Context) ([]channelCreatedRow, []channelCreatedRow, error) {
 	conn, err := pgx.Connect(ctx, c.DSN)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer conn.Close(context.Background())
 	if c.Schema != "" {
 		if _, err := conn.Exec(ctx, "SET search_path TO "+pgx.Identifier{c.Schema}.Sanitize()); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 	}
 	// The scan is the one cross-tenant board read in keel; board's core RLS
 	// policy admits it only through the explicit bypass marker. The setting is
 	// session-local on this dedicated connection.
 	if _, err := conn.Exec(ctx, "SELECT set_config('keel.bypass_rls', 'on', false)"); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	table := "board_events"
 	if c.Schema != "" {
 		table = pgx.Identifier{c.Schema, "board_events"}.Sanitize()
 	}
-	rows, err := conn.Query(ctx,
-		`SELECT tenant_id, seq, payload FROM `+table+` WHERE kind = 'channel.created' ORDER BY tenant_id, seq`)
+	explicit, err := scanChannelEvents(conn.Query(ctx,
+		`SELECT tenant_id, seq, payload FROM `+table+` WHERE kind = 'channel.created' ORDER BY tenant_id, seq`))
 	if err != nil {
-		return nil, err
+		return nil, nil, err
+	}
+	implicit, err := scanChannelEvents(conn.Query(ctx, `
+		SELECT DISTINCT ON (tenant_id, channel) tenant_id, seq, payload
+		FROM `+table+`
+		WHERE kind = 'message.posted'
+		  AND (payload->>'re') IS NULL
+		  AND channel IS NOT NULL
+		  AND channel <> ''
+		ORDER BY tenant_id, channel, seq`))
+	if err != nil {
+		return nil, nil, err
+	}
+	return explicit, implicit, nil
+}
+
+func scanChannelEvents(rows pgx.Rows, queryErr error) ([]channelCreatedRow, error) {
+	if queryErr != nil {
+		return nil, queryErr
 	}
 	defer rows.Close()
 	out := make([]channelCreatedRow, 0, 32)

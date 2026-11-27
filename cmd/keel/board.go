@@ -1,9 +1,17 @@
 package main
 
 import (
+	"context"
 	"fmt"
+	"log/slog"
+	"net/http"
 	"os"
 	"strings"
+
+	"github.com/google/uuid"
+	"github.com/jixoai/keel/internal/accesswire"
+	"github.com/jixoai/keel/internal/boardintegration"
+	"github.com/jixoai/keel/internal/store"
 )
 
 // boardDeploymentEnabled reads the deployment-level board switch.
@@ -41,4 +49,42 @@ func boardDSN(keelDSN string) string {
 		return dedicated
 	}
 	return keelDSN
+}
+
+// boardWiring is the board surface as the serve loop mounts it. A disabled
+// deployment still supplies handlers (404 board_disabled) so the route shape
+// does not change with the flag.
+type boardWiring struct {
+	API     http.Handler
+	Webhook http.Handler
+	Surface *boardintegration.Surface
+}
+
+// newBoardWiring selects the board handlers for this deployment. It is the
+// tested seam between the flag and the HTTP mux; the disabled path never opens
+// a board connection.
+func newBoardWiring(ctx context.Context, keelDSN string, tenantID uuid.UUID, access *accesswire.Bridge, st *store.Store, logger *slog.Logger) (*boardWiring, error) {
+	enabled, err := boardDeploymentEnabled()
+	if err != nil {
+		return nil, err
+	}
+	if !enabled {
+		return &boardWiring{
+			API:     boardintegration.DisabledHandler(),
+			Webhook: boardintegration.DisabledHandler(),
+		}, nil
+	}
+	surface, err := boardintegration.New(ctx, boardintegration.Options{
+		DSN:                 boardDSN(keelDSN),
+		Schema:              strings.TrimSpace(os.Getenv("KEEL_BOARD_SCHEMA")),
+		Access:              access,
+		Store:               st,
+		TenantID:            tenantID,
+		Logger:              logger,
+		ChannelScanInterval: envDuration("KEEL_BOARD_CHANNEL_SCAN", 0),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("board surface: %w", err)
+	}
+	return &boardWiring{API: surface, Webhook: surface.Webhook(), Surface: surface}, nil
 }

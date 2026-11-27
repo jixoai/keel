@@ -164,6 +164,95 @@ func TestBoardSSEHeartbeatLastEventIDAndHiddenEvents(t *testing.T) {
 	}
 }
 
+// TestBoardSSERollover covers the adapter's bounded stream: the connection
+// closes on its own and the client can reconnect with Last-Event-ID.
+func TestBoardSSERollover(t *testing.T) {
+	env := newTestEnv(t, func(opts *Options) {
+		opts.StreamLifetime = 150 * time.Millisecond
+		opts.Heartbeat = -1
+	})
+	server := env.server()
+	if resp := env.do(t, server, "POST", "/v1/board/channels", "alice", map[string]any{"path": "work"}); resp.status != 201 {
+		t.Fatalf("create work: %d", resp.status)
+	}
+	env.relation(env.tenant, "work", store.RelationViewer, env.carol.record.ID)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stream, lines := openSSE(t, ctx, server.URL+"/v1/board/events", "carol", "")
+	defer stream.Body.Close()
+	waitForLine(t, lines, func(line string) bool { return line == ": connected" }, 2*time.Second)
+	started := time.Now()
+	deadline := time.After(3 * time.Second)
+	for {
+		select {
+		case _, ok := <-lines:
+			if !ok {
+				if elapsed := time.Since(started); elapsed > 2*time.Second {
+					t.Fatalf("stream lived %s, want a bounded rollover", elapsed)
+				}
+				return
+			}
+		case <-deadline:
+			t.Fatal("the bounded SSE stream did not close")
+		}
+	}
+}
+
+// TestBoardSSEMultiReplicaLive proves a subscriber on a second process receives
+// an event written by the first through the shared store, not a cached snapshot.
+func TestBoardSSEMultiReplicaLive(t *testing.T) {
+	env := newTestEnv(t, nil)
+	first := env.server()
+	if resp := env.do(t, first, "POST", "/v1/board/channels", "alice", map[string]any{"path": "work"}); resp.status != 201 {
+		t.Fatalf("create work: %d", resp.status)
+	}
+	env.relation(env.tenant, "work", store.RelationViewer, env.carol.record.ID)
+
+	second, err := New(context.Background(), Options{
+		DSN: env.boardDSN, Schema: env.schema, Access: env.bridge, Store: env.st,
+		TenantID: env.tenant, Logger: env.surf.logger,
+		Heartbeat: -1, StreamLifetime: -1, ChannelScanInterval: -1,
+	})
+	if err != nil {
+		t.Fatalf("second surface: %v", err)
+	}
+	defer second.Close()
+	secondServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		principal, _ := env.principal(r.Header.Get("X-Test-Who"))
+		r = r.WithContext(withTestPrincipal(r.Context(), principal))
+		second.ServeHTTP(w, r)
+	}))
+	defer secondServer.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stream, lines := openSSE(t, ctx, secondServer.URL+"/v1/board/events", "carol", "")
+	defer stream.Body.Close()
+	waitForLine(t, lines, func(line string) bool { return line == ": connected" }, 2*time.Second)
+
+	if resp := env.do(t, first, "POST", "/v1/board/messages", "alice", map[string]any{"channel": "work", "text": "LIVE-CROSS-PROCESS"}); resp.status != 201 {
+		t.Fatalf("post: %d", resp.status)
+	}
+	deadline := time.After(3 * time.Second)
+	for {
+		select {
+		case line, ok := <-lines:
+			if !ok {
+				t.Fatal("second replica stream closed before the event")
+			}
+			if strings.HasPrefix(line, "data: ") {
+				if !strings.Contains(line, "LIVE-CROSS-PROCESS") {
+					t.Fatalf("unexpected event: %s", line)
+				}
+				return
+			}
+		case <-deadline:
+			t.Fatal("the second replica did not deliver the live event")
+		}
+	}
+}
+
 // TestBoardSSEMultiReplicaCatchUp proves a second process sees events written
 // by the first through the shared store after forcing a head catch-up (the
 // stream's opening Refresh).
@@ -178,7 +267,7 @@ func TestBoardSSEMultiReplicaCatchUp(t *testing.T) {
 	// A second surface over the same board schema is the second replica. It has
 	// its own projection cache; its store is shared.
 	second, err := New(context.Background(), Options{
-		DSN: env.dsn, Schema: env.schema, Access: env.bridge, Store: env.st,
+		DSN: env.boardDSN, Schema: env.schema, Access: env.bridge, Store: env.st,
 		TenantID: env.tenant, Logger: env.surf.logger,
 		Heartbeat: -1, StreamLifetime: -1, ChannelScanInterval: -1,
 	})

@@ -84,7 +84,10 @@ export KEEL_BOARD_CHANNEL_SCAN=5m    # 可选；频道 owner 关系修复间隔�
   **不**注册进 keel 的 `rlsTenantTables`。两套 policy 不互相覆盖；board 查询由 board 自己的
   连接设置 tenant，未设置时匹配零行（fail closed）。
 - board 的 DSN 建议使用**非超级用户**角色（拥有 board 表即可；`FORCE RLS` 对 owner 生效，
-  超级用户总是绕过 RLS）。专用库/角色用 `KEEL_BOARD_DSN`；单库单租户可复用 `KEEL_DSN`。
+  超级用户/`BYPASSRLS` 总是绕过 RLS）。`keel serve` 启动时会检查该角色并 warn（不阻断）。
+  专用库/角色用 `KEEL_BOARD_DSN`；单库单租户可复用 `KEEL_DSN`。
+- 镜像/Dockerfile 只构建 `cmd/runtime`，**不含 board**。生产 board 入口是 `keel serve`
+  （`KEEL_BOARD_ENABLED=1`）；若要让 runtime 也提供 board，需要另一条接入 lane，且预算仍为 2048 KiB。
 - 跨租户：HTTP 侧 tenant 只来自登录 principal（不读 header/path），A 租户读不到 B 的行；
   数据库侧见 `internal/boardintegration` 的 RLS 测试（restricted role + unset tenant）。
 
@@ -95,8 +98,14 @@ export KEEL_BOARD_CHANNEL_SCAN=5m    # 可选；频道 owner 关系修复间隔�
 - 最近祖先继承：先查精确路径，再逐级向上；某一层对调用者有任意关系即生效（显式 viewer
   可收窄父级 editor）。
 - 创建频道（`POST /v1/board/channels`）成功 201 后，adapter 立即写创建者的 `owner` 关系；
-  写失败/崩溃由启动与周期扫描按 `channel.created` 事件修复。
-- 权限拒绝写 `auth_events`（`permission.denied`），detail 只有 key/relation/scope，不含正文。
+  隐式子频道（父频道 editor 下 `POST /messages`/`/tasks` 首次出现）也在 201 后写。
+  **正式偏离 design §11.2 的“同一事务”**：board 模块与 keel 关系表不能共享事务，因此
+  owner 写入是非原子的；启动与周期扫描按 `channel.created` 和每个频道最早的
+  `message.posted` root 补偿（崩溃窗口可用测试复现）。
+- 已知风险：未来 Phase 2 的频道 ACL 撤销后，上述 reconciler 会按历史创建事件重新补授
+  owner；Phase 2 必须增加 revocation marker（或改为显式 owner 管理），否则撤销不持久。
+- 权限拒绝写 `auth_events`（`permission.denied`），detail 只有 key/relation/scope，不含正文；
+  私有频道的未授权读/写同样先记审计，再向调用者返回 404。
 
 **API / SSE**
 
@@ -113,8 +122,9 @@ export KEEL_BOARD_CHANNEL_SCAN=5m    # 可选；频道 owner 关系修复间隔�
 # board 适配（真实 PG；KEEL_TEST_DSN 指向专用库）
 KEEL_TEST_DSN='postgres://…' go test ./internal/boardintegration/ -v
 KEEL_TEST_DSN='postgres://…' go test -race ./internal/boardintegration/
+KEEL_TEST_DSN='postgres://…' go test ./internal/boardintegration/ -run TestBoardStoreRLSUsesTenantSetting -v
 go test ./internal/access/ ./internal/accessgate/ ./cmd/keel/
-scripts/binary-size.sh --budget-kb 256
+scripts/binary-size.sh --budget-kb 2048 --base 6ee7fe3
 ```
 
 - `GET /metrics` 同时输出 `board_*`（事件数、append 延迟、live claims、SSE 连接/滞后、

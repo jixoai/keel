@@ -18,6 +18,8 @@ import (
 	"github.com/jixoai/keel/internal/access"
 	"github.com/jixoai/keel/internal/accesswire"
 	"github.com/jixoai/keel/internal/auth"
+
+	"github.com/jixoai/keel-board/protocol"
 	keelstore "github.com/jixoai/keel/internal/store"
 
 	boardaudit "github.com/jixoai/keel-board/audit"
@@ -28,19 +30,21 @@ import (
 // board tables live in a throwaway schema; keel's own tables stay in the test
 // database's public schema with fresh tenant UUIDs.
 type testEnv struct {
-	t      *testing.T
-	dsn    string
-	schema string
-	tenant uuid.UUID
-	other  uuid.UUID
-	st     *keelstore.Store
-	bridge *accesswire.Bridge
-	surf   *Surface
+	t        *testing.T
+	dsn      string
+	boardDSN string
+	schema   string
+	tenant   uuid.UUID
+	other    uuid.UUID
+	st       *keelstore.Store
+	bridge   *accesswire.Bridge
+	surf     *Surface
 
-	alice kAccount
-	bob   kAccount
-	carol kAccount
-	dave  kAccount
+	alice   kAccount
+	bob     kAccount
+	carol   kAccount
+	manager kAccount
+	dave    kAccount
 
 	bot    keelstore.BotRecord
 	botKey string // the board profile token
@@ -80,6 +84,7 @@ func newTestEnv(t *testing.T, mutate func(*Options)) *testEnv {
 	env.alice = env.account(env.tenant, "alice", "human")
 	env.bob = env.account(env.tenant, "bob", "human")
 	env.carol = env.account(env.tenant, "carol", "human")
+	env.manager = env.account(env.tenant, "manager", "human")
 	env.dave = env.account(env.other, "dave", "human")
 	// The Bot belongs to Alice; a Bot acts through its Profile's Account.
 	env.bot = env.makeBot(env.tenant, env.alice.record.ID, "researcher")
@@ -94,6 +99,9 @@ func newTestEnv(t *testing.T, mutate func(*Options)) *testEnv {
 		env.grant(env.tenant, env.bob.record.ID, key)
 	}
 	env.grant(env.tenant, env.carol.record.ID, access.KeyBoardRead)
+	// The manager holds only the tenant-level administration key: it must not
+	// gain channel content without a relation.
+	env.grant(env.tenant, env.manager.record.ID, access.KeyBoardManage)
 	for _, key := range []string{access.KeyBoardRead, access.KeyBoardWrite, access.KeyBoardManage} {
 		env.grant(env.other, env.dave.record.ID, key)
 	}
@@ -117,6 +125,10 @@ func newTestEnv(t *testing.T, mutate func(*Options)) *testEnv {
 	if mutate != nil {
 		mutate(&options)
 	}
+	if options.Schema != "" {
+		env.schema = options.Schema
+	}
+	env.boardDSN = options.DSN
 	surface, err := New(ctx, options)
 	if err != nil {
 		t.Fatalf("board surface: %v", err)
@@ -206,6 +218,8 @@ func (e *testEnv) principal(who string) (auth.Principal, bool) {
 		return e.human("bob", e.bob.record), true
 	case "carol":
 		return e.human("carol", e.carol.record), true
+	case "manager":
+		return e.human("manager", e.manager.record), true
 	case "dave":
 		return e.human("dave", e.dave.record), true
 	case "bot":
@@ -216,6 +230,23 @@ func (e *testEnv) principal(who string) (auth.Principal, bool) {
 	default:
 		return auth.Principal{}, false
 	}
+}
+
+// contextAndActor builds a request context carrying who's edge principal and
+// the board Actor that principal resolves to. It is the direct-authorizer
+// fixture (no HTTP layer).
+func (e *testEnv) contextAndActor(who string) (context.Context, protocol.Actor) {
+	e.t.Helper()
+	principal, ok := e.principal(who)
+	if !ok {
+		e.t.Fatalf("no principal %q", who)
+	}
+	ctx := withTestPrincipal(context.Background(), principal)
+	actor, err := (&Identity{Store: e.st}).Actor(testRequest(ctx))
+	if err != nil {
+		e.t.Fatalf("actor %q: %v", who, err)
+	}
+	return ctx, actor
 }
 
 func (e *testEnv) human(name string, record keelstore.AccountRecord) auth.Principal {

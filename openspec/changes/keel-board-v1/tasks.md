@@ -88,14 +88,18 @@
 > （`scripts/keel-board-phase1-gate.sh` 生成）。10.6 由 secret-store lane 继续；
 > 10.7 的 credential 状态派生自 10.6 的 entry/secret，本 lane 先交付指标、
 > `permission.denied` 与 board audit（credential 状态随 10.6 补齐）。
+> **owner 写入正式偏离**：board 模块与 keel 关系表不能共享事务；201 后立即写 owner，
+> 启动/周期 reconciler 按 `channel.created` 与最早 `message.posted` root 补偿（非原子）。
+> Phase 2 做频道 ACL 撤销时必须加 revocation marker，否则 reconciler 会重新补授。
+> **依赖 pin**：10.1 当前 tag `v0.1.0`（commit `d5a9e0a…`）；P1-3/P1-4 修复后升 `v0.1.1`。
 
-- [x] 10.1 keel `go.mod` 固定 `github.com/jixoai/keel-board@<phase-0-commit>`；`go test ./...` 通过；记录 NOTICE/许可证。
+- [x] 10.1 keel `go.mod` 固定 `github.com/jixoai/keel-board` tag `v0.1.0`（`d5a9e0a…`；P1-3/P1-4 后升 `v0.1.1`）；`go test ./...` 通过；记录 NOTICE/许可证。
 - [x] 10.2 实现 Account/Bot/Profile 适配：`Principal/Actor` 解析、Bot 身份、owner/by/for、平台 actor 命名；测试人与 Bot 差异。
 - [x] 10.3 实现 RBAC/ReBAC：`board.read/write/manage` 权限键、频道 `resource_relations` viewer/editor/owner、最近祖先继承；真实 PG 测试。
 - [x] 10.4 接入 keel PG 与 RLS：keel-board migrations 在 keel 启动幂等执行，`tenant_id` 谓词 + RLS 双保险；A/B 租户测试。
 - [x] 10.5 接入 SSE hub 与 Last-Event-ID；keel 的 tenant 鉴权、心跳、多副本 NOTIFY/poll；集成测试。
 - [ ] 10.6 接入 tenant secret store：`SecretResolver`、sync entries 的 POST/PATCH（创建/启停/轮换/路由，只传 secret_ref）、`board.sync.enabled`/`board.enabled` feature flag；测试关闭即 404/无 webhook，日志/事件/响应无 secret。
-- [x] 10.7 接入 telemetry/audit：board/sync 指标、permission.denied、credential 状态；测试无 secret/正文。
+- [x] 10.7 接入 telemetry/audit（部分完成）：board/sync 指标、permission.denied、board audit 已交付；credential 状态待 10.6；测试无 secret/正文。
 
 ## 11. Phase 1：superagent 适配
 

@@ -112,7 +112,7 @@ func assertBoardRLS(t *testing.T, ctx context.Context, dsn, boardSchema string, 
 	roleIdent := quoteIdent(role)
 	userIdent := quoteIdent(currentUser)
 	if _, err := conn.Exec(ctx, `CREATE ROLE `+roleIdent+` NOLOGIN`); err != nil {
-		t.Skipf("cannot create a restricted role in this database: %v", err)
+		t.Fatalf("cannot create a restricted role in this database (CI must be able to prove RLS): %v", err)
 	}
 	if _, err := conn.Exec(ctx, `GRANT `+roleIdent+` TO `+userIdent); err != nil {
 		_, _ = conn.Exec(ctx, `DROP ROLE `+roleIdent)

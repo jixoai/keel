@@ -1062,29 +1062,21 @@ func runServe(parent context.Context, opts serveOptions) error {
 	// (design §20); the routes stay mounted but answer 404 board_disabled, so a
 	// disabled deployment does not reveal whether a channel exists. The
 	// tenant-level flag (board.enabled) lands with the secret-store lane (10.6).
-	boardEnabled, err := boardDeploymentEnabled()
+	boardWiring, err := newBoardWiring(ctx, opts.DSN, opts.TenantID, product.access, st, log)
 	if err != nil {
 		return err
 	}
-	var boardSurface *boardintegration.Surface
-	var boardHandler http.Handler = boardintegration.DisabledHandler()
-	var boardWebhook http.Handler = boardintegration.DisabledHandler()
-	if boardEnabled {
-		boardSurface, err = boardintegration.New(ctx, boardintegration.Options{
-			DSN:                 boardDSN(opts.DSN),
-			Schema:              strings.TrimSpace(os.Getenv("KEEL_BOARD_SCHEMA")),
-			Access:              product.access,
-			Store:               st,
-			TenantID:            opts.TenantID,
-			Logger:              log,
-			ChannelScanInterval: envDuration("KEEL_BOARD_CHANNEL_SCAN", 0),
-		})
-		if err != nil {
-			return fmt.Errorf("board surface: %w", err)
-		}
-		boardHandler = boardSurface
-		boardWebhook = boardSurface.Webhook()
+	boardSurface := boardWiring.Surface
+	boardHandler := boardWiring.API
+	boardWebhook := boardWiring.Webhook
+	if boardSurface != nil {
 		defer boardSurface.Close()
+		if bypass, err := boardintegration.RoleBypassesRLS(ctx, boardDSN(opts.DSN)); err != nil {
+			log.Warn("board role privilege check failed", "detail", "row-level security may not be enforced")
+		} else if bypass {
+			log.Warn("board PostgreSQL role bypasses row-level security",
+				"detail", "use a non-superuser, NOBYPASSRLS role for the board DSN")
+		}
 	}
 
 	// Automatic recovery is default behavior, not a button: scan every

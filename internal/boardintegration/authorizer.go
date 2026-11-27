@@ -206,6 +206,17 @@ func (a *Authorizer) Authorize(ctx context.Context, tenant string, actor protoco
 				}
 			}
 		}
+		// The caller gets a 404 so it cannot confirm the channel exists, but the
+		// denial is still an authorization fact: record it in auth_events
+		// (permission.denied) before hiding it.
+		key, scope, reason, held := boardKey(effective, permission)
+		reasonCode := access.ReasonMissingRelation
+		detail := fmt.Sprintf("channel %q has no relation for the caller", path)
+		if !held {
+			reasonCode = access.ReasonMissingGrant
+			detail = reason
+		}
+		a.recordDenial(ctx, principal, key, scope, reasonCode, detail, resource(tenantID, path))
 		return notFound()
 	}
 
@@ -314,15 +325,24 @@ func (a *Authorizer) channelExists(tenant, path string) (bool, error) {
 // returns the board's 403. The audit detail carries identifiers and the missing
 // key/relation only, never message text or a claim token.
 func (a *Authorizer) deny(ctx context.Context, principal access.Principal, key string, scope access.Scope, reason access.Reason, detail string, res access.Resource, missing string) error {
-	decision := access.Decision{Allow: false, Reason: reason, Key: key, Scope: scope, Detail: detail}
-	if a.Bridge != nil {
-		a.Bridge.Denied(ctx, principal, decision, res)
-	}
+	a.recordDenial(ctx, principal, key, scope, reason, detail, res)
 	message := "permission denied"
 	if missing != "" {
 		message = "permission denied: missing " + missing
 	}
 	return protocol.NewError(protocol.CodeForbidden, message).WithHint(missing)
+}
+
+// recordDenial appends one permission.denied fact to keel's auth_events. It is
+// best effort, like every denial audit: a refusal or a hidden 404 must not turn
+// into a 500 because the audit stream is down.
+func (a *Authorizer) recordDenial(ctx context.Context, principal access.Principal, key string, scope access.Scope, reason access.Reason, detail string, res access.Resource) {
+	if a.Bridge == nil {
+		return
+	}
+	a.Bridge.Denied(ctx, principal, access.Decision{
+		Allow: false, Reason: reason, Key: key, Scope: scope, Detail: detail,
+	}, res)
 }
 
 // boardKey picks the key that authorizes permission and its effective scope.

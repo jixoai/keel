@@ -119,11 +119,11 @@ Linear 与任意 Chat SDK adapter 的线程；否则“通用任务/线程标准
 | origin / copy | `messages[id].origin` + `board_sync_copies` | 消息来自哪个平台线程；出去了哪一份 |
 | dedupe / delivery marker | `board_sync_inbox` / `board_sync_outbox` | 入站 occurrence ID；出站确定性 delivery ID；echo marker |
 | provider | `sync.Provider` Go 接口 | 原生 Slack/GitHub/Linear；Chat SDK 走 bridge |
-| webhook | `/v1/board/sync/webhooks/{key}` | adapter 验签，不走 board 会话认证 |
+| webhook | `/webhooks/{key}`（keel 进程根路径） | adapter 验签，不走 board 会话认证 |
 | source read / typing | `/v1/board/sources/{key}/*` / ephemeral | 只读平台；typing 不落日志 |
 | profile | **Bot** | 命名执行身份；不是 Role，不授予权限 |
 | principal | **Account** | 认证与授权主体 |
-| actor | `account:<id>` 或 `account:<id>+bot:<id>` | 显示“Bot via Account” |
+| actor | `account:<id>` 或 `account:<id>+bot-<token>` | Bot 的稳定 token 见 §3 命名说明；raw Bot ID 放 Actor.Handle |
 | grants / can | `board.read/write/manage` + channel ReBAC | 不实现 Vercel grants 数据模型 |
 | SSE cursor | `board_events.seq` | 每 tenant 单调递增；不透明字符串视图 |
 | PostgreSQL | keel 既有 PG | 单库、RLS、tenant_id |
@@ -140,8 +140,12 @@ Linear 与任意 Chat SDK adapter 的线程；否则“通用任务/线程标准
   它自己创建的任务。这与 Vercel 的 “principal 改所有 profile、profile 只改自己” 同构。
 - **`for` 只指向 owner 的 Actor。** 可以指向 owner Account 本身或它的某个 Bot；不允许把
   任务指派给别的 Account 的 Bot（跨主体指派是未来的 offer/accept，不在本 change）。
-- **认证不引入 OIDC。** 沿用 keel Account 的会话/API key；`GET /v1/board/me` 返回当前
-  Account、可选 Bot、权限与频道 can 映射。
+- **认证不引入 OIDC。** 沿用 keel Account 的会话/API key。v0.1.0 未提供
+  `GET /v1/board/me`；当前身份用 `GET /v1/board/actors` 或消息/任务的 author 投影读取。
+- **Bot actor 命名（实现偏离）。** v0.1.0 的 profile 文法是
+  `^[a-z][a-z0-9-]{0,31}$`，而 keel Bot ID 形如 `bot_<32hex>`，无法原样放在 `+` 后；
+  因此 actor 为 `account:<account-id>+bot-<sha256 前 24 hex>`，Bot ID 与显示名分别放在
+  `Actor.Handle`/`Actor.Name`。这保持 `task.For == actor.ID` 的 claim 语义稳定。
 
 ## 4. 数据模型与存储
 
@@ -417,8 +421,12 @@ automation、audit）都 `ENABLE/FORCE ROW LEVEL SECURITY` + tenant policy：pol
 `keel.bypass_rls='on'`。应用层仍显式带 `tenant_id` 谓词（双保险）；未设置 tenant 的语句
 匹配零行（fail closed），跨租户 ID 一律 404，不返回“存在但无权”。
 
-keel 导入时这些表同样注册到 `store.rlsTenantTables`，由 keel 启动迁移复核
-ENABLE/FORCE/policy；board 独立运行时由 `store` 自己的 0003/0006/0008/0009 迁移保证。
+keel 导入时这些表**不**注册进 `store.rlsTenantTables`：board 表由 `keel-board` 自己的
+store/pool 迁移并维护 `keel.tenant_id` policy，keel 既有表继续使用 `app.tenant_id`。
+两套 GUC 在同一数据库里隔离（board 连接只设置 `keel.tenant_id`，keel 租户连接只设置
+`app.tenant_id`），避免两条 policy 在同一表上互相 fail closed。部署可用
+`KEEL_BOARD_DSN`/`KEEL_BOARD_SCHEMA` 指向独立角色或 schema；board 的 0003/0006/0008/0009
+迁移与 fail-closed 由 `internal/boardintegration` 的真实非超级用户 DSN 测试覆盖。
 
 ### 4.5 投影重建
 
@@ -464,7 +472,7 @@ COMMIT
 
 ### 5.2 并发 claim
 
-1. 两个请求同时 `claim-ready` 同一任务。
+1. 两个请求同时 `POST /tasks/claim` 同一任务。
 2. 第一个取得 `board_heads` 行锁，校验 `state=ready` 且 `for` 允许，写
    `task.claimed`（`epoch+1`、`until`、`token_hash`），提交后 fold 到缓存。
 3. 第二个取得锁后读到 `state=claimed`，返回 409 `task_claimed`，不写事件。
@@ -590,7 +598,7 @@ Board 不依赖后台定时器保证正确性：
 
 - Claim 响应返回 `{epoch, token, until}`；`token` 是 32 字节随机数的 base64url（43 字符）。
 - 服务端只存 `SHA-256(token)` 的 hex；事件 payload 与投影都只含 hash。
-- 任何读接口（`/tasks`、`/messages/{id}`、`/events/stream`、`/me`）都 MUST NOT 返回 token；
+- 任何读接口（`/tasks`、`/messages/{id}`、`/events`）都 MUST NOT 返回 token；
   `board_requests.result` 也不含 token。
 - 调用方可自带 token（必须是 32 字节 base64url）：用于“从 run ID 派生、跨进程重建”的场景；
   自带 token 时服务端仍只存它的 SHA-256，不需要额外保存原文。
@@ -599,7 +607,7 @@ Board 不依赖后台定时器保证正确性：
 
 ### 7.2 租约
 
-- `leaseSeconds` 缺省 900；请求范围 30–3600；服务端给 `min(request, tenant_cap)`，
+- `lease`（秒）缺省 900；请求范围 30–3600；服务端给 `min(request, tenant_cap)`，
   `tenant_cap` 默认 3600，且 MUST NOT 低于 300。
 - `renew` 从 `now()` 起延长，epoch 不变；可在租约任何时刻 renew；过期后 renew 返回
   `claim_lost`（先按 §5.4 写 expired）。
@@ -609,7 +617,7 @@ Board 不依赖后台定时器保证正确性：
 
 ### 7.3 Claim-ready 选择顺序
 
-`POST /tasks/claim-ready {channel, label?, from?, leaseSeconds?, waitSeconds?, token?}`：
+`POST /tasks/claim {channel, label?, from?, lease?, wait?, token?}`（v0.1.0 路径；设计旧名 claim-ready）：
 
 1. 频道（或 `channel/` 子树）内 `state=ready`（含租约已过期的 claimed，按 effective state）；
 2. 先选 `for` 等于调用者 Actor 的任务；
@@ -626,7 +634,7 @@ Board 不依赖后台定时器保证正确性：
 - 被指派的任务只有该 Actor 能 claim（即使租约过期），其他 Actor 返回 409 `task_assigned`。
 - `assign {for:null}` 回到池；owner/manage 可在 waiting/ready/claimed/blocked 时改；
   failed 需先 reopen，completed/canceled 不可改。
-- `claim-ready` 对别的 Actor 的指派任务不选；显式 `claim` 命中时返回 `task_assigned`。
+- `POST /tasks/claim` 对别的 Actor 的指派任务不选；显式 `claim` 命中时返回 `task_assigned`。
 
 ## 8. 依赖（needs）
 
@@ -689,17 +697,16 @@ Base：`/v1/board`。认证沿用 keel；tenant 来自凭据，不出现在路�
 
 | Method | Path | Body / Query | 返回 | 权限 |
 | --- | --- | --- | --- | --- |
-| GET | `/me` | — | `{account, bot?, actor, can:{board:{read,write,manage}, channels:[...]}}` | board.read |
 | GET | `/channels` | `prefix?`, `after?`, `limit?` | `{channels:[{path,messages,threads,can}], cursor}` | board.read |
 | POST | `/channels` | `{path}` | 201 `{channel, created}` | board.write 或 board.manage |
 | GET | `/messages` | `channel`, `after?`, `limit?` | `{messages:[...], cursor}` | board.read + viewer |
 | GET | `/messages/{id}` | `after?`, `limit?` | `{message, replies, cursor}` | board.read + viewer |
 | POST | `/messages` | `{channel?, re?, text, labels?, idempotencyKey?}` | 201 `{message}` | board.write + editor |
-| POST | `/tasks` | `{channel, text, labels?, needs?, for?, claim?, leaseSeconds?, idempotencyKey?}` 或 `{re, needs?, for?, claim?, leaseSeconds?, idempotencyKey?}` | 201 `{task, claim?}` | board.write + editor |
+| POST | `/tasks` | `{channel, text, labels?, needs?, for?, claim?, lease?, idempotencyKey?}` 或 `{re, needs?, for?, claim?, lease?, idempotencyKey?}` | 201 `{task, claim?}` | board.write + editor |
 | GET | `/tasks` | `channel?`, `state?`, `label?`, `by?`, `owner?`, `for?`, `needs?`, `after?`, `limit?` | `{tasks:[...], cursor}` | board.read + viewer |
-| POST | `/tasks/claim-ready` | `{channel, label?, from?, leaseSeconds?, waitSeconds?, token?}` | `{task, claim}` 或 `{task:null}` | board.write + editor |
-| POST | `/tasks/{id}/claim` | `{leaseSeconds?, token?}` | `{task, claim:{epoch,token,until}}` | board.write + editor |
-| POST | `/tasks/{id}/renew` | `{epoch, token, leaseSeconds?}` | `{task, until}` | board.write + editor |
+| POST | `/tasks/claim` | `{channel, label?, from?, lease?, wait?, token?}` | `{task, claim}` 或 `{task:null}` | board.write + editor |
+| POST | `/tasks/{id}/claim` | `{lease?, token?}` | `{task, claim:{epoch,token,until}}` | board.write + editor |
+| POST | `/tasks/{id}/renew` | `{epoch, token, lease?}` | `{task, until}` | board.write + editor |
 | POST | `/tasks/{id}/release` | `{epoch, token}` | `{task}` | board.write + editor |
 | POST | `/tasks/{id}/complete` | `{epoch, token, result?}` | `{task}` | board.write + editor |
 | POST | `/tasks/{id}/fail` | `{epoch, token, reason}` | `{task}` | board.write + editor |
@@ -709,7 +716,10 @@ Base：`/v1/board`。认证沿用 keel；tenant 来自凭据，不出现在路�
 | POST | `/tasks/{id}/assign` | `{for: actor|null}` | `{task}` | owner/manage |
 | POST | `/tasks/{id}/needs` | `{needs:[id...]}` | `{task}` | owner/manage |
 | POST | `/tasks/{id}/cancel` | `{reason}` | `{task}` | owner/manage |
-| GET | `/events/stream` | `channel?`, `label?`, `state?`, `owner?`, `for?`, `after?`, `Last-Event-ID` | SSE | board.read + viewer |
+| GET | `/events` | `channel?`, `label?`, `state?`, `owner?`, `for?`, `after?`, `Last-Event-ID` | SSE | board.read + viewer |
+
+v0.1.0 未提供 `GET /me`（用 `/actors` 或消息/任务的 author 投影）；`claim` 与 SSE 的实际路径
+以上表为准，`claim-ready`/`events/stream` 是早期设计名。
 
 Phase 0 追加（独立仓库）：`POST /tasks/batch`、`GET /tasks/batch/{id}`、`GET /threads`、
 `POST /messages/{id}/edit`、`POST /messages/{id}/delete`、`POST /messages/{id}/labels`、
@@ -782,9 +792,14 @@ Phase 0 追加（独立仓库）：`POST /tasks/batch`、`GET /tasks/batch/{id}`
   - `editor` → read + write（发帖/回复/创建任务/claim/标签/claim 结算）
   - `owner` → editor + assign/cancel/unblock/reopen/needs on any task + 管理频道访问
 - subject：`account` 或 `group`；不使用 `team_bot`（授权主体永远是 Account）。
-- **创建频道即 owner**：`POST /channels` 或首帖自动建频道时，创建者 MUST 在同一事务获得该
-  频道的 `owner` 关系；否则创建者会立刻失去对自己频道的管理能力。其他人只能由 owner 或
+- **创建频道即 owner**：`POST /channels` 或首帖自动建频道时，创建者 SHOULD 获得该频道的
+  `owner` 关系；否则创建者会立刻失去对自己频道的管理能力。其他人只能由 owner 或
   `board.manage` 授予关系（phase 2 的频道访问管理 UI）。
+  **Phase 1 正式偏离（非原子）**：board 模块与 keel 的 `resource_relations` 不能共享事务。
+  keel adapter 在 `201` 后立即写 owner，并由启动/周期 reconciler 按 `channel.created` 和
+  每个频道最早的 `message.posted` root 补偿崩溃窗口。该写入仍可能在校验与落库之间失败；
+  调用方看到的 201 不保证 owner 已提交。**风险**：Phase 2 的频道 ACL 撤销后，reconciler
+  会按历史创建事件重新补授；Phase 2 必须增加 revocation marker 或改为显式 owner 管理。
 - **子树继承**：解析 `work/production` 时，先查精确路径；没有再逐级向上查 `work`；
   最近祖先的关系生效（most specific wins）。因此 `work` 上的 editor 覆盖 `work/production`；
   在 `work/secret` 上显式给 viewer 可以收窄该子树。
@@ -819,7 +834,7 @@ Phase 0 追加（独立仓库）：`POST /tasks/batch`、`GET /tasks/batch/{id}`
 
 ### 12.1 流
 
-`GET /v1/board/events/stream`：
+`GET /v1/board/events`（v0.1.0 路径）：
 
 - `Accept: text/event-stream`；`Last-Event-ID` 优先于 `after`。
 - 事件帧：
@@ -1121,7 +1136,7 @@ keel-board ◀─ POST /v1/board/sync/bridge/{key}/events ── sidecar（平�
 
 | Method | Path | 权限 | 作用 |
 | --- | --- | --- | --- |
-| POST | `/v1/board/sync/webhooks/{key}` | provider 验签（无 board token） | 平台 webhook 入口；先落 inbox 再 ack |
+| POST | `/webhooks/{key}`（keel 进程根路径） | provider 验签（无 board token） | 平台 webhook 入口；先落 inbox 再 ack |
 | POST | `/v1/board/sync/bridge/{key}/events` | bridge HMAC | Chat SDK sidecar 推送归一化事件 |
 | GET | `/v1/board/sync/entries` | board.manage | 列出 entries/状态/平台 |
 | GET | `/v1/board/sync/entries/{key}/status` | board.manage | 单 entry 的 inbox/outbox lag、失败、dead letter |
@@ -1316,7 +1331,8 @@ sync:
 - `board_audit` 与其它 `board_*` 持久表一样 FORCE RLS；`GET /v1/board/admin/audit?limit=`
   （board.manage）只读当前 tenant 的最近记录。
 - 权限拒绝、跨租户尝试写既有 `auth_events`（`permission.denied`），detail 只含
-  action/channel/所需权限，不含正文与 token。
+  action/channel/所需权限，不含正文与 token。私有频道的未授权读/写对调用者仍返回 404
+  （不确认存在），但同样写 `permission.denied`；拒绝审计是 best effort，不改变 404。
 - 适配器写 `board_links` 与事件；superagent 原审计不变。
 
 ### 18.2 指标
