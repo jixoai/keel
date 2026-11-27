@@ -15,7 +15,23 @@ import { SlotRegistry } from "./registry";
 class FakeBridgeHost implements BridgeHost {
   readonly calls: { name: string; data?: unknown }[] = [];
   private listener: ((payload: unknown) => void) | null = null;
+  private subscribeGate: Promise<void> | null = null;
+  private releaseSubscribe: (() => void) | null = null;
   stops = 0;
+  onCalls = 0;
+
+  /** Hold the next subscribe reply so a test can dispose mid-flight. */
+  delaySubscribe(): void {
+    this.subscribeGate = new Promise((resolve) => {
+      this.releaseSubscribe = resolve;
+    });
+  }
+
+  release(): void {
+    this.releaseSubscribe?.();
+    this.releaseSubscribe = null;
+    this.subscribeGate = null;
+  }
 
   available(): boolean {
     return true;
@@ -23,12 +39,17 @@ class FakeBridgeHost implements BridgeHost {
 
   async call<T>(name: string, data?: unknown): Promise<T> {
     this.calls.push({ name, data });
+    const inner = (data as { name?: string } | undefined)?.name;
+    if (name === "keel.plugin.call" && inner === "keel.plugin.subscribe" && this.subscribeGate) {
+      await this.subscribeGate;
+    }
     if (name === "keel.plugin.scope") return { ok: true, token: "scope-token" } as T;
     return { ok: true } as T;
   }
 
   on<T>(name: string, listener: (payload: T) => void): () => void {
     if (name !== "keel.plugin.event") throw new Error(`unexpected host event ${name}`);
+    this.onCalls += 1;
     this.listener = listener as (payload: unknown) => void;
     return () => {
       this.stops += 1;
@@ -41,7 +62,7 @@ class FakeBridgeHost implements BridgeHost {
   }
 }
 
-const tick = async () => new Promise((resolve) => setTimeout(resolve, 50));
+const tick = async (ms = 50) => new Promise((resolve) => setTimeout(resolve, ms));
 
 test("bridge: subscribe starts one stream, dispose unsubscribes and drops every listener", async () => {
   const host = new FakeBridgeHost();
@@ -154,4 +175,26 @@ test("registry: replacing a declaration also withdraws the previous subscription
   expect(pluginEventSubscriberCount("demo.replaced")).toBe(0);
   expect(pluginEventStreamActive("demo.replaced")).toBe(false);
   expect(host.stops).toBeGreaterThanOrEqual(1);
+});
+
+test("bridge: disposing while subscribe is in flight installs no listener and unsubscribes", async () => {
+  const host = new FakeBridgeHost();
+  host.delaySubscribe();
+  const bridge = createPluginBridge(
+    { pluginId: "demo.race", capabilities: ["state", "subscribe"], tools: [], events: ["turn.end"] },
+    host,
+  );
+  bridge.onEvent(() => {});
+  await tick();
+  expect(host.calls.some((call) => (call.data as { name?: string })?.name === "keel.plugin.subscribe")).toBe(true);
+  bridge.dispose?.();
+  host.release();
+  await tick(80);
+  expect(host.onCalls).toBe(0);
+  expect(pluginEventSubscriberCount("demo.race")).toBe(0);
+  expect(pluginEventStreamActive("demo.race")).toBe(false);
+  const unsubscribes = host.calls.filter(
+    (call) => (call.data as { name?: string })?.name === "keel.plugin.unsubscribe",
+  ).length;
+  expect(unsubscribes).toBeGreaterThanOrEqual(1);
 });

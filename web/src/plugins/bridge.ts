@@ -97,6 +97,9 @@ class ScopedPluginBridge implements PluginBridge {
   private readonly tools: string[];
   private readonly events: string[];
   private scope: Promise<string> | null = null;
+  /** Set by `dispose`: a subscribe that resolves after the withdrawal must not
+   * install its host listener. */
+  private disposed = false;
 
   constructor(
     grant: BridgeGrant,
@@ -172,6 +175,7 @@ class ScopedPluginBridge implements PluginBridge {
    * cannot leave a subscription or a listener behind. */
   dispose(): void {
     const id = this.pluginId;
+    this.disposed = true;
     const streamActive = eventStops.has(id) || eventStarting.has(id);
     eventListeners.delete(id);
     const stop = eventStops.get(id);
@@ -189,11 +193,18 @@ class ScopedPluginBridge implements PluginBridge {
   /** Start the server stream once; its events fan out by plugin id. */
   private startEvents(): Promise<void> {
     const id = this.pluginId;
+    if (this.disposed) return Promise.resolve();
     if (eventStops.has(id)) return Promise.resolve();
     const starting = eventStarting.get(id);
     if (starting) return starting;
     const start = (async () => {
       await this.call("keel.plugin.subscribe", { events: this.events });
+      if (this.disposed) {
+        // The plugin was withdrawn while the subscribe was in flight: the
+        // server subscription exists, so close it and install no listener.
+        await this.call("keel.plugin.unsubscribe", {}).catch(() => {});
+        return;
+      }
       try {
         const unsubscribe = this.port.on<PluginEvent>("keel.plugin.event", (payload) => {
           if (!payload || payload.pluginId !== id) return;
