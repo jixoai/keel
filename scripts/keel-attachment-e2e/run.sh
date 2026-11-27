@@ -122,6 +122,9 @@ PY
 trap cleanup EXIT INT TERM
 
 mkdir -p "$RUN_DIR" "$EVIDENCE"
+# A stale steps.json from an earlier run must never be reported by a run that
+# failed before producing its own (a build failure, a crashed lane).
+rm -f "$EVIDENCE/steps.json" "$EVIDENCE/report.html"
 chmod 700 "$RUN_DIR"
 mkdir -p "$SECRETS"
 chmod 700 "$SECRETS"
@@ -151,7 +154,10 @@ if [[ "$SKIP_BUILD" != "1" ]]; then
   say "building keel -> $BIN"
   ( cd "$ROOT" && GOTOOLCHAIN=auto go build -o "$BIN" ./cmd/keel ) || fail "go build failed"
   say "building seed-tenant"
+  # The build cache is shared with other agents; a transient std/cache error is
+  # retried once rather than failing the lane.
   ( cd "$ROOT" && GOTOOLCHAIN=auto go build -o "$RUN_DIR/seed-tenant" ./scripts/keel-attachment-e2e/seed-tenant ) \
+    || ( cd "$ROOT" && GOTOOLCHAIN=auto go build -o "$RUN_DIR/seed-tenant" ./scripts/keel-attachment-e2e/seed-tenant ) \
     || fail "seed-tenant build failed"
   say "packaging web -> $WEB_DIR (this takes a few minutes)"
   "$ROOT/scripts/package-web.sh" "$WEB_DIR" || fail "web packaging failed"
@@ -318,10 +324,13 @@ export E2E_TENANT_B="$TENANT_B"
 export E2E_DSN_FILE="$RUN_DIR/dsn"
 export E2E_MODEL_LOG="$RUN_DIR/scripted-model.jsonl"
 export E2E_PLUGINS_ROOT="$RUN_DIR/e2e-plugins"
-export E2E_CHROME="${E2E_CHROME:-/Applications/Google Chrome.app/Contents/MacOS/Google Chrome}"
-export PLAYWRIGHT_CORE="${PLAYWRIGHT_CORE:-/Users/kzf/.npm/_npx/e41f203b7505f1fb/node_modules/playwright-core/index.mjs}"
+[[ -n "${E2E_CHROME:-}" ]] && export E2E_CHROME
+[[ -n "${PLAYWRIGHT_CORE:-}" ]] && export PLAYWRIGHT_CORE
 export E2E_HEADLESS="${E2E_HEADLESS:-true}"
 
+# A run owns its artifacts: never let report-gen read a previous steps.json
+# after this run crashed before writing one.
+rm -f "$EVIDENCE/steps.json" "$EVIDENCE/report.html"
 set +e
 node "$ROOT/scripts/keel-attachment-e2e/e2e.mjs"
 E2E_CODE=$?

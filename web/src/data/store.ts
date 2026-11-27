@@ -1850,10 +1850,15 @@ class KeelStore {
       this.sessionsError.set(null);
       void this.enrich(rows);
     } catch (error) {
-      if (error instanceof KeelApiError && (error.status === 401 || error.status === 403)) {
+      if (error instanceof KeelApiError && error.status === 401) {
         // The session expired: back to the login gate instead of an error list.
         this.auth.set("required");
         this.sessionsError.set(null);
+      } else if (error instanceof KeelApiError && error.status === 403) {
+        // Authenticated but not allowed to read sessions. This is a permission
+        // face, not an expired login: keep the account signed in and say what
+        // is missing (`session.read`), with no attachment or session content.
+        this.sessionsError.set(`无权限读取会话（缺少 ${error.requiredKey ?? "session.read"}）。`);
       } else {
         this.sessionsError.set(messageOf(error));
       }

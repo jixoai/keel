@@ -77,6 +77,9 @@ export function syncPluginInventory(registry: SlotRegistry, view: PluginsView | 
   const result: SyncResult = { registered: [], unregistered: [], failed: [] };
   const plugins = enabledPlugins(view);
   const present = new Set(plugins.map((plugin) => plugin.id ?? ""));
+  // The inventory order is the cross-plugin selection priority (design §11).
+  // Record it before any registration so a re-registered plugin keeps its rank.
+  registry.setInventoryOrder(plugins.map((plugin) => plugin.id ?? ""));
 
   // 1. Drop what is no longer enabled/present.
   for (const id of [...applied.keys()]) {

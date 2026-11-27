@@ -50,19 +50,45 @@ interface BridgeReply {
 const CALL_TIMEOUT_MS = 15_000;
 const SCOPE_TIMEOUT_MS = 5_000;
 
+/** The host surface the bridge needs. Injected so tests can prove the
+ * subscribe/unsubscribe lifecycle without a real embedding app. */
+export interface BridgeHost {
+  available(): boolean;
+  call<T>(name: string, data?: unknown, options?: { timeout?: number }): Promise<T>;
+  on<T>(name: string, listener: (payload: T) => void): () => void;
+}
+
+const defaultBridgeHost: BridgeHost = {
+  available: () => {
+    try {
+      return host.available();
+    } catch {
+      return false;
+    }
+  },
+  call: <T>(name: string, data?: unknown, options?: { timeout?: number }) =>
+    host.call<T>(name, data, options) as Promise<T>,
+  on: <T>(name: string, listener: (payload: T) => void) => host.on<T>(name, listener),
+};
+
 /** True when a host answers at all (a terminal test host has no bridge). */
 export function hostBridgeAvailable(): boolean {
-  try {
-    return host.available();
-  } catch {
-    return false;
-  }
+  return defaultBridgeHost.available();
 }
 
 /** Per-plugin event subscribers, shared by every bridge instance of a plugin. */
 const eventListeners = new Map<string, Set<(event: PluginEvent) => void>>();
 const eventStops = new Map<string, () => void>();
 const eventStarting = new Map<string, Promise<void>>();
+
+/** Diagnostics for the lifecycle tests: how many listeners and whether a host
+ * stream is live for one plugin. Not used by a screen. */
+export function pluginEventSubscriberCount(pluginId: string): number {
+  return eventListeners.get(pluginId)?.size ?? 0;
+}
+export function pluginEventStreamActive(pluginId: string): boolean {
+  return eventStops.has(pluginId) || eventStarting.has(pluginId);
+}
 
 /** A bridge is one contribution's view of the plugin's grants. */
 class ScopedPluginBridge implements PluginBridge {
@@ -72,7 +98,10 @@ class ScopedPluginBridge implements PluginBridge {
   private readonly events: string[];
   private scope: Promise<string> | null = null;
 
-  constructor(grant: BridgeGrant) {
+  constructor(
+    grant: BridgeGrant,
+    private readonly port: BridgeHost = defaultBridgeHost,
+  ) {
     this.pluginId = grant.pluginId;
     this.capabilities = grant.capabilities;
     this.tools = grant.tools;
@@ -138,6 +167,25 @@ class ScopedPluginBridge implements PluginBridge {
     };
   }
 
+  /** Withdraw this plugin's event stream and every listener. The registry calls
+   * it on disable/uninstall and when a declaration is replaced, so a plugin
+   * cannot leave a subscription or a listener behind. */
+  dispose(): void {
+    const id = this.pluginId;
+    const streamActive = eventStops.has(id) || eventStarting.has(id);
+    eventListeners.delete(id);
+    const stop = eventStops.get(id);
+    eventStops.delete(id);
+    eventStarting.delete(id);
+    stop?.();
+    this.scope = null;
+    if (streamActive && this.capabilities.includes("subscribe") && this.port.available()) {
+      void this.call("keel.plugin.unsubscribe", {}).catch(() => {
+        /* a stream that already closed is not an error to the page */
+      });
+    }
+  }
+
   /** Start the server stream once; its events fan out by plugin id. */
   private startEvents(): Promise<void> {
     const id = this.pluginId;
@@ -147,7 +195,7 @@ class ScopedPluginBridge implements PluginBridge {
     const start = (async () => {
       await this.call("keel.plugin.subscribe", { events: this.events });
       try {
-        const unsubscribe = host.on<PluginEvent>("keel.plugin.event", (payload) => {
+        const unsubscribe = this.port.on<PluginEvent>("keel.plugin.event", (payload) => {
           if (!payload || payload.pluginId !== id) return;
           for (const listener of eventListeners.get(id) ?? []) {
             try {
@@ -181,10 +229,10 @@ class ScopedPluginBridge implements PluginBridge {
   private async scopeToken(): Promise<string> {
     if (!this.scope) {
       this.scope = (async () => {
-        if (!hostBridgeAvailable()) {
+        if (!this.port.available()) {
           throw new PluginFault("ERR_UNSUPPORTED", "这个宿主没有 keel 插件桥（host.call 不可用）。");
         }
-        const reply = await host.call<BridgeReply>(
+        const reply = await this.port.call<BridgeReply>(
           "keel.plugin.scope",
           {
             pluginId: this.pluginId,
@@ -210,7 +258,7 @@ class ScopedPluginBridge implements PluginBridge {
   }
 
   private async call(name: string, args: Record<string, unknown>): Promise<BridgeReply> {
-    if (!hostBridgeAvailable()) {
+    if (!this.port.available()) {
       throw new PluginFault("ERR_UNSUPPORTED", "这个宿主没有 keel 插件桥（host.call 不可用）。");
     }
     let token: string;
@@ -221,7 +269,7 @@ class ScopedPluginBridge implements PluginBridge {
     }
     let reply: BridgeReply;
     try {
-      reply = await host.call<BridgeReply>(
+      reply = await this.port.call<BridgeReply>(
         "keel.plugin.call",
         { token, name, args },
         { timeout: CALL_TIMEOUT_MS },
@@ -240,6 +288,6 @@ class ScopedPluginBridge implements PluginBridge {
 }
 
 /** Open one contribution's scoped bridge. */
-export function createPluginBridge(grant: BridgeGrant): PluginBridge {
-  return new ScopedPluginBridge(grant);
+export function createPluginBridge(grant: BridgeGrant, port?: BridgeHost): PluginBridge {
+  return new ScopedPluginBridge(grant, port);
 }

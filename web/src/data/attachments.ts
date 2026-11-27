@@ -124,6 +124,26 @@ export async function loadAttachmentPart(
   return run;
 }
 
+/** Refresh a ready projection in place (a pending thumbnail became ready).
+ * Unlike `retryAttachmentPart`, this never drops the current part or flips the
+ * row to `loading`: a failed refresh leaves the last good projection visible. */
+export async function refreshAttachmentPart(
+  key: string,
+  loader: () => Promise<AttachmentPart>,
+): Promise<void> {
+  const current = states()[key];
+  if (current?.status !== "ready") {
+    await loadAttachmentPart(key, loader);
+    return;
+  }
+  try {
+    const part = await loader();
+    states.update((map) => ({ ...map, [key]: { status: "ready", part } }));
+  } catch {
+    /* keep the last good projection; the row's pending wait is bounded */
+  }
+}
+
 /** Seed the cache with the local degradation (no server route / no fileId). */
 export function useLocalAttachmentPart(key: string, ref: AttachmentRef): void {
   const existing = states()[key];

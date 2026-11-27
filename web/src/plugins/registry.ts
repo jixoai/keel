@@ -11,7 +11,7 @@
 // contribution appears and disappears with its plugin — no reload.
 import { signal } from "nsh";
 import { BASE_SLOTS, KEEL_UI_PLUGIN } from "./base";
-import { createPluginBridge } from "./bridge";
+import { createPluginBridge, type BridgeHost } from "./bridge";
 import { formAvailability, slotTargetAvailable } from "./forms";
 import { loadChunkModule } from "./loader";
 import { mimeMatches } from "./mime";
@@ -58,6 +58,14 @@ export class SlotRegistry {
   private readonly pluginTools = new Map<string, string[]>();
   /** One scoped bridge per plugin: a render must not mint a new host scope. */
   private readonly bridges = new Map<string, ReturnType<typeof createPluginBridge>>();
+  /** The inventory's plugin order (`GET /v1/plugins`), the selection priority
+   * the design fixes. Contributions from plugins outside it keep their array
+   * order after every ranked plugin. */
+  private pluginOrder: string[] = [];
+
+  /** `bridgePort` exists for tests: it proves the subscribe/unsubscribe
+   * lifecycle without a real embedding app. Production passes nothing. */
+  constructor(private readonly bridgePort?: BridgeHost) {}
 
   /** The reactive state. */
   state(): RegistryState {
@@ -78,6 +86,44 @@ export class SlotRegistry {
 
   contributions(): MountedContribution[] {
     return this.stateSignal().contributions;
+  }
+
+  /** Record the inventory's plugin order. Selection uses it instead of the
+   * client's array order, which a re-registration would otherwise change by
+   * appending the plugin's new contributions at the end. */
+  setInventoryOrder(ids: readonly string[]): void {
+    const next = [...new Set(ids.map((id) => String(id ?? "").trim()).filter(Boolean))];
+    if (next.length === this.pluginOrder.length && next.every((id, index) => id === this.pluginOrder[index])) {
+      return;
+    }
+    this.pluginOrder = next;
+    // No contribution changed; a new state object makes every selection getter
+    // (which reads the signal) re-evaluate against the new priority.
+    this.stateSignal.set({ ...this.stateSignal() });
+  }
+
+  private pluginRank(pluginId: string): number {
+    const index = this.pluginOrder.indexOf(pluginId);
+    return index < 0 ? Number.MAX_SAFE_INTEGER : index;
+  }
+
+  /** Contributions of one slot in declaration order: inventory plugin order,
+   * then `contributes[]` order, then the client array's order as a final tie. */
+  private orderedForSlot(slotID: string, target: SlotTarget): MountedContribution[] {
+    return this.stateSignal()
+      .contributions
+      .map((entry, index) => ({ entry, index }))
+      .filter(({ entry }) => entry.declaration.slot === slotID)
+      .map(({ entry, index }) => ({ entry: this.withAvailability(entry, target), index }))
+      .sort((left, right) => {
+        const rank = this.pluginRank(left.entry.declaration.pluginId) - this.pluginRank(right.entry.declaration.pluginId);
+        if (rank !== 0) return rank;
+        const order =
+          (left.entry.declaration.order ?? left.index) - (right.entry.declaration.order ?? right.index);
+        if (order !== 0) return order;
+        return left.index - right.index;
+      })
+      .map(({ entry }) => entry);
   }
 
   /** Register (or replace) one plugin's whole UI declaration atomically. A
@@ -241,7 +287,8 @@ export class SlotRegistry {
       ...baseContributions.filter((entry) => !removedSlotIDs.has(entry.declaration.slot)),
       ...nextContributions,
     ];
-    this.bridges.delete(pluginId);
+    this.disposeBridge(pluginId);
+    this.pruneBridges(kept);
     this.stateSignal.set({ slots: mergedSlots, contributions: kept, issues });
     for (const entry of nextContributions) {
       const slot = slotsByID.get(entry.declaration.slot);
@@ -353,7 +400,8 @@ export class SlotRegistry {
     }
     this.generation += 1;
     this.stateSignal.set({ slots, contributions, issues });
-    this.bridges.delete(pluginId);
+    this.disposeBridge(pluginId);
+    this.pruneBridges(contributions);
     return removed.length + ownSlots.length;
   }
 
@@ -389,8 +437,7 @@ export class SlotRegistry {
 
   /** The first contribution that handles a tool call, if any. */
   toolRenderer(toolName: string, target: SlotTarget): MountedContribution | undefined {
-    const view = this.resolve("keel.ui.tool-renderer", target);
-    return view?.contributions.find(
+    return this.orderedForSlot("keel.ui.tool-renderer", target).find(
       (entry) => entry.status === "ready" && (!entry.declaration.toolName || entry.declaration.toolName === toolName),
     );
   }
@@ -400,8 +447,7 @@ export class SlotRegistry {
    * attachments: an attachment renderer must opt in with
    * `part = attachment`. */
   messagePart(partKind: string, target: SlotTarget): MountedContribution | undefined {
-    const view = this.resolve("keel.ui.message-part", target);
-    return view?.contributions.find(
+    return this.orderedForSlot("keel.ui.message-part", target).find(
       (entry) =>
         entry.status === "ready" &&
         (entry.declaration.partKind === partKind ||
@@ -412,12 +458,13 @@ export class SlotRegistry {
   /** The attachment preview selection for one MIME (change
    * keel-plugin-attachment, task 3.2).
    *
-   * Declaration order is the inventory's order: first `part=attachment` with a
-   * MIME match that is `ready` and runnable on this target. Loading entries
-   * and failed/unavailable entries are reported separately so the host can
-   * explain the wait or the degradation without stealing another attachment's
-   * row. An entry without `part=attachment` is never considered, and an empty
-   * `mime` narrowing is the wildcard **only for an attachment claim**. */
+   * Declaration order is the inventory's order (`setInventoryOrder`), then the
+   * contribution's own index: first `part=attachment` with a MIME match that
+   * is `ready` and runnable on this target. Loading entries and
+   * failed/unavailable entries are reported separately so the host can explain
+   * the wait or the degradation without stealing another attachment's row. An
+   * entry without `part=attachment` is never considered, and an empty `mime`
+   * narrowing is the wildcard **only for an attachment claim**. */
   attachmentSelection(
     mime: string,
     target: SlotTarget,
@@ -426,12 +473,9 @@ export class SlotRegistry {
     loading: MountedContribution[];
     unavailable: MountedContribution[];
   } {
-    const current = this.stateSignal();
-    const ordered = current.contributions
-      .filter((entry) => entry.declaration.slot === "keel.ui.message-part")
+    const ordered = this.orderedForSlot("keel.ui.message-part", target)
       .filter((entry) => entry.declaration.partKind === "attachment")
-      .filter((entry) => mimeMatches(entry.declaration.mime, mime))
-      .map((entry) => this.withAvailability(entry, target));
+      .filter((entry) => mimeMatches(entry.declaration.mime, mime));
     const ready = ordered.filter((entry) => entry.status === "ready");
     const loading = ordered.filter((entry) => entry.status === "declared" || entry.status === "loading");
     const unavailable = ordered.filter((entry) => entry.status === "failed" || entry.status === "unavailable");
@@ -455,7 +499,7 @@ export class SlotRegistry {
       pluginId,
       capabilities: [...capabilities] as never,
       tools: tools ?? this.pluginTools.get(pluginId) ?? [],
-    });
+    }, this.bridgePort);
     this.bridges.set(pluginId, bridge);
     return bridge;
   }
@@ -468,8 +512,9 @@ export class SlotRegistry {
       return;
     }
     this.pluginTools.set(pluginId, [...tools]);
-    // A grant that changed needs a fresh scope next time it is asked for.
-    this.bridges.delete(pluginId);
+    // A grant that changed needs a fresh scope next time it is asked for; the
+    // old stream must not keep delivering under the previous grant.
+    this.disposeBridge(pluginId);
   }
 
   /** Reload one plugin's chunk contributions (a retry from the failure face). */
@@ -497,10 +542,12 @@ export class SlotRegistry {
   /** Remove every declaration (tests, a tenant switch). */
   reset(): void {
     for (const entry of this.stateSignal().contributions) this.disposeMounted(entry);
+    for (const bridge of this.bridges.values()) bridge.dispose?.();
     this.generation += 1;
     this.loads.clear();
     this.pluginTools.clear();
     this.bridges.clear();
+    this.pluginOrder = [];
     this.stateSignal.set({ slots: [], contributions: [], issues: [] });
   }
 
@@ -590,6 +637,27 @@ export class SlotRegistry {
       entry.module?.unload?.();
     } catch {
       /* a plugin's cleanup throw must not block the unload */
+    }
+  }
+
+  /** Withdraw one plugin's bridge: its host listeners and server subscription
+   * go with the contributions. A throwing plugin cleanup cannot block it. */
+  private disposeBridge(pluginId: string): void {
+    const bridge = this.bridges.get(pluginId);
+    this.bridges.delete(pluginId);
+    try {
+      bridge?.dispose?.();
+    } catch {
+      /* a bridge's cleanup throw must not block the withdrawal */
+    }
+  }
+
+  /** Dispose bridges whose plugin no longer owns any mounted contribution (an
+   * unloaded slot provider can orphan another plugin's only contribution). */
+  private pruneBridges(contributions: MountedContribution[]): void {
+    const alive = new Set(contributions.map((entry) => entry.declaration.pluginId));
+    for (const pluginId of [...this.bridges.keys()]) {
+      if (!alive.has(pluginId)) this.disposeBridge(pluginId);
     }
   }
 

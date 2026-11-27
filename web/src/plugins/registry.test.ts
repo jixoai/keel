@@ -557,3 +557,112 @@ test("messagePart: a no-part contribution is a wildcard for host kinds, never fo
   expect(slots.messagePart("assistant", "web")?.declaration.id).toBe("plain");
   expect(slots.messagePart("attachment", "web")).toBe(undefined);
 });
+
+test("attachment selection: inventory order survives a re-registration (跨插件 MIME 顺序)", async () => {
+  const slots = registry();
+  slots.setInventoryOrder(["aaa.first", "zzz.second"]);
+  const first = slots.registerPlugin({
+    pluginId: "aaa.first",
+    contributes: [
+      {
+        id: "aaa-preview",
+        slot: "keel.ui.message-part",
+        form: "chunk",
+        entry: "fixture:w12-hello",
+        part: "attachment",
+        mime: ["image/*"],
+      },
+    ],
+  });
+  expect(first.ok).toBe(true);
+  const second = slots.registerPlugin({
+    pluginId: "zzz.second",
+    contributes: [
+      {
+        id: "zzz-preview",
+        slot: "keel.ui.message-part",
+        form: "chunk",
+        entry: "fixture:w12-hello",
+        part: "attachment",
+        mime: ["image/*"],
+      },
+    ],
+  });
+  expect(second.ok).toBe(true);
+  await wait(40);
+  expect(slots.attachmentSelection("image/png", "web").ready?.declaration.pluginId).toBe("aaa.first");
+
+  // A re-registration moves the mounted entry to the client array's end; the
+  // inventory rank must keep aaa.first first.
+  const changed = slots.registerPlugin({
+    pluginId: "aaa.first",
+    contributes: [
+      {
+        id: "aaa-preview",
+        slot: "keel.ui.message-part",
+        form: "chunk",
+        entry: "fixture:w12-hello",
+        title: "aaa changed",
+        part: "attachment",
+        mime: ["image/*"],
+      },
+    ],
+  });
+  expect(changed.ok).toBe(true);
+  await wait(40);
+  expect(slots.attachmentSelection("image/png", "web").ready?.declaration.pluginId).toBe("aaa.first");
+});
+
+test("inventory sync: a changed plugin keeps its inventory priority across plugins", async () => {
+  resetPluginSync();
+  const slots = registry();
+  const preview = (pluginId: string, title: string) => ({
+    id: `${pluginId}.preview`,
+    slot: "keel.ui.message-part",
+    form: "chunk",
+    entry: "fixture:w12-hello",
+    title,
+    part: "attachment",
+    mime: ["image/*"],
+  });
+  const view = (firstTitle: string): PluginsView => ({
+    generation: 1,
+    plugins: [
+      { id: "zzz.second", state: "enabled", contributes: [preview("zzz.second", "zzz first")] },
+      { id: "aaa.first", state: "enabled", contributes: [preview("aaa.first", firstTitle)] },
+    ],
+  });
+  syncPluginInventory(slots, view("aaa original"));
+  await wait(40);
+  expect(slots.attachmentSelection("image/png", "web").ready?.declaration.pluginId).toBe("zzz.second");
+  syncPluginInventory(slots, view("aaa changed"));
+  await wait(40);
+  // The inventory says zzz before aaa. Only aaa changed and was re-registered;
+  // selection must still pick zzz, the inventory's first matching ready plugin.
+  expect(slots.attachmentSelection("image/png", "web").ready?.declaration.pluginId).toBe("zzz.second");
+});
+
+test("iframe contract: only a same-origin /plugins/<id>/ page is accepted", () => {
+  for (const entry of [
+    "https://evil.example/preview.html",
+    "//evil.example/preview.html",
+    "data:text/html,<p>x</p>",
+    "blob:https://keel.example/x",
+    "javascript:alert(1)",
+    "/v1/files/abc",
+  ]) {
+    const result = registry().registerPlugin({
+      pluginId: "demo.panel",
+      contributes: [{ id: "frame", slot: "keel.ui.message-part", form: "iframe", entry }],
+    });
+    expect(result.ok).toBe(false);
+    expect(result.issues.some((issue) => issue.field === "contributes[0].entry")).toBe(true);
+  }
+  const good = registry().registerPlugin({
+    pluginId: "demo.panel",
+    contributes: [
+      { id: "frame", slot: "keel.ui.message-part", form: "iframe", entry: "/plugins/demo.panel/ui/preview.html" },
+    ],
+  });
+  expect(good.ok).toBe(true);
+});

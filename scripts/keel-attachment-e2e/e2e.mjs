@@ -29,6 +29,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
+import { createRequire } from 'node:module';
+import os from 'node:os';
 
 const BASE = (process.env.E2E_BASE || '').replace(/\/$/, '');
 const BASE_B = (process.env.E2E_BASE_B || '').replace(/\/$/, '');
@@ -40,10 +42,32 @@ const WORKTREE = process.env.E2E_WORKTREE || process.cwd();
 const HEAD_COMMIT = process.env.E2E_HEAD_COMMIT || '';
 const COVERAGE_BASE = process.env.E2E_COVERAGE_BASE || '8916393';
 const ADMIN_USER = process.env.E2E_ADMIN_USERNAME || 'e2e-admin';
-const CHROME = process.env.E2E_CHROME || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
-const PLAYWRIGHT =
-  process.env.PLAYWRIGHT_CORE ||
-  '/Users/kzf/.npm/_npx/e41f203b7505f1fb/node_modules/playwright-core/index.mjs';
+// Portability: an explicit path wins; otherwise resolve the installed package
+// and let Playwright pick its browser (or require E2E_CHROME on a machine
+// without one). No machine-specific cache path is the only default.
+const nodeRequire = createRequire(import.meta.url);
+const resolvePlaywright = () => {
+  if (process.env.PLAYWRIGHT_CORE) return process.env.PLAYWRIGHT_CORE;
+  try {
+    return nodeRequire.resolve('playwright-core');
+  } catch {
+    /* not installed next to the worktree: try the machine's npx cache below */
+  }
+  const npx = path.join(os.homedir(), '.npm', '_npx');
+  try {
+    for (const entry of fs.readdirSync(npx)) {
+      const candidate = path.join(npx, entry, 'node_modules', 'playwright-core', 'index.mjs');
+      if (fs.existsSync(candidate)) return candidate;
+    }
+  } catch {
+    /* no cache directory */
+  }
+  return '';
+};
+const PLAYWRIGHT = resolvePlaywright();
+const CHROME = process.env.E2E_CHROME || (process.platform === 'darwin'
+  ? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
+  : '');
 const HEADLESS = (process.env.E2E_HEADLESS || 'true') !== 'false';
 const TENANT = process.env.E2E_TENANT || '';
 const TENANT_B = process.env.E2E_TENANT_B || '';
@@ -258,9 +282,12 @@ function modelRequests() {
 let browser = null;
 
 async function launchBrowser() {
+  if (!PLAYWRIGHT) {
+    throw new Error('playwright-core is not installed; set PLAYWRIGHT_CORE to its index.mjs (E2E is not run by the app build)');
+  }
   const playwright = await import(PLAYWRIGHT);
   browser = await playwright.chromium.launch({
-    executablePath: CHROME,
+    ...(CHROME ? { executablePath: CHROME } : {}),
     headless: HEADLESS,
     args: ['--disable-dev-shm-usage'],
   });
@@ -490,26 +517,36 @@ function changedFiles() {
 
 const COVERAGE_MAP = [
   [/^web\/src\/screens\/messages\.tsx$/, '附件行 / 五态 / 插件槽位', '步骤 2、3、4、6'],
+  [/^web\/src\/screens\/attachment-row\.tsx$/, '附件行五态 / 缩略图 / 无权限', '步骤 2、6 + TUI harness'],
+  [/^web\/src\/screens\/attachment-row\.harness\.tsx$/, '附件行 harness', 'TUI harness'],
+  [/^web\/src\/screens\/attachment-row\.tui\.test\.tsx$/, '五态与回退渲染单测', 'nsh test --target tui'],
   [/^web\/src\/plugins\/slots\.tsx$/, '预览槽位与回退面', '步骤 3、4、5'],
-  [/^web\/src\/plugins\/registry\.ts$/, '声明顺序 + MIME 选择', 'TUI registry tests'],
-  [/^web\/src\/plugins\/validation\.ts$/, 'mime 声明校验', 'TUI registry tests'],
+  [/^web\/src\/plugins\/registry\.ts$/, '声明顺序 + MIME 选择 + bridge 生命周期', 'TUI registry/bridge tests'],
+  [/^web\/src\/plugins\/registry\.test\.ts$/, 'MIME/顺序/iframe 契约单测', 'nsh test --target tui'],
+  [/^web\/src\/plugins\/bridge\.ts$/, '订阅/退订生命周期', 'TUI bridge tests'],
+  [/^web\/src\/plugins\/bridge\.test\.ts$/, '订阅清理单测', 'nsh test --target tui'],
+  [/^web\/src\/plugins\/sync\.ts$/, 'inventory 顺序同步', 'TUI registry tests'],
+  [/^web\/src\/plugins\/validation\.ts$/, 'mime 声明 / iframe 契约校验', 'TUI registry tests'],
   [/^web\/src\/plugins\/mime\.ts$/, 'MIME 语法与匹配', 'TUI registry tests'],
   [/^web\/src\/plugins\/mime\.test\.ts$/, 'MIME 单测', 'nsh test --target tui'],
   [/^web\/src\/plugins\/types\.ts$/, '槽位契约', '编译 + TUI 测试'],
   [/^web\/src\/plugins\/bundled\.ts$/, '测试 chunk 入口', 'TUI harness'],
   [/^web\/src\/plugins\/fixtures\//, '测试 chunk', 'TUI harness'],
-  [/^web\/src\/screens\/attachment-row\.harness\.tsx$/, '附件行 harness', 'TUI harness'],
-  [/^web\/src\/screens\/attachment-row\.tui\.test\.tsx$/, '回退渲染单测', 'nsh test --target tui'],
+  [/^web\/src\/plugins\/slots\.tui\.test\.tsx$/, 'TUI 附件测试', 'nsh test --target tui'],
   [/^web\/src\/data\/attachments\.ts$/, 'AttachmentPart 读取/缓存/权限', '步骤 1、6'],
-  [/^web\/src\/data\/attachments\.test\.ts$/, '附件投影状态单测', 'nsh test --target tui'],
+  [/^web\/src\/data\/attachments\.test\.ts$/, '附件投影状态/刷新/去重单测', 'nsh test --target tui'],
+  [/^web\/src\/data\/attachment-link\.ts$/, '同源下载/打开入口', '步骤 2、8'],
+  [/^web\/src\/data\/attachment-link\.test\.ts$/, '同源策略单测', 'nsh test --target tui'],
   [/^web\/src\/data\/contract\.ts$/, 'AttachmentPart 契约', '步骤 1、2'],
   [/^web\/src\/data\/http\.ts$/, 'part 路由客户端', '步骤 1、2'],
-  [/^web\/src\/data\/store\.ts$/, 'part 读取入口', '步骤 2、6'],
-  [/^web\/src\/data\/attachment-link\.ts$/, '同源下载/打开入口', '步骤 2、8'],
+  [/^web\/src\/data\/store\.ts$/, 'part 读取入口 / 403 权限面', '步骤 2、6、7'],
   [/^web\/src\/data\/fixture\.ts$/, '演示数据（插件/附件）', 'TUI 测试'],
-  [/^web\/src\/plugins\/slots\.tui\.test\.tsx$/, 'TUI 附件测试', 'nsh test --target tui'],
-  [/^scripts\/keel-attachment-e2e\//, 'E2E 运行器（证据生产者）', 'EXEMPT：本报告由它产出'],
 ];
+
+/** Only documentation/evidence and the E2E harness itself may be exempt. A
+ * product or test file outside COVERAGE_MAP is UNCOVERED, never silently
+ * exempt. */
+const EXEMPT_ALLOWLIST = [/^openspec\//, /^scripts\/keel-attachment-e2e\//];
 
 function coverageRows() {
   return changedFiles().map((file) => {
@@ -517,12 +554,21 @@ function coverageRows() {
     if (match) {
       return { file, change: 'changed', status: 'COVERED', surface: match[1], evidence: match[2] };
     }
+    if (EXEMPT_ALLOWLIST.some((pattern) => pattern.test(file))) {
+      return {
+        file,
+        change: 'changed',
+        status: 'EXEMPT',
+        surface: file.startsWith('openspec/') ? 'change 文档/证据' : 'E2E 运行器（证据生产者）',
+        evidence: 'EXEMPT：显式白名单',
+      };
+    }
     return {
       file,
       change: 'changed',
-      status: 'EXEMPT',
-      surface: file.startsWith('openspec/') ? 'change 文档/证据' : '非产品面',
-      evidence: 'EXEMPT：文档、证据或仓库杂项',
+      status: 'UNCOVERED',
+      surface: '未映射产品/测试文件',
+      evidence: 'UNCOVERED：必须映射或补证据',
     };
   });
 }
@@ -649,7 +695,11 @@ async function step2(step, ctx) {
   check(step, '默认行显示 PDF 名称与 MIME', text.includes('发布说明.pdf') && text.includes('application/pdf'), 'name + mime', text.includes('发布说明.pdf'));
   check(step, '没有插件预览时只显示默认行', !text.includes('E2E 插件附件预览'), 'no plugin preview', text.includes('E2E 插件附件预览'));
   check(step, '投递形态如实标注未记录', text.includes('本次投递形态未记录'), 'delivery note', text.includes('本次投递形态未记录'));
-  check(step, '图片缩略图已绘制（无空白占位）', (await page.locator(sel(`attachment-${ctx.pngId}`)).locator('img').count()) > 0, 'img > 0', await page.locator(sel(`attachment-${ctx.pngId}`)).locator('img').count());
+  const thumbImg = page.locator(sel(`attachment-${ctx.pngId}`)).locator('img[src*="/thumbnail"]').first();
+  const drawn = await thumbImg
+    .evaluate((img) => ({ complete: img.complete, naturalWidth: img.naturalWidth, src: img.currentSrc }))
+    .catch(() => ({ complete: false, naturalWidth: 0, src: '' }));
+  check(step, '图片缩略图已绘制（naturalWidth > 0，无空白占位）', drawn.complete && drawn.naturalWidth > 0, 'complete + naturalWidth > 0', JSON.stringify(drawn));
   const size = await overflow(page);
   check(step, '1440 无横向溢出', size.doc <= size.inner, 'doc <= inner', JSON.stringify(size));
   await shot(page, step, 'default-attachment-row', { fullPage: true });
@@ -713,12 +763,14 @@ async function step5(step, ctx) {
   await pageReload(ctx.adminPage);
   await openSession(ctx.adminPage, BASE, ctx.sessionId);
   await waitTestId(ctx.adminPage, `attachment-${ctx.pngId}`, 40000);
-  await ctx.adminPage.waitForSelector('[data-testid^="plugin-failure-"]', { timeout: 40000 });
+  await ctx.adminPage.waitForSelector(sel('attachment-preview-failure'), { timeout: 40000 });
   const text = await bodyText(ctx.adminPage);
-  check(step, '渲染抛错可解释', text.includes('E2E-ATTACHMENT-PREVIEW-EXPLODED') || text.includes('ERR_PLUGIN'), 'explained failure', text.includes('E2E-ATTACHMENT-PREVIEW-EXPLODED'));
+  const compact = text.replace(/\s+/g, '');
+  check(step, '渲染抛错显示中文失败面', text.includes('附件预览失败') && compact.includes('E2E-ATTACHMENT-PREVIEW-EXPLODED'), '附件预览失败 + reason', compact.includes('E2E-ATTACHMENT-PREVIEW-EXPLODED'));
+  check(step, '不把技术码当主文案', !text.includes('ERR_PLUGIN'), 'no ERR_PLUGIN', text.includes('ERR_PLUGIN'));
   check(step, '默认行保留', text.includes('demo-shot.png') && text.includes('下载'), 'name + download', text.includes('下载'));
   const pdfRow = await ctx.adminPage.locator(sel(`attachment-${ctx.pdfId}`)).innerText();
-  check(step, '单个失败不影响其他附件', !pdfRow.includes('ERR_PLUGIN') && !pdfRow.includes('E2E-ATTACHMENT-PREVIEW-EXPLODED'), 'PDF row clean', pdfRow.slice(0, 80));
+  check(step, '单个失败不影响其他附件', !pdfRow.includes('附件预览失败') && !pdfRow.includes('E2E-ATTACHMENT-PREVIEW-EXPLODED'), 'PDF row clean', pdfRow.slice(0, 80));
   await shot(ctx.adminPage, step, 'preview-failure-fallback');
   await admin.post(`/v1/plugins/${BROKEN_PLUGIN}/disable`, {});
   await admin.post(`/v1/plugins/${BROKEN_PLUGIN}/uninstall`, {});
@@ -841,9 +893,11 @@ async function step7(step, ctx) {
   await page.fill(`${sel('login-password')} input`, OUTSIDER_PASSWORD);
   await page.click(sel('login-submit'));
   await page.waitForTimeout(1500);
+  await page.waitForTimeout(1500);
   const text = await bodyText(page);
   check(step, 'UI 不展示会话/附件内容', !text.includes('demo-shot.png') && !text.includes('发布说明.pdf'), 'no attachment text', text.includes('demo-shot.png'));
-  check(step, 'UI 回到可解释的认证/权限门', (await page.locator(sel('login-gate')).count()) > 0 || text.includes('权限'), 'gate visible', text.slice(-160));
+  const gateVisible = (await page.locator(sel('login-gate')).count()) > 0;
+  check(step, 'UI 显示真实权限态而非登录失败', !gateVisible && /无权限读取会话|session\.read/.test(text), 'permission face, no login gate', text.slice(-200));
   await shot(page, step, 'outsider-no-session-read');
 }
 
@@ -891,6 +945,17 @@ async function step8(step, ctx) {
 
 async function step9(step, ctx) {
   const state = await ctx.adminContext.storageState();
+  // The review's P2: the viewport walk must show the plugin preview in place,
+  // not only the fallback after the uninstall. Reinstall it for this step and
+  // withdraw it afterwards.
+  const pluginDir = writePackage(PREVIEW_PLUGIN, { chunk: PREVIEW_CHUNK, title: 'E2E Attachment Preview' });
+  const install = await approveAndRepeat(ctx.admin, 'install preview plugin (layout)', '/v1/plugins/install', { path: pluginDir });
+  check(step, '布局走查前重新安装预览插件', install.final.status === 201, 201, install.final.status);
+  const enable = await approveAndRepeat(ctx.admin, 'enable preview plugin (layout)', `/v1/plugins/${PREVIEW_PLUGIN}/enable`, {});
+  check(step, '布局走查前重新启用预览插件', enable.final.status === 200, 200, enable.final.status);
+  const inventory = await waitInventory(ctx.admin, PREVIEW_PLUGIN, 'enabled');
+  const contribution = (inventory.contributes || []).find((entry) => entry.part === 'attachment');
+  check(step, '布局走查前 inventory 带附件贡献', contribution?.part === 'attachment', 'part=attachment', JSON.stringify(contribution || null));
   const viewports = [
     { width: 390, height: 844 },
     { width: 768, height: 1024 },
@@ -902,6 +967,15 @@ async function step9(step, ctx) {
     await openSession(page, BASE, ctx.sessionId);
     await waitTestId(page, `attachment-${ctx.pngId}`, 40000);
     await waitTestId(page, `attachment-${ctx.pdfId}`, 40000);
+    await waitTestId(page, `plugin-attachment-${ctx.pngId}`, 40000);
+    try {
+      await waitTestId(page, 'e2e-attachment-preview', 40000);
+    } catch (error) {
+      logLine(step, `${viewport.width}: preview did not render; body=${(await bodyText(page)).slice(0, 600)}`);
+      throw error;
+    }
+    const text = await bodyText(page);
+    check(step, `${viewport.width}: 插件预览在场`, text.includes('E2E 插件附件预览'), 'preview text', text.includes('E2E 插件附件预览'));
     const size = await overflow(page);
     check(step, `${viewport.width}: 无横向溢出`, size.doc <= size.inner, 'doc <= inner', JSON.stringify(size));
     const box = await page.locator(sel(`attachment-${ctx.pngId}`)).boundingBox();
@@ -912,9 +986,20 @@ async function step9(step, ctx) {
       'inside viewport',
       JSON.stringify(box),
     );
+    const image = await page
+      .locator(sel(`attachment-${ctx.pngId}`))
+      .locator('img[src*="/thumbnail"]')
+      .first()
+      .evaluate((img) => ({ complete: img.complete, naturalWidth: img.naturalWidth }))
+      .catch(() => ({ complete: false, naturalWidth: 0 }));
+    check(step, `${viewport.width}: 缩略图已绘制`, image.complete && image.naturalWidth > 0, 'complete + naturalWidth > 0', JSON.stringify(image));
     await shot(page, step, `layout-${viewport.width}`);
     await context.close();
   }
+  const disabled = await ctx.admin.post(`/v1/plugins/${PREVIEW_PLUGIN}/disable`, {});
+  check(step, '布局走查后停用预览插件', disabled.status === 200, 200, disabled.status);
+  const removed = await ctx.admin.post(`/v1/plugins/${PREVIEW_PLUGIN}/uninstall`, {});
+  check(step, '布局走查后卸载预览插件', removed.status === 200, 200, removed.status);
 }
 
 // ---- main ----------------------------------------------------------------------
@@ -947,23 +1032,35 @@ async function main() {
   const totalChecks = steps.reduce((sum, step) => sum + step.checks.length, 0);
   const passedChecks = steps.reduce((sum, step) => sum + step.checks.filter((c) => c.ok).length, 0);
   const failedSteps = steps.filter((step) => step.result !== 'PASS');
+  if (coverage.uncovered > 0) {
+    addFinding(
+      'coverage-uncovered',
+      'P0',
+      `改动文件覆盖表 UNCOVERED=${coverage.uncovered}`,
+      '产品/测试文件没有映射到证据。EXEMPT 只允许文档/证据和 E2E 运行器；其余必须 COVERED。',
+      coverage.rows
+        .filter((row) => row.status === 'UNCOVERED')
+        .map((row) => row.file)
+        .join(', '),
+    );
+  }
   const report = {
     title: 'keel-plugin-attachment · 真实浏览器 E2E',
     change: 'keel-plugin-attachment（tasks 3.6 / 5.4 / 5.5）',
     date: new Date().toISOString().slice(0, 10),
     frozenBase: { repo: WORKTREE, commit: HEAD_COMMIT },
     conclusion:
-      failedSteps.length === 0
+      failedSteps.length === 0 && coverage.uncovered === 0
         ? `${steps.length}/${steps.length} 步通过，${passedChecks}/${totalChecks} 条断言通过；P0/P1 = 0；UNCOVERED=0。`
-        : `${failedSteps.length}/${steps.length} 步失败；${passedChecks}/${totalChecks} 条断言通过。`,
+        : `${steps.length - failedSteps.length}/${steps.length} 步通过；${passedChecks}/${totalChecks} 条断言通过；UNCOVERED=${coverage.uncovered}。`,
     assertions: { total: totalChecks, passed: passedChecks },
     steps,
     findings,
     coverage,
   };
   fs.writeFileSync(path.join(EVIDENCE, 'steps.json'), JSON.stringify(report, null, 2) + '\n');
-  console.log(`[e2e] report data written: ${path.join(EVIDENCE, 'steps.json')} (${passedChecks}/${totalChecks} checks)`);
-  if (failedSteps.length > 0) process.exitCode = 1;
+  console.log(`[e2e] report data written: ${path.join(EVIDENCE, 'steps.json')} (${passedChecks}/${totalChecks} checks, UNCOVERED=${coverage.uncovered})`);
+  if (failedSteps.length > 0 || coverage.uncovered > 0) process.exitCode = 1;
 }
 
 (async () => {

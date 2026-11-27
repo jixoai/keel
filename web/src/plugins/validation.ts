@@ -197,6 +197,12 @@ function entryProblem(form: SlotForm, entry: string): string | null {
   if (form === "iframe" && /^javascript:/i.test(value)) {
     return "iframe 的 entry 不能是 javascript: URL。";
   }
+  if (form === "iframe" && !value.startsWith("/plugins/")) {
+    // An iframe is a plugin's own hosted page, not an arbitrary browser
+    // surface: data:, blob:, remote http(s) and protocol-relative URLs are
+    // refused here, so the app's one hosted namespace is the only target.
+    return "iframe 的 entry 必须是同源 /plugins/<id>/ 页面。";
+  }
   if (form === "package" && !/\.nshpkg($|\?)/.test(value)) {
     return "package 的 entry 必须指向一个 .nshpkg 包。";
   }
@@ -436,6 +442,7 @@ export function normalizeContribution(
       toolName: typeof toolNameRaw === "string" ? toolNameRaw : undefined,
       partKind,
       mime,
+      order: index,
     },
     issues,
   };

@@ -117,11 +117,12 @@ function safeRender(
   registry: SlotRegistry,
   target: SlotTarget,
   props?: unknown,
+  failure?: (entry: MountedContribution) => JSX.Element,
 ): JSX.Element {
   const module = entry.module;
-  if (!module) return <PluginFailure entry={entry} registry={registry} />;
+  if (!module) return failure ? failure(entry) : <PluginFailure entry={entry} registry={registry} />;
   const declaration = slot;
-  if (!declaration) return <PluginFailure entry={entry} registry={registry} />;
+  if (!declaration) return failure ? failure(entry) : <PluginFailure entry={entry} registry={registry} />;
   const context: PluginChunkContext = {
     pluginId: entry.declaration.pluginId,
     contribution: entry.declaration,
@@ -135,6 +136,13 @@ function safeRender(
       <PluginUnavailable code="ERR_PLUGIN" reason="这个 chunk 没有渲染任何内容。" />
     );
   } catch (error) {
+    if (failure) {
+      return failure({
+        ...entry,
+        code: "ERR_PLUGIN",
+        reason: error instanceof Error ? error.message : String(error),
+      });
+    }
     return (
       <PluginFailure
         entry={{
@@ -594,13 +602,53 @@ export function PluginAttachmentPreview(props: {
     target: target(),
     withDefaultRow: true,
   });
+  /** The attachment slot's own failure face: plain Chinese, the plugin's
+   * reason, and a retry. The technical `ERR_*` stays in the diagnostic code,
+   * not as the sentence a reader sees. */
+  const failureFace = (entry: MountedContribution): JSX.Element => (
+    <Alert
+      variant="default"
+      icon="alert"
+      title="附件预览失败"
+      description={entry.reason ?? "预览插件没有完成渲染；默认附件行仍可查看与下载。"}
+      action={
+        <Button
+          variant="ghost"
+          size="sm"
+          icon="refresh"
+          label="重试"
+          accessibilityLabel={`重试附件预览 ${entry.declaration.pluginId}`}
+          onPress={() => void registry.reloadPlugin(entry.declaration.pluginId)}
+        />
+      }
+      testID="attachment-preview-failure"
+    />
+  );
+  /** An iframe page receives the same read-only projection as a chunk, as
+   * query parameters (there is no host-tree props path for it). Values are
+   * encoded; the page must not treat the name as a path. */
+  const iframeSrc = (entry: MountedContribution): string => {
+    const base = entry.declaration.entry ?? "";
+    if (!base) return base;
+    const value = props.part;
+    const pairs = [
+      ["fileId", value.fileId],
+      ["name", value.name ?? ""],
+      ["mime", value.mime],
+      ["size", String(value.size)],
+      ["kind", value.kind],
+      ["thumbStatus", value.thumbStatus],
+      ["downloadUrl", value.downloadUrl],
+    ].map(([key, item]) => `${key}=${encodeURIComponent(item)}`);
+    return `${base}${base.includes("?") ? "&" : "?"}${pairs.join("&")}`;
+  };
   return (
     <View testID={props.testID ?? `plugin-attachment-${props.part.fileId || "local"}`} style={{ minWidth: 0, gap: space.sm }}>
       <If when={ready()}>
         {(entry) => (
           <View style={{ minWidth: 0 }}>
             {entry().declaration.form === "iframe" ? (
-              <PluginIframeEntry entry={entry()} />
+              <PluginIframeEntry entry={entry()} src={iframeSrc(entry())} />
             ) : entry().declaration.form === "package" ? (
               <PluginUnavailable
                 code="ERR_UNSUPPORTED"
@@ -614,6 +662,7 @@ export function PluginAttachmentPreview(props: {
                 registry,
                 target(),
                 contextProps(),
+                failureFace,
               )
             )}
           </View>
@@ -656,14 +705,30 @@ export function PluginAttachmentPreview(props: {
                       icon="external"
                       label="在浏览器打开"
                       accessibilityLabel="在浏览器打开附件预览"
-                      onPress={() => void openExternal(entry().declaration.entry ?? "")}
+                      onPress={() => void openExternal(iframeSrc(entry()))}
                     />
                   ) : undefined
                 }
                 testID="attachment-preview-terminal"
               />
             ) : entry().status === "failed" ? (
-              <PluginFailure entry={entry()} registry={registry} compact />
+              <Alert
+                variant="default"
+                icon="alert"
+                title="附件预览失败"
+                description={entry().reason ?? "预览插件没有完成渲染；默认附件行仍可查看与下载。"}
+                action={
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    icon="refresh"
+                    label="重试"
+                    accessibilityLabel={`重试附件预览 ${entry().declaration.pluginId}`}
+                    onPress={() => void registry.reloadPlugin(entry().declaration.pluginId)}
+                  />
+                }
+                testID="attachment-preview-failure"
+              />
             ) : (
               <PluginUnavailable code={entry().code} reason={entry().reason} />
             )}
@@ -679,7 +744,7 @@ export function PluginAttachmentPreview(props: {
                   numberOfLines: 1,
                 }}
               >
-                {entry().declaration.entry}
+                {iframeSrc(entry())}
               </Text>
             </If>
           </View>
@@ -692,12 +757,16 @@ export function PluginAttachmentPreview(props: {
 /** The iframe fallback: an explicit browser frame, labelled as non-native
  * theme. The terminal never reaches it (the registry marks the target
  * unsupported first). */
-export function PluginIframeEntry(props: { entry: MountedContribution; compact?: boolean }) {
-  const url = () => props.entry.declaration.entry ?? "";
-  const open = () => {
-    void openUrl(url()).catch(() => {
-      /* the address stays on screen */
-    });
+export function PluginIframeEntry(props: { entry: MountedContribution; compact?: boolean; src?: string }) {
+  const entryUrl = () => props.entry.declaration.entry ?? "";
+  const url = () => props.src ?? entryUrl();
+  const open = async () => {
+    try {
+      const absolute = await absoluteAttachmentUrl(url());
+      await openUrl(absolute);
+    } catch {
+      /* the address stays on screen; openUrl refuses cross-origin or unknown */
+    }
   };
   return (
     <View
@@ -720,7 +789,14 @@ export function PluginIframeEntry(props: { entry: MountedContribution; compact?:
         >
           {url()}
         </Text>
-        <Button variant="ghost" size="sm" icon="external" label="打开" accessibilityLabel="打开插件页面" onPress={open} />
+        <Button
+          variant="ghost"
+          size="sm"
+          icon="external"
+          label="打开"
+          accessibilityLabel="打开插件页面"
+          onPress={() => void open()}
+        />
       </View>
       <If when={!props.compact}>
         <IframeFrame url={url()} id={props.entry.declaration.id} />
@@ -729,10 +805,15 @@ export function PluginIframeEntry(props: { entry: MountedContribution; compact?:
   );
 }
 
+/** The frame's application policy is its URL: validation refuses anything but
+ * a same-origin `/plugins/<id>/` page, so the web view has no remote, data: or
+ * protocol-relative source. NSH exposes no per-frame sandbox on this target;
+ * the hosted namespace and the plugin's declared capabilities are the boundary. */
 function IframeFrame(props: { url: string; id: string }) {
   return (
     <WebView
       testID={`plugin-iframe-frame-${props.id}`}
+      accessibilityLabel={`插件页面 ${props.url}`}
       src={props.url}
       style={{
         width: "100%",

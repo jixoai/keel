@@ -82,6 +82,10 @@ export interface SlotContribution {
   /** Attachment-only MIME narrowing: `type/subtype` or `type/*`, lowercase.
    * Absent/empty means "every attachment MIME" for an attachment claim. */
   mime?: string[];
+  /** The contribution's index in its plugin's `contributes[]`, recorded by
+   * validation. Selection uses it (with the inventory's plugin order) when a
+   * re-registration moves the mounted entry in the client's array. */
+  order?: number;
 }
 
 export type ContributionStatus = "declared" | "loading" | "ready" | "failed" | "unavailable";
@@ -131,6 +135,10 @@ export interface PluginBridge {
   onEvent(listener: (event: PluginEvent) => void): () => void;
   /** The grants this bridge was opened with (never a host secret). */
   readonly capabilities: readonly BridgeCapability[];
+  /** Withdraw the plugin's event stream and every listener. Called when the
+   * plugin is disabled/uninstalled or its declaration is replaced; it must not
+   * leave a listener, a host subscription or a cached scope behind. */
+  dispose?(): void;
 }
 
 /** The bridge's state document (a projection of the plugin's inventory row and

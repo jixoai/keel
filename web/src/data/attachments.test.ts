@@ -12,8 +12,10 @@ import {
   loadAttachmentPart,
   localAttachmentPart,
   resetAttachmentParts,
+  refreshAttachmentPart,
   retryAttachmentPart,
 } from "./attachments";
+import { uniqueAttachments } from "../screens/attachment-row";
 import { KeelApiError } from "./http";
 
 const part: AttachmentPart = {
@@ -87,4 +89,31 @@ test("projection cache: a ready read is not repeated for the same identity", asy
     return Promise.resolve(part);
   });
   expect(calls).toBe(1);
+});
+
+test("refresh: a pending-thumbnail refresh never blanks a good projection", async () => {
+  resetAttachmentParts();
+  const key = attachmentPartKey("session-1", 11, part.fileId);
+  await loadAttachmentPart(key, () => Promise.resolve(part));
+  await refreshAttachmentPart(key, () => Promise.reject(new Error("transient")));
+  expect(attachmentPartState(key)?.status).toBe("ready");
+  expect(attachmentPartState(key)?.part?.thumbStatus).toBe("ready");
+  const pending = { ...part, thumbStatus: "pending" as const, thumbnailUrl: undefined };
+  await refreshAttachmentPart(key, () => Promise.resolve(pending));
+  expect(attachmentPartState(key)?.status).toBe("ready");
+  expect(attachmentPartState(key)?.part?.thumbStatus).toBe("pending");
+});
+
+test("dedupe: the same fileId (or the same local identity) renders once", () => {
+  expect(
+    uniqueAttachments([
+      { fileId: "f-1", name: "a.png", mime: "image/png", size: 10 },
+      { fileId: "f-1", name: "a.png", mime: "image/png", size: 10 },
+      { fileId: "f-2", name: "b.pdf", mime: "application/pdf", size: 20 },
+      { name: "local.png", mime: "image/png", size: 30 },
+      { name: "local.png", mime: "image/png", size: 30 },
+    ]).length,
+  ).toBe(3);
+  expect(uniqueAttachments([])).toEqual([]);
+  expect(uniqueAttachments(undefined)).toEqual([]);
 });
