@@ -626,7 +626,11 @@ type fakeBridge struct {
 	// garbageDeliveries answers 200 with a malformed body for that many
 	// attempts (a transport/protocol failure the client must retry).
 	garbageDeliveries int
-	attempts          int
+	// slowDeliveries answers after deliverDelay; the provider's 15s client
+	// timeout fires first, which is a real timeout rather than a 5xx.
+	slowDeliveries int
+	deliverDelay   time.Duration
+	attempts       int
 }
 
 func newFakeBridge(secret boardsync.Secret, key boardsync.Key) *fakeBridge {
@@ -649,6 +653,20 @@ func newFakeBridge(secret boardsync.Secret, key boardsync.Key) *fakeBridge {
 			}
 			fake.mu.Lock()
 			fake.attempts++
+			if fake.slowDeliveries > 0 {
+				fake.slowDeliveries--
+				delay := fake.deliverDelay
+				fake.mu.Unlock()
+				if delay > 0 {
+					select {
+					case <-time.After(delay):
+					case <-r.Context().Done():
+						return
+					}
+				}
+				_, _ = w.Write([]byte(`{"thread":"-100:t1","message":"tg-out-1"}`))
+				return
+			}
 			if fake.failDeliveries > 0 {
 				fake.failDeliveries--
 				fake.mu.Unlock()
@@ -699,6 +717,13 @@ func (f *fakeBridge) setGarbageDeliveries(count int) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.garbageDeliveries = count
+}
+
+func (f *fakeBridge) setSlowDeliveries(count int, delay time.Duration) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.slowDeliveries = count
+	f.deliverDelay = delay
 }
 
 // --- report --------------------------------------------------------------
@@ -1486,6 +1511,33 @@ func (e *env) scenarioBridge(scenario *Scenario) error {
 		return fmt.Sprintf("malformed 200 then success; attempts=%d", attempts), nil
 	}) {
 		return errors.New("sidecar malformed retry failed")
+	}
+	if !scenario.Step("a sidecar timeout is retried and a later attempt succeeds", func() (string, error) {
+		before := e.bridgeSDK.deliveryAttempts()
+		// The chatsdk client's default per-attempt timeout is 15s; a handler
+		// that sleeps 16s produces a real client-side timeout, not a 5xx.
+		e.bridgeSDK.setSlowDeliveries(1, 16*time.Second)
+		if _, err := e.postReply(root.ID, "sidecar timeout reply"); err != nil {
+			return "", err
+		}
+		err := e.waitFor(30*time.Second, "sidecar retry after timeout", func() (bool, error) {
+			for _, delivery := range e.bridgeSDK.deliveries() {
+				if strings.Contains(delivery.Body.Markdown, "sidecar timeout reply") {
+					return true, nil
+				}
+			}
+			return false, nil
+		})
+		if err != nil {
+			return "", fmt.Errorf("%w (attempts=%d)", err, e.bridgeSDK.deliveryAttempts()-before)
+		}
+		attempts := e.bridgeSDK.deliveryAttempts() - before
+		if attempts != 2 {
+			return "", fmt.Errorf("attempts = %d, want one timeout + one success", attempts)
+		}
+		return "15s client timeout then success; attempts=2", nil
+	}) {
+		return errors.New("sidecar timeout retry failed")
 	}
 	return nil
 }

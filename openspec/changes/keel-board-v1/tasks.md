@@ -97,7 +97,7 @@
 - [x] 10.3 实现 RBAC/ReBAC：`board.read/write/manage` 权限键、频道 `resource_relations` viewer/editor/owner、最近祖先继承；真实 PG 测试。
 - [x] 10.4 接入 keel PG 与 RLS：keel-board migrations 在 keel 启动幂等执行，`tenant_id` 谓词 + RLS 双保险；A/B 租户测试。
 - [x] 10.5 接入 SSE hub 与 Last-Event-ID；keel 的 tenant 鉴权、心跳、多副本 NOTIFY/poll；集成测试。
-- [x] 10.6 接入 tenant secret store：`SecretResolver`、sync entries 的 POST/PATCH（创建/启停/轮换/路由，只传 secret_ref）、`board.sync.enabled`/`board.enabled` feature flag；测试关闭即 404/无 webhook，日志/事件/响应无 secret。（evidence: `evidence/phase-1-sync.md`；启停即时，创建/轮换/路由变更持久化后需重启装载，期间 entry 在 board sync store 停用）
+- [x] 10.6 接入 tenant secret store：`SecretResolver`、sync entries 的 POST/PATCH（创建/启停/轮换/路由，只传 secret_ref）、`board.sync.enabled`/`board.enabled` feature flag；测试关闭即 404/无 webhook，日志/事件/响应无 secret。（evidence: `evidence/phase-1-sync.md`；启停即时，创建/轮换/路由变更持久化后需重启装载，期间 entry 在 board sync store 停用；创建即 pending disabled。路由目标必须是已存在且有 `board_channel` relation 的频道，否则 400；历史坏 entry boot 时 disabled 且不启动 worker；零 relation 频道可由 tenant board.manage 显式认领）
 - [x] 10.7 接入 telemetry/audit：board/sync 指标、permission.denied、credential 状态；测试无 secret/正文。
 
 ## 11. Phase 1：superagent 适配
@@ -114,15 +114,15 @@
 
 ## 12. Phase 1：keel 上的 sync 启用
 
-- [x] 12.1 从 tenant config/secret store 装配 Slack/GitHub/Linear/Chat SDK entries；webhook 路径注册；未配置时 `sync_disabled`；测试配置矩阵。（evidence: `evidence/phase-1-sync.md`）
+- [x] 12.1 从 tenant config/secret store 装配 Slack/GitHub/Linear/Chat SDK entries；webhook 路径注册；未配置时 `sync_disabled`；测试配置矩阵。entry 的静态 route 在写入与 boot 时都要求频道已存在且至少有一条 `board_channel` relation（fail closed），零 relation 频道走显式认领。（evidence: `evidence/phase-1-sync.md`）
 - [x] 12.2 验证 Slack/GitHub/Linear 在 keel 的 webhook→inbox→board→outbound→receipt 全链路；fake 平台 E2E。（evidence: `evidence/phase-1-sync-e2e.html`）
-- [x] 12.3 验证 bridge sidecar 在 keel 部署中的 HMAC/nonce/超时/失败；sidecar 不属于 keel 运行时。（evidence: `evidence/phase-1-sync-e2e.html`）
-- [x] 12.4 验证 source read/typing/permalinks/attachments 在 keel 权限下的行为；`board.manage` 与频道关系测试。（evidence: `evidence/phase-1-sync.md`，attachments/source read/typing 在 E2E）
+- [x] 12.3 验证 bridge sidecar 在 keel 部署中的 HMAC/nonce/超时/5xx/malformed 重试；sidecar 不属于 keel 运行时。E2E 覆盖：真实 client timeout（sidecar 延迟 16s > 15s client timeout，第一次超时、第二次成功，attempts=2）、5xx 两次后成功、malformed 响应后重试成功；supervisor 侧由真实 PG + HTTP 的 bridge E2E 覆盖 timeout/5xx/retry 与 `board_disabled`。（evidence: `evidence/phase-1-sync-e2e.html`）
+- [x] 12.4 验证 source read/typing/permalinks/attachments 在 keel 权限下的行为；`board.manage` 与频道关系测试。Slack permalink 在 E2E 中作为 board link 原样保留，并以 alice 会话读回。（evidence: `evidence/phase-1-sync.md`；attachments/source read/typing/permalink 在 `evidence/phase-1-sync-e2e.html`）
 
 ## 13. Phase 1：门禁
 
 - [x] 13.1 跑 keel 单测/集成/race + keel-board conformance；全绿并记录输出。（`evidence/phase-1-sync.md`：boardintegration + race + `go test -p 1 ./...` + v0.1.1 conformance；不修改 board 仓库）
-- [x] 13.2 E2E：keel API + fake 平台 + fake bridge，覆盖 sync 全链路、superagent 镜像/命令桥、跨租户；脚本生成 HTML 报告。（sync 全链路/跨租户：`evidence/phase-1-sync-e2e.html`；superagent 镜像/命令桥属 11.x lane，不在本 lane）
+- [x] 13.2 E2E：keel API + fake 平台 + fake bridge，覆盖 sync 全链路、superagent 镜像/命令桥、跨租户；脚本生成 HTML 报告。`cmd/board-sync-e2e` 现在包含真实 PG + HTTP 的 superagent bridge 场景（auth principal → Surface.Gate → bridge → Surface → 真实 board log，fake supervisor）：频道级授权拒绝（supervisor calls=0、head 不变）、operator 组 claim/complete/block、`board_disabled` 404、supervisor timeout/5xx/retry。（evidence: `evidence/phase-1-sync-e2e.html`）
 - [ ] 13.3 独立子代理复核（禁 Codex）：身份/RBAC、sync 凭据/不可信输入、双真值、回滚；P0/P1 清零。
 - [ ] 13.4 写 phase 1 evidence；完成阶段归档检查点并签收；change 保持 active 进入 Phase 2。
 

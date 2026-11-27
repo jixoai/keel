@@ -110,8 +110,9 @@ export KEEL_BOARD_FILE_TIMEOUT=10s   # 可选；单个入站文件下载超时
 {"board":{"enabled":true,"sync":{"enabled":true}}}
 ```
 
-- **route 前置条件（fail closed）**：`routes` 里每个 board channel 必须已经存在，并且在
-  `resource_relations` 中至少有一条 `resource_type=board_channel` 的关系；否则
+- **route 前置条件（fail closed）**：`routes` 里每个 board channel 必须已经存在，并且
+  在自身或任一祖先路径上有至少一条 `resource_type=board_channel` 的关系（与 board 的
+  最近祖先继承一致）；否则
   `POST/PATCH /v1/board/sync/entries` 返回 400，提示先 `POST /v1/board/channels`
   （创建者自动成为 owner）或走孤儿频道认领。boot 时历史 entry 也做同一校验：不合格的
   entry 在 board sync store 停用、日志给出原因、不启动 worker，进程继续启动。
@@ -138,9 +139,13 @@ export KEEL_BOARD_FILE_TIMEOUT=10s   # 可选；单个入站文件下载超时
 ```
 
 - PATCH `/v1/board/sync/entries/{key}` 接受 `enabled` / `secretRef` / `settings` / `routes` /
-  `startChannels`。`enabled` 即时切换（webhook 接受状态 + 本进程 worker 启停）；创建、凭据
+  `startChannels`。`enabled:false` 永远允许（即使 route 频道已被删除/撤权）；
+  `enabled:true` 或 `routes` 变化会重新校验 route。凭据/settings/platform 变更可先保存，
+  但 entry 保持 pending/disabled 直到重启，boot 会再次校验 route。启停即时生效；创建、凭据
   轮换、settings/routes/startChannels 变更需要重启，变更期间 entry 在 board sync store 中
   停用（安全失败，旧凭据不会继续服务），响应 `restartRequired:true`。
+- `enabled:false` 的 entry 可作为安全 staging，允许 `routes` 指向尚未创建的频道；启用时
+  （`enabled:true`）再返回 400 要求先创建/授权频道。
 - `GET /v1/board/sync/credentials`（board.manage）返回每个 entry 的
   `configured|missing|invalid`；`GET /metrics` 的 `board_sync_credential_status{key,status}`
   同口径。凭据只报状态，不含值或密文。entry 同时返回 `restartRequired`：凭据本身可能已是
@@ -157,9 +162,10 @@ export KEEL_BOARD_FILE_TIMEOUT=10s   # 可选；单个入站文件下载超时
   可收窄父级 editor）。
 - 创建频道（`POST /v1/board/channels`）成功 201 后，adapter 立即写创建者的 `owner` 关系；
   隐式子频道（父频道 editor 下 `POST /messages`/`/tasks` 首次出现）也在 201 后写。
-- **孤儿频道认领**：对已存在但**零 relation** 的频道，`board.manage`（tenant/all scope）
-  调用 `POST /v1/board/channels` 返回 200，并补写调用者 owner；已有任何 relation 时保持
-  现状，不会借该路径夺取 ACL。board.write 调用者对无关系频道仍 404（不能探测存在性）。
+- **孤儿频道认领**：对已存在但**自身及整条祖先路径都零 relation** 的频道，
+  `board.manage`（tenant/all scope）调用 `POST /v1/board/channels` 返回 200，并补写调用者
+  owner；自身或任一祖先已有 relation 时保持现状，不会借该路径夺取继承 ACL。board.write
+  调用者对无关系频道仍 404（不能探测存在性）。
   **正式偏离 design §11.2 的“同一事务”**：board 模块与 keel 关系表不能共享事务，因此
   owner 写入是非原子的；启动与周期扫描按 `channel.created` 和每个频道最早的
   `message.posted` root 补偿（崩溃窗口可用测试复现）。
