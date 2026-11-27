@@ -51,6 +51,10 @@ type RecordedMeasurement struct {
 	Boundaries  []float64
 	Value       float64
 	Attributes  SpanAttributes
+	// TimeMs is the recording wall clock (epoch milliseconds). The memory
+	// adapter predates the exporter pipeline and leaves it zero; the hub sets it
+	// so an exporter can stamp OTLP data points.
+	TimeMs int64
 	// Context is the exemplar span carrier, or nil.
 	Context Carrier
 }

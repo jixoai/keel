@@ -337,6 +337,17 @@ func (s *memorySpan) telemetryCarrier() Carrier {
 	return copyCarrier(s.record.context)
 }
 
+// telemetrySpanIdentity exposes the memory adapter's stable span/trace identity
+// to the hub, so an exporter's parentage matches the in-process tree.
+func (s *memorySpan) telemetrySpanIdentity() (spanID, traceID, parentID string) {
+	spanID = s.record.context[carrierSpanKey]
+	traceID = s.record.context[carrierTraceKey]
+	if s.record.parentID != nil {
+		parentID = strconv.FormatInt(*s.record.parentID, 10)
+	}
+	return spanID, traceID, parentID
+}
+
 // inertSpan carries adapter capabilities for callbacks admitted after the
 // parent settled, without recording anything (memory.ts:195-211).
 type inertSpan struct {
