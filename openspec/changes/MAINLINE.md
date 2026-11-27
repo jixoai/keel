@@ -139,6 +139,12 @@ W0.5 插件全景/扩展面冻结
   复用已交付的 W8 subagent resume，不重做。
 - **W11**：按 `acceptance.md` 的 E0→G0→G1→…→G11 顺序收口；前置门未绿，后续门不成立。
 
+**插件生态交付快照（2026-11-27）**：`keel-plugin-telemetry` 已归档（真实服务 E2E 8 步 /
+104 断言，collector 收到 run span/metric/log，采样与停用均生效）；`keel-board-v1` Phase 0
+独立仓库已在 `d5a9e0a` 打 `v0.1.0`，最终独立复审 P0/P1=0，CI test+stress 同一 commit 全绿。
+`keel-plugin-attachment` 与 `keel-plugin-commands` 的 UI 切片仍在独立复审/修复中，收口后
+再归档；此前不得把它们当作已交付。
+
 ## 明确 Defer（Alpha 不做）
 
 - macOS 原生打包/签名/更新器（保留 web/TUI；macOS target 产物后置）。

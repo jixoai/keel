@@ -1,2 +1,0 @@
-initializing a PostgreSQL cluster in /var/folders/tn/y_b12zxs2dldn8thmfnpy9c80000gp/T//keel-telemetry-e2e.20261127-153010.c9Yc1U/pg (superuser keel, loopback only)
-ready: postgres://keel:09ffa49059f157bd43b79b6e42c92953@127.0.0.1:13605/keel_telemetry_e2e_1795764610?sslmode=disable

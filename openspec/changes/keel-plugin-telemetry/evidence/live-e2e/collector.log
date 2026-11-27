@@ -1,7 +1,0 @@
-fake OTLP collector listening on 127.0.0.1:13604 (evidence /Users/kzf/Development/GitHub/jixoai/fde2e/.worktrees/keel-plugin-telemetry-e2e/openspec/changes/keel-plugin-telemetry/evidence/live-e2e/collector-requests.jsonl)
-[collector] /v1/traces 1397 bytes 2 span(s) auth=sha256:4a3b39a6ac29
-[collector] /v1/metrics 1019 bytes 2 metric(s) auth=sha256:4a3b39a6ac29
-[collector] /v1/logs 949 bytes 1 log record(s) auth=sha256:4a3b39a6ac29
-[collector] /v1/metrics 1019 bytes 2 metric(s) auth=sha256:4a3b39a6ac29
-[collector] /v1/logs 949 bytes 1 log record(s) auth=sha256:4a3b39a6ac29
-[collector] SIGTERM; stopping with 5 request(s) recorded

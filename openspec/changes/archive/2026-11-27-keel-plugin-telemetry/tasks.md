@@ -97,10 +97,14 @@
 
 ## 8. 验收与归档
 
-- [ ] 8.1 `go test -race` 相关包（telemetry/servicehost/harnessext/pluginpkg/agent/
+- [x] 8.1 `go test -race` 相关包（telemetry/servicehost/harnessext/pluginpkg/agent/
   host/cmd）全绿；`scripts/binary-size.sh` 通过；`nsh check` 相关面全绿。
 - [x] 8.2 `openspec validate keel-plugin-telemetry --strict` 通过；证据目录含输出。
-- [ ] 8.3 独立 reviewer（子代理）复核 P0/P1 清零；重点审正文/密钥、基数、租户隔离与
+- [x] 8.3 独立 reviewer（子代理）复核 P0/P1 清零；重点审正文/密钥、基数、租户隔离与
   故障不拖垮 run。
-- [ ] 8.4 归档：`openspec archive keel-plugin-telemetry`，更新 `MAINLINE.md` 与
+  > 两轮独立复审：首轮 FAIL（P0 run path 未接 hub、P2 若干），修复后复审 PASS（P0/P1=0，
+  > 全量门禁、变异 4/4 红）；证据见本轮复审记录与 `evidence/mutation-*.txt`。
+- [x] 8.4 归档：`openspec archive keel-plugin-telemetry`，更新 `MAINLINE.md` 与
   `openspec/specs/plugin-telemetry/spec.md` 的 Purpose。
+  > 2026-11-27 归档为 `archive/2026-11-27-keel-plugin-telemetry`；spec Purpose 已写实，
+  > MAINLINE 记入插件生态快照。
