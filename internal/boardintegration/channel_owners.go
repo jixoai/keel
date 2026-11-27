@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -28,17 +27,25 @@ import (
 // creator as channel owner after a successful create, and the SSE keepalive /
 // lifetime policy.
 type handler struct {
-	next   http.Handler
-	board  *boardlog.Board
-	owners *ChannelOwners
-	sse    *sseHandler
-	logger *slog.Logger
+	next      http.Handler
+	board     *boardlog.Board
+	owners    *ChannelOwners
+	sse       *sseHandler
+	syncAdmin *syncAdmin
+	logger    *slog.Logger
 }
 
 func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Path
 	if len(path) > 1 && path[len(path)-1] == '/' {
 		path = path[:len(path)-1]
+	}
+	// keel-owned sync entry management (POST/PATCH) is not part of board
+	// v0.1.0; the mount layer implements it. It is checked before the board's
+	// own route table so board's GET routes stay untouched.
+	if h.syncAdmin != nil && h.syncAdmin.handles(r) {
+		h.syncAdmin.ServeHTTP(w, r)
+		return
 	}
 	if r.Method == http.MethodGet && path == boardserverEventsPath {
 		h.sse.ServeHTTP(w, r)
@@ -197,9 +204,6 @@ type ChannelOwners struct {
 	DSN    string
 	Schema string
 	Logger *slog.Logger
-
-	mu   sync.Mutex
-	seen map[string]bool
 }
 
 // GrantOwner writes the owner relation for one channel. It validates the
@@ -261,9 +265,6 @@ func (c *ChannelOwners) Run(ctx context.Context, interval time.Duration) {
 	if c.Logger == nil {
 		c.Logger = slog.Default()
 	}
-	if c.seen == nil {
-		c.seen = make(map[string]bool)
-	}
 	c.scan(ctx)
 	if interval < 0 {
 		return
@@ -303,7 +304,7 @@ func (c *ChannelOwners) scan(ctx context.Context) {
 	for _, event := range explicit {
 		key := event.tenant + "\x00" + event.payload.Channel
 		explicitChannels[key] = true
-		c.grantFromEvent(ctx, event, event.tenant+"\x00"+event.seq, "channel.created")
+		c.grantFromEvent(ctx, event, "channel.created")
 	}
 	for _, event := range implicit {
 		key := event.tenant + "\x00" + event.payload.Channel
@@ -312,37 +313,25 @@ func (c *ChannelOwners) scan(ctx context.Context) {
 			// ordinary content, not a second creator.
 			continue
 		}
-		c.grantFromEvent(ctx, event, event.tenant+"\x00implicit\x00"+event.payload.Channel, "first message.posted")
+		c.grantFromEvent(ctx, event, "first message.posted")
 	}
 }
 
-// grantFromEvent records one event's creator as owner. It is the shared half of
-// both repair paths; a platform actor has no keel Account and is marked seen so
-// the scan does not retry it every pass.
-func (c *ChannelOwners) grantFromEvent(ctx context.Context, event channelCreatedRow, key, source string) {
-	c.mu.Lock()
-	already := c.seen[key]
-	c.mu.Unlock()
-	if already {
-		return
-	}
+// grantFromEvent records one event's creator as owner. Every pass re-checks
+// the source event: the write is idempotent and only a missing tuple appends an
+// audit row, so a relation an operator deleted is repaired on the next pass. A
+// "seen" cache would skip exactly that case and make repair depend on scan
+// timing. A platform actor has no keel Account and is left to the sync entry's
+// actor, which owns platform-created channels.
+func (c *ChannelOwners) grantFromEvent(ctx context.Context, event channelCreatedRow, source string) {
 	accountID, ok := accountFromPrincipal(event.payload.By.Principal)
 	if !ok {
-		c.markSeen(key)
 		return
 	}
 	if err := c.GrantOwner(ctx, event.tenant, event.payload.Channel, accountID, accountID); err != nil {
 		c.Logger.Warn("board channel owner repair failed",
 			"channel", event.payload.Channel, "source", source, "err", err)
-		return
 	}
-	c.markSeen(key)
-}
-
-func (c *ChannelOwners) markSeen(key string) {
-	c.mu.Lock()
-	c.seen[key] = true
-	c.mu.Unlock()
 }
 
 type channelCreatedRow struct {

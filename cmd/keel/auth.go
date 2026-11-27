@@ -183,6 +183,14 @@ func (a *authController) wrap(next http.Handler) http.Handler {
 	})
 }
 
+// boardBridgeRoute is the one /v1 route a Chat SDK sidecar calls without a keel
+// session. The board's bridge handler owns HMAC, nonce and tenant-switch checks.
+func boardBridgeRoute(method, path string) bool {
+	return method == http.MethodPost &&
+		strings.HasPrefix(path, "/v1/board/sync/bridge/") &&
+		strings.HasSuffix(path, "/events")
+}
+
 // mode is the boot log and doctor label.
 func (a *authController) mode() string { return string(a.cfg.Mode) }
 
@@ -209,6 +217,15 @@ func (a *authController) serve(w http.ResponseWriter, r *http.Request, next http
 	// valid link. The handler validates the token and answers 401 for a missing
 	// or invalid one (never 404, which would disclose existence).
 	if notificationTokenRoute(path) {
+		next.ServeHTTP(w, r)
+		return
+	}
+	// A Chat SDK bridge sidecar is not a keel session: it authenticates with
+	// HMAC v1 on the board's bridge route (design §14.4). The board handler
+	// verifies the signature, replay nonce and the deployment tenant's switches;
+	// letting the session middleware answer first would make the route
+	// unreachable from a sidecar.
+	if boardBridgeRoute(r.Method, path) {
 		next.ServeHTTP(w, r)
 		return
 	}

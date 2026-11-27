@@ -48,6 +48,7 @@ type testEnv struct {
 
 	bot    keelstore.BotRecord
 	botKey string // the board profile token
+	box    *keelstore.SecretBox
 }
 
 type kAccount struct {
@@ -56,6 +57,14 @@ type kAccount struct {
 }
 
 func newTestEnv(t *testing.T, mutate func(*Options)) *testEnv {
+	t.Helper()
+	return newTestEnvBefore(t, mutate, nil)
+}
+
+// newTestEnvBefore is newTestEnv with a hook that runs after the keel fixture
+// exists but before the board surface is built. Sync tests use it to write the
+// tenant's entry/secret rows that the surface assembles at boot.
+func newTestEnvBefore(t *testing.T, mutate func(*Options), before func(*testEnv)) *testEnv {
 	t.Helper()
 	dsn := os.Getenv("KEEL_TEST_DSN")
 	if dsn == "" {
@@ -73,12 +82,20 @@ func newTestEnv(t *testing.T, mutate func(*Options)) *testEnv {
 		schema: fmt.Sprintf("board_phase1_%s", strings.ReplaceAll(uuid.NewString()[:8], "-", "")),
 		tenant: uuid.New(), other: uuid.New(),
 	}
+	if err := st.Migrate(ctx); err != nil {
+		t.Fatalf("migrate keel schema: %v", err)
+	}
 	for _, tenant := range []uuid.UUID{env.tenant, env.other} {
 		if err := st.CreateTenant(ctx, tenant, "board-"+tenant.String()[:8]); err != nil {
 			t.Fatalf("create tenant: %v", err)
 		}
 		if err := accesswire.EnsureBuiltinGroups(ctx, st, tenant); err != nil {
 			t.Fatalf("seed builtin groups: %v", err)
+		}
+		// Board v1 defaults both switches off (design §20); the fixture opts
+		// both tenants in so the RBAC/identity assertions reach the board.
+		if _, err := st.SetTenantConfig(ctx, tenant, json.RawMessage(`{"board":{"enabled":true,"sync":{"enabled":true}}}`)); err != nil {
+			t.Fatalf("enable board flags: %v", err)
 		}
 	}
 	env.alice = env.account(env.tenant, "alice", "human")
@@ -89,6 +106,11 @@ func newTestEnv(t *testing.T, mutate func(*Options)) *testEnv {
 	// The Bot belongs to Alice; a Bot acts through its Profile's Account.
 	env.bot = env.makeBot(env.tenant, env.alice.record.ID, "researcher")
 	env.botKey = BotProfileToken(env.bot.ID)
+	box, err := keelstore.NewSecretBox(bytes.Repeat([]byte{0x42}, 32))
+	if err != nil {
+		t.Fatalf("secret box: %v", err)
+	}
+	env.box = box
 
 	// Alice administers the board and writes; Bob writes but does not
 	// administer; Carol reads only.
@@ -121,6 +143,10 @@ func newTestEnv(t *testing.T, mutate func(*Options)) *testEnv {
 		Heartbeat:           60 * time.Millisecond,
 		StreamLifetime:      -1,
 		ChannelScanInterval: -1,
+		TenantFlagsTTL:      -1,
+		SecretBox:           env.box,
+		BlobDir:             t.TempDir(),
+		DisableAutomation:   true,
 	}
 	if mutate != nil {
 		mutate(&options)
@@ -129,6 +155,9 @@ func newTestEnv(t *testing.T, mutate func(*Options)) *testEnv {
 		env.schema = options.Schema
 	}
 	env.boardDSN = options.DSN
+	if before != nil {
+		before(env)
+	}
 	surface, err := New(ctx, options)
 	if err != nil {
 		t.Fatalf("board surface: %v", err)

@@ -1062,8 +1062,20 @@ func runServe(parent context.Context, opts serveOptions) error {
 	// namespace must stay outside the session edge. The board is off by default
 	// (design §20); the routes stay mounted but answer 404 board_disabled, so a
 	// disabled deployment does not reveal whether a channel exists. The
-	// tenant-level flag (board.enabled) lands with the secret-store lane (10.6).
-	boardWiring, err := newBoardWiring(ctx, opts.DSN, opts.TenantID, product.access, st, log)
+	// The tenant-level board.enabled / board.sync.enabled flags narrow this
+	// deployment switch; they cannot enable a deployment that never opted in.
+	boardWiring, err := newBoardWiringWithOptions(ctx, opts.DSN, opts.TenantID, product.access, st, log, func(options *boardintegration.Options) {
+		// 10.6/12.x: tenant entry documents and their secrets. A deployment
+		// without KEEL_SECRET_KEY keeps sync fail-closed (credential missing).
+		options.SecretBox = secretBox
+		options.BlobDir = opts.CASDir
+		options.FileHosts = boardFileHosts()
+		options.MaxFileBytes = envInt64("KEEL_BOARD_MAX_FILE_BYTES", 0)
+		options.MaxFiles = envInt("KEEL_BOARD_MAX_FILES", 0)
+		options.MaxLinks = envInt("KEEL_BOARD_MAX_LINKS", 0)
+		options.MaxWebhookBody = envInt64("KEEL_BOARD_MAX_WEBHOOK_BYTES", 0)
+		options.FileFetchTimeout = envDuration("KEEL_BOARD_FILE_TIMEOUT", 0)
+	})
 	if err != nil {
 		return err
 	}

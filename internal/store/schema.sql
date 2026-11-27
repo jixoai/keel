@@ -1784,3 +1784,42 @@ ALTER TABLE command_invocations ADD COLUMN IF NOT EXISTS lease_until timestamptz
 
 CREATE INDEX IF NOT EXISTS command_invocations_session
     ON command_invocations (tenant_id, session_id, created_at DESC);
+
+-- Board tenant sync entry configuration (keel-board-v1, Phase 1 10.6/12.1).
+-- This is keel's configuration document for the platform connections the board
+-- mount assembles: it stores only secret NAMES (secret_ref), never a value.
+-- The board module's own sync tables (board_sync_entries and friends) are
+-- owned by github.com/jixoai/keel-board; this table is deliberately named with
+-- the board_tenant_ prefix so both migrations can share one schema.
+CREATE TABLE IF NOT EXISTS board_tenant_sync_entries (
+    tenant_id      uuid NOT NULL,
+    key            text NOT NULL,
+    platform       text NOT NULL,
+    secret_ref     jsonb NOT NULL DEFAULT '{}'::jsonb,
+    settings       jsonb NOT NULL DEFAULT '{}'::jsonb,
+    routes         jsonb NOT NULL DEFAULT '{}'::jsonb,
+    start_channels text[] NOT NULL DEFAULT '{}'::text[],
+    enabled        boolean NOT NULL DEFAULT false,
+    revision       bigint NOT NULL DEFAULT 1,
+    created_at     timestamptz NOT NULL DEFAULT now(),
+    updated_at     timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (tenant_id, key)
+);
+
+-- Board attachment key -> keel blob mapping (keel-board-v1, 12.4). The board
+-- module's blob.Store is key-addressed while keel's blob store is
+-- (tenant, sha256)-addressed; this row is the translation. The bytes live in
+-- keel's blobs/blob_chunks tables, so attachment reads return real bytes; a
+-- board delete removes this translation and leaves the bytes to keel's normal
+-- blob lifecycle.
+CREATE TABLE IF NOT EXISTS board_tenant_blob_keys (
+    key          text PRIMARY KEY,
+    tenant_id    uuid NOT NULL,
+    blob_id      uuid NOT NULL,
+    content_type text NOT NULL DEFAULT '',
+    size         bigint NOT NULL DEFAULT 0,
+    created_at   timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS board_tenant_blob_keys_tenant
+    ON board_tenant_blob_keys (tenant_id, blob_id);

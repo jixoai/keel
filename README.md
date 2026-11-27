@@ -186,11 +186,19 @@ env 文件路径：`FDE2E_ENV_PERSONAL`，默认取主仓根目录的 `.env.pers
 - **实时**：`GET /v1/board/events`（Last-Event-ID、频道/标签过滤、15s 心跳、55s 重连）。
 - **观测**：board 指标并入 `GET /metrics`（`board_*`）；拒绝写 `auth_events`
   （`permission.denied`）；sync 运维审计写 `board_audit`，均不含正文/secret。
-- **开关**：默认关闭（`/v1/board/*` 与 `/webhooks/*` 返回 404 `board_disabled`）；部署级
-  `KEEL_BOARD_ENABLED=1` 开启，tenant 级 `board.enabled` 与 sync entries 由 10.6 的
-  secret-store lane 接入。
+- **开关**：三层默认关闭。部署级 `KEEL_BOARD_ENABLED=1` 是前置开关；tenant 配置
+  `board.enabled` 与 `board.sync.enabled` 再逐租户开启（`{"board":{"enabled":true,
+  "sync":{"enabled":true}}}`）。关闭时 `/v1/board/*` 返回 404 `board_disabled`，
+  sync/source/webhook 返回 404 `sync_disabled`，webhook 在任何读取/写入前拒绝。
 - **平台 webhook**：`POST /webhooks/{key}` 不走 board 会话认证，由对应 provider 验签；
   未配置 entry 时 fail closed。
+  Chat SDK bridge `POST /v1/board/sync/bridge/{key}/events` 用 HMAC v1 + nonce，不经会话。
+- **Sync**：tenant 配置只存 `secret_ref`（tenant secret 名称），凭据在 keel 的
+  `tenant_secrets`（`KEEL_SECRET_KEY`）加密存储。`POST/PATCH /v1/board/sync/entries`
+  （`board.manage` + `secret.write`）创建/启停/轮换/路由；启停即时生效，创建/轮换/路由变更
+  在重启后装载（变更期间 entry 在 board sync store 中停用，旧凭据不会继续服务）。
+  inbox/outbox、board 事件订阅、watcher/schedule worker 随 `keel serve` 启动；
+  board 附件的字节走 keel blob store（真实读写，不再 501）。
 - **部署入口**：Dockerfile/`cmd/runtime` 不含 board；board 只在 `keel serve` 中启用。
 - **superagent 镜像/命令桥**：tenant 文档 `board.superagent.{mirror,bridge,channel}`（默认
   `false/false/"superagent"`）。`mirror=true` 把 Ticket/Assignment/Attention/report 单向投影为
@@ -199,7 +207,7 @@ env 文件路径：`FDE2E_ENV_PERSONAL`，默认取主仓根目录的 `.env.pers
   cancel 先调 supervisor 既有 API，成功后才写 board。superagent 的 `collab_*` 仍是真值，
   board 不反写；旧 `/superagent` 看板已冻结，Phase 2 15.7 删除。
 
-运行细节（DSN 角色、迁移、webhook 配置、验收命令）见
+运行细节（DSN 角色、迁移、tenant 开关、entry/secret 配置、验收与 E2E 命令）见
 [docs/RUNBOOK.md](docs/RUNBOOK.md#boardkeel-board-v011)。
 
 ## 状态与路线

@@ -16,9 +16,11 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/jixoai/keel/internal/accesswire"
-	"github.com/jixoai/keel/internal/store"
+	keelstore "github.com/jixoai/keel/internal/store"
 
 	boardaudit "github.com/jixoai/keel-board/audit"
+	"github.com/jixoai/keel-board/automation"
+	boardblob "github.com/jixoai/keel-board/blob"
 	boardlog "github.com/jixoai/keel-board/log"
 	boardmetrics "github.com/jixoai/keel-board/metrics"
 	boardserver "github.com/jixoai/keel-board/server"
@@ -40,7 +42,7 @@ type Options struct {
 	Access *accesswire.Bridge
 	// Store is keel's identity store, used for bot display names and the
 	// channel-owner relation writes. Defaults to Access.Store.
-	Store *store.Store
+	Store *keelstore.Store
 	// TenantID is the deployment tenant a platform webhook belongs to. Sync
 	// webhooks carry no board session; the deployment tenant plus the entry's
 	// provider signature are the authority. Zero refuses webhooks.
@@ -58,12 +60,38 @@ type Options struct {
 	// uses 5 minutes; negative disables the periodic scan (the startup scan
 	// still runs).
 	ChannelScanInterval time.Duration
-	// SyncRegistry is the process's sync entries. Nil starts empty; Phase 1
-	// leaves it empty until the tenant secret store lane (10.6) registers
-	// entries. Tests inject entries here.
+	// SyncRegistry is a deployment/test-provided registry. Nil loads the
+	// tenant's board_tenant_sync_entries configuration (the production path);
+	// a non-nil registry is used as-is and no entry document is loaded.
 	SyncRegistry *boardsync.Registry
 	// BoardMetrics is an existing board metric registry. Nil creates one.
 	BoardMetrics *boardmetrics.Registry
+	// SecretBox decrypts tenant secrets for sync providers. Nil means the
+	// deployment has no KEEL_SECRET_KEY: entry credentials report missing and
+	// nothing is ever read from plaintext.
+	SecretBox *keelstore.SecretBox
+	// BlobDir is the local CAS root keel's blob store uses. Empty keeps blobs
+	// in PostgreSQL chunks.
+	BlobDir string
+	// FileHosts is the inbound file/link URL host allowlist. Empty refuses
+	// every URL, which is the safe default.
+	FileHosts []string
+	// TenantFlagsTTL bounds how long a tenant switch read is cached. Zero uses
+	// 5s; a negative value disables the cache (tests).
+	TenantFlagsTTL time.Duration
+	// SyncStoreConfig bounds the board sync store's retry/lease policy. Zero
+	// uses the board module's defaults; tests shorten the delays.
+	SyncStoreConfig boardsyncstore.Config
+	// MaxWebhookBody, MaxFileBytes, MaxFiles, MaxLinks and FileFetchTimeout
+	// bound untrusted platform input. Zero keeps the board defaults.
+	MaxWebhookBody   int64
+	MaxFileBytes     int64
+	MaxFiles         int
+	MaxLinks         int
+	FileFetchTimeout time.Duration
+	// DisableAutomation omits the watcher/schedule consumers and their
+	// management routes. The default is to mount both.
+	DisableAutomation bool
 }
 
 // TextExporter is a Prometheus text exporter (keel's metrics.Registry and the
@@ -75,20 +103,25 @@ type TextExporter interface {
 // Surface owns the board's PostgreSQL pools, log, HTTP handlers and background
 // repair loop. Close releases them in dependency order.
 type Surface struct {
-	handler    *handler
-	webhook    *boardserver.Server
-	board      *boardlog.Board
-	store      *boardstore.Postgres
-	syncdb     *boardsyncstore.Postgres
-	audit      *boardaudit.Postgres
-	owners     *ChannelOwners
-	metrics    *boardmetrics.Registry
-	identity   *Identity
-	authorizer *Authorizer
-	cancel     context.CancelFunc
-	done       chan struct{}
-	closeOnce  sync.Once
-	logger     *slog.Logger
+	handler       *handler
+	webhook       *boardserver.Server
+	board         *boardlog.Board
+	store         *boardstore.Postgres
+	syncdb        *boardsyncstore.Postgres
+	audit         *boardaudit.Postgres
+	automation    *automation.Postgres
+	owners        *ChannelOwners
+	metrics       *boardmetrics.Registry
+	identity      *Identity
+	authorizer    *Authorizer
+	flags         *TenantFlags
+	manager       *syncManager
+	webhookTenant uuid.UUID
+	stopAuto      func()
+	cancel        context.CancelFunc
+	done          chan struct{}
+	closeOnce     sync.Once
+	logger        *slog.Logger
 }
 
 // New builds the board surface. It runs the board's idempotent migrations
@@ -128,7 +161,9 @@ func New(ctx context.Context, opts Options) (*Surface, error) {
 	}
 	board := boardlog.New(boardlog.Options{Store: store})
 
-	syncdb, err := boardsyncstore.OpenPostgres(ctx, boardsyncstore.PostgresOptions{DSN: opts.DSN, SearchPath: opts.Schema})
+	syncdb, err := boardsyncstore.OpenPostgres(ctx, boardsyncstore.PostgresOptions{
+		DSN: opts.DSN, SearchPath: opts.Schema, Config: opts.SyncStoreConfig,
+	})
 	if err != nil {
 		store.Close()
 		return nil, openError("open sync store", err, opts.DSN)
@@ -139,9 +174,22 @@ func New(ctx context.Context, opts Options) (*Surface, error) {
 		store.Close()
 		return nil, openError("open board audit", err, opts.DSN)
 	}
+	var automationStore *automation.Postgres
+	if !opts.DisableAutomation {
+		automationStore, err = automation.OpenPostgres(ctx, automation.PostgresOptions{DSN: opts.DSN, SearchPath: opts.Schema})
+		if err != nil {
+			auditStore.Close()
+			syncdb.Close()
+			store.Close()
+			return nil, openError("open automation store", err, opts.DSN)
+		}
+	}
 
 	authorizer, err := NewAuthorizer(opts.Access, nil, board, opts.Logger)
 	if err != nil {
+		if automationStore != nil {
+			automationStore.Close()
+		}
 		auditStore.Close()
 		syncdb.Close()
 		store.Close()
@@ -153,9 +201,38 @@ func New(ctx context.Context, opts Options) (*Surface, error) {
 	if metricsRegistry == nil {
 		metricsRegistry = boardmetrics.NewRegistry()
 	}
-	syncRegistry := opts.SyncRegistry
-	if syncRegistry == nil {
-		syncRegistry = boardsync.NewRegistry()
+	flags := NewTenantFlags(opts.Store, opts.TenantFlagsTTL)
+	// The deployment tenant's switches decide whether this process assembles
+	// platform connections. A read failure is not fatal for the board core:
+	// the per-request gate will answer 503 until the document is fixed.
+	bootFlags, flagErr := flags.Get(ctx, opts.TenantID)
+	if flagErr != nil {
+		opts.Logger.Warn("board tenant flags could not be read at boot; sync stays off", "error", flagErr)
+		bootFlags = BoardFlags{}
+	}
+	syncEnabled := bootFlags.FullyEnabled()
+	var boot *syncBoot
+	if opts.SyncRegistry != nil {
+		// A caller-provided registry (tests / an embedding deployment) owns the
+		// entry set; configuration loading is skipped deliberately.
+		boot = &syncBoot{
+			registry:      opts.SyncRegistry,
+			startChannels: make(map[boardserver.SyncKey][]string),
+			bridgeSecrets: make(map[boardsync.Key]boardsync.Secret),
+			subscribed:    make(map[boardsync.Key]bool),
+			statuses:      make(map[boardsync.Key]CredentialStatus),
+		}
+	} else {
+		boot, err = loadSyncBoot(ctx, opts, syncEnabled, syncdb)
+		if err != nil {
+			if automationStore != nil {
+				automationStore.Close()
+			}
+			auditStore.Close()
+			syncdb.Close()
+			store.Close()
+			return nil, err
+		}
 	}
 	deploymentTenant := opts.TenantID
 	syncTenant := func(*http.Request) (string, error) {
@@ -164,8 +241,11 @@ func New(ctx context.Context, opts Options) (*Surface, error) {
 		}
 		return deploymentTenant.String(), nil
 	}
-
-	server := boardserver.New(boardserver.Options{
+	var blobs boardblob.Store
+	if adapter := newKeelBlobs(opts.Store, opts.BlobDir); adapter != nil {
+		blobs = adapter
+	}
+	serverOptions := boardserver.Options{
 		Board:     board,
 		Authorize: authorizer,
 		Actor:     identity.Actor,
@@ -173,39 +253,104 @@ func New(ctx context.Context, opts Options) (*Surface, error) {
 		Logger:    opts.Logger,
 		Metrics:   metricsRegistry,
 		Audit:     auditStore,
+		Blobs:     blobs,
 		Sync: &boardserver.SyncOptions{
-			Store:    syncdb,
-			Registry: syncRegistry,
-			Tenant:   syncTenant,
-			Logger:   opts.Logger,
+			Store:            syncdb,
+			Registry:         boot.registry,
+			Tenant:           syncTenant,
+			Owned:            boot.owned,
+			StartChannels:    boot.startChannels,
+			BridgeSecret:     bridgeSecretFunc(boot.bridgeSecrets),
+			FileHosts:        append([]string(nil), opts.FileHosts...),
+			MaxFileBytes:     opts.MaxFileBytes,
+			MaxFiles:         opts.MaxFiles,
+			MaxLinks:         opts.MaxLinks,
+			FileFetchTimeout: opts.FileFetchTimeout,
+			MaxWebhookBody:   opts.MaxWebhookBody,
+			Logger:           opts.Logger,
 		},
-	})
+	}
+	if automationStore != nil {
+		actions, actionErr := automation.NewRegistryWith(automation.PostAction{})
+		if actionErr != nil {
+			if automationStore != nil {
+				automationStore.Close()
+			}
+			auditStore.Close()
+			syncdb.Close()
+			store.Close()
+			return nil, actionErr
+		}
+		serverOptions.Automation = &boardserver.AutomationOptions{
+			Store: automationStore, Actions: actions, Logger: opts.Logger,
+		}
+	}
+	server := boardserver.New(serverOptions)
 
 	owners := &ChannelOwners{
 		Store: opts.Store, Audit: opts.Access, Schema: opts.Schema, DSN: opts.DSN,
 		Logger: opts.Logger,
 	}
+	manager := newSyncManager(boot, opts.Store, syncdb, auditStore, deploymentTenant, opts.SecretBox, opts.Logger, metricsRegistry)
+	manager.Attach(server, deploymentTenant.String())
 	runCtx, cancel := context.WithCancel(context.Background())
+	admin := &syncAdmin{manager: manager, bridge: opts.Access, tenant: deploymentTenant, logger: opts.Logger}
+	handler := &handler{
+		next:      server,
+		board:     board,
+		owners:    owners,
+		sse:       &sseHandler{next: server, heartbeat: opts.Heartbeat, lifetime: opts.StreamLifetime, logger: opts.Logger},
+		syncAdmin: admin,
+		logger:    opts.Logger,
+	}
 	surface := &Surface{
-		handler: &handler{
-			next:   server,
-			board:  board,
-			owners: owners,
-			sse:    &sseHandler{next: server, heartbeat: opts.Heartbeat, lifetime: opts.StreamLifetime, logger: opts.Logger},
-			logger: opts.Logger,
-		},
-		webhook:    server,
-		board:      board,
-		store:      store,
-		syncdb:     syncdb,
-		audit:      auditStore,
-		owners:     owners,
-		metrics:    metricsRegistry,
-		identity:   identity,
-		authorizer: authorizer,
-		cancel:     cancel,
-		done:       make(chan struct{}),
-		logger:     opts.Logger,
+		handler:       handler,
+		webhook:       server,
+		board:         board,
+		store:         store,
+		syncdb:        syncdb,
+		audit:         auditStore,
+		automation:    automationStore,
+		owners:        owners,
+		metrics:       metricsRegistry,
+		identity:      identity,
+		authorizer:    authorizer,
+		flags:         flags,
+		manager:       manager,
+		webhookTenant: deploymentTenant,
+		cancel:        cancel,
+		done:          make(chan struct{}),
+		logger:        opts.Logger,
+	}
+	// Sync cursors are fixed before the listener accepts writes, then the
+	// workers start. A failure here is a boot failure: half-running sync is
+	// worse than not starting.
+	if err := manager.Start(runCtx); err != nil {
+		cancel()
+		manager.Stop()
+		if automationStore != nil {
+			automationStore.Close()
+		}
+		auditStore.Close()
+		syncdb.Close()
+		store.Close()
+		return nil, err
+	}
+	if automationStore != nil && deploymentTenant != uuid.Nil {
+		workerAuthorizer := &WorkerAuthorizer{Bridge: opts.Access, Store: opts.Store, Decision: authorizer}
+		stop, autoErr := startAutomationWorkers(runCtx, opts.Logger, automationStore, board, workerAuthorizer, deploymentTenant.String())
+		if autoErr != nil {
+			cancel()
+			manager.Stop()
+			if automationStore != nil {
+				automationStore.Close()
+			}
+			auditStore.Close()
+			syncdb.Close()
+			store.Close()
+			return nil, autoErr
+		}
+		surface.stopAuto = stop
 	}
 	go func() {
 		defer close(surface.done)
@@ -214,23 +359,87 @@ func New(ctx context.Context, opts Options) (*Surface, error) {
 	return surface, nil
 }
 
-// ServeHTTP implements the board API handler mounted at /v1/board.
+// ServeHTTP implements the board API handler mounted at /v1/board. It applies
+// the tenant switches before any board route: a disabled tenant sees 404
+// board_disabled, and the sync/source half additionally requires
+// board.sync.enabled. A request without an edge principal is passed to the
+// board, whose authorizer answers 401.
 func (s *Surface) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if !s.checkBoardFlags(w, r) {
+		return
+	}
 	s.handler.ServeHTTP(w, r)
+}
+
+// checkBoardFlags answers false when the request was already refused.
+func (s *Surface) checkBoardFlags(w http.ResponseWriter, r *http.Request) bool {
+	if s == nil || s.flags == nil {
+		return true
+	}
+	tenantID, ok := requestTenant(r)
+	if boardBridgePath(r.URL.Path) && s.webhookTenant != uuid.Nil {
+		// The bridge route's HMAC is the authority and its board tenant is the
+		// deployment tenant; a session principal must not choose the switches.
+		tenantID, ok = s.webhookTenant, true
+	}
+	if !ok {
+		return true
+	}
+	flags, err := s.flags.Get(r.Context(), tenantID)
+	if err != nil {
+		s.logger.Error("board tenant flags read failed", "tenant", tenantID, "error", err)
+		writeAdminError(w, http.StatusServiceUnavailable, "unavailable", "board availability is unavailable")
+		return false
+	}
+	if !flags.Enabled {
+		writeDisabled(w, "the board is disabled in this deployment", "board_disabled")
+		return false
+	}
+	if boardSyncPath(r.URL.Path) && !flags.Sync {
+		syncDisabledHandler().ServeHTTP(w, r)
+		return false
+	}
+	return true
 }
 
 // Webhook serves the platform webhook namespace. It is mounted outside the
 // board's session authentication; each provider verifies its own signature. The
-// guard keeps the handler's other routes (/v1/board, /metrics) unreachable even
-// if a proxy hands it a path outside the namespace.
+// deployment tenant's switches gate the namespace before a byte of the body is
+// read, so a disabled board or sync has no side effect. The guard also keeps
+// the handler's other routes (/v1/board, /metrics) unreachable even if a proxy
+// hands it a path outside the namespace.
 func (s *Surface) Webhook() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !strings.HasPrefix(r.URL.Path, "/webhooks/") {
 			DisabledHandler().ServeHTTP(w, r)
 			return
 		}
+		if !s.checkWebhookFlags(w, r) {
+			return
+		}
 		s.webhook.ServeHTTP(w, r)
 	})
+}
+
+func (s *Surface) checkWebhookFlags(w http.ResponseWriter, r *http.Request) bool {
+	if s == nil || s.flags == nil || s.webhookTenant == uuid.Nil {
+		return true
+	}
+	flags, err := s.flags.Get(r.Context(), s.webhookTenant)
+	if err != nil {
+		s.logger.Error("board webhook tenant flags read failed", "tenant", s.webhookTenant, "error", err)
+		writeAdminError(w, http.StatusServiceUnavailable, "unavailable", "board availability is unavailable")
+		return false
+	}
+	if !flags.Enabled {
+		writeDisabled(w, "the board is disabled in this deployment", "board_disabled")
+		return false
+	}
+	if !flags.Sync {
+		syncDisabledHandler().ServeHTTP(w, r)
+		return false
+	}
+	return true
 }
 
 // Metrics returns the board metric registry.
@@ -251,8 +460,8 @@ func (s *Surface) Identity() *Identity { return s.identity }
 // before routing a mirrored task action to the supervisor.
 func (s *Surface) Authorizer() *Authorizer { return s.authorizer }
 
-// SyncStore returns the durable sync store. The secret-store lane (10.6)
-// registers tenant entries through it; this lane leaves the registry empty.
+// SyncStore returns the durable sync store. The tenant entry manager writes
+// the board module's local entry rows through it.
 func (s *Surface) SyncStore() *boardsyncstore.Postgres { return s.syncdb }
 
 // AuditStore returns the board audit store (operational audit; the domain
@@ -266,14 +475,24 @@ func (s *Surface) Expo(base TextExporter) TextExporter {
 	return &combinedExporter{base: base, board: s.metrics}
 }
 
-// Close stops the reconciler and releases every pool.
+// Close stops the reconciler, workers and automation consumers, then releases
+// every pool.
 func (s *Surface) Close() {
 	s.closeOnce.Do(func() {
 		if s.cancel != nil {
 			s.cancel()
 		}
+		if s.manager != nil {
+			s.manager.Stop()
+		}
+		if s.stopAuto != nil {
+			s.stopAuto()
+		}
 		if s.done != nil {
 			<-s.done
+		}
+		if s.automation != nil {
+			s.automation.Close()
 		}
 		if s.audit != nil {
 			s.audit.Close()
@@ -365,10 +584,7 @@ func DisabledHandler() http.Handler { return disabledHandler{} }
 type disabledHandler struct{}
 
 func (disabledHandler) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
-	w.Header().Set("content-type", "application/json; charset=utf-8")
-	w.Header().Set("cache-control", "no-store")
-	w.WriteHeader(http.StatusNotFound)
-	_, _ = w.Write([]byte(`{"error":"the board is disabled in this deployment","code":"board_disabled"}`))
+	writeDisabled(w, "the board is disabled in this deployment", "board_disabled")
 }
 
 const (

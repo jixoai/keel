@@ -77,12 +77,21 @@ export KEEL_BOARD_ENABLED=1          # 默认 0（关闭）：/v1/board/* 与 /w
 export KEEL_BOARD_DSN='postgres://…' # 可选；默认复用 KEEL_DSN
 export KEEL_BOARD_SCHEMA=board       # 可选；board 表独立 schema（不存在时自动 CREATE SCHEMA）
 export KEEL_BOARD_CHANNEL_SCAN=5m    # 可选；频道 owner 关系修复间隔，负值只跑启动扫描
+export KEEL_SECRET_KEY='…'           # sync 凭据必需：32 字节；缺失时 credential=missing，sync fail closed
+export KEEL_BOARD_FILE_HOSTS=files.slack.com,api.github.com # 可选；入站文件/链接允许的 host，空=全部拒绝
+export KEEL_BOARD_MAX_FILE_BYTES=26214400  # 可选；单文件上限（默认 50 MiB）
+export KEEL_BOARD_MAX_FILES=10       # 可选；单条消息文件数
+export KEEL_BOARD_MAX_LINKS=10       # 可选；单条消息链接数
+export KEEL_BOARD_MAX_WEBHOOK_BYTES=1048576 # 可选；webhook body 上限
+export KEEL_BOARD_FILE_TIMEOUT=10s   # 可选；单个入站文件下载超时
 ```
 
 - 启动幂等执行 board 的 `board_*` 迁移（core / sync / automation / audit RLS）。
 - **RLS 双设置边界**：keel 既有表用 `app.tenant_id`；board 表用 `keel.tenant_id`，且
   **不**注册进 keel 的 `rlsTenantTables`。两套 policy 不互相覆盖；board 查询由 board 自己的
-  连接设置 tenant，未设置时匹配零行（fail closed）。
+  连接设置 tenant，未设置时匹配零行（fail closed）。keel 侧的 sync entry 配置表
+  `board_tenant_sync_entries` 与附件映射 `board_tenant_blob_keys` 是普通 tenant 表，已注册
+  进 keel 的 RLS。
 - board 的 DSN 建议使用**非超级用户**角色（拥有 board 表即可；`FORCE RLS` 对 owner 生效，
   超级用户/`BYPASSRLS` 总是绕过 RLS）。`keel serve` 启动时会检查该角色并 warn（不阻断）。
   专用库/角色用 `KEEL_BOARD_DSN`；单库单租户可复用 `KEEL_DSN`。
@@ -90,6 +99,46 @@ export KEEL_BOARD_CHANNEL_SCAN=5m    # 可选；频道 owner 关系修复间隔�
   （`KEEL_BOARD_ENABLED=1`）；若要让 runtime 也提供 board，需要另一条接入 lane，且预算仍为 2048 KiB。
 - 跨租户：HTTP 侧 tenant 只来自登录 principal（不读 header/path），A 租户读不到 B 的行；
   数据库侧见 `internal/boardintegration` 的 RLS 测试（restricted role + unset tenant）。
+
+**tenant 开关与 sync entries**
+
+```json
+// tenant 配置文档（keel admin 的 config，或 st.SetTenantConfig）
+{"board":{"enabled":true,"sync":{"enabled":true}}}
+```
+
+- `board.enabled=false`：`/v1/board/*` 全部 404 `board_disabled`；`/webhooks/*` 同样 404 且
+  不读 body、不写 inbox。`board.sync.enabled=false`：核心 board 可用，`/v1/board/sync/*`、
+  `/v1/board/sources/*` 与 webhook/bridge 返回 404 `sync_disabled`。
+- 开关按请求读取（5s 缓存），关闭即时生效；打开 sync 需要重启装载 entry（`keel serve`
+  启动时读取 `board_tenant_sync_entries`）。
+- sync entry 固定属于部署租户（`KEEL_SERVE_TENANT`）：`/webhooks/{key}` 没有 tenant 段，
+  其他租户的 manage 调用在管理路由上返回 404，避免存下永远收不到平台事件的 entry。
+- entry 只存 `secret_ref`（role → tenant secret 名称）；secret 值用
+  `PUT /v1/settings/secrets/{name}`（需 `secret.write`）或 `tenant_secrets` 存储，绝不写入
+  entry 行、日志、响应、指标或审计。
+
+```json
+// POST /v1/board/sync/entries（board.manage + secret.write）
+{
+  "key": "slack", "platform": "slack", "enabled": true,
+  "secretRef": {"signingSecret": "SLACK_SIGNING", "botToken": "SLACK_BOT_TOKEN"},
+  "settings": {"botUserId": "U123", "botId": "B123", "apiBaseUrl": "https://slack.com/api"},
+  "routes": {"C0123": "support"},
+  "startChannels": ["C0123"]
+}
+```
+
+- PATCH `/v1/board/sync/entries/{key}` 接受 `enabled` / `secretRef` / `settings` / `routes` /
+  `startChannels`。`enabled` 即时切换（webhook 接受状态 + 本进程 worker 启停）；创建、凭据
+  轮换、settings/routes/startChannels 变更需要重启，变更期间 entry 在 board sync store 中
+  停用（安全失败，旧凭据不会继续服务），响应 `restartRequired:true`。
+- `GET /v1/board/sync/credentials`（board.manage）返回每个 entry 的
+  `configured|missing|invalid`；`GET /metrics` 的 `board_sync_credential_status{key,status}`
+  同口径。凭据只报状态，不含值或密文。
+- `platform` 支持 `slack` / `github` / `linear` / `chatsdk`；GitHub 需 `repos`（入站）与
+  `writeRepos`（出站，空=不写），Linear 需 `botUserId` + `teamKeys`，chatsdk 需
+  `settings.platform`、`bridgeUrl`、`selfIds` 与 `secretRef.bridgeSecret`。
 
 **权限**
 
@@ -112,9 +161,14 @@ export KEEL_BOARD_CHANNEL_SCAN=5m    # 可选；频道 owner 关系修复间隔�
 - Base `/v1/board`；沿用 keel 登录与 Bot key，写请求仍要 `X-Keel-CSRF`（人类会话）。
 - `GET /v1/board/events`：SSE；`Last-Event-ID` 优先于 `after`；adapter 每 15s 发 `: ping`，
   55s 主动断开由客户端带游标重连；无权事件不下发内容。
-- 同步：`GET /v1/board/sync/entries|status|inbox|outbox/failures|threads` 需要 `board.manage`；
+- 同步：`GET /v1/board/sync/entries|entries/{key}/status|status|inbox|outbox/failures|threads`
+  与 `GET /v1/board/sources/{key}/read|join` 需要 `board.manage`；entry 创建/启停/轮换见上。
   平台 webhook `POST /webhooks/{key}` 不走会话认证，由 provider 验签；未配置 entry 时
-  不读取 body、不落库（pre-auth unknown key）。
+  不读取 body、不落库（pre-auth unknown key）。Chat SDK bridge
+  `POST /v1/board/sync/bridge/{key}/events` 同样绕过会话，用 HMAC v1 + 5 分钟 nonce 窗口。
+- 时间线：`keel serve` 启动时固定每个 owned entry 的 board cursor（`PrepareSync`），然后启动
+  board 事件订阅、每 entry 的 inbound/outbound worker、watcher/schedule worker；worker 全在
+  serve context 下，退出时停止并等待。
 
 **superagent 镜像 / 命令桥（Phase 1 11.x）**
 
@@ -152,24 +206,32 @@ export KEEL_SECRET_KEY='…'     # 必填；缺失时 mirror/bridge 均 fail clo
 **验收 / 排障**
 
 ```bash
-# board 适配（真实 PG；KEEL_TEST_DSN 指向专用库）
+# board 适配 + sync/secret 管理（真实 PG；KEEL_TEST_DSN 指向专用库）
 KEEL_TEST_DSN='postgres://…' go test ./internal/boardintegration/ -v
 KEEL_TEST_DSN='postgres://…' go test -race ./internal/boardintegration/
 KEEL_TEST_DSN='postgres://…' go test ./internal/boardintegration/ -run TestBoardStoreRLSUsesTenantSetting -v
 go test ./internal/access/ ./internal/accessgate/ ./cmd/keel/
 scripts/binary-size.sh --budget-kb 3072 --base 6ee7fe3
+
+# 全量 + E2E（fake Slack/GitHub/Linear/Chat SDK bridge；生成 HTML 报告）
+KEEL_TEST_DSN='postgres://…' scripts/keel-board-phase1-sync-gate.sh
+KEEL_TEST_DSN='postgres://…' go run ./cmd/board-sync-e2e \
+  -dsn 'postgres://…' -out /tmp/phase-1-sync-e2e.html
 ```
 
 - `GET /metrics` 同时输出 `board_*`（事件数、append 延迟、live claims、SSE 连接/滞后、
-  sync 深度/失败等）；标签只有 kind/key/platform/status，不含 tenant/消息 ID。
+  sync 深度/失败、`board_sync_credential_status`）；标签只有 kind/key/platform/status，
+  不含 tenant/消息 ID/secret。
 - `GET /v1/board/admin/audit?limit=`（`board.manage`）读最近运维审计；领域审计在
-  `board_events`，两者都不含 secret/正文。
+  `board_events`，两者都不含 secret/正文。entry 生命周期另写
+  `sync.entry.created|updated`（仅 key/platform/status/revision）。
 - v0.1.1 SSE 对不可见事件写 `id:` 空帧（游标前进、不泄露内容），`Last-Event-ID` 优先于
   `after`；`last` 只重放可见事件。
 - 已知接口缺口（v0.1.1）：board 无 `GET /me`（用 `/actors` 或消息 author 投影）；
-  SSE 的 `state/owner/for` 过滤、watcher/schedule 管理 API 由后续 lane 接入。
-- Phase 1 不启用 sync entries 的创建/轮换（10.6 secret-store lane）；`board.sync.enabled`
-  与 tenant 级 `board.enabled` 同样在 10.6 收口。
+  board 模块没有 entry POST/PATCH（keel 在挂载层补齐，未改 board 仓库）。
+- 轮换/创建/路由变更的运行期语义是“持久化 + 停用 + 重启装载”，不是热替换：本进程的
+  provider 仍持有旧凭据，keel 主动停用 board sync row 使 webhook 无副作用；重启后按新
+  `secret_ref` 重建 provider。启停是即时的；禁用时已排队的 outbox 在重启/重新启用后继续。
 
 ## 遥测导出插件（`keel.telemetry`）
 

@@ -147,6 +147,21 @@ func (a *Authorizer) Authorize(ctx context.Context, tenant string, actor protoco
 	} else if actor.Profile != nil {
 		return unauthorized()
 	}
+	return a.authorizePrincipal(ctx, tenantID, principal, actor, channel, permission)
+}
+
+// authorizePrincipal is the shared decision path. HTTP requests reach it after
+// the edge principal was authenticated; the automation workers reach it through
+// WorkerAuthorizer, which resolves the same principal from the actor the
+// watcher/schedule names. actor is used for audit only; the principal is the
+// authority.
+func (a *Authorizer) authorizePrincipal(ctx context.Context, tenantID uuid.UUID, principal access.Principal, actor protocol.Actor, channel string, permission protocol.Permission) error {
+	if a == nil || a.Bridge == nil || a.Relations == nil {
+		return unavailable("the board authorizer is not wired")
+	}
+	if actor.Principal == "" {
+		actor.Principal = AccountActorID(principal.AccountID)
+	}
 
 	effective, err := a.Bridge.Effective(ctx, principal)
 	if err != nil {
@@ -196,7 +211,7 @@ func (a *Authorizer) Authorize(ctx context.Context, tenant string, actor protoco
 			// A writer may create a channel that does not exist yet. It must not
 			// use the create route to probe an existing channel it cannot read:
 			// board's 200 created=false would confirm existence.
-			exists, existsErr := a.channelExists(tenant, path)
+			exists, existsErr := a.channelExists(tenantID.String(), path)
 			if existsErr != nil {
 				return existsErr
 			}

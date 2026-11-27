@@ -128,6 +128,12 @@ var rlsTenantTables = []string{
 	"board_links",
 	// Commands (keel-plugin-commands): the requestId ledger is tenant-scoped.
 	"command_invocations",
+	// Board tenant configuration (keel-board-v1, Phase 1 10.6/12.x): the
+	// board mount's entry document and its attachment-key translation. The
+	// board's own board_* tables stay outside this list and carry their own
+	// keel.tenant_id policies.
+	"board_tenant_sync_entries",
+	"board_tenant_blob_keys",
 }
 
 // ApplyRLS applies the RLS migration. It is safe to run on every boot, on a

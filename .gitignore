@@ -11,6 +11,7 @@ __pycache__/
 # built binaries (releases are published from tags, not the worktree)
 /keel
 /keel.exe
+/board-sync-e2e
 
 # self-contained release assets (scripts/package-self-contained.sh)
 /cmd/keel/assets/pg.txz

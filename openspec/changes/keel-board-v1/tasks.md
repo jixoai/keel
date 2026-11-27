@@ -98,8 +98,8 @@
 - [x] 10.3 实现 RBAC/ReBAC：`board.read/write/manage` 权限键、频道 `resource_relations` viewer/editor/owner、最近祖先继承；真实 PG 测试。
 - [x] 10.4 接入 keel PG 与 RLS：keel-board migrations 在 keel 启动幂等执行，`tenant_id` 谓词 + RLS 双保险；A/B 租户测试。
 - [x] 10.5 接入 SSE hub 与 Last-Event-ID；keel 的 tenant 鉴权、心跳、多副本 NOTIFY/poll；集成测试。
-- [ ] 10.6 接入 tenant secret store：`SecretResolver`、sync entries 的 POST/PATCH（创建/启停/轮换/路由，只传 secret_ref）、`board.sync.enabled`/`board.enabled` feature flag；测试关闭即 404/无 webhook，日志/事件/响应无 secret。
-- [x] 10.7 接入 telemetry/audit（部分完成）：board/sync 指标、permission.denied、board audit 已交付；credential 状态待 10.6；测试无 secret/正文。
+- [x] 10.6 接入 tenant secret store：`SecretResolver`、sync entries 的 POST/PATCH（创建/启停/轮换/路由，只传 secret_ref）、`board.sync.enabled`/`board.enabled` feature flag；测试关闭即 404/无 webhook，日志/事件/响应无 secret。（evidence: `evidence/phase-1-sync.md`；启停即时，创建/轮换/路由变更持久化后需重启装载，期间 entry 在 board sync store 停用）
+- [x] 10.7 接入 telemetry/audit：board/sync 指标、permission.denied、credential 状态；测试无 secret/正文。
 
 ## 11. Phase 1：superagent 适配
 
@@ -115,15 +115,15 @@
 
 ## 12. Phase 1：keel 上的 sync 启用
 
-- [ ] 12.1 从 tenant config/secret store 装配 Slack/GitHub/Linear/Chat SDK entries；webhook 路径注册；未配置时 `sync_disabled`；测试配置矩阵。
-- [ ] 12.2 验证 Slack/GitHub/Linear 在 keel 的 webhook→inbox→board→outbound→receipt 全链路；fake 平台 E2E。
-- [ ] 12.3 验证 bridge sidecar 在 keel 部署中的 HMAC/nonce/超时/失败；sidecar 不属于 keel 运行时。
-- [ ] 12.4 验证 source read/typing/permalinks/attachments 在 keel 权限下的行为；`board.manage` 与频道关系测试。
+- [x] 12.1 从 tenant config/secret store 装配 Slack/GitHub/Linear/Chat SDK entries；webhook 路径注册；未配置时 `sync_disabled`；测试配置矩阵。（evidence: `evidence/phase-1-sync.md`）
+- [x] 12.2 验证 Slack/GitHub/Linear 在 keel 的 webhook→inbox→board→outbound→receipt 全链路；fake 平台 E2E。（evidence: `evidence/phase-1-sync-e2e.html`）
+- [x] 12.3 验证 bridge sidecar 在 keel 部署中的 HMAC/nonce/超时/失败；sidecar 不属于 keel 运行时。（evidence: `evidence/phase-1-sync-e2e.html`）
+- [x] 12.4 验证 source read/typing/permalinks/attachments 在 keel 权限下的行为；`board.manage` 与频道关系测试。（evidence: `evidence/phase-1-sync.md`，attachments/source read/typing 在 E2E）
 
 ## 13. Phase 1：门禁
 
-- [ ] 13.1 跑 keel 单测/集成/race + keel-board conformance；全绿并记录输出。
-- [ ] 13.2 E2E：keel API + fake 平台 + fake bridge，覆盖 sync 全链路、superagent 镜像/命令桥、跨租户；脚本生成 HTML 报告。
+- [x] 13.1 跑 keel 单测/集成/race + keel-board conformance；全绿并记录输出。（`evidence/phase-1-sync.md`：boardintegration + race + `go test -p 1 ./...` + v0.1.1 conformance；不修改 board 仓库）
+- [x] 13.2 E2E：keel API + fake 平台 + fake bridge，覆盖 sync 全链路、superagent 镜像/命令桥、跨租户；脚本生成 HTML 报告。（sync 全链路/跨租户：`evidence/phase-1-sync-e2e.html`；superagent 镜像/命令桥属 11.x lane，不在本 lane）
 - [ ] 13.3 独立子代理复核（禁 Codex）：身份/RBAC、sync 凭据/不可信输入、双真值、回滚；P0/P1 清零。
 - [ ] 13.4 写 phase 1 evidence；完成阶段归档检查点并签收；change 保持 active 进入 Phase 2。
 

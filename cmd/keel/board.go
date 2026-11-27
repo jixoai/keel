@@ -20,9 +20,9 @@ import (
 // 404 board_disabled until a deployment opts in). KEEL_BOARD_ENABLED=1 (or
 // true/yes/on) enables the surface; an empty or 0/false/no/off value keeps the
 // routes mounted but answers 404 board_disabled. The tenant-level board.enabled
-// flag (10.6) narrows this deployment switch further; it cannot enable a
-// deployment that never opted in. An unrecognized value fails startup instead
-// of guessing.
+// and board.sync.enabled flags narrow this deployment switch further; they
+// cannot enable a deployment that never opted in. An unrecognized value fails
+// startup instead of guessing.
 func boardDeploymentEnabled() (bool, error) {
 	raw := strings.ToLower(strings.TrimSpace(os.Getenv("KEEL_BOARD_ENABLED")))
 	switch raw {
@@ -51,6 +51,23 @@ func boardDSN(keelDSN string) string {
 	return keelDSN
 }
 
+// boardFileHosts reads the inbound file/link URL host allowlist. Empty is the
+// safe default: the sync host refuses every inbound URL rather than fetching an
+// arbitrary host named by a platform payload.
+func boardFileHosts() []string {
+	raw := strings.TrimSpace(os.Getenv("KEEL_BOARD_FILE_HOSTS"))
+	if raw == "" {
+		return nil
+	}
+	out := make([]string, 0, 4)
+	for _, part := range strings.Split(raw, ",") {
+		if host := strings.TrimSpace(part); host != "" {
+			out = append(out, host)
+		}
+	}
+	return out
+}
+
 // boardWiring is the board surface as the serve loop mounts it. A disabled
 // deployment still supplies handlers (404 board_disabled) so the route shape
 // does not change with the flag.
@@ -64,6 +81,14 @@ type boardWiring struct {
 // tested seam between the flag and the HTTP mux; the disabled path never opens
 // a board connection.
 func newBoardWiring(ctx context.Context, keelDSN string, tenantID uuid.UUID, access *accesswire.Bridge, st *store.Store, logger *slog.Logger) (*boardWiring, error) {
+	return newBoardWiringWithOptions(ctx, keelDSN, tenantID, access, st, logger, nil)
+}
+
+// newBoardWiringWithOptions is newBoardWiring plus the sync wiring a serve
+// process supplies (tenant secret box, blob directory, file/link allowlist,
+// limits). Keeping it separate leaves the default-off seam testable without
+// constructing a store or a secret key.
+func newBoardWiringWithOptions(ctx context.Context, keelDSN string, tenantID uuid.UUID, access *accesswire.Bridge, st *store.Store, logger *slog.Logger, configure func(*boardintegration.Options)) (*boardWiring, error) {
 	enabled, err := boardDeploymentEnabled()
 	if err != nil {
 		return nil, err
@@ -74,7 +99,7 @@ func newBoardWiring(ctx context.Context, keelDSN string, tenantID uuid.UUID, acc
 			Webhook: boardintegration.DisabledHandler(),
 		}, nil
 	}
-	surface, err := boardintegration.New(ctx, boardintegration.Options{
+	options := boardintegration.Options{
 		DSN:                 boardDSN(keelDSN),
 		Schema:              strings.TrimSpace(os.Getenv("KEEL_BOARD_SCHEMA")),
 		Access:              access,
@@ -82,7 +107,11 @@ func newBoardWiring(ctx context.Context, keelDSN string, tenantID uuid.UUID, acc
 		TenantID:            tenantID,
 		Logger:              logger,
 		ChannelScanInterval: envDuration("KEEL_BOARD_CHANNEL_SCAN", 0),
-	})
+	}
+	if configure != nil {
+		configure(&options)
+	}
+	surface, err := boardintegration.New(ctx, options)
 	if err != nil {
 		return nil, fmt.Errorf("board surface: %w", err)
 	}

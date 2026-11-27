@@ -57,6 +57,30 @@ type TenantConfig struct {
 	// configuration vocabulary for the external gateway: the loadout decides
 	// which services exist from this document and nothing else.
 	External ExternalConfig `json:"external"`
+	// Board carries the tenant's board feature switches (keel-board-v1 design
+	// §20). Both default false: the deployment must opt the board in at the
+	// deployment level (KEEL_BOARD_ENABLED) and the tenant must opt in here.
+	// The board mount reads this document per request; the sync connections
+	// themselves live in keel's board_tenant_sync_entries table.
+	Board BoardConfig `json:"board"`
+}
+
+// BoardConfig is the tenant's board switch document.
+type BoardConfig struct {
+	// Enabled turns /v1/board/* on for this tenant. A disabled tenant answers
+	// 404 board_disabled without revealing whether a channel exists.
+	Enabled bool `json:"enabled,omitempty"`
+	// Sync turns the platform sync surface (entries, webhooks, source reads)
+	// on for this tenant. It requires Enabled; it is independent so a tenant
+	// can use the board without any platform connection.
+	Sync BoardSyncConfig `json:"sync"`
+}
+
+// BoardSyncConfig is the tenant's sync switch document. The connections
+// themselves are keel configuration rows (board_tenant_sync_entries) whose
+// secret_ref values name tenant secrets; this flag gates them.
+type BoardSyncConfig struct {
+	Enabled bool `json:"enabled,omitempty"`
 }
 
 // AgentConfig selects the model and shapes the base system prompt. APIKeyRef
@@ -551,6 +575,12 @@ func Merge(defaults, tenant TenantConfig) TenantConfig {
 				Unmetered:             pickString(defaults.External.Quota.Unmetered, tenant.External.Quota.Unmetered),
 				MaxSessionsPerBackend: pickInt(defaults.External.Quota.MaxSessionsPerBackend, tenant.External.Quota.MaxSessionsPerBackend),
 			},
+		},
+		// Board switches are tenant decisions, never inherited deployment
+		// defaults: an unset tenant document stays off.
+		Board: BoardConfig{
+			Enabled: tenant.Board.Enabled,
+			Sync:    BoardSyncConfig{Enabled: tenant.Board.Sync.Enabled},
 		},
 	}
 	if tenant.Agent.Sections != nil {
