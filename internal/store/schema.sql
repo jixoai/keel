@@ -1715,3 +1715,34 @@ CREATE INDEX IF NOT EXISTS collab_session_index_children
 CREATE INDEX IF NOT EXISTS collab_session_index_mode
     ON collab_session_index (tenant_id, mode_id)
     WHERE state = 'active';
+
+-- Command invocations (change keel-plugin-commands): the durable idempotency
+-- and audit row of one chat command call. (tenant, session, requestId) is the
+-- idempotency key: a replay reads the first row instead of executing again, and
+-- a destructive command's opened decision is remembered in decision_id. The row
+-- never carries the argument document: only its hash and length (the audit rule
+-- "no argument bodies").
+CREATE TABLE IF NOT EXISTS command_invocations (
+    tenant_id     uuid NOT NULL,
+    session_id    uuid NOT NULL,
+    request_id    text NOT NULL,
+    command       text NOT NULL,
+    source        text NOT NULL,
+    actor         text NOT NULL DEFAULT '',
+    status        text NOT NULL,
+    decision_id   uuid,
+    args_hash     text NOT NULL DEFAULT '',
+    args_bytes    int  NOT NULL DEFAULT 0,
+    duration_ms   bigint NOT NULL DEFAULT 0,
+    event_seq     bigint NOT NULL DEFAULT 0,
+    result        jsonb,
+    truncated     boolean NOT NULL DEFAULT false,
+    error_code    text NOT NULL DEFAULT '',
+    error_message text NOT NULL DEFAULT '',
+    created_at    timestamptz NOT NULL DEFAULT now(),
+    updated_at    timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (tenant_id, session_id, request_id)
+);
+
+CREATE INDEX IF NOT EXISTS command_invocations_session
+    ON command_invocations (tenant_id, session_id, created_at DESC);

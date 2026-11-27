@@ -169,6 +169,13 @@ var rules = []Rule{
 	// Manual checkpoint compaction (change keel-checkpoint): a write on the
 	// session's context, idempotent by requestId.
 	resource(http.MethodPost, "/v1/sessions/{id}/compact", access.KeySessionWrite, "session", "path:id"),
+	// Chat commands (change keel-plugin-commands): the outer gate checks that the
+	// caller holds the key at some scope; the handler then resolves the session
+	// (a foreign/missing session is 404, not a relation 403) and applies the
+	// relation decision plus the command-level keys (plugin.invoke / skill.read /
+	// model.invoke).
+	route(http.MethodGet, "/v1/sessions/{id}/commands", ModeHeldKey, access.KeySessionRead),
+	route(http.MethodPost, "/v1/sessions/{id}/commands/{name}", ModeHeldKey, access.KeySessionWrite),
 	// Session checkpoint policy: the read projection is session.read; writing a
 	// narrowing override is session.write (the effective policy can never exceed
 	// the tenant ceiling).

@@ -85,9 +85,15 @@ func (s *Server) compactSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Permission runs before the body is read: a caller without session.write
-	// learns nothing about the session's context by probing this route. A
-	// deployment without the access seam fails closed (503), never open.
+	// learns nothing about the session's context by probing this route. The
+	// manual compaction calls the model to summarize, so it also requires
+	// model.invoke — the same pair the `/compact` command declares
+	// (change keel-plugin-commands). A deployment without the access seam fails
+	// closed (503), never open.
 	if !s.authorizeSessionResource(w, r, tenantID, sessionID, access.KeySessionWrite) {
+		return
+	}
+	if !s.authorizeSessionResource(w, r, tenantID, sessionID, access.KeyModelInvoke) {
 		return
 	}
 	var body compactRequest

@@ -1121,7 +1121,10 @@ func (r *Runner) run(ctx context.Context, lease kernel.Lease, span telemetry.Spa
 	// must be taken here, not over the binding text. A reader of run.finished then
 	// sees which prompt answered the attempt — including a host-side section
 	// change that leaves the agent's own text untouched.
-	systemPrompt := r.systemPromptFor(surface)
+	// A `/skill:<name>` command pins the skill for the NEXT turn by appending a
+	// durable skill.loaded event. The attempt projects pending pins into the
+	// system prompt by reference; no user/assistant event is fabricated.
+	systemPrompt := applySkillPreload(r.systemPromptFor(surface), events)
 	if surface.PromptHash == "" && strings.TrimSpace(surface.Prompt) != "" {
 		// No host renderer contributed sections: the wire prompt IS the binding
 		// text, so its digest is the binding's.

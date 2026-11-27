@@ -1607,6 +1607,31 @@ func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, 
 		PluginAuditWriter: pluginAuditStore{store: st},
 		PluginTools:       &pluginToolBridge{index: toolIndex, manager: manager},
 		Theme:             theme,
+		// Chat commands (change keel-plugin-commands): the durable invocation
+		// state machine is the same store; plugin commands come from the live
+		// manager registry and execute through Manager.InvokePluginTool (never
+		// the UI bridge's index); skills are the tenant library. A command is
+		// idle-only, so the idle seam reads the durable run row: queued/pending/
+		// running means a turn is owed or in flight.
+		CommandStore:   st,
+		CommandPlugins: manager,
+		CommandTools:   manager,
+		CommandSkills:  opts.Skills,
+		SessionIdle: func(ctx context.Context, tenantID, sessionID uuid.UUID) (bool, error) {
+			run, err := st.GetRun(ctx, tenantID, sessionID)
+			if errors.Is(err, store.ErrNoRun) {
+				return true, nil
+			}
+			if err != nil {
+				return false, err
+			}
+			switch run.Status {
+			case store.RunQueued, store.RunPending, store.RunRunning:
+				return false, nil
+			default:
+				return true, nil
+			}
+		},
 		// MCP Apps (P2): the catalogue/document surface and the two capability
 		// inputs (the configured sandbox origin and the host theme palettes the
 		// View maps onto the apps standard variables). Nil registry answers 501

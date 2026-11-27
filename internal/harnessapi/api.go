@@ -253,6 +253,29 @@ type Config struct {
 	// settles as failed in the kernel policy table; the product snapshot
 	// remembers the cancellation).
 	RunStatus func(tenantID, sessionID uuid.UUID) (string, bool)
+	// CommandStore is the durable command invocation state machine behind
+	// POST /v1/sessions/{id}/commands/{name} (change keel-plugin-commands). Nil
+	// answers 503 on execution; the catalog still renders builtin/skill entries
+	// and omits plugin entries.
+	CommandStore CommandInvocationStore
+	// CommandPlugins is the live plugin command registry (Manager.ListCommands).
+	// Nil keeps builtin/skill commands only.
+	CommandPlugins CommandPluginRegistry
+	// CommandTools is the plugin tool dispatch a plugin command executes
+	// (Manager.InvokePluginTool). Nil makes plugin commands answer 503.
+	CommandTools PluginToolInvoker
+	// CommandSkills is the installed skill catalog and loader behind
+	// `/skill:<name>`. Nil omits skill commands from the catalog.
+	CommandSkills CommandSkills
+	// SessionIdle reports whether a session has no in-flight turn or compaction.
+	// Command execution requires it: a missing seam fails closed (503).
+	SessionIdle SessionIdleFunc
+	// CommandDecisionTimeout bounds the durable decision of a destructive
+	// command (default 5 minutes; the broker caps it at 24h).
+	CommandDecisionTimeout time.Duration
+	// CommandWaitTimeout bounds how long a duplicate requestId waits for the
+	// in-flight execution it collided with (default 30s).
+	CommandWaitTimeout time.Duration
 	// Provisioner is the tenant provisioning surface (POST /v1/admin/tenants).
 	// Nil answers 501: a deployment without it has no operator path, which is a
 	// configuration choice, not a bug.
@@ -436,6 +459,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("DELETE /v1/sessions/{id}", s.archiveSession)
 	s.mux.HandleFunc("POST /v1/sessions/{id}/cancel", s.cancelSession)
 	s.mux.HandleFunc("POST /v1/sessions/{id}/compact", s.compactSession)
+	s.commandRoutes()
 	s.mux.HandleFunc("GET /v1/sessions/{id}/checkpoint-policy", s.getCheckpointPolicy)
 	s.mux.HandleFunc("PUT /v1/sessions/{id}/checkpoint-policy", s.putCheckpointPolicy)
 	s.mux.HandleFunc("GET /v1/sessions/{id}/decisions", s.listDecisions)
@@ -674,6 +698,11 @@ func (s *Server) capabilities(w http.ResponseWriter, _ *http.Request) {
 		// MCP events (P4): subscriptions/listen and notification routing. False
 		// until the dispatcher is wired; clients then keep the legacy behavior.
 		"mcp.events": s.cfg.MCPEvents,
+		// Chat commands (change keel-plugin-commands): the catalog is served
+		// whenever the access surface exists; execution additionally needs the
+		// durable invocation store and the idle seam.
+		"commands":         s.cfg.Access != nil,
+		"commands.execute": s.commandWired(),
 	}
 	hooks := make([]string, 0, len(harnessext.HookEvents()))
 	for _, event := range harnessext.HookEvents() {

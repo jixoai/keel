@@ -161,6 +161,29 @@ func TestCompactRouteRefusals(t *testing.T) {
 		}
 	})
 
+	t.Run("no model.invoke", func(t *testing.T) {
+		// The manual compaction calls the model to summarize: a caller with
+		// session.write but without model.invoke cannot spend that credential
+		// (change keel-plugin-commands keeps the route and the /compact command
+		// on the same permission pair).
+		denied := permitAllAccess()
+		denied.decisions = map[string]access.Decision{
+			access.KeyModelInvoke: {
+				Allow: false, Key: access.KeyModelInvoke,
+				Reason: access.ReasonMissingGrant, Detail: "model.invoke is not granted",
+			},
+		}
+		seam := &compactFake{results: map[string]CompactResult{}}
+		server := httptest.NewServer(New(Config{CompactSession: seam.compact, Access: denied, Logger: testLogger()}))
+		defer server.Close()
+		if code := doJSON(t, server.Client(), http.MethodPost, server.URL+url, tenant, map[string]any{"requestId": "r1"}, nil); code != http.StatusForbidden {
+			t.Fatalf("status = %d, want 403", code)
+		}
+		if seam.callCount() != 0 {
+			t.Fatal("the seam was called without model.invoke")
+		}
+	})
+
 	t.Run("no session.write", func(t *testing.T) {
 		denied := permitAllAccess()
 		denied.decisions = map[string]access.Decision{

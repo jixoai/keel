@@ -45,4 +45,12 @@ const (
 
 	EventNotificationAck      = "notification.ack"
 	EventNotificationPushSent = "notification.push_sent"
+
+	// Command facts (change keel-plugin-commands). command.invoked is the
+	// user-facing projection/audit line of one command call; skill.loaded is the
+	// host pin a `/skill:<name>` command writes for the NEXT turn (the runner
+	// projects it into the attempt's system prompt, never into user/assistant
+	// messages). Both are bookkeeping: the transcript decoder ignores them.
+	EventCommandInvoked = "command.invoked"
+	EventSkillLoaded    = "skill.loaded"
 )
