@@ -1,13 +1,13 @@
 {
-  "bytesIn": 1396705896,
-  "drainWaitSec": 60.229998445,
-  "durationSec": 60.042714446,
+  "bytesIn": 964691760,
+  "drainWaitSec": 60.160151362,
+  "durationSec": 60.275984779,
   "errorCounts": {},
-  "imageLatencyP50MS": 28665.977097,
-  "imageLatencyP95MS": 36337.594934,
-  "imageLatencyP99MS": 37272.184726,
-  "imagesErr": 201,
-  "imagesOK": 999,
+  "imageLatencyP50MS": 36019.014267000006,
+  "imageLatencyP95MS": 37246.547768,
+  "imageLatencyP99MS": 37587.824726,
+  "imagesErr": 317,
+  "imagesOK": 690,
   "metricsError": "",
   "prefillRuns": 1000,
   "rssMaxMB": 0,
@@ -15,28 +15,28 @@
   "rssP50MB": 0,
   "runStatusCounts": {
     "done": 132,
-    "pending": 804,
-    "running": 64
+    "pending": 803,
+    "running": 65
   },
   "runsActiveFinal": 64,
   "runsActiveMax": 64,
   "runsFailedFinal": 0,
   "runsFinishedDone": 132,
   "runsFinishedFail": 0,
-  "runsPendingFinal": 804,
-  "runsPendingMax": 985,
-  "runsStartedFinal": 323,
+  "runsPendingFinal": 803,
+  "runsPendingMax": 988,
+  "runsStartedFinal": 257,
   "runsVerified": 1000,
   "sessions": 1000,
-  "sseErrors": 1242,
+  "sseErrors": 856,
   "sseSessions": 1000,
   "statusCounts": {
-    "-429": 1926,
-    "429": 1242
+    "-429": 2137,
+    "429": 856
   },
   "streamsActiveMax": 1800,
-  "tenant": "0f645b0a-8f6e-424e-a6cb-96f0344163a1",
+  "tenant": "09038af8-5942-48ed-ab45-1de998fa5022",
   "textSessions": -1,
-  "texts": 4168,
-  "throughputMBs": 23.261871300907643
+  "texts": 2265,
+  "throughputMBs": 16.004578996710084
 }
