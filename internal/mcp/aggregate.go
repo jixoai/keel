@@ -103,5 +103,15 @@ func (m *Manager) CallToolWithOptions(ctx context.Context, server, tool string, 
 	if candidate.Client == nil {
 		return CallToolResult{}, fmt.Errorf("mcp: server %q is not connected", server)
 	}
+	// A borrow validates the connection slot (health probe when due, one
+	// backoff-bounded reconnect when the probe fails). The tool existence check
+	// above stays bound to the attempt's frozen catalogue; a reconnect may
+	// replace the transport but not the tool the attempt selected.
+	if err := m.EnsureConnected(ctx, server); err != nil {
+		return CallToolResult{}, err
+	}
+	if live := m.findServer(server); live != nil && live.Client != nil && live.Err == nil {
+		candidate = live
+	}
 	return candidate.Client.CallToolWithOptions(ctx, entry.Name, args, options)
 }

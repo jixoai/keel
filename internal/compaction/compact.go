@@ -12,6 +12,7 @@ package compaction
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 
 	"github.com/jixoai/keel/internal/agentcore"
 	"github.com/jixoai/keel/internal/provider"
@@ -91,6 +92,58 @@ func Compact(
 		// No cut, or the cut would cover only the previous checkpoint.
 		return nil, nil
 	}
+	return compactAt(ctx, stream, model, msgs, settings, cut.FirstKeptIndex, prevCompactionIndex, prevDetails, previousSummary, cfg)
+}
+
+// CompactAt summarizes a pinned range instead of re-selecting a cut. It is the
+// resume half of the compaction task contract (PI CompactionCheckpoint phase
+// "summarize"): a task that already selected its range MUST be able to re-run
+// the summary without letting a new input or a changed transcript move the
+// boundary. firstKeptIndex must be inside (start, len(msgs)) and is validated
+// here; an unusable pin returns an error rather than silently repairing it.
+//
+// Everything except the cut selection is Compact's behavior, and callers that
+// pass a freshly selected cut get identical results from either entry point.
+func CompactAt(
+	ctx context.Context,
+	stream provider.StreamFn,
+	model provider.Model,
+	msgs []agentcore.Message,
+	settings CompactionSettings,
+	firstKeptIndex int,
+	prevCompactionIndex int,
+	prevDetails *CompactionDetails,
+	previousSummary string,
+	cfg provider.StreamConfig,
+) (*CompactionResult, error) {
+	first := prevCompactionIndex + 1
+	if first < 0 {
+		first = 0
+	}
+	if firstKeptIndex <= first || firstKeptIndex >= len(msgs) {
+		return nil, fmt.Errorf("compaction: pinned first kept index %d is outside (%d, %d)", firstKeptIndex, first, len(msgs))
+	}
+	return compactAt(ctx, stream, model, msgs, settings, firstKeptIndex, prevCompactionIndex, prevDetails, previousSummary, cfg)
+}
+
+// compactAt is the shared body of Compact and CompactAt.
+func compactAt(
+	ctx context.Context,
+	stream provider.StreamFn,
+	model provider.Model,
+	msgs []agentcore.Message,
+	settings CompactionSettings,
+	firstKeptIndex int,
+	prevCompactionIndex int,
+	prevDetails *CompactionDetails,
+	previousSummary string,
+	cfg provider.StreamConfig,
+) (*CompactionResult, error) {
+	first := prevCompactionIndex + 1
+	if first < 0 {
+		first = 0
+	}
+	cut := struct{ FirstKeptIndex int }{FirstKeptIndex: firstKeptIndex}
 
 	start := first
 	if prevCompactionIndex >= 0 {

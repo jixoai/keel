@@ -59,7 +59,7 @@ func TestRealFilesystemAggregateTool(t *testing.T) {
 		t.Fatal(err)
 	}
 	server := &mcp.Server{Entry: mcp.ServerEntry{Name: "filesystem"}, Client: client, Tools: tools}
-	tool := newMCPTool(&realMCPBackend{client: client, servers: []*mcp.Server{server}}, nil)
+	tool := newMCPTool(&realMCPBackend{client: client, servers: []*mcp.Server{server}}, nil, nil)
 	if tool.Name() != MCP {
 		t.Fatalf("aggregate tool name = %q", tool.Name())
 	}

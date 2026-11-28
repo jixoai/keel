@@ -312,8 +312,12 @@ func newCommandHarness(t *testing.T, mutate func(*Config)) *commandHarness {
 	plugins := &fakeCommandPlugins{registry: harnessext.CommandRegistry{Generation: 7}}
 	tools := &fakeCommandTools{result: json.RawMessage(`{"indexed":42}`)}
 	skills := &fakeCommandSkills{details: map[string]skilllib.Detail{
-		"alpha": {Record: skilllib.Record{Name: "alpha", Description: "Alpha skill", CurrentHash: "sha256:alpha"}, Body: "Alpha body."},
-		"beta":  {Record: skilllib.Record{Name: "beta", Description: "Beta skill", CurrentHash: "sha256:beta"}, Body: "Beta body."},
+		"alpha": {
+			Record:       skilllib.Record{Name: "alpha", Description: "Alpha skill", CurrentHash: "sha256:alpha"},
+			Body:         "Alpha body.",
+			AllowedTools: []string{"read", "Bash(git:*)"},
+		},
+		"beta": {Record: skilllib.Record{Name: "beta", Description: "Beta skill", CurrentHash: "sha256:beta"}, Body: "Beta body."},
 	}}
 	compact := &fakeCompact{result: CompactResult{CheckpointID: 9, Performed: true, TokensBefore: 100, TokensAfter: 10}}
 	broker := harnessext.NewDecisionBroker(harnessext.DecisionBrokerOptions{Logger: testLogger()})
@@ -753,6 +757,12 @@ func TestCommandSkillLoadsForNextTurnAndReplays(t *testing.T) {
 	loaded := harness.store.eventsOfKind(store.EventSkillLoaded)
 	if loaded[0]["name"] != "alpha" || loaded[0]["body"] != "Alpha body." || loaded[0]["hash"] != "sha256:alpha" {
 		t.Fatalf("skill.loaded = %v", loaded[0])
+	}
+	// allowed-tools travels with the pin so the runner can intersect the tool
+	// surface for the next turn (PI allowed-tools parity).
+	allowed, _ := loaded[0]["allowedTools"].([]any)
+	if len(allowed) != 2 || allowed[0] != "read" || allowed[1] != "Bash(git:*)" {
+		t.Fatalf("skill.loaded allowedTools = %v", loaded[0]["allowedTools"])
 	}
 	if code, _ := harness.do(t, http.MethodPost, harness.commandPath("skill:alpha"), map[string]any{"requestId": "rs"}); code != http.StatusOK {
 		t.Fatalf("skill replay = %d", code)

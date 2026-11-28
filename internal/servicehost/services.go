@@ -364,6 +364,11 @@ func (m *mcpService) Start(ctx context.Context, _ *servicegraph.EffectScope) err
 	if m.events != nil {
 		m.events.Start(ctx)
 	}
+	// Connection-pool supervision: probe each server on the configured cadence
+	// and reconnect failures with per-server exponential backoff. A crash
+	// between tool calls is therefore repaired without waiting for the next
+	// borrow; Close stops the monitor before closing connections.
+	m.manager.StartHealthMonitor(ctx, 0)
 	return nil
 }
 

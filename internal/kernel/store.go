@@ -58,6 +58,21 @@ type LogStore interface {
 	// reports how many rows it removed. The newest projection is always kept.
 	PruneCheckpoints(ctx context.Context, tenantID, sessionID uuid.UUID, req PruneRequest) (int64, error)
 
+	// SaveCompactionTask upserts one compaction task's recovery checkpoint
+	// keyed by its request ID. It is not a transcript and never replaces the
+	// event log or the checkpoint projection.
+	SaveCompactionTask(ctx context.Context, tenantID, sessionID uuid.UUID, checkpoint CompactionTaskCheckpoint) error
+
+	// LoadCompactionTask returns a task's checkpoint. found=false means no task
+	// with that request ID is in flight.
+	LoadCompactionTask(ctx context.Context, tenantID, sessionID uuid.UUID, requestID string) (CompactionTaskCheckpoint, bool, error)
+
+	// ListCompactionTasks returns every in-flight task of one session.
+	ListCompactionTasks(ctx context.Context, tenantID, sessionID uuid.UUID) ([]CompactionTaskCheckpoint, error)
+
+	// DeleteCompactionTask removes a finished (or abandoned) task checkpoint.
+	DeleteCompactionTask(ctx context.Context, tenantID, sessionID uuid.UUID, requestID string) error
+
 	// FindDedupe looks up one committed event by its namespaced dedupe key
 	// without taking the session write lock (the Lookup path is read-only).
 	FindDedupe(ctx context.Context, tenantID, sessionID uuid.UUID, key string) (Event, bool, error)

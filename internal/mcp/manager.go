@@ -77,6 +77,10 @@ type ConnectOptions struct {
 	Logger *slog.Logger
 	// Concurrency bounds simultaneous connection attempts. Zero uses 8.
 	Concurrency int
+	// HealthCheckInterval is the pool's health-probe cadence for one server.
+	// Zero uses 30s; a negative value disables probing (the borrow path still
+	// validates a connection before use).
+	HealthCheckInterval time.Duration
 	// AppReadiness is the host registry's "this app's document has been
 	// fetched, validated and published" predicate. While an app is not ready
 	// its tools carry no app binding and no mcp_apps line: the text result is
@@ -201,6 +205,13 @@ type Manager struct {
 	snapshotMu    sync.Mutex
 	snapshots     map[string][]*Server
 	snapshotOrder []string
+
+	// healthMu guards the per-server connection slots and the monitor
+	// lifecycle (pool.go). Each slot has its own mutex for borrows.
+	healthMu     sync.Mutex
+	slots        map[string]*serverSlot
+	healthCancel context.CancelFunc
+	healthDone   chan struct{}
 }
 
 // Connect connects the enabled entries. It always returns a manager so callers
@@ -241,6 +252,18 @@ func Connect(ctx context.Context, entries []ServerEntry, options ConnectOptions)
 		}()
 	}
 	wg.Wait()
+	// Seed the pool slots: a failed initial connection starts its reconnect
+	// backoff immediately; a connected server is fresh and healthy.
+	for _, server := range manager.servers {
+		slot := manager.slot(server.Entry.Name)
+		slot.mu.Lock()
+		if server.Err != nil {
+			slot.recordFailure(server.Err, time.Now())
+		} else {
+			slot.recordSuccess(false, time.Now())
+		}
+		slot.mu.Unlock()
+	}
 	return manager
 }
 
@@ -285,6 +308,13 @@ func (m *Manager) Reconnect(ctx context.Context, name string) error {
 	if previous != nil && previous.Client != nil {
 		_ = previous.Client.Close()
 	}
+	// A successful reconnect revives the pool slot (the caller may be the OAuth
+	// sign-in path, which bypasses EnsureConnected's backoff), but it does not
+	// count as a supervised reconnect: EnsureConnected owns that counter.
+	slot := m.slot(name)
+	slot.mu.Lock()
+	slot.recordSuccess(false, time.Now())
+	slot.mu.Unlock()
 	m.logger.Info("mcp server reconnected", "server", name, "tools", len(server.Tools))
 	if options.ServerReconnected != nil {
 		options.ServerReconnected(name)
@@ -751,6 +781,10 @@ func (m *Manager) Close() error {
 	if m == nil {
 		return nil
 	}
+	// Stop the health monitor before taking the server lock: the monitor calls
+	// Servers(), which takes the same lock, and this order is the only one that
+	// cannot deadlock.
+	m.stopHealthMonitor()
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var failures []string

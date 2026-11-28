@@ -658,6 +658,125 @@ func (s *PGStore) PruneCheckpoints(ctx context.Context, tenantID, sessionID uuid
 	return tag.RowsAffected(), nil
 }
 
+// SaveCompactionTask upserts one in-flight task checkpoint keyed by request
+// ID. A missing (or foreign) session answers ErrNotFound: the guarded INSERT
+// cannot create recovery state for a session that does not exist.
+func (s *PGStore) SaveCompactionTask(ctx context.Context, tenantID, sessionID uuid.UUID, checkpoint CompactionTaskCheckpoint) error {
+	var retryUntil any
+	if !checkpoint.RetryUntil.IsZero() {
+		retryUntil = checkpoint.RetryUntil
+	}
+	tag, err := s.pool.Exec(ctx,
+		`INSERT INTO compaction_tasks (
+		     tenant_id, session_id, request_id, phase, first_kept_seq, tail_seq,
+		     tokens_before, policy_version, attempt, retry_until)
+		 SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10
+		 WHERE EXISTS (SELECT 1 FROM sessions WHERE tenant_id = $1 AND session_id = $2)
+		 ON CONFLICT (tenant_id, session_id, request_id) DO UPDATE
+		 SET phase = EXCLUDED.phase,
+		     first_kept_seq = EXCLUDED.first_kept_seq,
+		     tail_seq = EXCLUDED.tail_seq,
+		     tokens_before = EXCLUDED.tokens_before,
+		     policy_version = EXCLUDED.policy_version,
+		     attempt = EXCLUDED.attempt,
+		     retry_until = EXCLUDED.retry_until,
+		     updated_at = now()`,
+		tenantID, sessionID, checkpoint.RequestID, checkpoint.Phase,
+		checkpoint.FirstKeptSeq, checkpoint.TailSeq, checkpoint.TokensBefore,
+		checkpoint.PolicyVersion, checkpoint.Attempt, retryUntil)
+	if err != nil {
+		return fmt.Errorf("kernel: save compaction task: %w", pgFail(err))
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("kernel: session %s/%s: %w", tenantID, sessionID, ErrNotFound)
+	}
+	return nil
+}
+
+// LoadCompactionTask returns one in-flight task checkpoint.
+func (s *PGStore) LoadCompactionTask(ctx context.Context, tenantID, sessionID uuid.UUID, requestID string) (CompactionTaskCheckpoint, bool, error) {
+	var (
+		checkpoint CompactionTaskCheckpoint
+		retryUntil *time.Time
+	)
+	err := s.pool.QueryRow(ctx,
+		`SELECT request_id, phase, first_kept_seq, tail_seq, tokens_before,
+		        policy_version, attempt, retry_until
+		 FROM compaction_tasks
+		 WHERE tenant_id = $1 AND session_id = $2 AND request_id = $3`,
+		tenantID, sessionID, requestID).
+		Scan(&checkpoint.RequestID, &checkpoint.Phase, &checkpoint.FirstKeptSeq,
+			&checkpoint.TailSeq, &checkpoint.TokensBefore, &checkpoint.PolicyVersion,
+			&checkpoint.Attempt, &retryUntil)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return CompactionTaskCheckpoint{}, false, nil
+	}
+	if err != nil {
+		return CompactionTaskCheckpoint{}, false, fmt.Errorf("kernel: load compaction task: %w", pgFail(err))
+	}
+	if retryUntil != nil {
+		checkpoint.RetryUntil = *retryUntil
+	}
+	return checkpoint, true, nil
+}
+
+// ListCompactionTasks returns every in-flight task of one session.
+func (s *PGStore) ListCompactionTasks(ctx context.Context, tenantID, sessionID uuid.UUID) ([]CompactionTaskCheckpoint, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT request_id, phase, first_kept_seq, tail_seq, tokens_before,
+		        policy_version, attempt, retry_until
+		 FROM compaction_tasks
+		 WHERE tenant_id = $1 AND session_id = $2
+		 ORDER BY updated_at DESC, request_id`, tenantID, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("kernel: list compaction tasks: %w", pgFail(err))
+	}
+	defer rows.Close()
+	var out []CompactionTaskCheckpoint
+	for rows.Next() {
+		var (
+			checkpoint CompactionTaskCheckpoint
+			retryUntil *time.Time
+		)
+		if err := rows.Scan(&checkpoint.RequestID, &checkpoint.Phase, &checkpoint.FirstKeptSeq,
+			&checkpoint.TailSeq, &checkpoint.TokensBefore, &checkpoint.PolicyVersion,
+			&checkpoint.Attempt, &retryUntil); err != nil {
+			return nil, fmt.Errorf("kernel: scan compaction task: %w", pgFail(err))
+		}
+		if retryUntil != nil {
+			checkpoint.RetryUntil = *retryUntil
+		}
+		out = append(out, checkpoint)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("kernel: list compaction tasks: %w", pgFail(err))
+	}
+	return out, nil
+}
+
+// DeleteCompactionTask removes a finished or abandoned task. A missing row is
+// a no-op; a missing session answers ErrNotFound.
+func (s *PGStore) DeleteCompactionTask(ctx context.Context, tenantID, sessionID uuid.UUID, requestID string) error {
+	tag, err := s.pool.Exec(ctx,
+		`DELETE FROM compaction_tasks
+		 WHERE tenant_id = $1 AND session_id = $2 AND request_id = $3`,
+		tenantID, sessionID, requestID)
+	if err != nil {
+		return fmt.Errorf("kernel: delete compaction task: %w", pgFail(err))
+	}
+	if tag.RowsAffected() > 0 {
+		return nil
+	}
+	exists, existsErr := s.SessionExists(ctx, tenantID, sessionID)
+	if existsErr != nil {
+		return existsErr
+	}
+	if !exists {
+		return fmt.Errorf("kernel: session %s/%s: %w", tenantID, sessionID, ErrNotFound)
+	}
+	return nil
+}
+
 // FindDedupe looks up one committed event by its namespaced dedupe key.
 func (s *PGStore) FindDedupe(ctx context.Context, tenantID, sessionID uuid.UUID, key string) (Event, bool, error) {
 	if key == "" {

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/jixoai/keel/internal/agentcore"
 	"github.com/jixoai/keel/internal/mcp"
@@ -30,6 +31,51 @@ type MCPBackend interface {
 // advisory and dropping a frame is always safe.
 type MCPProgressPublisher func(scope agentcore.ToolRunScope, toolCallID string, progress mcp.ProgressNotification)
 
+// MCPApprovalRequest is one destructive MCP tool call awaiting a human
+// decision. Arguments is the exact payload that will be sent on approval;
+// implementations must not log it (it may carry repository paths or content).
+type MCPApprovalRequest struct {
+	Server      string
+	Tool        string
+	Arguments   json.RawMessage
+	Destructive bool
+}
+
+// MCPApprovalFunc asks a human to approve (nil) or refuse (error) a destructive
+// MCP tool call. The host wires it to the durable decision primitive; a nil
+// function keeps the fail-closed default (the call is refused with
+// mcp_approval_required rather than executed without consent).
+type MCPApprovalFunc func(ctx context.Context, request MCPApprovalRequest) error
+
+// destructiveToolName is the name-family fallback for servers that publish no
+// annotations.destructiveHint. It is deliberately small and verb-anchored:
+// read/list/search/get tools stay unrestricted, while write-shaped verbs ask.
+func destructiveToolName(name string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(name))
+	for _, prefix := range []string{
+		"delete", "remove", "drop", "truncate", "destroy", "purge",
+		"write", "edit", "move", "rename", "copy", "create", "mkdir",
+		"execute", "exec", "run", "shell", "spawn", "kill", "terminate",
+		"put", "patch", "post", "upload", "install", "uninstall", "replace",
+	} {
+		if normalized == prefix || strings.HasPrefix(normalized, prefix+"_") ||
+			strings.HasPrefix(normalized, prefix+"-") || strings.HasPrefix(normalized, prefix+".") {
+			return true
+		}
+	}
+	return false
+}
+
+// requiresApproval reports whether the tool is destructive. An explicit
+// annotation wins (true or false); the name-family fallback applies only when
+// the server declared nothing.
+func requiresApproval(tool mcp.Tool) bool {
+	if destructive, declared := tool.DestructiveHint(); declared {
+		return destructive
+	}
+	return destructiveToolName(tool.Name)
+}
+
 var mcpToolActions = []string{ActionList, ActionDesc, ActionCall}
 
 const mcpToolDescription = "MCP tool ecosystem. Actions: list (servers and their tools); " +
@@ -40,7 +86,7 @@ func mcpSchema() json.RawMessage {
 	return schema(`, "server":{"type":"string"}, "tool":{"type":"string"}, "arguments":{"type":"object","description":"Arguments passed to the MCP tool."}`)
 }
 
-func newMCPTool(backend MCPBackend, progress MCPProgressPublisher) *actionTool {
+func newMCPTool(backend MCPBackend, progress MCPProgressPublisher, approval MCPApprovalFunc) *actionTool {
 	return &actionTool{
 		name:        MCP,
 		description: mcpToolDescription,
@@ -53,7 +99,7 @@ func newMCPTool(backend MCPBackend, progress MCPProgressPublisher) *actionTool {
 			case ActionDesc:
 				return mcpDescribe(ctx, backend, raw)
 			case ActionCall:
-				return mcpCall(ctx, backend, progress, raw)
+				return mcpCall(ctx, backend, progress, approval, raw)
 			default:
 				return unknownAction(MCP, action, mcpToolActions)
 			}
@@ -164,7 +210,7 @@ func mcpDescribe(ctx context.Context, backend MCPBackend, raw json.RawMessage) (
 	return notFound(MCP, fmt.Sprintf("no MCP server named %q", input.Server))
 }
 
-func mcpCall(ctx context.Context, backend MCPBackend, progress MCPProgressPublisher, raw json.RawMessage) (agentcore.AgentToolResult, error) {
+func mcpCall(ctx context.Context, backend MCPBackend, progress MCPProgressPublisher, approval MCPApprovalFunc, raw json.RawMessage) (agentcore.AgentToolResult, error) {
 	if backend == nil {
 		return notWired(MCP, "no MCP service is configured in this deployment")
 	}
@@ -191,6 +237,27 @@ func mcpCall(ctx context.Context, backend MCPBackend, progress MCPProgressPublis
 	tool, server, err := lookupModelTool(mcpServers(ctx, backend), input.Server, input.Tool)
 	if err != nil {
 		return mcpCallFailure(err, input.Server, input.Tool)
+	}
+	// A destructive tool is a human decision on the model path. The check runs
+	// before the backend sees the call: no approval seam means the call is
+	// refused, never executed silently.
+	if requiresApproval(tool) {
+		if approval == nil {
+			return ErrorResult(CodeMCPApprovalRequired, MCP,
+				fmt.Sprintf("MCP tool %s/%s is destructive and needs human approval, but this deployment has no approval seam.",
+					input.Server, input.Tool),
+				map[string]any{"server": input.Server, "tool": input.Tool, "destructive": true})
+		}
+		if err := approval(ctx, MCPApprovalRequest{
+			Server:      input.Server,
+			Tool:        input.Tool,
+			Arguments:   append(json.RawMessage(nil), arguments...),
+			Destructive: true,
+		}); err != nil {
+			return ErrorResult(CodeMCPApprovalDenied, MCP,
+				fmt.Sprintf("MCP tool %s/%s was not approved: %v", input.Server, input.Tool, err),
+				map[string]any{"server": input.Server, "tool": input.Tool, "destructive": true})
+		}
 	}
 	result, err := backend.CallToolWithOptions(ctx, input.Server, input.Tool, arguments, mcpCallOptions(ctx, progress))
 	if err != nil {

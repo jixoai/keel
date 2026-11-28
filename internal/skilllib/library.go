@@ -274,8 +274,12 @@ type Snapshot struct {
 // Detail is one skill including its body and resource manifest.
 type Detail struct {
 	Record
-	Body  string              `json:"body"`
-	Files []skills.BundleFile `json:"files"`
+	Body string `json:"body"`
+	// AllowedTools is the parsed `allowed-tools` declaration of the active
+	// version. The command host forwards it with the skill.loaded pin so the
+	// runner can intersect the tool surface at execution time.
+	AllowedTools []string            `json:"allowedTools,omitempty"`
+	Files        []skills.BundleFile `json:"files"`
 }
 
 // UpdateResult reports what an update did: updated, up_to_date, or pinned (the
@@ -586,7 +590,12 @@ func (l *Library) Show(tenantID uuid.UUID, name string) (Detail, error) {
 			}
 			bundle = version
 		}
-		detail = Detail{Record: record, Body: bundle.Skill.Body, Files: bundle.Files}
+		detail = Detail{
+			Record:       record,
+			Body:         bundle.Skill.Body,
+			AllowedTools: append([]string(nil), bundle.Skill.AllowedTools...),
+			Files:        bundle.Files,
+		}
 		return false, nil
 	})
 	return detail, err

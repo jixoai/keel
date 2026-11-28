@@ -52,6 +52,10 @@ type ManualCompactResult struct {
 	// Replayed is true when the requestId already produced a checkpoint and the
 	// same result is being returned without a second LLM call.
 	Replayed bool
+	// Recovered is true when the compaction event was committed by an earlier
+	// call that died before saving its checkpoint, and this call restored the
+	// projection from that event. No summary request was made.
+	Recovered bool
 	// TokensBefore and TokensAfter are the context-token estimates around the
 	// compaction (equal when nothing was performed).
 	TokensBefore int
@@ -109,6 +113,18 @@ func (r *Runner) CompactNow(ctx context.Context, lease kernel.Lease, requestID s
 	}
 
 	events, _, err := r.loadEvents(ctx, lease.Scope)
+	if err != nil {
+		return ManualCompactResult{}, err
+	}
+	// Crash window: the summary was committed but the process died before the
+	// checkpoint projection was saved. The committed event is the truth, so
+	// restore the projection and return it instead of summarizing again.
+	if recovered, found, err := r.recoverCommittedCompaction(ctx, lease.Scope, requestID, events); err != nil {
+		return ManualCompactResult{}, err
+	} else if found {
+		return recovered, nil
+	}
+	task, hasTask, err := r.loadCompactionTask(ctx, lease.Scope, requestID)
 	if err != nil {
 		return ManualCompactResult{}, err
 	}
@@ -203,11 +219,38 @@ func (r *Runner) CompactNow(ctx context.Context, lease kernel.Lease, requestID s
 	// Preflight the cut before spending a summary request: the compaction is only
 	// safe when it starts at a committed child event after every unread input and
 	// outside the inherited prefix.
-	cut := compaction.FindCutPoint(msgs, settings.KeepRecentTokens)
-	if cut.FirstKeptIndex <= 0 {
+	//
+	// A task checkpoint in the summarize phase carries the range the interrupted
+	// call already selected. Resume that pin (PI CompactionCheckpoint phase
+	// "summarize") instead of selecting a new cut: new input arriving after the
+	// crash must not move what this request promised to summarize. A pin that no
+	// longer names a committed child event falls back to a fresh selection.
+	cutIndex := 0
+	resumed := false
+	if hasTask && task.Phase == kernel.CompactionPhaseSummarize {
+		if pinned := indexOfPositiveSeq(seqs, task.FirstKeptSeq); pinned > 0 {
+			if problem := manualCutUnsafe(seqs, pinned, prefixLen, movedStart, initialLen, isUnread); problem == "" {
+				cutIndex = pinned
+				resumed = true
+			} else {
+				r.Logger.Warn("compaction task pin is no longer safe; re-selecting",
+					"session_id", lease.Scope.SessionID, "request_id", requestID,
+					"pinned_seq", task.FirstKeptSeq, "problem", problem)
+			}
+		} else {
+			r.Logger.Warn("compaction task pin is no longer in the transcript; re-selecting",
+				"session_id", lease.Scope.SessionID, "request_id", requestID,
+				"pinned_seq", task.FirstKeptSeq)
+		}
+	}
+	if !resumed {
+		cut := compaction.FindCutPoint(msgs, settings.KeepRecentTokens)
+		cutIndex = cut.FirstKeptIndex
+	}
+	if cutIndex <= 0 {
 		return ManualCompactResult{TokensBefore: before, TokensAfter: before, PolicyVersion: policy.Version(), Reason: "nothing-to-compact"}, ErrManualCompactNothing
 	}
-	if problem := manualCutUnsafe(seqs, cut.FirstKeptIndex, prefixLen, movedStart, initialLen, isUnread); problem != "" {
+	if problem := manualCutUnsafe(seqs, cutIndex, prefixLen, movedStart, initialLen, isUnread); problem != "" {
 		if r.CheckpointMetrics != nil {
 			r.CheckpointMetrics.CheckpointFailed("conflict")
 		}
@@ -219,12 +262,26 @@ func (r *Runner) CompactNow(ctx context.Context, lease kernel.Lease, requestID s
 	// the next sequence; the pre-commit mapping is identical to the post-commit
 	// one because the compaction event itself is excluded.
 	lastSeq := events[len(events)-1].Seq
-	anchor := r.checkpointAnchor(ctx, lease.Scope, cut.FirstKeptIndex, lastSeq+1)
+	anchor := r.checkpointAnchor(ctx, lease.Scope, cutIndex, lastSeq+1)
 	if anchor <= 0 {
 		if r.CheckpointMetrics != nil {
 			r.CheckpointMetrics.CheckpointFailed("conflict")
 		}
 		return ManualCompactResult{TokensBefore: before, TokensAfter: before, PolicyVersion: policy.Version(), Reason: "unanchored-cut"}, fmt.Errorf("%w: cut is not anchored to a committed child event", ErrManualCompactUnsafe)
+	}
+	// Pin the selected range durably BEFORE the summary request. A process killed
+	// during the model call then resumes this exact range; the row carries no
+	// summary and is deleted once the event/projection are durable.
+	if err := r.saveCompactionTask(ctx, lease.Scope, kernel.CompactionTaskCheckpoint{
+		RequestID:     requestID,
+		Phase:         kernel.CompactionPhaseSummarize,
+		FirstKeptSeq:  anchor,
+		TailSeq:       lastSeq,
+		TokensBefore:  before,
+		PolicyVersion: policy.Version(),
+		Attempt:       task.Attempt,
+	}); err != nil {
+		return ManualCompactResult{}, fmt.Errorf("agent: save compaction task: %w", err)
 	}
 
 	providerModel := provider.Model{Provider: active.ProviderID, ID: active.Model, ContextWindow: window}
@@ -233,7 +290,12 @@ func (r *Runner) CompactNow(ctx context.Context, lease kernel.Lease, requestID s
 		ThinkingLevel: active.ThinkingLevel,
 		Extra:         active.RequestPatch,
 	}
-	res, err := compaction.Compact(ctx, active.Stream, providerModel, msgs, settings, -1, nil, "", streamConfig)
+	var res *compaction.CompactionResult
+	if resumed {
+		res, err = compaction.CompactAt(ctx, active.Stream, providerModel, msgs, settings, cutIndex, -1, nil, "", streamConfig)
+	} else {
+		res, err = compaction.Compact(ctx, active.Stream, providerModel, msgs, settings, -1, nil, "", streamConfig)
+	}
 	if err != nil {
 		// The summary request failed or was cancelled: the original context (the
 		// event log) is untouched and nothing is written.
@@ -268,11 +330,13 @@ func (r *Runner) CompactNow(ctx context.Context, lease kernel.Lease, requestID s
 		"tokensAfter":         tokensAfter,
 		"firstKept":           res.FirstKeptIndex,
 		"firstKeptTranscript": res.FirstKeptIndex,
+		"keptFromSeq":         anchor,
 		"summarized":          summarized,
 		"kept":                len(rebuilt) - 1,
 		"timestamp":           now,
 		"reason":              "manual",
 		"requestId":           requestID,
+		"policyVersion":       policy.Version(),
 	})
 	if err != nil {
 		return ManualCompactResult{}, err
@@ -310,7 +374,8 @@ func (r *Runner) CompactNow(ctx context.Context, lease kernel.Lease, requestID s
 	if err := r.Checkpoints.SaveCheckpoint(ctx, lease.Scope, record); err != nil {
 		// The compaction event is the truth and stays; the projection is missing,
 		// so the call reports failure rather than a checkpoint id it cannot
-		// promise. A retry would compact again (the event log is not shortened).
+		// promise. The task row is deliberately kept: the next retry recovers the
+		// projection from the committed event instead of compacting again.
 		r.Logger.Warn("manual compaction checkpoint save failed",
 			"tenant_id", lease.Scope.TenantID, "session_id", lease.Scope.SessionID,
 			"seq", seq, "err", err)
@@ -319,6 +384,8 @@ func (r *Runner) CompactNow(ctx context.Context, lease kernel.Lease, requestID s
 		}
 		return ManualCompactResult{}, err
 	}
+	// The event and its projection are both durable: the in-flight task is done.
+	r.deleteCompactionTask(ctx, lease.Scope, requestID)
 	if r.CheckpointMetrics != nil {
 		r.CheckpointMetrics.CheckpointCreated(res.TokensBefore, tokensAfter, time.Since(started))
 	}

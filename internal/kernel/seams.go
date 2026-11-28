@@ -121,6 +121,47 @@ type CheckpointRequestLookup interface {
 	CheckpointByRequest(ctx context.Context, scope Scope, requestID string) (Checkpoint, bool, error)
 }
 
+// Compaction task phases mirror PI's CompactionCheckpoint phases
+// (packages/durable/src/harness/compaction.ts): a task starts at select, pins
+// the range it will summarize, and may sleep in retry. The task checkpoint is
+// independent of the compaction projection (`checkpoints`): it records
+// recovery state for an interrupted run, never a replayable transcript.
+const (
+	CompactionPhaseSelect    = "select"
+	CompactionPhaseSummarize = "summarize"
+	CompactionPhaseRetry     = "retry"
+)
+
+// CompactionTaskCheckpoint is the durable recovery state of one compaction
+// task. It is keyed by the task's request ID (manual surface) or a derived
+// `auto:<seq>` identity for automatic compaction.
+//
+// Phase select has no range yet. Phase summarize pins FirstKeptSeq (the seq of
+// the first committed event the summary will retain) and TailSeq (the last
+// committed seq covered by the selection at pin time); those two facts let a
+// restarted task re-run the summary without re-selecting a different range.
+// Phase retry adds RetryUntil.
+type CompactionTaskCheckpoint struct {
+	RequestID     string
+	Phase         string
+	FirstKeptSeq  int64
+	TailSeq       int64
+	TokensBefore  int
+	PolicyVersion string
+	Attempt       int
+	RetryUntil    time.Time
+}
+
+// CompactionTaskStore is the compaction-task seam. Saving is an upsert keyed
+// by request ID; deleting a finished task never touches the event log or the
+// checkpoint projection. Every method carries the tenant boundary.
+type CompactionTaskStore interface {
+	SaveCompactionTask(ctx context.Context, scope Scope, checkpoint CompactionTaskCheckpoint) error
+	LoadCompactionTask(ctx context.Context, scope Scope, requestID string) (CompactionTaskCheckpoint, bool, error)
+	ListCompactionTasks(ctx context.Context, scope Scope) ([]CompactionTaskCheckpoint, error)
+	DeleteCompactionTask(ctx context.Context, scope Scope, requestID string) error
+}
+
 // ReadMarker is the durable read-point seam. A run records where its transcript
 // ended immediately after loading the log, before the first model call: a
 // process killed between then and Finish must still leave the fact behind, or
@@ -154,10 +195,11 @@ type ExternalSessions interface {
 }
 
 var (
-	_ Committer        = (*Kernel)(nil)
-	_ Reader           = (*Kernel)(nil)
-	_ CheckpointStore  = (*Kernel)(nil)
-	_ ReadMarker       = (*Kernel)(nil)
-	_ LeaseManager     = (*Kernel)(nil)
-	_ ExternalSessions = (*Kernel)(nil)
+	_ Committer           = (*Kernel)(nil)
+	_ Reader              = (*Kernel)(nil)
+	_ CheckpointStore     = (*Kernel)(nil)
+	_ CompactionTaskStore = (*Kernel)(nil)
+	_ ReadMarker          = (*Kernel)(nil)
+	_ LeaseManager        = (*Kernel)(nil)
+	_ ExternalSessions    = (*Kernel)(nil)
 )

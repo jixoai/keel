@@ -50,6 +50,9 @@ type memSession struct {
 	// independent of checkpoints so pruning a projection never forgets the
 	// request that produced it (PG parity: checkpoint_requests).
 	checkpointRequests map[string]Checkpoint
+	// compactionTasks is the in-flight compaction recovery state keyed by
+	// request ID.
+	compactionTasks map[string]CompactionTaskCheckpoint
 	// external, when set, marks the session as owned by an external backend.
 	// Such a session never gets a run row, so it is never claimable.
 	external *memExternal
@@ -413,6 +416,73 @@ func (m *MemStore) PruneCheckpoints(ctx context.Context, tenantID, sessionID uui
 	}
 	s.checkpoints = kept
 	return pruned, nil
+}
+
+// SaveCompactionTask upserts one in-flight task checkpoint.
+func (m *MemStore) SaveCompactionTask(ctx context.Context, tenantID, sessionID uuid.UUID, checkpoint CompactionTaskCheckpoint) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	s, ok := m.sessions[Scope{TenantID: tenantID, SessionID: sessionID}]
+	if !ok {
+		return fmt.Errorf("memstore: session: %w", ErrNotFound)
+	}
+	if s.compactionTasks == nil {
+		s.compactionTasks = map[string]CompactionTaskCheckpoint{}
+	}
+	s.compactionTasks[checkpoint.RequestID] = checkpoint
+	return nil
+}
+
+// LoadCompactionTask returns one in-flight task checkpoint.
+func (m *MemStore) LoadCompactionTask(ctx context.Context, tenantID, sessionID uuid.UUID, requestID string) (CompactionTaskCheckpoint, bool, error) {
+	if err := ctx.Err(); err != nil {
+		return CompactionTaskCheckpoint{}, false, err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	s, ok := m.sessions[Scope{TenantID: tenantID, SessionID: sessionID}]
+	if !ok {
+		return CompactionTaskCheckpoint{}, false, fmt.Errorf("memstore: session: %w", ErrNotFound)
+	}
+	checkpoint, found := s.compactionTasks[requestID]
+	return checkpoint, found, nil
+}
+
+// ListCompactionTasks returns every in-flight task of the session.
+func (m *MemStore) ListCompactionTasks(ctx context.Context, tenantID, sessionID uuid.UUID) ([]CompactionTaskCheckpoint, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	s, ok := m.sessions[Scope{TenantID: tenantID, SessionID: sessionID}]
+	if !ok {
+		return nil, fmt.Errorf("memstore: session: %w", ErrNotFound)
+	}
+	out := make([]CompactionTaskCheckpoint, 0, len(s.compactionTasks))
+	for _, checkpoint := range s.compactionTasks {
+		out = append(out, checkpoint)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].RequestID < out[j].RequestID })
+	return out, nil
+}
+
+// DeleteCompactionTask removes one task; a missing row is a no-op.
+func (m *MemStore) DeleteCompactionTask(ctx context.Context, tenantID, sessionID uuid.UUID, requestID string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	s, ok := m.sessions[Scope{TenantID: tenantID, SessionID: sessionID}]
+	if !ok {
+		return fmt.Errorf("memstore: session: %w", ErrNotFound)
+	}
+	delete(s.compactionTasks, requestID)
+	return nil
 }
 
 // ClaimLease claims the first runnable run.

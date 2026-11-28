@@ -98,6 +98,13 @@ const (
 	CodeSubagentLinkInvalid      = "subagent_link_invalid"
 	CodeSubagentMaxDepthWidened  = "subagent_max_depth_widened"
 	CodePermissionDenied         = "permission_denied"
+	// CodeMCPApprovalRequired is the typed refusal of a destructive MCP tool on
+	// the model path when no approval seam is wired: the call is never executed
+	// without an explicit human decision.
+	CodeMCPApprovalRequired = "mcp_approval_required"
+	// CodeMCPApprovalDenied is the typed refusal when the approval seam refused
+	// (or could not complete) the decision. The tool was not executed.
+	CodeMCPApprovalDenied = "mcp_approval_denied"
 )
 
 // actionInput is the envelope every aggregate tool parses.

@@ -40,6 +40,10 @@ type loadedSkill struct {
 	Description string `json:"description,omitempty"`
 	Hash        string `json:"hash,omitempty"`
 	Body        string `json:"body"`
+	// AllowedTools is the skill's declared tool restriction. It travels with
+	// the durable pin so the runner enforces it for the pinned turn; an empty
+	// list means the skill declares no restriction (PI semantics).
+	AllowedTools []string `json:"allowedTools,omitempty"`
 }
 
 // pendingLoadedSkills returns the skills loaded since the newest committed

@@ -1197,11 +1197,12 @@ func (s *Server) dispatchCommand(ctx context.Context, invocation *store.CommandI
 		// The durable pin is a reference (name/hash/logical location) plus a
 		// BOUNDED body: a skill bundle is not copied whole into the event log.
 		payload := map[string]any{
-			"name":        detail.Name,
-			"description": boundText(detail.Description, 1024),
-			"hash":        detail.CurrentHash,
-			"location":    detail.Path,
-			"body":        boundUTF8Text(detail.Body, commandSkillBodyMax),
+			"name":         detail.Name,
+			"description":  boundText(detail.Description, 1024),
+			"hash":         detail.CurrentHash,
+			"location":     detail.Path,
+			"body":         boundUTF8Text(detail.Body, commandSkillBodyMax),
+			"allowedTools": append([]string(nil), detail.AllowedTools...),
 		}
 		if _, _, err := s.appendSessionEvent(ctx, *invocation, store.EventSkillLoaded, payload, commandEventKey(*invocation, "skill")); err != nil {
 			return store.CommandStatusError, CommandCodeToolError, "the skill load could not be recorded", nil

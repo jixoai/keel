@@ -194,6 +194,40 @@ CREATE TABLE IF NOT EXISTS checkpoint_requests (
     PRIMARY KEY (tenant_id, session_id, request_id)
 );
 
+-- compaction_tasks is the in-flight recovery checkpoint of one compaction
+-- task, mirroring PI's CompactionCheckpoint phases (select / summarize /
+-- retry). It is NOT a projection of the transcript: it never carries a
+-- summary, and a finished task is deleted once the compaction event and its
+-- checkpoint are durable. The row is what lets a restarted manual compaction
+-- re-use the range it pinned instead of selecting a new cut, and what makes a
+-- crash after the event commit recoverable without compacting twice.
+CREATE TABLE IF NOT EXISTS compaction_tasks (
+    tenant_id      uuid NOT NULL,
+    session_id     uuid NOT NULL,
+    request_id     text NOT NULL,
+    phase          text NOT NULL,
+    first_kept_seq bigint NOT NULL DEFAULT 0,
+    tail_seq       bigint NOT NULL DEFAULT 0,
+    tokens_before  bigint NOT NULL DEFAULT 0,
+    policy_version text NOT NULL DEFAULT '',
+    attempt        integer NOT NULL DEFAULT 0,
+    retry_until    timestamptz,
+    created_at     timestamptz NOT NULL DEFAULT now(),
+    updated_at     timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (tenant_id, session_id, request_id),
+    CONSTRAINT compaction_tasks_phase_check
+        CHECK (phase IN ('select', 'summarize', 'retry')),
+    CONSTRAINT compaction_tasks_range_check CHECK (
+        (phase = 'select' AND first_kept_seq = 0 AND tail_seq = 0)
+        OR (phase IN ('summarize', 'retry') AND first_kept_seq > 0 AND tail_seq >= first_kept_seq)
+    ),
+    CONSTRAINT compaction_tasks_tokens_check CHECK (tokens_before >= 0 AND attempt >= 0),
+    CONSTRAINT compaction_tasks_retry_check CHECK (phase <> 'retry' OR retry_until IS NOT NULL)
+);
+
+CREATE INDEX IF NOT EXISTS compaction_tasks_by_session
+    ON compaction_tasks (tenant_id, session_id, updated_at DESC);
+
 -- session_checkpoint_policies is the per-session narrowing override of the
 -- tenant checkpoint policy. The document is opaque JSON (internal/compaction
 -- owns its schema); the effective policy is always the tenant policy narrowed

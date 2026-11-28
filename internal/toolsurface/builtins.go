@@ -17,6 +17,9 @@ type Backends struct {
 	// MCPProgress publishes a tool call's notifications/progress frames on the
 	// host's transient channel (P4.5). Nil means progress is not shown.
 	MCPProgress MCPProgressPublisher
+	// MCPApproval gates destructive MCP tools on the model path. Nil is
+	// fail-closed: such a call answers mcp_approval_required and never executes.
+	MCPApproval MCPApprovalFunc
 	Agents      AgentBackend
 	Creation    CreationBackend
 	Tasks       TasksBackend
@@ -46,7 +49,7 @@ func BuiltinTools(discovered []skills.Skill, backends Backends) []agentcore.Agen
 		newReadTool(backends.Files),
 		newWriteTool(backends.Files),
 		newEditTool(backends.Files),
-		newMCPTool(backends.MCP, backends.MCPProgress),
+		newMCPTool(backends.MCP, backends.MCPProgress, backends.MCPApproval),
 		newSkillsTool(discovered, backends.Skills),
 		newTasksTool(backends.Tasks),
 		newAgentTool(backends.Agents),

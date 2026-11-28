@@ -109,6 +109,12 @@ type Runner struct {
 	// the whole log. It is optional: a test double or a deployment without the
 	// seam falls back to the full committed log.
 	Checkpoints kernel.CheckpointStore
+	// CompactionTasks is the in-flight compaction recovery seam (PI
+	// CompactionTask: entry checkpoint -> pinned summarize -> retry). It is
+	// separate from Checkpoints: a task row never carries a summary and is
+	// deleted once the compaction event and its projection are durable. Nil
+	// keeps the pre-feature behavior (a crash before commit simply re-selects).
+	CompactionTasks kernel.CompactionTaskStore
 	// CheckpointPolicies resolves the attempt's effective checkpoint policy
 	// (tenant ceiling narrowed by the session override). Nil uses the
 	// generation's CompactionOptions policy. It is consulted per attempt and per
@@ -434,6 +440,9 @@ func NewRunner(committer kernel.Committer, events kernel.Reader, stream provider
 	if checkpoints, ok := committer.(kernel.CheckpointStore); ok {
 		runner.Checkpoints = checkpoints
 	}
+	if tasks, ok := committer.(kernel.CompactionTaskStore); ok {
+		runner.CompactionTasks = tasks
+	}
 	return runner
 }
 
@@ -673,6 +682,11 @@ func (r *Runner) run(ctx context.Context, lease kernel.Lease, span telemetry.Spa
 	if err != nil {
 		return res, err
 	}
+	// A process that died between committing an automatic compaction event and
+	// saving its projection leaves the context readable but the projection
+	// missing. Recover committed events and discard uncommitted entry markers
+	// before building this attempt's view (the event log is unchanged).
+	r.recoverAutomaticCompactions(ctx, lease.Scope, events)
 	// A reclaimed lease is a crashed process's attempt being adopted. Record the
 	// recovery before any new work: the fact answers who/when/why and which
 	// configuration the successor runs under.
@@ -768,6 +782,20 @@ func (r *Runner) run(ctx context.Context, lease kernel.Lease, span telemetry.Spa
 	tools, err := r.toolsForRun(surface, lease.Scope.SessionID.String())
 	if err != nil {
 		return res, err
+	}
+	// An explicitly loaded skill applies to this turn. Its allowed-tools
+	// declaration intersects the surface before the model sees it; the same
+	// policy also gates execution below (defense in depth for a tool that
+	// reaches the executor outside the frozen surface).
+	skillPolicy := newSkillToolPolicy(pendingLoadedSkills(events))
+	if skillPolicy.restricted {
+		tools, err = skillPolicy.intersectTools(tools)
+		if err != nil {
+			return res, err
+		}
+		r.Logger.Info("skill allowed-tools intersection",
+			"session_id", lease.Scope.SessionID, "skills", skillPolicy.skills,
+			"allowed", skillPolicy.allowed)
 	}
 	// The guardrail policy is captured once for this attempt: a rotation
 	// affecting the process later changes only later attempts. The guarded
@@ -958,6 +986,9 @@ func (r *Runner) run(ctx context.Context, lease kernel.Lease, span telemetry.Spa
 	// the cancellation guard reads to tell "the caller stopped an attempt that had
 	// already answered" from "the attempt produced nothing".
 	answerCommitted := false
+	// autoTaskID names the in-flight automatic compaction entry checkpoint
+	// (empty when no CompactionStartEvent was seen).
+	autoTaskID := ""
 	// Only a trailing user input is this run's prompt; a run that continues from
 	// committed tool results must not replay prompt lifecycle events for them.
 	promptCount := 0
@@ -968,6 +999,10 @@ func (r *Runner) run(ctx context.Context, lease kernel.Lease, span telemetry.Spa
 		promptCount++
 	}
 	beforeToolCall := r.toolAccessGuard(lease.Scope)
+	// The skill restriction runs after authorization (a skill never widens the
+	// principal's grants) and before guardrails/hooks: a refusal is the skill's
+	// rule, not a repeat and not something a hook may override.
+	beforeToolCall = composeSkillToolGuard(beforeToolCall, r.skillToolGuard(skillPolicy))
 	if guard != nil {
 		beforeToolCall = guard.composeBefore(beforeToolCall)
 	}
@@ -1160,6 +1195,22 @@ func (r *Runner) run(ctx context.Context, lease kernel.Lease, span telemetry.Spa
 			if guard != nil {
 				guard.checkMemory()
 			}
+		case agentcore.CompactionStartEvent:
+			// Entry checkpoint (PI CompactionTask phase "select"): the in-memory
+			// compaction has not produced a durable fact yet. The row is keyed by
+			// the last committed seq, which a replay of the same log derives
+			// identically. It is deleted as soon as the event is committed or the
+			// attempt settles without one.
+			autoTaskID = autoCompactionRequestID(cursor)
+			if err := r.saveCompactionTask(ctx, lease.Scope, kernel.CompactionTaskCheckpoint{
+				RequestID:     autoTaskID,
+				Phase:         kernel.CompactionPhaseSelect,
+				TokensBefore:  e.TokensBefore,
+				PolicyVersion: attemptCheckpointPolicy.Version(),
+			}); err != nil {
+				r.Logger.Warn("save automatic compaction entry checkpoint",
+					"session_id", lease.Scope.SessionID, "request_id", autoTaskID, "err", err)
+			}
 		case agentcore.CompactionEvent:
 			// The loop compacted its in-memory context. The compaction event is
 			// the durable fact (the summary and the kept boundary), and it is
@@ -1169,6 +1220,7 @@ func (r *Runner) run(ctx context.Context, lease kernel.Lease, span telemetry.Spa
 			if e.ErrorMessage != "" || strings.TrimSpace(e.Summary) == "" {
 				// A failed compaction is observable on the event stream only; it
 				// has no fact to persist (the context was left unchanged).
+				r.deleteCompactionTask(ctx, lease.Scope, autoTaskID)
 				if r.Hooks != nil {
 					r.Hooks.Emit(ctx, &hooks.SessionCompactFailedEvent{
 						Reason: "threshold", ErrorMessage: e.ErrorMessage, Aborted: ctx.Err() != nil,
@@ -1182,19 +1234,39 @@ func (r *Runner) run(ctx context.Context, lease kernel.Lease, span telemetry.Spa
 			if r.Hooks != nil {
 				r.Hooks.Emit(ctx, &hooks.SessionCompactEvent{Reason: "threshold"})
 			}
+			// The checkpoint anchor is computed before the commit so the event
+			// payload can carry it: that is what lets a later attempt recover a
+			// lost projection from the event alone. The pre-commit mapping equals
+			// the post-commit one because the compaction event itself is excluded.
+			lastEventSeq := events[len(events)-1].Seq
+			preAnchor := int64(0)
+			switch {
+			case feed.handedAny():
+				r.Logger.Debug("checkpoint left unanchored: guide input injected", "session_id", lease.Scope.SessionID)
+			case movedStart < initialLen && e.FirstKeptTranscriptIndex >= movedStart && e.FirstKeptTranscriptIndex < initialLen:
+				r.Logger.Debug("checkpoint left unanchored: cut in moved unread inputs", "session_id", lease.Scope.SessionID,
+					"first_kept", e.FirstKeptTranscriptIndex, "moved_start", movedStart, "initial_len", initialLen)
+			default:
+				preAnchor = r.checkpointAnchor(ctx, lease.Scope, e.FirstKeptTranscriptIndex, lastEventSeq+1)
+			}
 			raw, err := marshalPayload(map[string]any{
 				"summary":             e.Summary,
 				"summaryHash":         kernel.CheckpointSummaryHash(e.Summary),
 				"reason":              "threshold",
 				"tokensBefore":        e.TokensBefore,
+				"tokensAfter":         e.TokensAfter,
 				"firstKept":           e.FirstKeptIndex,
 				"firstKeptTranscript": e.FirstKeptTranscriptIndex,
+				"keptFromSeq":         preAnchor,
 				"summarized":          e.SummarizedCount,
 				"kept":                e.KeptCount,
 				"timestamp":           time.Now().UnixMilli(),
+				"requestId":           autoTaskID,
+				"policyVersion":       attemptCheckpointPolicy.Version(),
 			})
 			if err != nil {
 				r.Logger.Warn("persist compaction", "err", err)
+				r.deleteCompactionTask(ctx, lease.Scope, autoTaskID)
 				if r.CheckpointMetrics != nil {
 					r.CheckpointMetrics.CheckpointFailed("save")
 				}
@@ -1207,8 +1279,10 @@ func (r *Runner) run(ctx context.Context, lease kernel.Lease, span telemetry.Spa
 			if err != nil {
 				// The loop already compacted its in-memory context; failing the
 				// attempt would replay the turn from the uncompacted log. Keep
-				// the run moving and let the next turn try again.
+				// the run moving and let the next turn try again. No event exists,
+				// so the entry marker is stale.
 				r.Logger.Warn("persist compaction", "err", err)
+				r.deleteCompactionTask(ctx, lease.Scope, autoTaskID)
 				if r.CheckpointMetrics != nil {
 					r.CheckpointMetrics.CheckpointFailed("save")
 				}
@@ -1216,6 +1290,7 @@ func (r *Runner) run(ctx context.Context, lease kernel.Lease, span telemetry.Spa
 			}
 			cursor = seq
 			if r.Checkpoints == nil {
+				r.deleteCompactionTask(ctx, lease.Scope, autoTaskID)
 				continue
 			}
 			// The checkpoint is a projection of the event just committed. Its
@@ -1270,6 +1345,10 @@ func (r *Runner) run(ctx context.Context, lease kernel.Lease, span telemetry.Spa
 				if r.CheckpointMetrics != nil {
 					r.CheckpointMetrics.CheckpointCreated(e.TokensBefore, e.TokensAfter, time.Since(saveStarted))
 				}
+				// The event and its projection are durable; the entry marker is
+				// finished. A delete failure leaves a stale row that the next
+				// attempt discards (the committed event is already projected).
+				r.deleteCompactionTask(ctx, lease.Scope, autoTaskID)
 				r.pruneCheckpointsFor(ctx, lease.Scope, attemptCheckpointPolicy)
 			}
 		case agentcore.MessageEndEvent:
