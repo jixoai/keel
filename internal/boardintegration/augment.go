@@ -1,20 +1,18 @@
 package boardintegration
 
-// Phase 2 contract additions at the keel mount layer.
+// Contract additions at the keel mount layer.
 //
-// board v0.1.1 renders its task projection without a viewer-dependent action
-// list, archive fact, mirror provenance or sync credential state. The UI's one
-// action authority is `TaskView.moves`, so keel augments the board's JSON
-// responses rather than teaching the client a second rule set (keel-board-v1
-// UI DESIGN §6.1/§15). The board module stays untouched and keeps its own
-// events: this file rewrites JSON response bodies only, never SSE frames.
+// board renders its task projection without a viewer-dependent action list or
+// sync credential state. The UI's one action authority is `TaskView.moves`, so
+// keel augments the board's JSON responses rather than teaching the client a
+// second rule set (keel-board-v1 UI DESIGN §6.1/§15). The board module stays
+// untouched and keeps its own events: this file rewrites JSON response bodies
+// only, never SSE frames.
 //
 // Every addition is derived from facts the board already authorised:
 //   - the task projection (state, owner, by, for, claim),
 //   - the caller's channel relation and board keys (probed without writing a
-//     permission.denied audit row),
-//   - the message's own labels (board.archived, source/ticket/noSync) and,
-//     when a command bridge is wired, its durable board_links row.
+//     permission.denied audit row).
 //
 // A task whose flags cannot be established gets `moves: []`, which reads as
 // read-only. It never gets an invented permission.
@@ -34,50 +32,10 @@ import (
 	"github.com/jixoai/keel/internal/auth"
 )
 
-// MirrorFacts is the durable bridge seam for a mirrored task. The production
-// implementation is *superagentboard.Bridge (cmd/keel wires it); a deployment
-// without a supervisor leaves it nil and every mirrored task is read-only.
-//
-// Returning an error must be treated as read-only by the caller: an unreadable
-// link is not evidence that the task is board-writable.
-type MirrorFacts interface {
-	TaskMirror(ctx context.Context, tenantID uuid.UUID, taskID uint64) (mirrored bool, source string, readOnly, bridge bool, err error)
-	// CanBridge reports whether this caller's mirrored actions can actually
-	// reach the supervisor: the bridge must be configured and the caller must
-	// hold task.write at tenant scope. It is checked once per response, not per
-	// task. An error means false: a failed probe must not offer an action that
-	// would be refused after a supervisor round-trip.
-	CanBridge(ctx context.Context, tenantID uuid.UUID) (bool, error)
-}
-
-const (
-	// ArchivedLabel marks a task the mirror imported from a terminal Ticket.
-	// It is written by the mirror through the board log (a board write, not a
-	// client label change), so the reserved board.* namespace stays reserved.
-	ArchivedLabel = "board.archived"
-	// mirrorSource is the label value and the mirror's durable link source.
-	mirrorSource = "superagent"
-)
-
-// SetMirrorFacts wires the bridge after construction. Requests only read it,
-// so the store is guarded by a small lock rather than copied into each handler.
-func (s *Surface) SetMirrorFacts(facts MirrorFacts) {
-	if s == nil {
-		return
-	}
-	s.mirrorMu.Lock()
-	s.mirrorFacts = facts
-	s.mirrorMu.Unlock()
-}
-
-func (s *Surface) mirrorFactSource() MirrorFacts {
-	if s == nil {
-		return nil
-	}
-	s.mirrorMu.RLock()
-	defer s.mirrorMu.RUnlock()
-	return s.mirrorFacts
-}
+// ArchivedLabel marks a task imported as already terminal history. It is
+// written through the board log, so the reserved board.* namespace stays
+// reserved. An archived task is read-only history.
+const ArchivedLabel = "board.archived"
 
 // API returns the board surface with the Phase 2 JSON contract additions. A
 // caller that mounts the surface directly (tests, an embedding deployment) gets
@@ -184,29 +142,14 @@ func isSyncPath(path string) bool {
 
 // ---- task moves -----------------------------------------------------------
 
-type mirrorFact struct {
-	mirrored bool
-	source   string
-	readOnly bool
-	bridge   bool
-	ticket   string
-}
-
 type taskAugmentSession struct {
-	ctx         context.Context
-	now         time.Time
-	actor       protocol.Actor
-	tenantID    uuid.UUID
-	authorizer  *Authorizer
-	mirrorFacts MirrorFacts
-	abilities   map[string]ChannelAbilities
-	mirrors     map[uint64]mirrorFact
-	changed     bool
-	// bridgeChecked/bridgeAllowed cache the caller's supervisor task.write
-	// probe. The bridge is either usable for every mirrored task in this
-	// response or for none; one check per request is enough.
-	bridgeChecked bool
-	bridgeAllowed bool
+	ctx        context.Context
+	now        time.Time
+	actor      protocol.Actor
+	tenantID   uuid.UUID
+	authorizer *Authorizer
+	abilities  map[string]ChannelAbilities
+	changed    bool
 }
 
 func (s *Surface) augmentTasks(r *http.Request, value any) bool {
@@ -232,8 +175,8 @@ func (s *Surface) augmentTasks(r *http.Request, value any) bool {
 	session := &taskAugmentSession{
 		ctx: r.Context(), now: time.Now().UTC(),
 		actor: actor, tenantID: tenantID,
-		authorizer: s.authorizer, mirrorFacts: s.mirrorFactSource(),
-		abilities: map[string]ChannelAbilities{}, mirrors: map[uint64]mirrorFact{},
+		authorizer: s.authorizer,
+		abilities:  map[string]ChannelAbilities{},
 	}
 	session.walk(value)
 	return session.changed
@@ -310,83 +253,7 @@ func (s *taskAugmentSession) augmentTask(task map[string]any, message map[string
 	if archived {
 		task["archived"] = true
 	}
-	mirror := s.mirrorOf(task, message, labels)
-	if mirror.mirrored && !mirror.readOnly && !s.canBridge() {
-		// board's bridge config may be on while this caller cannot pass the
-		// supervisor's tenant task.write gate. Offering the moves would only
-		// produce a 403 after a supervisor round-trip, so the task is read-only
-		// for this caller.
-		mirror.readOnly = true
-		mirror.bridge = false
-	}
-	if mirror.mirrored {
-		task["mirror"] = map[string]any{
-			"source":   mirror.source,
-			"readOnly": mirror.readOnly,
-			"bridge":   mirror.bridge,
-		}
-		if mirror.ticket != "" {
-			task["origin"] = map[string]any{"platform": mirror.source, "ref": mirror.ticket}
-		}
-	}
-	task["moves"] = s.movesFor(task, message, archived, mirror)
-}
-
-// mirrorOf recognizes a mirrored task from the labels the mirror itself writes
-// (source/ticket/noSync) and, when a bridge is wired, asks board_links for the
-// durable fact and the bridge switch. A mirrored-looking task whose durable
-// link cannot be read stays read-only rather than becoming board-writable.
-func (s *taskAugmentSession) mirrorOf(_ map[string]any, message map[string]any, labels map[string]any) mirrorFact {
-	if message == nil || !jsonBool(message["noSync"]) {
-		return mirrorFact{}
-	}
-	if jsonText(labels["source"]) != mirrorSource || jsonText(labels["ticket"]) == "" {
-		return mirrorFact{}
-	}
-	ticket := jsonText(labels["ticket"])
-	fallback := mirrorFact{mirrored: true, source: mirrorSource, readOnly: true, ticket: ticket}
-	taskID := refNumber(message["id"])
-	if taskID == 0 {
-		return fallback
-	}
-	if cached, ok := s.mirrors[taskID]; ok {
-		return cached
-	}
-	fact := fallback
-	if s.mirrorFacts != nil {
-		mirrored, source, readOnly, bridge, err := s.mirrorFacts.TaskMirror(s.ctx, s.tenantID, taskID)
-		if err == nil && mirrored {
-			if strings.TrimSpace(source) == "" {
-				source = mirrorSource
-			}
-			fact = mirrorFact{
-				mirrored: true, source: source,
-				readOnly: readOnly, bridge: bridge && !readOnly, ticket: ticket,
-			}
-		}
-	}
-	s.mirrors[taskID] = fact
-	return fact
-}
-
-// canBridge probes the supervisor task.write gate at most once per response.
-// An error, a nil fact source or a caller without tenant task.write all mean
-// false: mirrored tasks stay read-only rather than exposing a move that the
-// bridge would refuse.
-func (s *taskAugmentSession) canBridge() bool {
-	if s.bridgeChecked {
-		return s.bridgeAllowed
-	}
-	s.bridgeChecked = true
-	if s.mirrorFacts == nil {
-		return false
-	}
-	allowed, err := s.mirrorFacts.CanBridge(s.ctx, s.tenantID)
-	if err != nil {
-		return false
-	}
-	s.bridgeAllowed = allowed
-	return allowed
+	task["moves"] = s.movesFor(task, message, archived)
 }
 
 func (s *taskAugmentSession) abilitiesFor(channel string) ChannelAbilities {
@@ -406,13 +273,8 @@ func (s *taskAugmentSession) abilitiesFor(channel string) ChannelAbilities {
 // fence and the owner rule, so the UI never offers an action the next request
 // would refuse. Token-bearing actions are offered to the claim's actor only;
 // the tab that actually holds the token filters the list itself.
-func (s *taskAugmentSession) movesFor(task map[string]any, message map[string]any, archived bool, mirror mirrorFact) []string {
+func (s *taskAugmentSession) movesFor(task map[string]any, message map[string]any, archived bool) []string {
 	if archived {
-		return []string{}
-	}
-	if mirror.mirrored && mirror.readOnly {
-		// The command bridge is off or unavailable: every mirrored action is
-		// refused with mirror_read_only, so the UI must not offer one.
 		return []string{}
 	}
 	var channel string
@@ -522,9 +384,6 @@ func (s *taskAugmentSession) movesFor(task map[string]any, message map[string]an
 		return []string{}
 	}
 	moves = dedupeMoves(moves)
-	if mirror.mirrored && !mirror.readOnly {
-		moves = filterBridgeMoves(moves)
-	}
 	return moves
 }
 
@@ -544,23 +403,10 @@ func dedupeMoves(moves []string) []string {
 	return out
 }
 
-// bridgeMoves is the closed set *superagentboard.Bridge* routes to the
-// supervisor. Anything outside it is answered mirror_read_only and must not be
-// advertised.
-var bridgeMoves = map[string]bool{
-	"claim": true, "complete": true, "fail": true,
-	"block": true, "unblock": true, "assign": true, "cancel": true,
-}
-
-func filterBridgeMoves(moves []string) []string {
-	out := make([]string, 0, len(moves))
-	for _, move := range moves {
-		if bridgeMoves[move] {
-			out = append(out, move)
-		}
-	}
-	return out
-}
+// bridgeMoves and filterBridgeMoves were removed with the legacy
+// superagentboard command bridge (change keel-plugin-split). A dependent plugin
+// now reaches the board only through the board service; there is no second
+// action namespace to filter.
 
 // ---- sync credential merge ------------------------------------------------
 

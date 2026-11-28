@@ -17,6 +17,7 @@ import (
 	"github.com/jixoai/keel/internal/collab"
 	"github.com/jixoai/keel/internal/store"
 	"github.com/jixoai/keel/internal/superagent"
+	"github.com/jixoai/keel/internal/superagentstore"
 )
 
 // TestSuperagentFixtureEndToEnd is the local fixture E2E: real PostgreSQL,
@@ -37,6 +38,7 @@ func TestSuperagentFixtureEndToEnd(t *testing.T) {
 	}
 	t.Cleanup(st.Close)
 	tenant := uuid.New()
+	domain := superagentstore.New(st.Pool())
 	if err := st.CreateTenant(ctx, tenant, "e2e-"+tenant.String()[:8]); err != nil {
 		t.Fatalf("CreateTenant: %v", err)
 	}
@@ -49,23 +51,23 @@ func TestSuperagentFixtureEndToEnd(t *testing.T) {
 		TenantID: tenant, SessionID: uuid.New(), BotID: "orchestrator",
 		State: collab.SessionActive, CreatedAt: time.Now().UTC(),
 	}
-	if err := st.Put(ctx, owner); err != nil {
+	if err := domain.Put(ctx, owner); err != nil {
 		t.Fatalf("Put owner: %v", err)
 	}
 	registry := e2eRegistry(t, tenant)
 	source := superagent.NewFixtureSource(func() time.Time { return time.Now().UTC() })
 	inputs := &recordingSink{}
 	outbox, err := superagent.NewOutbox(superagent.OutboxOptions{
-		Store: st, Channel: channel, Audit: &fakeAudit{},
+		Store: domain, Channel: channel, Audit: &fakeAudit{},
 	})
 	if err != nil {
 		t.Fatalf("NewOutbox: %v", err)
 	}
-	host := e2eHost(t, st, registry, outbox)
+	host := e2eHost(t, domain, registry, outbox)
 	orch, err := superagent.NewOrchestrator(superagent.Config{
-		TenantID: tenant, Store: st, Host: host, Source: source, Channel: channel,
+		TenantID: tenant, Store: domain, Host: host, Source: source, Channel: channel,
 		Policy: &superagent.AllowlistPolicy{Actors: map[string]bool{"alice": true}, WorkerBot: "worker", PolicyVersion: "e2e-v1"},
-		Inputs: inputs, Sessions: st, Audit: &fakeAudit{}, Outbox: outbox,
+		Inputs: inputs, Sessions: domain, Audit: &fakeAudit{}, Outbox: outbox,
 		Operator:            allowOperator{},
 		OrchestratorSession: owner.SessionID, OrchestratorBot: "orchestrator",
 		WorkerBot: "worker", MaxPoll: 20,
@@ -147,15 +149,15 @@ func TestSuperagentFixtureEndToEnd(t *testing.T) {
 	trace.Add("completed", map[string]any{"ticketId": ticket.ID.String(), "status": done.Tickets[0].Status})
 
 	// Durable facts survive a fresh read.
-	stored, err := st.GetWorkItem(ctx, tenant, ticket.ID)
+	stored, err := domain.GetWorkItem(ctx, tenant, ticket.ID)
 	if err != nil || stored.Status != collab.WorkItemDone {
 		t.Fatalf("durable ticket = %+v, err=%v", stored, err)
 	}
-	assignments, err := st.ListAssignments(ctx, tenant, ticket.ID)
+	assignments, err := domain.ListAssignments(ctx, tenant, ticket.ID)
 	if err != nil || len(assignments) != 1 || assignments[0].Status != collab.AssignmentDone {
 		t.Fatalf("durable assignments = %+v, err=%v", assignments, err)
 	}
-	storedAttention, err := st.GetAttention(ctx, tenant, attention.ID)
+	storedAttention, err := domain.GetAttention(ctx, tenant, attention.ID)
 	if err != nil || storedAttention.Status != collab.AttentionAnswered {
 		t.Fatalf("durable attention = %+v, err=%v", storedAttention, err)
 	}
@@ -195,7 +197,12 @@ func e2eRegistry(t *testing.T, tenant uuid.UUID) *collab.ModeRegistry {
 	return registry
 }
 
-func e2eHost(t *testing.T, st *store.Store, registry *collab.ModeRegistry, outbox *superagent.Outbox) *collab.Coordinator {
+type e2eDomain interface {
+	collab.WorkStore
+	collab.SessionIndex
+}
+
+func e2eHost(t *testing.T, st e2eDomain, registry *collab.ModeRegistry, outbox *superagent.Outbox) *collab.Coordinator {
 	t.Helper()
 	host, err := collab.NewHost(collab.HostOptions{
 		TenantID: registry.TenantID(), Modes: registry, Work: st, Sessions: st,

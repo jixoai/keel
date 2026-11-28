@@ -28,6 +28,7 @@ import (
 	"github.com/jixoai/keel/internal/bashbridge"
 	"github.com/jixoai/keel/internal/blob"
 	"github.com/jixoai/keel/internal/boardintegration"
+	"github.com/jixoai/keel/internal/boardplugin"
 	"github.com/jixoai/keel/internal/capturepolicy"
 	"github.com/jixoai/keel/internal/collab"
 	"github.com/jixoai/keel/internal/compaction"
@@ -52,6 +53,8 @@ import (
 	placementwiring "github.com/jixoai/keel/internal/placement/wiring"
 	"github.com/jixoai/keel/internal/pluginpkg"
 	"github.com/jixoai/keel/internal/pluginpkg/builtin"
+	"github.com/jixoai/keel/internal/pluginruntime"
+	"github.com/jixoai/keel/internal/pluginstore/pg"
 	"github.com/jixoai/keel/internal/provider"
 	"github.com/jixoai/keel/internal/quota"
 	"github.com/jixoai/keel/internal/servicehost"
@@ -61,7 +64,9 @@ import (
 	"github.com/jixoai/keel/internal/spillblob"
 	"github.com/jixoai/keel/internal/store"
 	"github.com/jixoai/keel/internal/stream"
-	"github.com/jixoai/keel/internal/superagentboard"
+	"github.com/jixoai/keel/internal/superagent"
+	"github.com/jixoai/keel/internal/superagentplugin"
+	"github.com/jixoai/keel/internal/superagentstore"
 	"github.com/jixoai/keel/internal/tasklog"
 	"github.com/jixoai/keel/internal/telemetry"
 	"github.com/jixoai/keel/internal/testkit"
@@ -1045,44 +1050,24 @@ func runServe(parent context.Context, opts serveOptions) error {
 	// attachment re-check and the MCP ui/message bridge read the same number.
 	uploadLimit := httpapi.DefaultMaxUpload
 	hostTheme := loadHostTheme(static.root, log)
-	product, err := newProductLayer(ctx, st, kern, placementRT.Edge, placementRT.Gate, rt, hooks, runControl, partials, taskLog, opts, secretBox, secretReason,
-		accessBridge, mcpApps, mcpAppsSandboxOrigin, hostTheme, edge, uploadLimit, mcpMetrics, mrtr,
-		newManualCompactor(rt.Binding(), st, kern, log), sessionPolicies, log)
-	if err != nil {
-		return err
-	}
-	toolSubagents = product.subagents
-	toolPluginManager = product.pluginManager
-	defer product.close()
 
-	// --- board (keel-board-v1, Phase 1) ---
-	// The board is a separate authorization and storage surface: it is mounted
+	// --- board (keel-plugin-split) ---
+	// The board is an independent plugin and storage surface: it is mounted
 	// beside the httpapi mux (not behind accessgate) because its own authorizer
 	// maps board.read/write/manage plus channel relations, and its webhook
-	// namespace must stay outside the session edge. The board is off by default
-	// (design §20); the routes stay mounted but answer 404 board_disabled, so a
-	// disabled deployment does not reveal whether a channel exists. The
-	// The tenant-level board.enabled / board.sync.enabled flags narrow this
-	// deployment switch; they cannot enable a deployment that never opted in.
-	boardWiring, err := newBoardWiringWithOptions(ctx, opts.DSN, opts.TenantID, product.access, st, log, boardServeOptions(secretBox, opts.CASDir))
+	// namespace must stay outside the session edge. It is built before the
+	// product layer so the superagent plugin can declare it as a dependency.
+	// The board is off by default (design §20); the routes stay mounted but
+	// answer 404 board_disabled. The tenant-level board.enabled /
+	// board.sync.enabled flags narrow this deployment switch.
+	boardWiring, err := newBoardWiringWithOptions(ctx, opts.DSN, opts.TenantID, accessBridge, st, log, boardServeOptions(secretBox, opts.CASDir))
 	if err != nil {
 		return err
 	}
 	boardSurface := boardWiring.Surface
-	var boardBridge *superagentboard.Bridge
 	boardHandler := boardWiring.API
 	boardWebhook := boardWiring.Webhook
 	if boardSurface != nil {
-		// The bridge starts as a pass-through and is attached to the supervisor
-		// after the agent runtime exists. It routes a mirrored task's actions
-		// to the supervisor before the board handler sees them. The Surface gate
-		// wraps the augmented bridge, so a disabled tenant answers 404
-		// board_disabled before any bridge action (or reply/mutation guard) can
-		// reach the supervisor, and every successful bridge/board response still
-		// carries the Phase 2 moves/archived/mirror fields.
-		boardBridge = newSuperagentBoardBridge(boardSurface, st, log)
-		boardSurface.SetMirrorFacts(boardBridge)
-		boardHandler = boardSurface.Gate(boardSurface.Augment(boardBridge))
 		defer boardSurface.Close()
 		if bypass, err := boardintegration.RoleBypassesRLS(ctx, boardDSN(opts.DSN)); err != nil {
 			log.Warn("board role privilege check failed", "detail", "row-level security may not be enforced")
@@ -1091,9 +1076,16 @@ func runServe(parent context.Context, opts serveOptions) error {
 				"detail", "use a non-superuser, NOBYPASSRLS role for the board DSN")
 		}
 	}
-	// Attach after both the product layer (the supervisor) and the board exist.
-	// A nil supervisor or board leaves the bridge a pass-through.
-	attachSuperagentBoard(ctx, opts.TenantID, st, boardSurface, boardBridge, product.superagent, log)
+
+	product, err := newProductLayer(ctx, st, kern, placementRT.Edge, placementRT.Gate, rt, hooks, runControl, partials, taskLog, opts, secretBox, secretReason,
+		accessBridge, mcpApps, mcpAppsSandboxOrigin, hostTheme, edge, uploadLimit, mcpMetrics, mrtr,
+		newManualCompactor(rt.Binding(), st, kern, log), sessionPolicies, boardSurface, log)
+	if err != nil {
+		return err
+	}
+	toolSubagents = product.subagents
+	toolPluginManager = product.pluginManager
+	defer product.close()
 
 	// Automatic recovery is default behavior, not a button: scan every
 	// non-terminal run before the listener opens, record the recovery facts and
@@ -1339,11 +1331,19 @@ type productLayer struct {
 	access *accesswire.Bridge
 
 	closeFns []func(context.Context)
+	// servicePlugins owns the board/superagent plugin graph. close unloads it
+	// in reverse dependency order before the product services go away.
+	servicePlugins *pluginruntime.Runtime
 }
 
 func (p *productLayer) close() {
 	ctx, cancel := context.WithTimeout(context.Background(), serveShutdownTimeout)
 	defer cancel()
+	if p.servicePlugins != nil {
+		if err := p.servicePlugins.Unload(ctx); err != nil {
+			slog.Default().Warn("service plugin unload", "err", err)
+		}
+	}
 	for i := len(p.closeFns) - 1; i >= 0; i-- {
 		p.closeFns[i](ctx)
 	}
@@ -1457,7 +1457,7 @@ func (r runRequeuer) RequeueRun(ctx context.Context, tenantID, sessionID uuid.UU
 // settings secret store; secretReason explains its absence to an operator;
 // theme is the host theme token document handed to plugin UIs through the
 // bridge (nil when the web build has none).
-func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, admission kernel.Committer, admissionGate *placement.Gate, rt *servicehost.Runtime, hooks *harnessext.HookBus, runControl *harnessext.RunControl, partials *harnessext.PartialHub, taskLog *tasklog.Service, opts serveOptions, secretBox *store.SecretBox, secretReason string, accessBridge *accesswire.Bridge, mcpApps *mcphost.Registry, mcpAppsSandboxOrigin string, theme json.RawMessage, edge *quota.Edge, maxUpload int64, mcpMetrics *mcphost.Metrics, mrtr *mcphost.MRTR, compactSession harnessapi.CompactSessionFunc, checkpointPolicies harnessapi.SessionCheckpointPolicyService, log *slog.Logger) (*productLayer, error) {
+func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, admission kernel.Committer, admissionGate *placement.Gate, rt *servicehost.Runtime, hooks *harnessext.HookBus, runControl *harnessext.RunControl, partials *harnessext.PartialHub, taskLog *tasklog.Service, opts serveOptions, secretBox *store.SecretBox, secretReason string, accessBridge *accesswire.Bridge, mcpApps *mcphost.Registry, mcpAppsSandboxOrigin string, theme json.RawMessage, edge *quota.Edge, maxUpload int64, mcpMetrics *mcphost.Metrics, mrtr *mcphost.MRTR, compactSession harnessapi.CompactSessionFunc, checkpointPolicies harnessapi.SessionCheckpointPolicyService, boardSurface *boardintegration.Surface, log *slog.Logger) (*productLayer, error) {
 	sessions := storeSessions{Store: st}
 	decisions := harnessext.NewDecisionBroker(harnessext.DecisionBrokerOptions{
 		Store:  harnessext.NewTasksDecisionStore(st),
@@ -1600,14 +1600,53 @@ func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, 
 	// the mode and starts the poller; with no configuration the descriptor stays
 	// disabled exactly as the core change left it.
 	superagentChanges := newSuperagentChangeSink()
-	superagentRuntime, err := newSuperagentRuntime(ctx, opts.TenantID, st, collabModes, accessBridge, subagents, starter, superagentChanges.Publish, log)
-	if err != nil {
-		return nil, fmt.Errorf("super-agent: %w", err)
+	// The superagent plugin owns its own domain store; the core store keeps the
+	// sessions/bots/auth facts. A deployment whose board plugin is absent never
+	// constructs the supervisor at all: the plugin graph reports it PENDING.
+	domain := superagentstore.New(st.Pool())
+	var superagentRuntime *superagent.Orchestrator
+	if boardSurface == nil {
+		log.Warn("super-agent plugin is pending: the board plugin is not available")
+	} else {
+		superagentRuntime, err = newSuperagentRuntime(ctx, opts.TenantID, st, domain, collabModes, accessBridge, subagents, starter, superagentChanges.Publish, log)
+		if err != nil {
+			return nil, fmt.Errorf("super-agent: %w", err)
+		}
 	}
 	// The model-facing report/ask tools were captured at Boot; install the
 	// orchestrator they call. Nil (disabled mode) leaves them answering the
 	// typed unavailable refusal.
 	opts.SuperagentWorkerTools.set(superagentRuntime)
+
+	// Service-plugin graph (change keel-plugin-split): board provides `board`,
+	// superagent requires it. Load order is topological; unload is reverse.
+	serviceBoard := boardService(boardSurface)
+	servicePlugins, err := pluginruntime.New(pluginruntime.Options{
+		Plugins: []*pluginruntime.Plugin{
+			boardplugin.NewPlugin(boardplugin.Options{
+				Service: serviceBoard, Domain: boardSurface,
+				Disabled: boardSurface == nil, Logger: log,
+			}),
+			superagentplugin.NewPlugin(superagentplugin.Options{
+				Service:  superagentRuntime,
+				Writer:   newSuperagentBoardWriter(ctx, opts.TenantID, st, domain, boardSurface, serviceBoard, log),
+				Domain:   superagentplugin.DomainStore{Store: domain},
+				Disabled: superagentRuntime == nil, Logger: log,
+			}),
+		},
+		Kernel: pg.New(st.Pool()), TenantID: opts.TenantID, Logger: log,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("service plugins: %w", err)
+	}
+	if err := servicePlugins.Load(ctx); err != nil {
+		return nil, fmt.Errorf("service plugins: %w", err)
+	}
+	for _, status := range servicePlugins.Snapshot() {
+		if status.State != pluginruntime.StateActive {
+			log.Warn("service plugin is not active", "plugin", status.ID, "state", status.State, "reason", status.Reason)
+		}
+	}
 
 	surface, err := newPluginSurface(ctx, rt, st, opts, hooks, triggers, decisions, approvals, notifications, subagents, partials, taskLog, tenantSecretLookup(st, secretBox, opts.TenantID, log), log)
 	if err != nil {
@@ -1882,22 +1921,23 @@ func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, 
 	}
 
 	layer := &productLayer{
-		hooks:         hooks,
-		decisions:     decisions,
-		partials:      partials,
-		runCtrl:       runControl,
-		starter:       starter,
-		subagents:     subagents,
-		collabModes:   collabModes,
-		triggers:      triggers,
-		plugins:       plugins,
-		pluginManager: manager,
-		notifications: notifications,
-		taskLog:       taskLog,
-		api:           api,
-		auth:          auth,
-		access:        accessBridge,
-		superagent:    superagentService,
+		hooks:          hooks,
+		decisions:      decisions,
+		partials:       partials,
+		runCtrl:        runControl,
+		starter:        starter,
+		subagents:      subagents,
+		collabModes:    collabModes,
+		triggers:       triggers,
+		plugins:        plugins,
+		pluginManager:  manager,
+		notifications:  notifications,
+		taskLog:        taskLog,
+		api:            api,
+		auth:           auth,
+		access:         accessBridge,
+		servicePlugins: servicePlugins,
+		superagent:     superagentService,
 	}
 	layer.closeFns = []func(context.Context){
 		func(ctx context.Context) { plugins.Close(ctx) },

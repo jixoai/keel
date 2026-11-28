@@ -88,7 +88,7 @@ func TestCheckReadyRequiresEveryKernelColumn(t *testing.T) {
 		                                            loadout_generation bigint, loadout_owner_epoch bigint)`,
 		`CREATE TABLE ` + ident + `.tasks (status text)`,
 		`CREATE TABLE ` + ident + `.checkpoints (tokens_before bigint, tokens_after bigint,
-		                                              policy_version text, request_id text)`,
+		                                              policy_version text, summary_hash text, request_id text)`,
 		`CREATE TABLE ` + ident + `.sessions (owner text, owner_epoch bigint, lease_until timestamptz,
 		                                              state_owner text, external_backend text,
 		                                              external_ref text, external_status text,

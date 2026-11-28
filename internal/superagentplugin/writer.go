@@ -1,4 +1,4 @@
-package superagentboard
+package superagentplugin
 
 import (
 	"context"
@@ -11,9 +11,10 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jixoai/keel/internal/boardplugin"
 	"github.com/jixoai/keel/internal/collab"
-	"github.com/jixoai/keel/internal/store"
 	"github.com/jixoai/keel/internal/superagent"
+	"github.com/jixoai/keel/internal/superagentstore"
 
 	"github.com/jixoai/keel-board/protocol"
 )
@@ -21,9 +22,9 @@ import (
 // LinkStore is the durable identity map the mirror and bridge share. The
 // production implementation is keel's *store.Store; tests use a map.
 type LinkStore interface {
-	PutBoardLink(ctx context.Context, link store.BoardLink) (store.BoardLink, error)
-	GetBoardLink(ctx context.Context, tenantID uuid.UUID, source, sourceID, kind string) (store.BoardLink, bool, error)
-	GetBoardLinkByTask(ctx context.Context, tenantID uuid.UUID, source, kind string, boardTaskID uint64) (store.BoardLink, bool, error)
+	PutBoardLink(ctx context.Context, link superagentstore.BoardLink) (superagentstore.BoardLink, error)
+	GetBoardLink(ctx context.Context, tenantID uuid.UUID, source, sourceID, kind string) (superagentstore.BoardLink, bool, error)
+	GetBoardLinkByTask(ctx context.Context, tenantID uuid.UUID, source, kind string, boardTaskID uint64) (superagentstore.BoardLink, bool, error)
 	SetBoardLinkClaimEpoch(ctx context.Context, tenantID uuid.UUID, source, sourceID, kind string, epoch uint64) error
 }
 
@@ -58,14 +59,14 @@ type ChannelACL interface {
 	EnsureOperator(ctx context.Context, tenantID uuid.UUID, channel string) error
 }
 
-// Mirror projects one tenant's supervisor records into the board. It is a
+// Writer projects one tenant's supervisor records into the board. It is a
 // read of collab_* plus append-only board writes; it never updates a
 // supervisor record, which is why a board write failure can be repaired by the
 // next pass without losing truth.
-type Mirror struct {
+type Writer struct {
 	TenantID uuid.UUID
 	Store    superagent.Store
-	Board    BoardPort
+	Board    boardplugin.Service
 	Links    LinkStore
 	Config   ConfigReader
 	Secret   *TokenSource
@@ -74,8 +75,11 @@ type Mirror struct {
 	// embedded test); production wires Surface.BoardEnabled. When it returns
 	// false, a pass appends no board event and does not read/sync a ticket.
 	Enabled func(ctx context.Context) bool
-	Logger  *slog.Logger
-	Now     func() time.Time
+	// Import pulls new board tasks into tickets before the write-back pass.
+	// Nil keeps the adapter ticket -> board only.
+	Import func(ctx context.Context) error
+	Logger *slog.Logger
+	Now    func() time.Time
 
 	Lease       time.Duration
 	RenewBefore time.Duration
@@ -89,27 +93,27 @@ type Mirror struct {
 	aclChannels map[string]bool
 }
 
-// NewMirror validates the mandatory seams. A missing secret is not a
+// NewWriter validates the mandatory seams. A missing secret is not a
 // construction error: Run and SyncOnce fail closed with ErrSecretMissing, so a
 // deployment can keep serving the board while an operator fixes the secret.
-func NewMirror(opts *Mirror) (*Mirror, error) {
+func NewWriter(opts *Writer) (*Writer, error) {
 	if opts == nil {
-		return nil, errors.New("superagentboard: mirror options are required")
+		return nil, errors.New("superagentplugin: mirror options are required")
 	}
 	if opts.TenantID == uuid.Nil {
-		return nil, errors.New("superagentboard: mirror tenant is required")
+		return nil, errors.New("superagentplugin: mirror tenant is required")
 	}
 	if opts.Store == nil {
-		return nil, errors.New("superagentboard: mirror needs the supervisor store")
+		return nil, errors.New("superagentplugin: mirror needs the supervisor store")
 	}
 	if opts.Board == nil {
-		return nil, errors.New("superagentboard: mirror needs a board port")
+		return nil, errors.New("superagentplugin: mirror needs a board port")
 	}
 	if opts.Links == nil {
-		return nil, errors.New("superagentboard: mirror needs a link store")
+		return nil, errors.New("superagentplugin: mirror needs a link store")
 	}
 	if opts.Config == nil {
-		return nil, errors.New("superagentboard: mirror needs a config reader")
+		return nil, errors.New("superagentplugin: mirror needs a config reader")
 	}
 	if opts.Logger == nil {
 		opts.Logger = slog.Default()
@@ -135,7 +139,7 @@ func NewMirror(opts *Mirror) (*Mirror, error) {
 // Run syncs on a ticker until ctx ends. Every tick re-reads the tenant
 // configuration, so switching mirror off stops new board writes without a
 // restart and switching it on starts them.
-func (m *Mirror) Run(ctx context.Context) {
+func (m *Writer) Run(ctx context.Context) {
 	if m.Interval < 0 {
 		return
 	}
@@ -155,12 +159,12 @@ func (m *Mirror) Run(ctx context.Context) {
 
 // boardEnabled applies the configuration gate. A nil gate is permissive (the
 // test/embedding seam); the production gate fails closed on a flag read error.
-func (m *Mirror) boardEnabled(ctx context.Context) bool {
+func (m *Writer) boardEnabled(ctx context.Context) bool {
 	return m.Enabled == nil || m.Enabled(ctx)
 }
 
 // SyncOnce mirrors every ticket. A disabled mirror is a no-op, not an error.
-func (m *Mirror) SyncOnce(ctx context.Context) (SyncReport, error) {
+func (m *Writer) SyncOnce(ctx context.Context) (SyncReport, error) {
 	var report SyncReport
 	if !m.boardEnabled(ctx) {
 		return report, nil
@@ -175,11 +179,16 @@ func (m *Mirror) SyncOnce(ctx context.Context) (SyncReport, error) {
 	if m.Secret == nil {
 		return report, ErrSecretMissing
 	}
+	if m.Import != nil {
+		if err := m.Import(ctx); err != nil {
+			return report, err
+		}
+	}
 	items, err := m.Store.ListWorkItems(ctx, m.TenantID, collab.WorkFilter{
 		ModeID: superagent.DefaultModeID, Order: collab.WorkOrderUpdatedDesc,
 	})
 	if err != nil {
-		return report, fmt.Errorf("superagentboard: list tickets: %w", err)
+		return report, fmt.Errorf("superagentplugin: list tickets: %w", err)
 	}
 	limit := m.TicketLimit
 	if limit > 0 && len(items) > limit {
@@ -206,7 +215,7 @@ func (m *Mirror) SyncOnce(ctx context.Context) (SyncReport, error) {
 // SyncTicket mirrors one ticket. The command bridge calls it after the
 // supervisor accepted an action, so the board reflects the new truth only
 // after the supervisor wrote it.
-func (m *Mirror) SyncTicket(ctx context.Context, ticketID uuid.UUID) (SyncReport, error) {
+func (m *Writer) SyncTicket(ctx context.Context, ticketID uuid.UUID) (SyncReport, error) {
 	var report SyncReport
 	if !m.boardEnabled(ctx) {
 		return report, nil
@@ -226,23 +235,23 @@ func (m *Mirror) SyncTicket(ctx context.Context, ticketID uuid.UUID) (SyncReport
 		return report, err
 	}
 	if item.ModeID != superagent.DefaultModeID {
-		return report, fmt.Errorf("superagentboard: work item %s is not a super-agent ticket", ticketID)
+		return report, fmt.Errorf("superagentplugin: work item %s is not a super-agent ticket", ticketID)
 	}
 	return m.syncTicket(ctx, config, superagent.TicketFromWorkItem(item))
 }
 
-func (m *Mirror) syncTicket(ctx context.Context, config SuperagentConfig, ticket superagent.Ticket) (SyncReport, error) {
+func (m *Writer) syncTicket(ctx context.Context, config SuperagentConfig, ticket superagent.Ticket) (SyncReport, error) {
 	var report SyncReport
 	if ticket.ID == uuid.Nil {
-		return report, errors.New("superagentboard: ticket has no id")
+		return report, errors.New("superagentplugin: ticket has no id")
 	}
 	terminal := isTerminalTicket(ticket)
 	archivedImport := terminal
-	link, linked, err := m.Links.GetBoardLink(ctx, m.TenantID, BoardSource, ticket.ID.String(), store.BoardLinkTicket)
+	link, linked, err := m.Links.GetBoardLink(ctx, m.TenantID, BoardSource, ticket.ID.String(), superagentstore.BoardLinkTicket)
 	if err != nil {
 		return report, err
 	}
-	var task TaskInfo
+	var task boardplugin.TaskInfo
 	if linked {
 		archivedImport = false
 		task, err = m.Board.Task(ctx, m.TenantID, link.BoardTaskID)
@@ -269,9 +278,9 @@ func (m *Mirror) syncTicket(ctx context.Context, config SuperagentConfig, ticket
 		if err != nil {
 			return report, err
 		}
-		if _, err := m.Links.PutBoardLink(ctx, store.BoardLink{
+		if _, err := m.Links.PutBoardLink(ctx, superagentstore.BoardLink{
 			TenantID: m.TenantID, Source: BoardSource, SourceID: ticket.ID.String(),
-			Kind: store.BoardLinkTicket, BoardTaskID: task.ID,
+			Kind: superagentstore.BoardLinkTicket, BoardTaskID: task.ID,
 		}); err != nil {
 			return report, err
 		}
@@ -296,7 +305,7 @@ func (m *Mirror) syncTicket(ctx context.Context, config SuperagentConfig, ticket
 
 // ensureACL writes the channel's read relation once per process; a failure is
 // retried by the next pass instead of being forgotten with the created flag.
-func (m *Mirror) ensureACL(ctx context.Context, channel string) {
+func (m *Writer) ensureACL(ctx context.Context, channel string) {
 	if m == nil || m.ACL == nil || strings.TrimSpace(channel) == "" {
 		return
 	}
@@ -318,22 +327,22 @@ func (m *Mirror) ensureACL(ctx context.Context, channel string) {
 	m.aclMu.Unlock()
 }
 
-func (m *Mirror) syncTicketState(ctx context.Context, ticket superagent.Ticket, task TaskInfo) (SyncReport, error) {
+func (m *Writer) syncTicketState(ctx context.Context, ticket superagent.Ticket, task boardplugin.TaskInfo) (SyncReport, error) {
 	var report SyncReport
 	if task.ID == 0 {
 		return report, nil
 	}
 	assignments, err := m.Store.ListAssignments(ctx, m.TenantID, ticket.ID)
 	if err != nil {
-		return report, fmt.Errorf("superagentboard: read assignments: %w", err)
+		return report, fmt.Errorf("superagentplugin: read assignments: %w", err)
 	}
 	attentions, err := m.Store.ListAttentions(ctx, m.TenantID, ticket.ID)
 	if err != nil {
-		return report, fmt.Errorf("superagentboard: read attentions: %w", err)
+		return report, fmt.Errorf("superagentplugin: read attentions: %w", err)
 	}
 	reports, err := m.Store.ListWorkerReports(ctx, m.TenantID, ticket.ID)
 	if err != nil {
-		return report, fmt.Errorf("superagentboard: read reports: %w", err)
+		return report, fmt.Errorf("superagentplugin: read reports: %w", err)
 	}
 
 	activeAssignment := activeAssignmentOf(assignments)
@@ -387,7 +396,7 @@ func (m *Mirror) syncTicketState(ctx context.Context, ticket superagent.Ticket, 
 			TaskID: task.ID, Kind: holdKind,
 			Reason: openAttention.Prompt, Actor: actor,
 		}); err != nil {
-			if errors.Is(err, ErrClaimConflict) {
+			if errors.Is(err, boardplugin.ErrClaimConflict) {
 				report.Conflicts++
 				m.logClaimConflict(ticket, task, err)
 			} else {
@@ -423,7 +432,7 @@ func (m *Mirror) syncTicketState(ctx context.Context, ticket superagent.Ticket, 
 			TaskID: task.ID, Actor: claimActorOf(task), Epoch: task.Epoch,
 		})
 		if err != nil {
-			if errors.Is(err, ErrClaimConflict) {
+			if errors.Is(err, boardplugin.ErrClaimConflict) {
 				report.Conflicts++
 				m.logClaimConflict(ticket, task, err)
 			} else {
@@ -442,7 +451,7 @@ func (m *Mirror) syncTicketState(ctx context.Context, ticket superagent.Ticket, 
 		if attention.Status == collab.AttentionOpen {
 			continue
 		}
-		if _, found, err := m.Links.GetBoardLink(ctx, m.TenantID, BoardSource, attention.ID.String(), store.BoardLinkAttention); err == nil && found {
+		if _, found, err := m.Links.GetBoardLink(ctx, m.TenantID, BoardSource, attention.ID.String(), superagentstore.BoardLinkAttention); err == nil && found {
 			continue
 		}
 		if err := m.mirrorAttentionReply(ctx, ticket, task.ID, attention, &report); err != nil {
@@ -457,7 +466,7 @@ func (m *Mirror) syncTicketState(ctx context.Context, ticket superagent.Ticket, 
 		if row.AppliedAt == nil {
 			continue
 		}
-		if _, found, err := m.Links.GetBoardLink(ctx, m.TenantID, BoardSource, row.ID.String(), store.BoardLinkReport); err == nil && found {
+		if _, found, err := m.Links.GetBoardLink(ctx, m.TenantID, BoardSource, row.ID.String(), superagentstore.BoardLinkReport); err == nil && found {
 			continue
 		}
 		if _, err := m.Board.Reply(ctx, m.TenantID, ReplyRequest{
@@ -472,9 +481,9 @@ func (m *Mirror) syncTicketState(ctx context.Context, ticket superagent.Ticket, 
 				"ticket", ticket.ID, "report", row.ID, "err", err)
 			continue
 		}
-		if _, err := m.Links.PutBoardLink(ctx, store.BoardLink{
+		if _, err := m.Links.PutBoardLink(ctx, superagentstore.BoardLink{
 			TenantID: m.TenantID, Source: BoardSource, SourceID: row.ID.String(),
-			Kind: store.BoardLinkReport, BoardTaskID: task.ID,
+			Kind: superagentstore.BoardLinkReport, BoardTaskID: task.ID,
 		}); err != nil {
 			m.Logger.Warn("superagent board mirror report link failed",
 				"ticket", ticket.ID, "report", row.ID, "err", err)
@@ -542,9 +551,9 @@ func (m *Mirror) syncTicketState(ctx context.Context, ticket superagent.Ticket, 
 	return report, nil
 }
 
-func (m *Mirror) accountSettle(err error, action string, ticket superagent.Ticket, task TaskInfo, report *SyncReport, ok func()) {
+func (m *Writer) accountSettle(err error, action string, ticket superagent.Ticket, task boardplugin.TaskInfo, report *SyncReport, ok func()) {
 	if err != nil {
-		if errors.Is(err, ErrClaimConflict) || errors.Is(err, ErrNotClaimable) {
+		if errors.Is(err, boardplugin.ErrClaimConflict) || errors.Is(err, boardplugin.ErrNotClaimable) {
 			report.Conflicts++
 			m.logClaimConflict(ticket, task, err)
 			return
@@ -561,7 +570,7 @@ func (m *Mirror) accountSettle(err error, action string, ticket superagent.Ticke
 // (blocked, claimed by a conflicting actor, secret missing) and the next pass
 // retries. The claim is service bookkeeping, not a supervisor assignment, so it
 // is not counted as report.Claims.
-func (m *Mirror) ensureSettlementClaim(ctx context.Context, ticket superagent.Ticket, task TaskInfo, report *SyncReport) (TaskInfo, bool) {
+func (m *Writer) ensureSettlementClaim(ctx context.Context, ticket superagent.Ticket, task boardplugin.TaskInfo, report *SyncReport) (boardplugin.TaskInfo, bool) {
 	if task.State == StateClaimed {
 		return task, true
 	}
@@ -577,7 +586,7 @@ func (m *Mirror) ensureSettlementClaim(ctx context.Context, ticket superagent.Ti
 		TaskID: task.ID, Actor: ServiceActor(m.TenantID), Token: token, Lease: m.Lease,
 	})
 	if err != nil {
-		if errors.Is(err, ErrClaimConflict) || errors.Is(err, ErrNotClaimable) {
+		if errors.Is(err, boardplugin.ErrClaimConflict) || errors.Is(err, boardplugin.ErrNotClaimable) {
 			report.Conflicts++
 			m.logClaimConflict(ticket, task, err)
 		} else {
@@ -592,7 +601,7 @@ func (m *Mirror) ensureSettlementClaim(ctx context.Context, ticket superagent.Ti
 }
 
 // mirrorClaim returns true when the board task changed.
-func (m *Mirror) mirrorClaim(ctx context.Context, ticket superagent.Ticket, assignment collab.Assignment, task TaskInfo, report *SyncReport) bool {
+func (m *Writer) mirrorClaim(ctx context.Context, ticket superagent.Ticket, assignment collab.Assignment, task boardplugin.TaskInfo, report *SyncReport) bool {
 	if assignment.SessionID == uuid.Nil {
 		return false
 	}
@@ -609,7 +618,7 @@ func (m *Mirror) mirrorClaim(ctx context.Context, ticket superagent.Ticket, assi
 		TaskID: task.ID, Actor: actor, Token: token, Lease: m.Lease,
 	})
 	if err != nil {
-		if errors.Is(err, ErrClaimConflict) || errors.Is(err, ErrNotClaimable) {
+		if errors.Is(err, boardplugin.ErrClaimConflict) || errors.Is(err, boardplugin.ErrNotClaimable) {
 			report.Conflicts++
 			m.logClaimConflict(ticket, task, err)
 			return false
@@ -625,7 +634,7 @@ func (m *Mirror) mirrorClaim(ctx context.Context, ticket superagent.Ticket, assi
 		epoch = task.Epoch
 	}
 	if epoch != 0 {
-		if err := m.Links.SetBoardLinkClaimEpoch(ctx, m.TenantID, BoardSource, ticket.ID.String(), store.BoardLinkTicket, epoch); err != nil && !errors.Is(err, store.ErrNotFound) {
+		if err := m.Links.SetBoardLinkClaimEpoch(ctx, m.TenantID, BoardSource, ticket.ID.String(), superagentstore.BoardLinkTicket, epoch); err != nil && !errors.Is(err, superagentstore.ErrNotFound) {
 			m.Logger.Warn("superagent board mirror claim epoch link failed", "ticket", ticket.ID, "err", err)
 		}
 	}
@@ -635,7 +644,7 @@ func (m *Mirror) mirrorClaim(ctx context.Context, ticket superagent.Ticket, assi
 			Lease: m.Lease, RenewBefore: m.RenewBefore,
 		})
 		if err != nil {
-			if errors.Is(err, ErrClaimConflict) {
+			if errors.Is(err, boardplugin.ErrClaimConflict) {
 				report.Conflicts++
 				m.logClaimConflict(ticket, info, err)
 			}
@@ -646,7 +655,7 @@ func (m *Mirror) mirrorClaim(ctx context.Context, ticket superagent.Ticket, assi
 	return claimed
 }
 
-func (m *Mirror) mirrorAttentionReply(ctx context.Context, ticket superagent.Ticket, taskID uint64, attention collab.Attention, report *SyncReport) error {
+func (m *Writer) mirrorAttentionReply(ctx context.Context, ticket superagent.Ticket, taskID uint64, attention collab.Attention, report *SyncReport) error {
 	if attention.Status == collab.AttentionOpen {
 		return nil
 	}
@@ -661,9 +670,9 @@ func (m *Mirror) mirrorAttentionReply(ctx context.Context, ticket superagent.Tic
 	if err != nil {
 		return err
 	}
-	if _, err := m.Links.PutBoardLink(ctx, store.BoardLink{
+	if _, err := m.Links.PutBoardLink(ctx, superagentstore.BoardLink{
 		TenantID: m.TenantID, Source: BoardSource, SourceID: attention.ID.String(),
-		Kind: store.BoardLinkAttention, BoardTaskID: taskID,
+		Kind: superagentstore.BoardLinkAttention, BoardTaskID: taskID,
 	}); err != nil {
 		return err
 	}
@@ -671,7 +680,7 @@ func (m *Mirror) mirrorAttentionReply(ctx context.Context, ticket superagent.Tic
 	return nil
 }
 
-func (m *Mirror) recordGitHubEvent(ctx context.Context, ticket superagent.Ticket, taskID uint64) {
+func (m *Writer) recordGitHubEvent(ctx context.Context, ticket superagent.Ticket, taskID uint64) {
 	source := strings.TrimSpace(ticket.Mandate.Source)
 	threadSource := strings.TrimSpace(ticket.Thread.Source)
 	if source != superagent.SourceGitHub && threadSource != superagent.SourceGitHub {
@@ -681,16 +690,16 @@ func (m *Mirror) recordGitHubEvent(ctx context.Context, ticket superagent.Ticket
 	if eventID == "" {
 		return
 	}
-	if _, err := m.Links.PutBoardLink(ctx, store.BoardLink{
+	if _, err := m.Links.PutBoardLink(ctx, superagentstore.BoardLink{
 		TenantID: m.TenantID, Source: superagent.SourceGitHub, SourceID: eventID,
-		Kind: store.BoardLinkGitHub, BoardTaskID: taskID,
+		Kind: superagentstore.BoardLinkGitHub, BoardTaskID: taskID,
 	}); err != nil {
 		m.Logger.Warn("superagent board mirror github event link failed",
 			"ticket", ticket.ID, "err", err)
 	}
 }
 
-func (m *Mirror) logClaimConflict(ticket superagent.Ticket, task TaskInfo, err error) {
+func (m *Writer) logClaimConflict(ticket superagent.Ticket, task boardplugin.TaskInfo, err error) {
 	// No prompt/token/body: the ids and the holder are enough to investigate,
 	// and the supervisor's own records remain the truth.
 	m.Logger.Warn("superagent board mirror claim conflict; board claim left in place",
@@ -768,7 +777,7 @@ func oldestOpenAttention(attentions []collab.Attention) *collab.Attention {
 	return nil
 }
 
-func claimActorOf(task TaskInfo) ActorInfo {
+func claimActorOf(task boardplugin.TaskInfo) ActorInfo {
 	if strings.TrimSpace(task.ClaimActor) == "" {
 		return ActorInfo{}
 	}

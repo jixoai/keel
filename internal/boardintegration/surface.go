@@ -135,10 +135,6 @@ type Surface struct {
 	done          chan struct{}
 	closeOnce     sync.Once
 	logger        *slog.Logger
-	// mirrorMu guards mirrorFacts, which keel serve wires after construction
-	// (the bridge exists only once the supervisor does).
-	mirrorMu    sync.RWMutex
-	mirrorFacts MirrorFacts
 }
 
 // New builds the board surface. It runs the board's idempotent migrations

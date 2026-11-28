@@ -1,4 +1,12 @@
-package store
+// Package superagentstore is the superagent plugin's independent PostgreSQL
+// domain store (change keel-plugin-split).
+//
+// It implements superagent.Store (which embeds collab.WorkStore) and
+// collab.SessionIndex over the superagent_* tables. The board owns its own
+// tables; this adapter never reads or writes one. The sole cross-plugin path is
+// the board plugin's Service interface, used by the superagent plugin's board
+// writer — not by this package.
+package superagentstore
 
 import (
 	"context"
@@ -16,12 +24,34 @@ import (
 	"github.com/jixoai/keel/internal/superagent"
 )
 
-// Super-agent persistence (change keel-collab-superagent).
-//
-// The methods below make *Store implement superagent.Store (which embeds
-// collab.WorkStore) and collab.SessionIndex. They are deliberately plain SQL
-// over the collab_* tables in schema.sql: the generic core shape stays generic,
-// and no super-agent-only column is added to sessions or tasks.
+// Store is the superagent plugin's domain adapter. It owns the plugin's
+// tenant-scoped rows; the host core (sessions, bots, auth) remains the keel
+// store.
+type Store struct {
+	pool *pgxpool.Pool
+}
+
+// New builds the adapter over the host's pool. The platform schema
+// (internal/store/schema.sql) creates the superagent_* tables.
+func New(pool *pgxpool.Pool) *Store { return &Store{pool: pool} }
+
+// Pool exposes the adapter's pool to the plugin's own tests; production code
+// uses the typed store methods.
+func (s *Store) Pool() *pgxpool.Pool { return s.pool }
+
+// Ping proves the adapter can reach its database.
+func (s *Store) Ping(ctx context.Context) error {
+	if s == nil || s.pool == nil {
+		return errors.New("superagentstore: no database pool")
+	}
+	_, err := s.pool.Exec(ctx, "SELECT 1")
+	return err
+}
+
+// ErrNotFound is the one not-found answer shared by the link map and the
+// domain reads. A foreign tenant's row and a missing row are indistinguishable.
+var ErrNotFound = errors.New("superagentstore: not found")
+
 var _ superagent.Store = (*Store)(nil)
 var _ collab.SessionIndex = (*Store)(nil)
 
@@ -44,7 +74,7 @@ func (s *Store) CreateWorkItem(ctx context.Context, item collab.WorkItem) (colla
 	}
 	item.UpdatedAt = now
 	row, err := scanWorkItem(s.pool.QueryRow(ctx, `
-		INSERT INTO collab_work_items
+		INSERT INTO superagent_work_items
 		    (tenant_id, work_item_id, mode_id, title, input, source, scope, limits,
 		     status, owner_session_id, idempotency_key, created_at, updated_at)
 		VALUES ($1,$2,$3,$4,$5::jsonb,$6::jsonb,$7::jsonb,$8::jsonb,$9,$10,$11,$12,$13)
@@ -67,7 +97,7 @@ func (s *Store) workItemByIdempotency(ctx context.Context, tenantID uuid.UUID, m
 	row, err := scanWorkItem(s.pool.QueryRow(ctx, `
 		SELECT tenant_id, work_item_id, mode_id, title, input, source, scope, limits,
 		       status, owner_session_id, idempotency_key, created_at, updated_at
-		  FROM collab_work_items
+		  FROM superagent_work_items
 		 WHERE tenant_id = $1 AND mode_id = $2 AND idempotency_key = $3`, tenantID, modeID, key))
 	if err != nil {
 		return collab.WorkItem{}, fmt.Errorf("store: read idempotent work item: %w", err)
@@ -80,7 +110,7 @@ func (s *Store) GetWorkItem(ctx context.Context, tenantID, workItemID uuid.UUID)
 	row, err := scanWorkItem(s.pool.QueryRow(ctx, `
 		SELECT tenant_id, work_item_id, mode_id, title, input, source, scope, limits,
 		       status, owner_session_id, idempotency_key, created_at, updated_at
-		  FROM collab_work_items WHERE tenant_id = $1 AND work_item_id = $2`, tenantID, workItemID))
+		  FROM superagent_work_items WHERE tenant_id = $1 AND work_item_id = $2`, tenantID, workItemID))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return collab.WorkItem{}, collabError(collab.ErrWorkItemNotFound, collab.CodeWorkItemNotFound, "get_work_item", "work item not found")
 	}
@@ -105,7 +135,7 @@ func (s *Store) ListWorkItems(ctx context.Context, tenantID uuid.UUID, filter co
 	rows, err := s.pool.Query(ctx, `
 		SELECT tenant_id, work_item_id, mode_id, title, input, source, scope, limits,
 		       status, owner_session_id, idempotency_key, created_at, updated_at
-		  FROM collab_work_items
+		  FROM superagent_work_items
 		 WHERE tenant_id = $1
 		   AND ($2 = '' OR mode_id = $2)
 		   AND ($3 = '' OR status = $3)
@@ -133,7 +163,7 @@ func (s *Store) UpdateWorkItem(ctx context.Context, item collab.WorkItem) (colla
 		return collab.WorkItem{}, err
 	}
 	row, err := scanWorkItem(s.pool.QueryRow(ctx, `
-		UPDATE collab_work_items
+		UPDATE superagent_work_items
 		   SET title = $3, input = $4::jsonb, source = $5::jsonb, scope = $6::jsonb,
 		       limits = $7::jsonb, status = $8, owner_session_id = $9, updated_at = now()
 		 WHERE tenant_id = $1 AND work_item_id = $2
@@ -218,7 +248,7 @@ func (s *Store) CreateAssignment(ctx context.Context, assignment collab.Assignme
 	}
 	assignment.UpdatedAt = now
 	row, err := scanAssignment(s.pool.QueryRow(ctx, `
-		INSERT INTO collab_assignments
+		INSERT INTO superagent_assignments
 		    (tenant_id, assignment_id, work_item_id, mode_id, bot_id, session_id, caller_session_id,
 		     status, title, input, result, error, idempotency_key, created_at, updated_at)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11::jsonb,$12,$13,$14,$15)
@@ -243,7 +273,7 @@ func (s *Store) assignmentByIdempotency(ctx context.Context, tenantID, workItemI
 	row, err := scanAssignment(s.pool.QueryRow(ctx, `
 		SELECT tenant_id, assignment_id, work_item_id, mode_id, bot_id, session_id, caller_session_id,
 		       status, title, input, result, error, idempotency_key, created_at, updated_at
-		  FROM collab_assignments
+		  FROM superagent_assignments
 		 WHERE tenant_id = $1 AND work_item_id = $2 AND idempotency_key = $3`, tenantID, workItemID, key))
 	if err != nil {
 		return collab.Assignment{}, fmt.Errorf("store: read idempotent assignment: %w", err)
@@ -256,7 +286,7 @@ func (s *Store) GetAssignment(ctx context.Context, tenantID, assignmentID uuid.U
 	row, err := scanAssignment(s.pool.QueryRow(ctx, `
 		SELECT tenant_id, assignment_id, work_item_id, mode_id, bot_id, session_id, caller_session_id,
 		       status, title, input, result, error, idempotency_key, created_at, updated_at
-		  FROM collab_assignments WHERE tenant_id = $1 AND assignment_id = $2`, tenantID, assignmentID))
+		  FROM superagent_assignments WHERE tenant_id = $1 AND assignment_id = $2`, tenantID, assignmentID))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return collab.Assignment{}, collabError(collab.ErrAssignmentNotFound, collab.CodeAssignmentNotFound, "get_assignment", "assignment not found")
 	}
@@ -271,7 +301,7 @@ func (s *Store) ListAssignments(ctx context.Context, tenantID, workItemID uuid.U
 	rows, err := s.pool.Query(ctx, `
 		SELECT tenant_id, assignment_id, work_item_id, mode_id, bot_id, session_id, caller_session_id,
 		       status, title, input, result, error, idempotency_key, created_at, updated_at
-		  FROM collab_assignments
+		  FROM superagent_assignments
 		 WHERE tenant_id = $1 AND work_item_id = $2
 		 ORDER BY created_at ASC, assignment_id ASC`, tenantID, workItemID)
 	if err != nil {
@@ -299,7 +329,7 @@ func (s *Store) ListAssignmentsBySession(ctx context.Context, tenantID, sessionI
 	rows, err := s.pool.Query(ctx, `
 		SELECT tenant_id, assignment_id, work_item_id, mode_id, bot_id, session_id, caller_session_id,
 		       status, title, input, result, error, idempotency_key, created_at, updated_at
-		  FROM collab_assignments
+		  FROM superagent_assignments
 		 WHERE tenant_id = $1 AND session_id = $2
 		 ORDER BY created_at ASC, assignment_id ASC`, tenantID, sessionID)
 	if err != nil {
@@ -320,7 +350,7 @@ func (s *Store) ListAssignmentsBySession(ctx context.Context, tenantID, sessionI
 // UpdateAssignment replaces the mutable fields of an assignment.
 func (s *Store) UpdateAssignment(ctx context.Context, assignment collab.Assignment) (collab.Assignment, error) {
 	row, err := scanAssignment(s.pool.QueryRow(ctx, `
-		UPDATE collab_assignments
+		UPDATE superagent_assignments
 		   SET bot_id = $3, session_id = $4, caller_session_id = $5, status = $6, title = $7,
 		       input = $8::jsonb, result = $9::jsonb, error = $10, updated_at = now()
 		 WHERE tenant_id = $1 AND assignment_id = $2
@@ -384,7 +414,7 @@ func (s *Store) ClaimWorkerReport(ctx context.Context, report superagent.WorkerR
 		report.CreatedAt = time.Now().UTC()
 	}
 	row, err := scanWorkerReport(s.pool.QueryRow(ctx, `
-		INSERT INTO collab_worker_reports
+		INSERT INTO superagent_worker_reports
 		    (tenant_id, report_id, work_item_id, assignment_id, session_id, request_id,
 		     state, summary, attention_id, result, audited_at, applied_at, created_at)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11,$12,$13)
@@ -416,7 +446,7 @@ func (s *Store) GetWorkerReport(ctx context.Context, tenantID, workItemID, assig
 	row, err := scanWorkerReport(s.pool.QueryRow(ctx, `
 		SELECT tenant_id, report_id, work_item_id, assignment_id, session_id, request_id,
 		       state, summary, attention_id, result, audited_at, applied_at, created_at
-		  FROM collab_worker_reports
+		  FROM superagent_worker_reports
 		 WHERE tenant_id = $1 AND work_item_id = $2 AND assignment_id = $3
 		   AND session_id = $4 AND request_id = $5`,
 		tenantID, workItemID, assignmentID, sessionID, requestID))
@@ -440,7 +470,7 @@ func (s *Store) ListWorkerReports(ctx context.Context, tenantID, workItemID uuid
 	rows, err := s.pool.Query(ctx, `
 		SELECT tenant_id, report_id, work_item_id, assignment_id, session_id, request_id,
 		       state, summary, attention_id, result, audited_at, applied_at, created_at
-		  FROM collab_worker_reports
+		  FROM superagent_worker_reports
 		 WHERE tenant_id = $1 AND work_item_id = $2
 		 ORDER BY created_at ASC, report_id ASC`,
 		tenantID, workItemID)
@@ -470,7 +500,7 @@ func (s *Store) MarkWorkerReportAudited(ctx context.Context, tenantID, reportID 
 		at = time.Now().UTC()
 	}
 	tag, err := s.pool.Exec(ctx, `
-		UPDATE collab_worker_reports
+		UPDATE superagent_worker_reports
 		   SET audited_at = $3
 		 WHERE tenant_id = $1 AND report_id = $2 AND audited_at IS NULL`,
 		tenantID, reportID, at)
@@ -482,7 +512,7 @@ func (s *Store) MarkWorkerReportAudited(ctx context.Context, tenantID, reportID 
 	}
 	var exists bool
 	if err := s.pool.QueryRow(ctx, `
-		SELECT EXISTS (SELECT 1 FROM collab_worker_reports WHERE tenant_id = $1 AND report_id = $2)`,
+		SELECT EXISTS (SELECT 1 FROM superagent_worker_reports WHERE tenant_id = $1 AND report_id = $2)`,
 		tenantID, reportID).Scan(&exists); err != nil {
 		return false, fmt.Errorf("store: read worker report: %w", err)
 	}
@@ -501,7 +531,7 @@ func (s *Store) MarkWorkerReportApplied(ctx context.Context, tenantID, reportID 
 		at = time.Now().UTC()
 	}
 	tag, err := s.pool.Exec(ctx, `
-		UPDATE collab_worker_reports
+		UPDATE superagent_worker_reports
 		   SET applied_at = $3
 		 WHERE tenant_id = $1 AND report_id = $2 AND applied_at IS NULL`,
 		tenantID, reportID, at)
@@ -513,7 +543,7 @@ func (s *Store) MarkWorkerReportApplied(ctx context.Context, tenantID, reportID 
 	}
 	var exists bool
 	if err := s.pool.QueryRow(ctx, `
-		SELECT EXISTS (SELECT 1 FROM collab_worker_reports WHERE tenant_id = $1 AND report_id = $2)`,
+		SELECT EXISTS (SELECT 1 FROM superagent_worker_reports WHERE tenant_id = $1 AND report_id = $2)`,
 		tenantID, reportID).Scan(&exists); err != nil {
 		return false, fmt.Errorf("store: read worker report: %w", err)
 	}
@@ -568,7 +598,7 @@ func (s *Store) CreateAttention(ctx context.Context, attention collab.Attention)
 		return collab.Attention{}, err
 	}
 	row, err := scanAttention(s.pool.QueryRow(ctx, `
-		INSERT INTO collab_attentions
+		INSERT INTO superagent_attentions
 		    (tenant_id, attention_id, work_item_id, assignment_id, mode_id, session_id, request_id,
 		     kind, prompt, options, allow_free_text, route, channel, status, answer, created_at, deadline)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11,$12,$13,$14,$15::jsonb,$16,$17)
@@ -593,7 +623,7 @@ func (s *Store) attentionByRequest(ctx context.Context, tenantID, workItemID uui
 	row, err := scanAttention(s.pool.QueryRow(ctx, `
 		SELECT tenant_id, attention_id, work_item_id, assignment_id, mode_id, session_id, request_id,
 		       kind, prompt, options, allow_free_text, route, channel, status, answer, created_at, deadline
-		  FROM collab_attentions
+		  FROM superagent_attentions
 		 WHERE tenant_id = $1 AND work_item_id = $2 AND request_id = $3`, tenantID, workItemID, requestID))
 	if err != nil {
 		return collab.Attention{}, fmt.Errorf("store: read idempotent attention: %w", err)
@@ -612,7 +642,7 @@ func (s *Store) UpdateAttention(ctx context.Context, attention collab.Attention)
 		return collab.Attention{}, err
 	}
 	row, err := scanAttention(s.pool.QueryRow(ctx, `
-		UPDATE collab_attentions
+		UPDATE superagent_attentions
 		   SET options = $3::jsonb, status = $4, answer = $5::jsonb
 		 WHERE tenant_id = $1 AND attention_id = $2
 		RETURNING tenant_id, attention_id, work_item_id, assignment_id, mode_id, session_id, request_id,
@@ -632,7 +662,7 @@ func (s *Store) GetAttention(ctx context.Context, tenantID, attentionID uuid.UUI
 	row, err := scanAttention(s.pool.QueryRow(ctx, `
 		SELECT tenant_id, attention_id, work_item_id, assignment_id, mode_id, session_id, request_id,
 		       kind, prompt, options, allow_free_text, route, channel, status, answer, created_at, deadline
-		  FROM collab_attentions WHERE tenant_id = $1 AND attention_id = $2`, tenantID, attentionID))
+		  FROM superagent_attentions WHERE tenant_id = $1 AND attention_id = $2`, tenantID, attentionID))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return collab.Attention{}, collabError(collab.ErrAttentionNotFound, collab.CodeAttentionNotFound, "get_attention", "attention not found")
 	}
@@ -647,7 +677,7 @@ func (s *Store) ListAttentions(ctx context.Context, tenantID, workItemID uuid.UU
 	return s.listAttentions(ctx, `
 		SELECT tenant_id, attention_id, work_item_id, assignment_id, mode_id, session_id, request_id,
 		       kind, prompt, options, allow_free_text, route, channel, status, answer, created_at, deadline
-		  FROM collab_attentions
+		  FROM superagent_attentions
 		 WHERE tenant_id = $1 AND work_item_id = $2
 		 ORDER BY created_at ASC, attention_id ASC`, tenantID, workItemID)
 }
@@ -657,7 +687,7 @@ func (s *Store) ListOpenAttentions(ctx context.Context, tenantID uuid.UUID) ([]c
 	return s.listAttentions(ctx, `
 		SELECT tenant_id, attention_id, work_item_id, assignment_id, mode_id, session_id, request_id,
 		       kind, prompt, options, allow_free_text, route, channel, status, answer, created_at, deadline
-		  FROM collab_attentions
+		  FROM superagent_attentions
 		 WHERE tenant_id = $1 AND status = 'open'
 		 ORDER BY created_at ASC, attention_id ASC`, tenantID)
 }
@@ -731,7 +761,7 @@ func (s *Store) ListAssignmentsByStatus(ctx context.Context, tenantID uuid.UUID,
 	rows, err := s.pool.Query(ctx, `
 		SELECT tenant_id, assignment_id, work_item_id, mode_id, bot_id, session_id, caller_session_id,
 		       status, title, input, result, error, idempotency_key, created_at, updated_at
-		  FROM collab_assignments
+		  FROM superagent_assignments
 		 WHERE tenant_id = $1 AND (cardinality($2::text[]) = 0 OR status = ANY($2::text[]))
 		 ORDER BY created_at ASC, assignment_id ASC`, tenantID, values)
 	if err != nil {
@@ -762,7 +792,7 @@ func (s *Store) AddLink(ctx context.Context, link collab.Link) (collab.Link, err
 		return collab.Link{}, collabError(collab.ErrTenantRequired, collab.CodeTenantRequired, "add_link", "tenant and link ids are required")
 	}
 	tag, err := s.pool.Exec(ctx, `
-		INSERT INTO collab_links
+		INSERT INTO superagent_links
 		    (tenant_id, link_id, work_item_id, kind, from_type, from_id, to_type, to_id, created_at)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
 		ON CONFLICT DO NOTHING`,
@@ -791,7 +821,7 @@ func (s *Store) AddLink(ctx context.Context, link collab.Link) (collab.Link, err
 func (s *Store) linkByNaturalKey(ctx context.Context, link collab.Link) (collab.Link, bool, error) {
 	row, err := scanLink(s.pool.QueryRow(ctx, `
 		SELECT `+linkColumns+`
-		  FROM collab_links
+		  FROM superagent_links
 		 WHERE tenant_id = $1
 		   AND COALESCE(work_item_id, '00000000-0000-0000-0000-000000000000'::uuid)
 		       = COALESCE($2, '00000000-0000-0000-0000-000000000000'::uuid)
@@ -810,7 +840,7 @@ func (s *Store) linkByNaturalKey(ctx context.Context, link collab.Link) (collab.
 // GetLink reads one link under the tenant boundary.
 func (s *Store) GetLink(ctx context.Context, tenantID, linkID uuid.UUID) (collab.Link, error) {
 	row, err := scanLink(s.pool.QueryRow(ctx,
-		`SELECT `+linkColumns+` FROM collab_links WHERE tenant_id = $1 AND link_id = $2`,
+		`SELECT `+linkColumns+` FROM superagent_links WHERE tenant_id = $1 AND link_id = $2`,
 		tenantID, linkID))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return collab.Link{}, collabError(collab.ErrLinkNotFound, collab.CodeLinkNotFound, "get_link", "link not found")
@@ -827,7 +857,7 @@ func (s *Store) GetLink(ctx context.Context, tenantID, linkID uuid.UUID) (collab
 func (s *Store) ListLinks(ctx context.Context, tenantID, workItemID uuid.UUID) ([]collab.Link, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT `+linkColumns+`
-		  FROM collab_links
+		  FROM superagent_links
 		 WHERE tenant_id = $1
 		   AND (work_item_id = $2
 		        OR (from_type = 'work_item' AND from_id = $3)
@@ -868,7 +898,7 @@ func (s *Store) SourceEventSeen(ctx context.Context, tenantID uuid.UUID, sourceI
 	var exists bool
 	if err := s.pool.QueryRow(ctx, `
 		SELECT EXISTS (
-			SELECT 1 FROM collab_source_events
+			SELECT 1 FROM superagent_source_events
 			 WHERE tenant_id = $1 AND source_id = $2 AND event_id = $3
 		)`, tenantID, sourceID, eventID).Scan(&exists); err != nil {
 		return false, fmt.Errorf("store: source event seen: %w", err)
@@ -885,7 +915,7 @@ func (s *Store) RecordSourceEvent(ctx context.Context, event superagent.SeenEven
 		event.CreatedAt = time.Now().UTC()
 	}
 	_, err := s.pool.Exec(ctx, `
-		INSERT INTO collab_source_events
+		INSERT INTO superagent_source_events
 		    (tenant_id, source_id, event_id, kind, actor_id, thread_id, payload, decision, work_item_id, received_at, created_at)
 		VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9,$10,$11)
 		ON CONFLICT (tenant_id, source_id, event_id) DO NOTHING`,
@@ -901,7 +931,7 @@ func (s *Store) RecordSourceEvent(ctx context.Context, event superagent.SeenEven
 func (s *Store) GetSourceCursor(ctx context.Context, tenantID uuid.UUID, sourceID string) (string, error) {
 	var cursor string
 	err := s.pool.QueryRow(ctx, `
-		SELECT cursor FROM collab_source_cursors WHERE tenant_id = $1 AND source_id = $2`,
+		SELECT cursor FROM superagent_source_cursors WHERE tenant_id = $1 AND source_id = $2`,
 		tenantID, sourceID).Scan(&cursor)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", nil
@@ -918,7 +948,7 @@ func (s *Store) SetSourceCursor(ctx context.Context, tenantID uuid.UUID, sourceI
 		return collabError(collab.ErrTenantRequired, collab.CodeTenantRequired, "set_source_cursor", "tenant and source ids are required")
 	}
 	_, err := s.pool.Exec(ctx, `
-		INSERT INTO collab_source_cursors (tenant_id, source_id, cursor, updated_at)
+		INSERT INTO superagent_source_cursors (tenant_id, source_id, cursor, updated_at)
 		VALUES ($1,$2,$3,now())
 		ON CONFLICT (tenant_id, source_id) DO UPDATE SET cursor = EXCLUDED.cursor, updated_at = now()`,
 		tenantID, sourceID, cursor)
@@ -945,7 +975,7 @@ func (s *Store) CreateSubscription(ctx context.Context, subscription superagent.
 	}
 	subscription.UpdatedAt = now
 	row := s.pool.QueryRow(ctx, `
-		INSERT INTO collab_subscriptions
+		INSERT INTO superagent_subscriptions
 		    (tenant_id, subscription_id, work_item_id, source_id, thread_kind, thread_id, active, created_at, updated_at)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
 		ON CONFLICT (tenant_id, work_item_id, source_id, thread_id) DO NOTHING
@@ -965,7 +995,7 @@ func (s *Store) CreateSubscription(ctx context.Context, subscription superagent.
 func (s *Store) subscriptionByThread(ctx context.Context, tenantID, workItemID uuid.UUID, thread superagent.ThreadRef) (superagent.Subscription, error) {
 	row := s.pool.QueryRow(ctx, `
 		SELECT tenant_id, subscription_id, work_item_id, source_id, thread_kind, thread_id, active, created_at, updated_at
-		  FROM collab_subscriptions
+		  FROM superagent_subscriptions
 		 WHERE tenant_id = $1 AND work_item_id = $2 AND source_id = $3 AND thread_id = $4`,
 		tenantID, workItemID, thread.Source, thread.ID)
 	stored, err := scanSubscription(row)
@@ -978,7 +1008,7 @@ func (s *Store) subscriptionByThread(ctx context.Context, tenantID, workItemID u
 // UpdateSubscription replaces the active state of a subscription.
 func (s *Store) UpdateSubscription(ctx context.Context, subscription superagent.Subscription) (superagent.Subscription, error) {
 	row := s.pool.QueryRow(ctx, `
-		UPDATE collab_subscriptions
+		UPDATE superagent_subscriptions
 		   SET active = $3, thread_kind = $4, updated_at = now()
 		 WHERE tenant_id = $1 AND subscription_id = $2
 		RETURNING tenant_id, subscription_id, work_item_id, source_id, thread_kind, thread_id, active, created_at, updated_at`,
@@ -997,7 +1027,7 @@ func (s *Store) UpdateSubscription(ctx context.Context, subscription superagent.
 func (s *Store) ListSubscriptions(ctx context.Context, tenantID, workItemID uuid.UUID) ([]superagent.Subscription, error) {
 	return s.listSubscriptions(ctx, `
 		SELECT tenant_id, subscription_id, work_item_id, source_id, thread_kind, thread_id, active, created_at, updated_at
-		  FROM collab_subscriptions
+		  FROM superagent_subscriptions
 		 WHERE tenant_id = $1 AND work_item_id = $2
 		 ORDER BY created_at ASC, subscription_id ASC`, tenantID, workItemID)
 }
@@ -1006,7 +1036,7 @@ func (s *Store) ListSubscriptions(ctx context.Context, tenantID, workItemID uuid
 func (s *Store) ListThreadSubscriptions(ctx context.Context, tenantID uuid.UUID, thread superagent.ThreadRef) ([]superagent.Subscription, error) {
 	return s.listSubscriptions(ctx, `
 		SELECT tenant_id, subscription_id, work_item_id, source_id, thread_kind, thread_id, active, created_at, updated_at
-		  FROM collab_subscriptions
+		  FROM superagent_subscriptions
 		 WHERE tenant_id = $1 AND source_id = $2 AND thread_id = $3 AND active
 		 ORDER BY created_at ASC, subscription_id ASC`, tenantID, thread.Source, thread.ID)
 }
@@ -1061,7 +1091,7 @@ func (s *Store) EnqueueOutbox(ctx context.Context, message superagent.OutboxMess
 	}
 	message.UpdatedAt = now
 	row := s.pool.QueryRow(ctx, `
-		INSERT INTO collab_outbox
+		INSERT INTO superagent_outbox
 		    (tenant_id, message_id, work_item_id, attention_id, channel_id, thread_kind, thread_id,
 		     body, data, idempotency_key, status, attempts, next_attempt_at, last_error, created_at, updated_at)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10,$11,$12,$13,$14,$15,$16)
@@ -1087,7 +1117,7 @@ func (s *Store) outboxByIdempotency(ctx context.Context, tenantID uuid.UUID, key
 	row := s.pool.QueryRow(ctx, `
 		SELECT tenant_id, message_id, work_item_id, attention_id, channel_id, thread_kind, thread_id,
 		       body, data, idempotency_key, status, attempts, next_attempt_at, last_error, created_at, updated_at
-		  FROM collab_outbox WHERE tenant_id = $1 AND idempotency_key = $2`, tenantID, key)
+		  FROM superagent_outbox WHERE tenant_id = $1 AND idempotency_key = $2`, tenantID, key)
 	stored, err := scanOutbox(row)
 	if err != nil {
 		return superagent.OutboxMessage{}, fmt.Errorf("store: read idempotent outbox: %w", err)
@@ -1103,7 +1133,7 @@ func (s *Store) ListOutbox(ctx context.Context, tenantID uuid.UUID, status super
 	rows, err := s.pool.Query(ctx, `
 		SELECT tenant_id, message_id, work_item_id, attention_id, channel_id, thread_kind, thread_id,
 		       body, data, idempotency_key, status, attempts, next_attempt_at, last_error, created_at, updated_at
-		  FROM collab_outbox
+		  FROM superagent_outbox
 		 WHERE tenant_id = $1 AND ($2 = '' OR status = $2)
 		 ORDER BY created_at ASC, message_id ASC
 		 LIMIT $3`, tenantID, string(status), limit)
@@ -1125,7 +1155,7 @@ func (s *Store) ListOutbox(ctx context.Context, tenantID uuid.UUID, status super
 // UpdateOutbox replaces the delivery state of one message.
 func (s *Store) UpdateOutbox(ctx context.Context, message superagent.OutboxMessage) (superagent.OutboxMessage, error) {
 	row := s.pool.QueryRow(ctx, `
-		UPDATE collab_outbox
+		UPDATE superagent_outbox
 		   SET status = $3, attempts = $4, next_attempt_at = $5, last_error = $6, data = $7::jsonb, updated_at = now()
 		 WHERE tenant_id = $1 AND message_id = $2
 		RETURNING tenant_id, message_id, work_item_id, attention_id, channel_id, thread_kind, thread_id,
@@ -1173,7 +1203,7 @@ func (s *Store) Session(ctx context.Context, tenantID, sessionID uuid.UUID) (col
 	var state string
 	err := s.pool.QueryRow(ctx, `
 		SELECT tenant_id, session_id, parent_session_id, bot_id, mode_id, work_item_id, depth, state, created_at
-		  FROM collab_session_index WHERE tenant_id = $1 AND session_id = $2`,
+		  FROM superagent_session_index WHERE tenant_id = $1 AND session_id = $2`,
 		tenantID, sessionID).Scan(&ref.TenantID, &ref.SessionID, &parentID, &ref.BotID, &ref.ModeID,
 		&workItemID, &ref.Depth, &state, &ref.CreatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -1202,7 +1232,7 @@ func (s *Store) Put(ctx context.Context, ref collab.SessionRef) error {
 		ref.CreatedAt = time.Now().UTC()
 	}
 	_, err := s.pool.Exec(ctx, `
-		INSERT INTO collab_session_index
+		INSERT INTO superagent_session_index
 		    (tenant_id, session_id, parent_session_id, bot_id, mode_id, work_item_id, depth, state, created_at, updated_at)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,now())`,
 		ref.TenantID, ref.SessionID, nullableUUID(ref.ParentSessionID), ref.BotID, ref.ModeID,
@@ -1219,7 +1249,7 @@ func (s *Store) Put(ctx context.Context, ref collab.SessionRef) error {
 // SetState updates one tracked session's state.
 func (s *Store) SetState(ctx context.Context, tenantID, sessionID uuid.UUID, state collab.SessionState) error {
 	tag, err := s.pool.Exec(ctx, `
-		UPDATE collab_session_index SET state = $3, updated_at = now()
+		UPDATE superagent_session_index SET state = $3, updated_at = now()
 		 WHERE tenant_id = $1 AND session_id = $2`, tenantID, sessionID, string(state))
 	if err != nil {
 		return fmt.Errorf("store: set collab session state: %w", err)
@@ -1234,7 +1264,7 @@ func (s *Store) SetState(ctx context.Context, tenantID, sessionID uuid.UUID, sta
 // takeover of a pre-existing worker session).
 func (s *Store) SetWorkItem(ctx context.Context, tenantID, sessionID, workItemID uuid.UUID) error {
 	tag, err := s.pool.Exec(ctx, `
-		UPDATE collab_session_index SET work_item_id = $3, updated_at = now()
+		UPDATE superagent_session_index SET work_item_id = $3, updated_at = now()
 		 WHERE tenant_id = $1 AND session_id = $2`,
 		tenantID, sessionID, nullableUUID(workItemID))
 	if err != nil {
@@ -1251,7 +1281,7 @@ func (s *Store) SetWorkItem(ctx context.Context, tenantID, sessionID, workItemID
 func (s *Store) Children(ctx context.Context, tenantID, parentSessionID uuid.UUID) ([]collab.SessionRef, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT tenant_id, session_id, parent_session_id, bot_id, mode_id, work_item_id, depth, state, created_at
-		  FROM collab_session_index
+		  FROM superagent_session_index
 		 WHERE tenant_id = $1 AND parent_session_id = $2
 		 ORDER BY created_at, session_id`,
 		tenantID, parentSessionID)
@@ -1292,7 +1322,7 @@ func (s *Store) InterruptActiveCollabSessions(ctx context.Context, tenantID uuid
 		return 0, collabError(collab.ErrTenantRequired, collab.CodeTenantRequired, "interrupt_collab_sessions", "tenant and mode are required")
 	}
 	tag, err := s.pool.Exec(ctx, `
-		UPDATE collab_session_index
+		UPDATE superagent_session_index
 		   SET state = 'cancelled', updated_at = now()
 		 WHERE tenant_id = $1 AND mode_id = $2 AND state = 'active'
 		   AND session_id <> $3`,
@@ -1307,7 +1337,7 @@ func (s *Store) InterruptActiveCollabSessions(ctx context.Context, tenantID uuid
 func (s *Store) ActiveChildren(ctx context.Context, tenantID, parentSessionID uuid.UUID) (int, error) {
 	var count int
 	if err := s.pool.QueryRow(ctx, `
-		SELECT count(*) FROM collab_session_index
+		SELECT count(*) FROM superagent_session_index
 		 WHERE tenant_id = $1 AND parent_session_id = $2 AND state = 'active'`,
 		tenantID, parentSessionID).Scan(&count); err != nil {
 		return 0, fmt.Errorf("store: count active children: %w", err)
@@ -1319,7 +1349,7 @@ func (s *Store) ActiveChildren(ctx context.Context, tenantID, parentSessionID uu
 func (s *Store) ActiveInMode(ctx context.Context, tenantID uuid.UUID, modeID string) (int, error) {
 	var count int
 	if err := s.pool.QueryRow(ctx, `
-		SELECT count(*) FROM collab_session_index
+		SELECT count(*) FROM superagent_session_index
 		 WHERE tenant_id = $1 AND mode_id = $2 AND state = 'active'`,
 		tenantID, modeID).Scan(&count); err != nil {
 		return 0, fmt.Errorf("store: count active mode sessions: %w", err)
@@ -1342,7 +1372,7 @@ func (s *Store) ListAttentionsByStatus(ctx context.Context, tenantID uuid.UUID, 
 	return s.listAttentions(ctx, `
 		SELECT tenant_id, attention_id, work_item_id, assignment_id, mode_id, session_id, request_id,
 		       kind, prompt, options, allow_free_text, route, channel, status, answer, created_at, deadline
-		  FROM collab_attentions
+		  FROM superagent_attentions
 		 WHERE tenant_id = $1
 		   AND (cardinality($2::text[]) = 0 OR status = ANY($2::text[]))
 		   AND ($3 = '' OR mode_id = $3)
@@ -1459,4 +1489,13 @@ func isUniqueViolation(err error) bool {
 		return pgErr.SQLState() == "23505"
 	}
 	return false
+}
+
+// nullableUUID stores the zero uuid as SQL NULL: the superagent tables use NULL
+// for "no owner/session" so a partial index and a FK can tell the two apart.
+func nullableUUID(id uuid.UUID) any {
+	if id == uuid.Nil {
+		return nil
+	}
+	return id
 }

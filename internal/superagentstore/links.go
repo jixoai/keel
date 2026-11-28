@@ -1,4 +1,4 @@
-// board_links persistence (change keel-board-v1, phase 1 11.1-11.3).
+// superagent_board_links persistence (change keel-board-v1, phase 1 11.1-11.3).
 //
 // The table maps one superagent record to the board artifact its adapter
 // created. It is keel's row, not the board's: the board log remains the board
@@ -6,7 +6,7 @@
 // key (tenant, source, source_id, kind) is the mirror's idempotency, so a
 // repeated sync or a restart finds the existing task/reply instead of
 // appending a second one.
-package store
+package superagentstore
 
 import (
 	"context"
@@ -48,15 +48,15 @@ type BoardLink struct {
 func (l BoardLink) Validate() error {
 	switch {
 	case l.TenantID == uuid.Nil:
-		return fmt.Errorf("store: board link tenant is required")
+		return fmt.Errorf("superagentstore: board link tenant is required")
 	case strings.TrimSpace(l.Source) == "":
-		return fmt.Errorf("store: board link source is required")
+		return fmt.Errorf("superagentstore: board link source is required")
 	case strings.TrimSpace(l.SourceID) == "":
-		return fmt.Errorf("store: board link source id is required")
+		return fmt.Errorf("superagentstore: board link source id is required")
 	case strings.TrimSpace(l.Kind) == "":
-		return fmt.Errorf("store: board link kind is required")
+		return fmt.Errorf("superagentstore: board link kind is required")
 	case l.BoardTaskID == 0:
-		return fmt.Errorf("store: board link board task id is required")
+		return fmt.Errorf("superagentstore: board link board task id is required")
 	}
 	return nil
 }
@@ -73,7 +73,7 @@ func (s *Store) PutBoardLink(ctx context.Context, link BoardLink) (BoardLink, er
 		return BoardLink{}, err
 	}
 	row, err := scanBoardLink(s.pool.QueryRow(ctx, `
-		INSERT INTO board_links
+		INSERT INTO superagent_board_links
 		    (tenant_id, source, source_id, kind, board_task_id, claim_epoch)
 		VALUES ($1, $2, $3, $4, $5, $6)
 		ON CONFLICT (tenant_id, source, source_id, kind) DO NOTHING
@@ -85,17 +85,17 @@ func (s *Store) PutBoardLink(ctx context.Context, link BoardLink) (BoardLink, er
 			return BoardLink{}, err
 		}
 		if !found {
-			return BoardLink{}, fmt.Errorf("store: board link %s/%s/%s disappeared during insert",
+			return BoardLink{}, fmt.Errorf("superagentstore: board link %s/%s/%s disappeared during insert",
 				link.Source, link.SourceID, link.Kind)
 		}
 		if existing.BoardTaskID != link.BoardTaskID {
-			return BoardLink{}, fmt.Errorf("store: board link %s/%s/%s already maps task %d, not %d",
+			return BoardLink{}, fmt.Errorf("superagentstore: board link %s/%s/%s already maps task %d, not %d",
 				link.Source, link.SourceID, link.Kind, existing.BoardTaskID, link.BoardTaskID)
 		}
 		return existing, nil
 	}
 	if err != nil {
-		return BoardLink{}, fmt.Errorf("store: put board link: %w", err)
+		return BoardLink{}, fmt.Errorf("superagentstore: put board link: %w", err)
 	}
 	return row, nil
 }
@@ -104,18 +104,18 @@ func (s *Store) PutBoardLink(ctx context.Context, link BoardLink) (BoardLink, er
 // the same not-found answer.
 func (s *Store) GetBoardLink(ctx context.Context, tenantID uuid.UUID, source, sourceID, kind string) (BoardLink, bool, error) {
 	if tenantID == uuid.Nil {
-		return BoardLink{}, false, fmt.Errorf("store: board link tenant is required")
+		return BoardLink{}, false, fmt.Errorf("superagentstore: board link tenant is required")
 	}
 	row, err := scanBoardLink(s.pool.QueryRow(ctx, `
 		SELECT tenant_id, source, source_id, kind, board_task_id, claim_epoch, created_at, updated_at
-		  FROM board_links
+		  FROM superagent_board_links
 		 WHERE tenant_id = $1 AND source = $2 AND source_id = $3 AND kind = $4`,
 		tenantID, strings.TrimSpace(source), strings.TrimSpace(sourceID), strings.TrimSpace(kind)))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return BoardLink{}, false, nil
 	}
 	if err != nil {
-		return BoardLink{}, false, fmt.Errorf("store: get board link: %w", err)
+		return BoardLink{}, false, fmt.Errorf("superagentstore: get board link: %w", err)
 	}
 	return row, true, nil
 }
@@ -125,18 +125,18 @@ func (s *Store) GetBoardLink(ctx context.Context, tenantID uuid.UUID, source, so
 // supervisor before the board changes.
 func (s *Store) GetBoardLinkByTask(ctx context.Context, tenantID uuid.UUID, source, kind string, boardTaskID uint64) (BoardLink, bool, error) {
 	if tenantID == uuid.Nil {
-		return BoardLink{}, false, fmt.Errorf("store: board link tenant is required")
+		return BoardLink{}, false, fmt.Errorf("superagentstore: board link tenant is required")
 	}
 	row, err := scanBoardLink(s.pool.QueryRow(ctx, `
 		SELECT tenant_id, source, source_id, kind, board_task_id, claim_epoch, created_at, updated_at
-		  FROM board_links
+		  FROM superagent_board_links
 		 WHERE tenant_id = $1 AND source = $2 AND kind = $3 AND board_task_id = $4`,
 		tenantID, strings.TrimSpace(source), strings.TrimSpace(kind), boardTaskID))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return BoardLink{}, false, nil
 	}
 	if err != nil {
-		return BoardLink{}, false, fmt.Errorf("store: get board link by task: %w", err)
+		return BoardLink{}, false, fmt.Errorf("superagentstore: get board link by task: %w", err)
 	}
 	return row, true, nil
 }
@@ -145,15 +145,15 @@ func (s *Store) GetBoardLinkByTask(ctx context.Context, tenantID uuid.UUID, sour
 // It never moves the mapping to another task.
 func (s *Store) SetBoardLinkClaimEpoch(ctx context.Context, tenantID uuid.UUID, source, sourceID, kind string, epoch uint64) error {
 	if tenantID == uuid.Nil {
-		return fmt.Errorf("store: board link tenant is required")
+		return fmt.Errorf("superagentstore: board link tenant is required")
 	}
 	tag, err := s.pool.Exec(ctx, `
-		UPDATE board_links
+		UPDATE superagent_board_links
 		   SET claim_epoch = $5, updated_at = now()
 		 WHERE tenant_id = $1 AND source = $2 AND source_id = $3 AND kind = $4`,
 		tenantID, strings.TrimSpace(source), strings.TrimSpace(sourceID), strings.TrimSpace(kind), epoch)
 	if err != nil {
-		return fmt.Errorf("store: set board link claim epoch: %w", err)
+		return fmt.Errorf("superagentstore: set board link claim epoch: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
 		return ErrNotFound
@@ -173,11 +173,11 @@ func scanBoardLink(row boardLinkScanner) (BoardLink, error) {
 		return BoardLink{}, err
 	}
 	if taskID < 0 {
-		return BoardLink{}, fmt.Errorf("store: board link task id is negative")
+		return BoardLink{}, fmt.Errorf("superagentstore: board link task id is negative")
 	}
 	link.BoardTaskID = uint64(taskID)
 	if epoch < 0 {
-		return BoardLink{}, fmt.Errorf("store: board link claim epoch is negative")
+		return BoardLink{}, fmt.Errorf("superagentstore: board link claim epoch is negative")
 	}
 	link.ClaimEpoch = uint64(epoch)
 	return link, nil

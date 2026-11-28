@@ -1,21 +1,13 @@
-// Package superagentboard is the superagent -> board adapter (change
-// keel-board-v1, phase 1 11.1-11.6).
+// Package superagentplugin is the superagent plugin (change keel-plugin-split).
 //
-// Direction and truth:
-//
-//   - mirror (1a): Tickets, Assignments, Attentions and worker reports are
-//     projected into board task threads. board_links is the durable identity
-//     map. collab_* stays the supervisor's truth; this package only appends
-//     board events through the board log API.
-//   - command bridge (1b): a board action on a mirrored task calls the
-//     supervisor's existing API first and mirrors the resulting truth only
-//     after it succeeded. A rejection or timeout leaves the board unchanged.
-//   - switch to board as truth (1c) is deliberately out of scope.
-//
-// The package never writes collab_* rows, never deletes board history and never
-// starts a second GitHub comment sync: mirrored messages are written with
-// NoSync and the adapter records the external event id in board_links.
-package superagentboard
+// The plugin owns its ticket/assignment/attention/outbox/subscription/cursor/
+// report/lease rows through internal/superagentstore, declares
+// `requires: [board]`, and reaches the task/channel/thread substrate only
+// through the board plugin's Service interface. It never reads a board table
+// and never imports a board store type. The legacy superagentboard bridge and
+// mirror package is deleted; the writer below is the only integration and it is
+// append-only on the board side.
+package superagentplugin
 
 import (
 	"context"
@@ -38,15 +30,11 @@ const DefaultChannel = "superagent"
 // mirrored artifact.
 const BoardSource = "superagent"
 
-// SuperagentConfig is the tenant's `board.superagent` section. All switches
-// default to false: a tenant that never opts in gets no board writes and no
-// command bridge.
+// SuperagentConfig is the tenant's `board.superagent` section. Both switches
+// default to false: a tenant that never opts in gets no board writes.
 type SuperagentConfig struct {
 	// Mirror projects supervisor records into the board.
 	Mirror bool `json:"mirror"`
-	// Bridge routes board actions on mirrored tasks through the supervisor.
-	// It only has an effect when Mirror produced the link.
-	Bridge bool `json:"bridge"`
 	// Channel is the board channel (path) mirrored tickets use.
 	Channel string `json:"channel"`
 }
@@ -65,14 +53,14 @@ func (c SuperagentConfig) Validate() (SuperagentConfig, error) {
 		channel = DefaultChannel
 	}
 	if err := protocol.ValidateChannel(channel); err != nil {
-		return SuperagentConfig{}, fmt.Errorf("superagentboard: board.superagent.channel: %w", err)
+		return SuperagentConfig{}, fmt.Errorf("superagentplugin: board.superagent.channel: %w", err)
 	}
 	c.Channel = channel
 	return c, nil
 }
 
-// Enabled reports whether either direction is on.
-func (c SuperagentConfig) Enabled() bool { return c.Mirror || c.Bridge }
+// Enabled reports whether board projection is on.
+func (c SuperagentConfig) Enabled() bool { return c.Mirror }
 
 // Document is the slice of the tenant configuration document this package
 // reads. Other sections are ignored, so the document schema stays owned by its
@@ -93,10 +81,9 @@ func ParseDocument(raw json.RawMessage) (SuperagentConfig, error) {
 	}
 	var document Document
 	if err := json.Unmarshal(raw, &document); err != nil {
-		return SuperagentConfig{}, fmt.Errorf("superagentboard: tenant config is not valid JSON: %w", err)
+		return SuperagentConfig{}, fmt.Errorf("superagentplugin: tenant config is not valid JSON: %w", err)
 	}
 	config.Mirror = document.Board.Superagent.Mirror
-	config.Bridge = document.Board.Superagent.Bridge
 	if strings.TrimSpace(document.Board.Superagent.Channel) != "" {
 		config.Channel = document.Board.Superagent.Channel
 	}
@@ -119,17 +106,17 @@ type StoreConfigReader struct {
 // SuperagentConfig implements ConfigReader.
 func (r StoreConfigReader) SuperagentConfig(ctx context.Context, tenantID uuid.UUID) (SuperagentConfig, error) {
 	if r.Store == nil {
-		return SuperagentConfig{}, errors.New("superagentboard: the config store is not wired")
+		return SuperagentConfig{}, errors.New("superagentplugin: the config store is not wired")
 	}
 	if tenantID == uuid.Nil {
-		return SuperagentConfig{}, errors.New("superagentboard: a tenant is required")
+		return SuperagentConfig{}, errors.New("superagentplugin: a tenant is required")
 	}
 	record, err := r.Store.GetTenantConfig(ctx, tenantID)
 	if errors.Is(err, store.ErrNoTenant) {
 		return DefaultSuperagentConfig().Validate()
 	}
 	if err != nil {
-		return SuperagentConfig{}, fmt.Errorf("superagentboard: read tenant config: %w", err)
+		return SuperagentConfig{}, fmt.Errorf("superagentplugin: read tenant config: %w", err)
 	}
 	return ParseDocument(record.Config)
 }

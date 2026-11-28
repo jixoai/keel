@@ -217,14 +217,15 @@ env 文件路径：`FDE2E_ENV_PERSONAL`，默认取主仓根目录的 `.env.pers
   SSE live、sync 状态与 watcher/schedule 启停；五态、390/768/1024/1440、键盘可达。
   旧 `/superagent` web/TUI 页面、只读数据源与 `/v1/superagent` 只读/运营 API 已删除；
   旧脚本归档在 `scripts/archive/retired-superagent/`，旧地址返回 404 历史页。
-- **superagent 镜像/命令桥**：tenant 文档 `board.superagent.{mirror,bridge,channel}`（默认
-  `false/false/"superagent"`）。`mirror=true` 把 Ticket/Assignment/Attention/report 单向投影为
-  board 任务/claim/blocked/回复（`board_links` 幂等、`KEEL_SECRET_KEY` 派生确定性 claim token，
-  缺失即 fail closed）；归档 Ticket 也导入为只读历史任务（`board.archived=true`，`moves=[]`）；
-  `bridge=true` 让 board 上的 claim/complete/fail/block/unblock/assign/
-  cancel 先调 supervisor 既有 API，成功后才写 board。superagent 的 `collab_*` 仍是真值，
-  board 不反写；旧 `/superagent` 看板与 `/v1/superagent` 只读/运营 API 已删除（破坏性变更），
-  board 是唯一任务面。
+- **superagent 插件**：`keel.superagent` 声明 `requires: [board]`，自有
+  `superagent_*` 表（ticket/assignment/attention/outbox/subscription/cursor/report/lease）
+  与 `superagent_board_links` 身份映射；board 缺失/禁用时插件是 `PENDING`，不会半装载。
+  tenant 文档 `board.superagent.{mirror,channel}`（默认 `false/"superagent"`）只控制
+  Ticket→board 投影：Ticket/Assignment/Attention/report 单向写为 board 任务/claim/blocked/
+  回复（`KEEL_SECRET_KEY` 派生确定性 claim token，缺失即 fail closed），board 任务也会经
+  board 服务导入为 ticket + open assignment。旧 `superagentboard` 镜像/命令桥已删除
+  （破坏性变更）：board 动作不再回呼 supervisor，superagent 的 ticket 仍是真值，
+  `/v1/superagent` 运营 API 保留在 superagent 插件服务上；board 是唯一任务面。
 
 运行细节（DSN 角色、迁移、tenant 开关、entry/secret 配置、验收与 E2E 命令）见
 [docs/RUNBOOK.md](docs/RUNBOOK.md#boardkeel-board-v011)。Phase 2 最终验收：

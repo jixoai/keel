@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -12,15 +12,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/uuid"
-
 	boardlog "github.com/jixoai/keel-board/log"
 	"github.com/jixoai/keel-board/protocol"
-	"github.com/jixoai/keel/internal/access"
-	"github.com/jixoai/keel/internal/accesswire"
 	"github.com/jixoai/keel/internal/auth"
 	keelstore "github.com/jixoai/keel/internal/store"
-	"github.com/jixoai/keel/internal/superagentboard"
 )
 
 // The Phase 2 wiring tests: the mount layer must make the board an operable
@@ -37,12 +32,7 @@ type taskViewJSON struct {
 	Claim    *claimJSON `json:"claim"`
 	Moves    []string   `json:"moves"`
 	Archived bool       `json:"archived"`
-	Mirror   *struct {
-		Source   string `json:"source"`
-		ReadOnly bool   `json:"readOnly"`
-		Bridge   bool   `json:"bridge"`
-	} `json:"mirror"`
-	Origin *struct {
+	Origin   *struct {
 		Platform string `json:"platform"`
 		Ref      string `json:"ref"`
 	} `json:"origin"`
@@ -176,6 +166,30 @@ func keysOf(set map[string]bool) []string {
 	return out
 }
 
+func (e *testEnv) emitArchivedLabel(t *testing.T, taskID string) {
+	t.Helper()
+	id := parseTaskRef(t, taskID)
+	err := e.surf.Board().Update(context.Background(), e.tenant.String(), boardlog.UpdateOptions{}, func(tx *boardlog.Tx) error {
+		tx.Emit(boardlog.EventLabelsChanged, &boardlog.LabelsChangedPayload{
+			ID: id, Thread: boardlog.ThreadKey(id), Set: map[string]string{ArchivedLabel: "true"},
+			By: boardlog.Author{Actor: "system"},
+		})
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("emit archived label: %v", err)
+	}
+}
+
+func parseTaskRef(t *testing.T, ref string) uint64 {
+	t.Helper()
+	var id uint64
+	if _, err := fmt.Sscanf(strings.TrimSpace(ref), "%d", &id); err != nil || id == 0 {
+		t.Fatalf("task ref %q is not a number", ref)
+	}
+	return id
+}
+
 func (e *testEnv) emitClaim(t *testing.T, taskID string, epoch uint64, until time.Time, actor string) {
 	t.Helper()
 	id := parseTaskRef(t, taskID)
@@ -191,80 +205,6 @@ func (e *testEnv) emitClaim(t *testing.T, taskID string, epoch uint64, until tim
 	if err != nil {
 		t.Fatalf("emit claim: %v", err)
 	}
-}
-
-func (e *testEnv) emitArchivedLabel(t *testing.T, taskID string) {
-	t.Helper()
-	id := parseTaskRef(t, taskID)
-	author := boardlog.Author{Actor: AccountActorID(e.alice.record.ID), Principal: AccountActorID(e.alice.record.ID)}
-	err := e.surf.Board().Update(context.Background(), e.tenant.String(), boardlog.UpdateOptions{}, func(tx *boardlog.Tx) error {
-		tx.Emit(boardlog.EventLabelsChanged, &boardlog.LabelsChangedPayload{
-			ID: id, Thread: boardlog.ThreadKey(id), Set: map[string]string{ArchivedLabel: "true"}, By: author,
-		})
-		return nil
-	})
-	if err != nil {
-		t.Fatalf("emit archived label: %v", err)
-	}
-}
-
-// emitMirrorTask writes the root exactly as the superagent mirror does: a
-// noSync message with source/ticket labels, then its task.created event.
-func (e *testEnv) emitMirrorTask(t *testing.T, channel, text string) string {
-	t.Helper()
-	author := boardlog.Author{Actor: AccountActorID(e.alice.record.ID), Principal: AccountActorID(e.alice.record.ID)}
-	var taskID uint64
-	err := e.surf.Board().Update(context.Background(), e.tenant.String(), boardlog.UpdateOptions{}, func(tx *boardlog.Tx) error {
-		taskID = tx.NextID(0)
-		tx.Emit(boardlog.EventMessagePosted, &boardlog.MessagePostedPayload{
-			ID: taskID, Channel: channel, Text: text,
-			Labels: map[string]string{"source": "superagent", "ticket": "ticket-1"},
-			NoSync: true, By: author,
-		})
-		tx.Emit(boardlog.EventTaskCreated, &boardlog.TaskCreatedPayload{
-			ID: taskID, Thread: boardlog.ThreadKey(taskID), By: author,
-		})
-		return nil
-	})
-	if err != nil {
-		t.Fatalf("emit mirror task: %v", err)
-	}
-	return protocol.FormatRef(taskID)
-}
-
-func parseTaskRef(t *testing.T, ref string) uint64 {
-	t.Helper()
-	id, ok := protocol.ParseRef(ref)
-	if !ok {
-		t.Fatalf("bad task ref %q", ref)
-	}
-	return id
-}
-
-type fakeMirrorFact struct {
-	mirrored bool
-	source   string
-	readOnly bool
-	bridge   bool
-	err      error
-}
-
-type fakeMirrorFacts struct {
-	tasks        map[uint64]fakeMirrorFact
-	canBridge    bool
-	canBridgeErr error
-}
-
-func (f fakeMirrorFacts) TaskMirror(_ context.Context, _ uuid.UUID, taskID uint64) (bool, string, bool, bool, error) {
-	fact, ok := f.tasks[taskID]
-	if !ok {
-		return false, "", true, false, nil
-	}
-	return fact.mirrored, fact.source, fact.readOnly, fact.bridge, fact.err
-}
-
-func (f fakeMirrorFacts) CanBridge(_ context.Context, _ uuid.UUID) (bool, error) {
-	return f.canBridge, f.canBridgeErr
 }
 
 func TestBoardMeIdentityPermissionsAndTenancy(t *testing.T) {
@@ -526,110 +466,6 @@ func TestTaskMovesMatrixAcrossStatesAndRoles(t *testing.T) {
 	}
 }
 
-func TestTaskMovesMirrorFacts(t *testing.T) {
-	env := newTestEnv(t, nil)
-	env.relation(env.tenant, "work", "owner", env.alice.record.ID)
-	env.relation(env.tenant, "work", "editor", env.bob.record.ID)
-	server := env.server()
-	env.createChannel(t, server, "alice", "work")
-	mirrorID := env.emitMirrorTask(t, "work", "mirrored ticket")
-	id := parseTaskRef(t, mirrorID)
-
-	// A mirror-looking task with no bridge fact is read-only, never a board
-	// task with invented actions.
-	message := env.taskThread(t, server, "alice", mirrorID)
-	if message.Task.Mirror == nil || !message.Task.Mirror.ReadOnly || message.Task.Mirror.Source != "superagent" {
-		t.Fatalf("mirror fact = %+v", message.Task.Mirror)
-	}
-	if message.Task.Origin == nil || message.Task.Origin.Ref != "ticket-1" {
-		t.Fatalf("origin = %+v", message.Task.Origin)
-	}
-	if len(message.Task.Moves) != 0 {
-		t.Fatalf("read-only mirror moves = %v", message.Task.Moves)
-	}
-
-	// The bridge is configured but this caller lacks tenant task.write: the
-	// mirror config alone must not advertise actions the supervisor would
-	// refuse.
-	env.surf.SetMirrorFacts(fakeMirrorFacts{
-		tasks: map[uint64]fakeMirrorFact{id: {mirrored: true, source: "superagent", readOnly: false, bridge: true}},
-	})
-	message = env.taskThread(t, server, "alice", mirrorID)
-	if message.Task.Mirror == nil || !message.Task.Mirror.ReadOnly || message.Task.Mirror.Bridge {
-		t.Fatalf("no task.write mirror fact = %+v", message.Task.Mirror)
-	}
-	if len(message.Task.Moves) != 0 {
-		t.Fatalf("no task.write mirror moves = %v", message.Task.Moves)
-	}
-
-	// A failed CanBridge probe is also read-only, never an invented action.
-	env.surf.SetMirrorFacts(fakeMirrorFacts{
-		tasks:        map[uint64]fakeMirrorFact{id: {mirrored: true, source: "superagent", readOnly: false, bridge: true}},
-		canBridgeErr: errors.New("task.write probe failed"),
-	})
-	message = env.taskThread(t, server, "alice", mirrorID)
-	if message.Task.Mirror == nil || !message.Task.Mirror.ReadOnly || len(message.Task.Moves) != 0 {
-		t.Fatalf("failed probe mirror = %+v moves=%v", message.Task.Mirror, message.Task.Moves)
-	}
-
-	// Bridge configured and the caller holds tenant task.write: only the
-	// actions the command bridge routes.
-	env.surf.SetMirrorFacts(fakeMirrorFacts{
-		tasks:     map[uint64]fakeMirrorFact{id: {mirrored: true, source: "superagent", readOnly: false, bridge: true}},
-		canBridge: true,
-	})
-	message = env.taskThread(t, server, "alice", mirrorID)
-	if message.Task.Mirror == nil || message.Task.Mirror.ReadOnly || !message.Task.Mirror.Bridge {
-		t.Fatalf("bridge mirror fact = %+v", message.Task.Mirror)
-	}
-	wantMoves(t, moveSet(t, message.Task), "claim", "block", "assign", "cancel")
-	wantNoMoves(t, moveSet(t, message.Task), "reply", "needs", "renew", "release", "reopen", "complete", "fail")
-
-	// An archived mirror is read-only regardless of the bridge.
-	env.emitArchivedLabel(t, mirrorID)
-	message = env.taskThread(t, server, "alice", mirrorID)
-	if !message.Task.Archived || len(message.Task.Moves) != 0 {
-		t.Fatalf("archived mirror = archived=%v moves=%v", message.Task.Archived, message.Task.Moves)
-	}
-
-	// A normal task with source/ticket labels but no noSync is not a mirror.
-	normal := env.createTask(t, server, "alice", "work", "normal")
-	message = env.taskThread(t, server, "alice", normal)
-	if message.Task.Mirror != nil {
-		t.Fatalf("normal task reported mirror: %+v", message.Task.Mirror)
-	}
-}
-
-// pgTaskWriteGate mirrors cmd/keel's superagentOperator.AuthorizeTaskWrite
-// without importing package main: the caller's own effective grants must hold
-// task.write at tenant scope. The real PG fixture supplies the tenant-admin
-// and bot-operator group grants, so the scope distinction is the production
-// one rather than a hand-written boolean.
-type pgTaskWriteGate struct {
-	bridge *accesswire.Bridge
-}
-
-func (g pgTaskWriteGate) AuthorizeTaskWrite(ctx context.Context, tenantID uuid.UUID) error {
-	if g.bridge == nil {
-		return errors.New("operator unavailable")
-	}
-	principal, err := g.bridge.Principal(ctx, tenantID)
-	if err != nil {
-		return err
-	}
-	effective, err := g.bridge.Effective(ctx, principal)
-	if err != nil {
-		return err
-	}
-	scope, held := effective.ScopeOf(access.KeyTaskWrite)
-	if !held || !scope.Covers(access.ScopeTenant) {
-		return errors.New("task.write at tenant scope is required")
-	}
-	return nil
-}
-
-// getAs issues a GET with an explicit test principal, for accounts created by
-// this test rather than the fixed fixture principals.
 func (e *testEnv) getAs(t *testing.T, record keelstore.AccountRecord, path string) response {
 	t.Helper()
 	request := httptest.NewRequest(http.MethodGet, path, nil)
@@ -668,155 +504,6 @@ func (e *testEnv) doVia(t *testing.T, handler http.Handler, record keelstore.Acc
 // task.write reaches tenant scope. tenant-admin has that grant and sees the
 // bridged claim; bot-operator only has team task.write, so its mirror is
 // read-only with no moves instead of an action that would 403 at the bridge.
-func TestTaskMovesMirrorRequiresTenantTaskWrite(t *testing.T) {
-	env := newTestEnv(t, nil)
-	ctx := context.Background()
-	admin := env.account(env.tenant, "tenantadmin", "human")
-	operator := env.account(env.tenant, "botoperator", "human")
-	for _, member := range []struct {
-		account keelstore.AccountRecord
-		group   string
-	}{
-		{admin.record, "tenant-admin"},
-		{operator.record, "bot-operator"},
-	} {
-		if _, err := env.st.AddPermissionGroupMember(ctx, env.tenant,
-			access.BuiltinGroupID(env.tenant, member.group), member.account.ID, env.alice.record.ID); err != nil {
-			t.Fatalf("add %s to %s: %v", member.account.Username, member.group, err)
-		}
-	}
-	env.relation(env.tenant, "work", "editor", admin.record.ID)
-	env.relation(env.tenant, "work", "editor", operator.record.ID)
-
-	mirrorID := env.emitMirrorTask(t, "work", "mirrored ticket")
-	id := parseTaskRef(t, mirrorID)
-	if _, err := env.st.PutBoardLink(ctx, keelstore.BoardLink{
-		TenantID: env.tenant, Source: "superagent", SourceID: "ticket-1",
-		Kind: keelstore.BoardLinkTicket, BoardTaskID: id,
-	}); err != nil {
-		t.Fatalf("put board link: %v", err)
-	}
-	tokens, err := superagentboard.NewTokenSource("test-secret")
-	if err != nil {
-		t.Fatalf("token source: %v", err)
-	}
-	bridge := &superagentboard.Bridge{Operator: pgTaskWriteGate{bridge: env.bridge}}
-	bridge.Attach(env.st,
-		superagentboard.StaticConfigReader{Config: superagentboard.SuperagentConfig{
-			Mirror: true, Bridge: true, Channel: "work",
-		}},
-		&superagentboard.Mirror{TenantID: env.tenant, Secret: tokens},
-		&superagentboard.SupervisorCommands{},
-		&superagentboard.LogBoard{Board: env.surf.Board()},
-	)
-	env.surf.SetMirrorFacts(bridge)
-
-	adminView := env.getAs(t, admin.record, "/v1/board/messages/"+mirrorID)
-	var adminThread struct {
-		Message messageJSON `json:"message"`
-	}
-	env.decode(t, adminView, &adminThread)
-	if adminThread.Message.Task == nil || adminThread.Message.Task.Mirror == nil {
-		t.Fatalf("tenant-admin task = %s", adminView.body)
-	}
-	if adminThread.Message.Task.Mirror.ReadOnly || !adminThread.Message.Task.Mirror.Bridge {
-		t.Fatalf("tenant-admin mirror = %+v", adminThread.Message.Task.Mirror)
-	}
-	wantMoves(t, moveSet(t, adminThread.Message.Task), "claim")
-	wantNoMoves(t, moveSet(t, adminThread.Message.Task), "reply", "complete", "renew", "release")
-
-	operatorView := env.getAs(t, operator.record, "/v1/board/messages/"+mirrorID)
-	var operatorThread struct {
-		Message messageJSON `json:"message"`
-	}
-	env.decode(t, operatorView, &operatorThread)
-	if operatorThread.Message.Task == nil || operatorThread.Message.Task.Mirror == nil {
-		t.Fatalf("bot-operator task = %s", operatorView.body)
-	}
-	if !operatorThread.Message.Task.Mirror.ReadOnly || operatorThread.Message.Task.Mirror.Bridge {
-		t.Fatalf("bot-operator mirror = %+v", operatorThread.Message.Task.Mirror)
-	}
-	if len(operatorThread.Message.Task.Moves) != 0 {
-		t.Fatalf("bot-operator moves = %v, want none", operatorThread.Message.Task.Moves)
-	}
-}
-
-// TestMirroredThreadsReadOnlyWithoutSupervisor pins the guard-only mount: the
-// bridge is constructed before a supervisor exists, so mirror/commands are nil
-// while links/config/board are attached. A linked mirrored thread must reject
-// reply/edit/delete and task actions as mirror_read_only, while an ordinary
-// thread reply still reaches the board.
-func TestMirroredThreadsReadOnlyWithoutSupervisor(t *testing.T) {
-	env := newTestEnv(t, nil)
-	ctx := context.Background()
-	env.relation(env.tenant, "work", "owner", env.alice.record.ID)
-	normalServer := env.server()
-	normalID := env.createTask(t, normalServer, "alice", "work", "normal task")
-	mirrorID := env.emitMirrorTask(t, "work", "mirrored ticket")
-	id := parseTaskRef(t, mirrorID)
-	if _, err := env.st.PutBoardLink(ctx, keelstore.BoardLink{
-		TenantID: env.tenant, Source: "superagent", SourceID: "ticket-1",
-		Kind: keelstore.BoardLinkTicket, BoardTaskID: id,
-	}); err != nil {
-		t.Fatalf("put board link: %v", err)
-	}
-
-	guard := &superagentboard.Bridge{
-		Next: env.surf, Identity: env.surf.Identity(), Authorizer: env.surf.Authorizer(),
-	}
-	guard.AttachGuard(env.st, superagentboard.StoreConfigReader{Store: env.st},
-		&superagentboard.LogBoard{Board: env.surf.Board()})
-	env.surf.SetMirrorFacts(guard)
-
-	mirrored, source, readOnly, bridge, err := guard.TaskMirror(ctx, env.tenant, id)
-	if err != nil || !mirrored || source != "superagent" || !readOnly || bridge {
-		t.Fatalf("guard TaskMirror = mirrored=%v source=%q readOnly=%v bridge=%v err=%v",
-			mirrored, source, readOnly, bridge, err)
-	}
-	if canBridge, err := guard.CanBridge(ctx, env.tenant); err != nil || canBridge {
-		t.Fatalf("guard CanBridge = %v/%v, want false", canBridge, err)
-	}
-
-	alice := env.alice.record
-	reply := env.doVia(t, guard, alice, http.MethodPost, "/v1/board/messages",
-		map[string]any{"re": mirrorID, "text": "reply must not land"})
-	if reply.status != http.StatusConflict || !containsCode(reply.body, "mirror_read_only") {
-		t.Fatalf("mirrored reply = %d %s", reply.status, reply.body)
-	}
-	edit := env.doVia(t, guard, alice, http.MethodPost, "/v1/board/messages/"+mirrorID+"/edit",
-		map[string]any{"text": "edit must not land"})
-	if edit.status != http.StatusConflict || !containsCode(edit.body, "mirror_read_only") {
-		t.Fatalf("mirrored edit = %d %s", edit.status, edit.body)
-	}
-	claim := env.doVia(t, guard, alice, http.MethodPost, "/v1/board/tasks/"+mirrorID+"/claim", map[string]any{})
-	if claim.status != http.StatusConflict || !containsCode(claim.body, "mirror_read_only") {
-		t.Fatalf("mirrored claim without supervisor = %d %s", claim.status, claim.body)
-	}
-
-	// A normal thread is not mirrored: the same guard forwards the reply.
-	normalReply := env.doVia(t, guard, alice, http.MethodPost, "/v1/board/messages",
-		map[string]any{"re": normalID, "text": "normal reply"})
-	if normalReply.status != http.StatusCreated {
-		t.Fatalf("normal reply = %d %s", normalReply.status, normalReply.body)
-	}
-
-	// The read projection also says read-only: no config-only bridge claim is
-	// exposed while the supervisor is absent.
-	view := env.getAs(t, alice, "/v1/board/messages/"+mirrorID)
-	var thread struct {
-		Message messageJSON `json:"message"`
-	}
-	env.decode(t, view, &thread)
-	if thread.Message.Task == nil || thread.Message.Task.Mirror == nil {
-		t.Fatalf("guard mirror view = %s", view.body)
-	}
-	if !thread.Message.Task.Mirror.ReadOnly || thread.Message.Task.Mirror.Bridge {
-		t.Fatalf("guard mirror fact = %+v", thread.Message.Task.Mirror)
-	}
-	if len(thread.Message.Task.Moves) != 0 {
-		t.Fatalf("guard mirror moves = %v", thread.Message.Task.Moves)
-	}
-}
 
 func TestBoardJSONErrorsAndSSESurviveAugmentation(t *testing.T) {
 	env := newTestEnv(t, nil)

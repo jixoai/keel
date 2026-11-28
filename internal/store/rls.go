@@ -113,20 +113,25 @@ var rlsTenantTables = []string{
 	"auth_events",
 	"bot_api_keys",
 	// collab-superagent. Every durable work-queue record is tenant-scoped.
-	"collab_work_items",
-	"collab_assignments",
-	"collab_worker_reports",
-	"collab_attentions",
-	"collab_links",
-	"collab_subscriptions",
-	"collab_source_cursors",
-	"collab_source_events",
-	"collab_outbox",
-	"collab_session_index",
+	"superagent_work_items",
+	"superagent_assignments",
+	"superagent_worker_reports",
+	"superagent_attentions",
+	"superagent_links",
+	"superagent_subscriptions",
+	"superagent_source_cursors",
+	"superagent_source_events",
+	"superagent_outbox",
+	"superagent_session_index",
 	// board-v1 superagent mirror: the adapter's identity map is tenant scoped
 	// like the records it maps. The board's board_* tables stay out of this
 	// list; they carry board's own keel.tenant_id policies.
-	"board_links",
+	"superagent_board_links",
+	// Plugin platform storage (keel-plugin-split): opaque state/config and the
+	// host's dependency status. Every row belongs to exactly one tenant.
+	"plugin_state",
+	"plugin_config",
+	"plugin_dependency",
 	// Commands (keel-plugin-commands): the requestId ledger is tenant-scoped.
 	"command_invocations",
 	// Board tenant configuration (keel-board-v1, Phase 1 10.6/12.x): the
