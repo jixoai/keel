@@ -1,31 +1,100 @@
 keel-plugin-split verification
-branch: task/keel-plugin-split-unified
-base: origin/task/keel-unified-integration @ 0fc714a5
+branch: task/keel-plugin-fix
+base: 77cea0bc (board P2 v0.1.4 + plugin split)
+code commit: 01912296de8a386fbe869f6913190aa0d199504e
+fix commits: 6d75fab8 (P1), 03569a74 (P2 batch), 5a9cd668 (pluginstore owner), 01912296 (worker-session E2E)
 date: 2026-11-28
 
 Environment
-  PostgreSQL 18 (local), fresh database keel_plugin_split_test
-  KEEL_TEST_DSN=postgres://kzf@localhost:5432/keel_plugin_split_test?sslmode=disable
+  PostgreSQL 18 (local), dedicated database keel_plugin_fix_test
+  KEEL_TEST_DSN=postgres://kzf@localhost:5432/keel_plugin_fix_test?sslmode=disable
+  Board pin: keel-board v0.1.4
 
-Targeted gates (all passed)
-  go test ./internal/pluginstore/...                                  ok
-  go test ./internal/pluginruntime/...                                ok
-  go test ./internal/superagentstore/...                              ok
-  KEEL_TEST_DSN=... go test ./internal/superagent/...                 ok
-  KEEL_TEST_DSN=... go test ./internal/boardintegration/...           ok (24.9s)
-  KEEL_TEST_DSN=... go test ./internal/boardplugin/                   ok
-  KEEL_TEST_DSN=... go test ./internal/superagentplugin/              ok
-  KEEL_TEST_DSN=... go test ./internal/store/ -run TestPluginSplitSchemaIsBreaking  ok
-  go test ./internal/architecture/ -run 'PluginSplit|BoardPlugin|Superagent'        ok
-  go vet <new packages + boardintegration + cmd/keel>                  ok
-  cd web && nsh check                                                  exit 0
+Gates (actual outputs)
+  go build ./...                                                      exit 0
+  go vet ./...                                                        exit 0
+  go test -p 1 <10 key packages> (no DSN)                             exit 0
+    ok  internal/pluginruntime, internal/pluginstore, internal/pluginstore/pg,
+        internal/superagent, internal/superagentplugin, internal/superagentstore,
+        internal/boardplugin, cmd/keel, internal/architecture, internal/store
+  KEEL_TEST_DSN=... go test -p 1 ./...                                EXIT 0
+    88 packages ok, 0 FAIL, 19 packages without tests
+  cd web && nsh check                                                 exit 0
+  cd web && nsh test --target tui --filter board src/data/board.test.ts
+    25 tests: 25 passed, 0 failed
+  bash -n scripts/board-phase2-gates.sh                               exit 0
   openspec validate keel-plugin-split --strict                        Change 'keel-plugin-split' is valid
 
-Full gate
-  KEEL_TEST_DSN=... go test -p 1 ./...                                 EXIT 0
-  go test -race ./internal/pluginruntime/ ./internal/pluginstore/ ./internal/boardplugin/  ok
+P1 / P2 targeted tests (verbose, KEEL_TEST_DSN set where PG is needed)
+  internal/superagentplugin
+    --- PASS: TestBoardTaskToTicketToBoardWriteback (0.32s)
+    --- PASS: TestWriterImportDoesNotReimportItsOwnProjection (0.60s)
+    --- PASS: TestImportedBoardTaskDispatchesWorkerSession (0.20s)
+    --- PASS: TestImportOnlyCreatesExecutableTickets (0.00s)
+    --- PASS: TestPluginReloadStartsAFreshSupervisor (0.00s)
+  cmd/keel
+    --- PASS: TestBoardStartFailureLeavesSuperagentPendingAndUnbuilt
+    --- PASS: TestDisabledBoardLeavesSuperagentPending
+    --- PASS: TestSupervisorBuildsAfterBoardPublishes
+  internal/pluginruntime
+    --- PASS: TestReloadAfterUnloadRunsAFreshGeneration
+    --- PASS: TestRequiresByPluginIDResolves
+  internal/superagent
+    --- PASS: TestDispatchTicketBindsImportedWorkerSession
+  internal/store (KEEL_TEST_DSN set)
+    --- PASS: TestLegacyPluginRowsRefuseStartup
+    --- PASS: TestLegacyEmptyPluginTableIsDropped
+    --- PASS: TestPluginSplitSchemaIsBreaking
+    --- PASS: TestReadyCoversPluginOwnedSchema
+  internal/architecture
+    --- PASS: TestCoreStoreDoesNotReadPluginOwnedTables
+    --- PASS: TestImporterUsesBoardTaskLink
+  internal/superagentstore (KEEL_TEST_DSN set)
+    TestBoardLinksTenantIsolationAndIdempotency covers the
+    one-ticket-per-board_task idempotent conflict
 
-Pre-existing test repair (needed for the full gate, not a product change)
-  internal/store/ready_test.go's isolated temp schema omitted checkpoints.summary_hash,
-  which ready.go has required since 0ab6e2dd. Confirmed the test failed on the base
-  commit 0fc714a5 with the same DSN; added the missing column to the test fixture.
+What the tests prove
+  P1-1  Production Writer.SyncOnce pass 1 projects a ticket into a board task;
+        passes 2/3 run Import over that channel, skip the projection by
+        board_task_id and the source=superagent label, and keep exactly one
+        ticket and one board task. PutBoardLink returns the winner's link when
+        a second source id names the same board task.
+  P1-2  Import writes no assignment. It stamps WorkerBot and the orchestrator
+        owner session, then DispatchTicket runs the guarded Host: one ACTIVE
+        assignment with SessionID != nil and BotID=worker-bot, plus a worker
+        launch for the same work item. A repeat dispatch is a no-op; a link
+        without an assignment re-runs dispatch.
+  P1-3  board Start failure -> board FAILED, superagent PENDING
+        ("waiting for: board"), Build not called, product gate nil. Disabled
+        board -> the same PENDING. Success -> Build sees the published board
+        service, plugin ACTIVE, product gate returns the supervisor.
+  P2-2  ready.go lists plugin_state/plugin_config/plugin_dependency and the
+        superagent_* tables; TestReadyCoversPluginOwnedSchema pins the list.
+  P2-3  Non-test core-store Go files may not name superagent/board-log tables
+        (ready.go and rls.go are listings); importer.go must call
+        GetBoardLinkByTask and projectedBoardTask.
+  P2-4  `mirror.readOnly`/`mirror.bridge` and the bridge answer action are gone
+        from the wire, store, fixtures and task UI; a stale `answer` token is
+        ignored (board data test).
+  P2-6  A non-empty legacy collab_*/board_links table fails Migrate with its
+        row count and an export/rebuild instruction; empty leftovers drop.
+  P2-7  pluginstore has no install writer; the core store/harnessext owns the
+        plugins inventory row.
+  P2-8  Unload then Load starts both plugins again; the superagent Stop callback
+        runs twice and its capability is removed after each unload.
+  P2-9  Only waiting/ready/claimed/blocked board tasks are imported;
+        completed/canceled/archived are skipped.
+
+Limits (not claimed as verified)
+  - The E2E board substrate is the board module's in-memory log; the board
+    PostgreSQL adapter is covered by the board repository's own conformance,
+    not by this test. The collab Host, PG superagent rows and Writer are
+    production code; the SessionLauncher is a test double, so no real model run
+    or worker process is claimed.
+  - Frontend verification is the type check plus the board data tests; no
+    screenshot/UI evidence run is claimed for this repair.
+  - scripts/board-phase2-gates.sh was syntax-checked (`bash -n`); it was not
+    executed in this worktree because it requires a clean tracked worktree and
+    writes its own evidence directory.
+  - The full DSN suite used one dedicated database; tests use `-p 1` and share
+    it, matching the existing test convention.

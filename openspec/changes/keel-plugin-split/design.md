@@ -41,6 +41,20 @@
 - Superagent plugin: `internal/superagentplugin` publishes the supervisor and the
   board writer/importer; `internal/superagentstore` owns all `superagent_*` SQL
   and `superagent_board_links`. `requires: [board]`.
+- Assembly order: the supervisor and its writer are built inside the superagent
+  plugin's `Start` (`Options.Build`), after the board plugin published `board`.
+  A missing/failed/disabled board leaves superagent `PENDING`; no orchestrator,
+  writer or product supervisor is exposed without an ACTIVE kernel state. The
+  run context belongs to the plugin, so unload cancels it and a reload can arm a
+  second generation.
+- Import is idempotent across writer passes: a projected board task is skipped
+  by its `board_task_id` link (and the `source=superagent` label); the link
+  insert returns the winner on a one-ticket-per-task conflict. Only executable
+  board states become tickets; completed/canceled/archived history is skipped.
+  The importer writes no sessionless OPEN assignment: it stamps `WorkerBot` and
+  the orchestrator session owner, then dispatches through the normal Host gate
+  so the worker session is created with the right Bot. An existing link with no
+  assignment is repaired by re-running the same dispatch.
 - The HTTP command bridge was removed rather than ported: the change only
   requires the board service boundary, and forwarding board actions back to the
   supervisor would preserve the coupling the split removes. Board actions no
