@@ -40,7 +40,7 @@ Both entry points build the same pieces in the same order; `cmd/runtime` is the 
 
 1. `store.Open(ctx, store.Config{...})` — the pgx pool (24 conns by default, `internal/store/store.go:76`).
 2. `kernel.NewPG(ctx, st.Pool())` — applies the base schema and kernel migrations
-   (`cmd/runtime/main.go:105`, `internal/kernel/pg.go:68`).
+   (`cmd/runtime/main.go:111`, `internal/kernel/pg.go:68`).
 3. `kernel.New(kernelLog, kernel.Options{Audit, Limits, OnCommit})` — the ledger object; `OnCommit`
    feeds metrics without blocking the write path (`cmd/runtime/main.go:137`,
    `internal/kernel/kernel.go:591`).

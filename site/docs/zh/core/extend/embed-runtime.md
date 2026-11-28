@@ -34,7 +34,7 @@ Go 的 `internal/` 规则意味着这些包只能被模块 `github.com/jixoai/ke
 `cmd/runtime` 启动序列（`cmd/runtime/main.go`）：
 
 1. `store.Open(ctx, store.Config{...})` —— pgx 池（默认 24 连接，`internal/store/store.go:76`）。
-2. `kernel.NewPG(ctx, st.Pool())` —— 应用基础 schema 与内核迁移（`cmd/runtime/main.go:105`、
+2. `kernel.NewPG(ctx, st.Pool())` —— 应用基础 schema 与内核迁移（`cmd/runtime/main.go:111`、
    `internal/kernel/pg.go:68`）。
 3. `kernel.New(kernelLog, kernel.Options{Audit, Limits, OnCommit})` —— 账本对象；`OnCommit` 在不阻塞
    写路径的前提下喂指标（`cmd/runtime/main.go:137`、`internal/kernel/kernel.go:591`）。

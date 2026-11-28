@@ -52,7 +52,7 @@ schema 分两处：
   （`internal/store/schema.sql:207`）；订阅者按自己的游标重读日志，因此丢一次通知只损失一个心跳周期。
 - **就绪检查深入到 schema**。`GET /v1/ready` 不只 Ping PG，还检查运行 schema（内核迁移
   0001/0003/0004/0005 的列、外部会话标记、handoff 表）。缺任一列的旧库返回 503，而不是假装就绪
-  （`docs/RUNBOOK.md:293`）。
+  （`docs/RUNBOOK.md:766`）。
 
 ## 2. Blob：库内 64KiB 分块 + CAS 溢出
 

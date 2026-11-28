@@ -60,7 +60,7 @@ Two database-side behaviours matter for the runtime:
   notification costs one heartbeat interval, never data.
 - **Readiness is schema-deep.** `GET /v1/ready` pings PG *and* checks the running schema (kernel
   migrations 0001/0003/0004/0005 columns, external session marks, handoff tables). An old database
-  missing any of them answers 503 instead of pretending to be ready (`docs/RUNBOOK.md:293`).
+  missing any of them answers 503 instead of pretending to be ready (`docs/RUNBOOK.md:766`).
 
 ## 2. Blobs: 64KiB chunks in PostgreSQL, overflow in a CAS
 
