@@ -48,8 +48,16 @@ SELECT request_id, upto_seq, summary_hash
 
 A row that stays in `summarize`/`retry` after the process is healthy means the
 task never reached a terminal outcome; do not delete it by hand — replay the
-same request (the pin is the recovery fact). `retry_until` is advisory state
-for the retry phase, not a scheduler.
+same request (the pin is the recovery fact). A failed summary writes
+`phase=retry`, increments `attempt` and sets `retry_until`; an earlier replay is
+refused with `ErrManualCompactRetry` until that deadline elapses, so a crashed
+or overloaded provider is not hammered. The retry then resumes the pinned range
+and increments `attempt` again.
+
+`checkpoint_requests` is bounded independently of projections:
+`PruneCheckpointRequests` runs on the run read path with a 1000-row cap and a
+30-day TTL. A requestId keeps replaying long after its projection was pruned;
+only the bounded oldest rows are removed.
 
 **Lease / kind**: there is no independent task lease column by design. Manual
 compaction runs under the session's kernel lease (`CompactNow` receives the
@@ -61,23 +69,30 @@ machine (`select → summarize → retry`). `attempt` is the durable retry count
 
 **Evidence / tests**
 
-- `go test -race ./internal/kernel/ -run 'TestCompactionTask|TestCheckpoint'`
-- `go test -race ./internal/agent/ -run 'TestManualCompact|TestRecoverAutomatic|TestCorruptCheckpoint|TestRunLazily'`
+- `go test -race ./internal/kernel/ -run 'TestCompactionTask|TestCheckpoint|TestMissingSession|TestPruneCheckpointRequests'`
+- `go test -race ./internal/agent/ -run 'TestManualCompact|TestRecoverAutomatic|TestCorruptCheckpoint|TestRunLazily|TestCompactionResume'`
 - Crash matrix: `TestManualCompactRecoversCommittedEntry`,
   `TestManualCompactResumesPinnedSummarizePhase`,
-  `TestRecoverAutomaticCompactionProjection`.
+  `TestManualCompactRetryBackoffAndAttempts`,
+  `TestRecoverAutomaticCompactionProjection`,
+  `TestCompactionResumeKeepsLogContiguousAndSingleAnswer`.
 
 ## 2. Skills `allowed-tools`
 
 - Absence of a declaration = no restriction. A declaration restricts the
   **attempt's** surface to the union of the active skills' entries, intersected
   with the actually registered toolset (`registry.Subset`).
-- Entry mapping: case-insensitive tool names; `Bash(git:*)` names `bash`;
-  `mcp__<server>__<tool>` and `mcp*` name the aggregate `mcp` tool.
+- Entry mapping: case-insensitive tool names; `Bash(git:*)` names `bash`.
+  `mcp__<server>__<tool>` grants only that server/tool call through the
+  aggregate `mcp` tool; `mcp__<server>__*` grants every tool of that server;
+  `mcp__<server>` is the same server-wide grant; a bare `mcp`/`mcp*` grants all
+  MCP tools. A per-tool grant does **not** add `list`/`desc` and never widens to
+  another server or tool.
 - Execution gate: a call outside the set is refused with code
   `skill_tool_not_allowed`, a model-readable message naming the skill and the
-  allowed tools, and structured `details{code,tool,skills,allowed}`. Ordering:
-  principal authorization → skill gate → guardrails/hooks.
+  allowed tools, and structured `details{code,tool,skills,allowed}`. The `mcp`
+  gate parses the call's `server`/`tool` arguments. Ordering: principal
+  authorization → skill gate → guardrails/hooks.
 - Verify: `go test -race ./internal/agent/ -run TestSkillTool` plus a live
   `/skill:<name>` turn; the model-visible manifest excludes denied tools.
 
@@ -106,11 +121,17 @@ machine (`select → summarize → retry`). `attempt` is the durable retry count
   `approval.confirm` (options `allow`/`deny`, 5-minute timeout). The call runs
   only after `allow`; the answer is recorded by the normal `/v1/decisions`
   provenance path.
+- The prompt and the open provenance row carry a bounded (~480-byte) argument
+  summary, the SHA-256 digest of the exact payload, and an `argumentsRedacted`
+  flag. Sensitive keys (`token`, `secret`, `password`, `api_key`,
+  `authorization`, `cookie`, `credential`, …) are replaced by `[redacted]`;
+  long strings/arrays are truncated. The raw arguments are never logged.
 - No decision broker (e.g. `cmd/runtime`) ⇒ fail closed: the tool answers
   `mcp_approval_required` and never executes.
-- The decision request id is derived from the attempt scope + provider
-  `toolCallId`, so a retried call re-addresses one question; a distinct call
-  asks again.
+- The decision request id is bound to attempt (`MCPAttemptFromContext`) +
+  provider `toolCallId` + the argument digest. A retry of the same call inside
+  one attempt reuses the question; a new attempt or a different payload asks
+  again, so an answered decision can never authorize a later attempt.
 
 **Verify**
 
@@ -124,11 +145,14 @@ machine (`select → summarize → retry`). `attempt` is the durable retry count
   request writes an `unaccounted` marker before the call and upgrades it to
   `settled` with the provider-reported numbers on the terminal event.
 - Request id: `u<promptSeq>-a<ordinal>-r<requestNo>` for a turn;
-  `...-compact` for a manual-compaction summary. A retried attempt derives the
-  same ids, so `AppendUsage` upgrades in place instead of double-billing.
-- A provider that reports no usage settles zeros (not measurable), never a
-  fabricated number. Accounting is best-effort and bounded (5s) on a detached
-  context; it never fails the model request.
+  `...-compact-<requestId>` for a manual-compaction summary. A retried attempt
+  derives the same ids, so `AppendUsage` upgrades in place instead of
+  double-billing.
+- A terminal event or cancellation **without** a provider usage report leaves
+  the row `unaccounted`: the request may have been billed and its usage is
+  unknown, so zero would be a false claim. An explicit empty usage object is a
+  measurement and settles zero. Accounting is best-effort and bounded (5s) on a
+  detached context; it never fails the model request.
 - The attempt summary sums the same provider usage events.
 
 **Inspect**

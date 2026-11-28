@@ -415,6 +415,50 @@ func (m *MemStore) PruneCheckpoints(ctx context.Context, tenantID, sessionID uui
 	return pruned, nil
 }
 
+// PruneCheckpointRequests bounds the manual-compaction idempotency ledger. It is
+// independent of the checkpoint projection: this call never touches events or
+// projections, and PruneCheckpoints never touches this ledger.
+func (m *MemStore) PruneCheckpointRequests(ctx context.Context, tenantID, sessionID uuid.UUID, req CheckpointRequestPruneRequest) (int64, error) {
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	s, ok := m.sessions[Scope{TenantID: tenantID, SessionID: sessionID}]
+	if !ok {
+		return 0, fmt.Errorf("memstore: session: %w", ErrNotFound)
+	}
+	if req.MaxRequests == 0 && req.TTL == 0 {
+		return 0, nil
+	}
+	ordered := make([]string, 0, len(s.checkpointRequests))
+	for requestID := range s.checkpointRequests {
+		ordered = append(ordered, requestID)
+	}
+	sort.Slice(ordered, func(i, j int) bool {
+		a, b := s.checkpointRequests[ordered[i]], s.checkpointRequests[ordered[j]]
+		if !a.CreatedAt.Equal(b.CreatedAt) {
+			return a.CreatedAt.After(b.CreatedAt)
+		}
+		return ordered[i] > ordered[j]
+	})
+	now := m.now()
+	pruned := int64(0)
+	kept := 0
+	for _, requestID := range ordered {
+		cp := s.checkpointRequests[requestID]
+		expired := req.TTL > 0 && !cp.CreatedAt.IsZero() && now.Sub(cp.CreatedAt) > req.TTL
+		overCap := req.MaxRequests > 0 && kept >= req.MaxRequests
+		if expired || overCap {
+			delete(s.checkpointRequests, requestID)
+			pruned++
+			continue
+		}
+		kept++
+	}
+	return pruned, nil
+}
+
 // SaveCompactionTask upserts one in-flight task checkpoint.
 func (m *MemStore) SaveCompactionTask(ctx context.Context, tenantID, sessionID uuid.UUID, checkpoint CompactionTaskCheckpoint) error {
 	if err := ctx.Err(); err != nil {

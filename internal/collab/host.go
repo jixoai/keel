@@ -956,6 +956,17 @@ func (c *Coordinator) Assign(ctx context.Context, tenantID, workItemID uuid.UUID
 	now := c.now()
 	key := strings.TrimSpace(req.IdempotencyKey)
 	candidateID := assignmentID(tenantID, item.ID, key)
+	// Serialise every operation that owns this idempotency key. Without this,
+	// two concurrent retries of one key with different worker sessions both
+	// observe the same open assignment, both pass the per-session binding
+	// guard (different sessions) and both complete it; the last write wins and
+	// the other caller's binding is silently lost. The key lock is acquired
+	// before the per-session lock (the only other Assign lock), so the order is
+	// consistent.
+	if key != "" {
+		unlockKey := c.keyLocks.lock("assign-idem|" + tenantID.String() + "|" + item.ID.String() + "|" + key)
+		defer unlockKey()
+	}
 	// An idempotent replay returns the earlier assignment without a second
 	// audit/create. Changed Bot/session parameters are a conflict, not a silent
 	// overwrite. A retry that supplies the worker for an earlier open assignment
@@ -1933,10 +1944,16 @@ func validateLinkEndpoint(endpoint LinkEndpoint) error {
 	return nil
 }
 
-// normalizeLinkEndpoint trims the caller's spelling so the natural key (and
-// therefore the derived id) cannot differ only by whitespace.
+// normalizeLinkEndpoint canonicalises the caller's spelling so the natural key
+// (and therefore the derived id) cannot differ by whitespace or UUID casing.
 func normalizeLinkEndpoint(endpoint LinkEndpoint) LinkEndpoint {
 	endpoint.ID = strings.TrimSpace(endpoint.ID)
+	switch endpoint.Type {
+	case LinkEndpointSession, LinkEndpointWorkItem, LinkEndpointAssignment:
+		if parsed, err := uuid.Parse(endpoint.ID); err == nil {
+			endpoint.ID = parsed.String()
+		}
+	}
 	return endpoint
 }
 

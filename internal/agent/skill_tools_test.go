@@ -92,6 +92,54 @@ func TestSkillToolPolicy(t *testing.T) {
 	}
 }
 
+// TestSkillToolPolicyMCPCallScope pins that a per-server/tool grant narrows the
+// aggregate `mcp` tool's execution: it never widens to every MCP tool.
+func TestSkillToolPolicyMCPCallScope(t *testing.T) {
+	call := func(server, tool string) json.RawMessage {
+		return json.RawMessage(`{"action":"call","server":"` + server + `","tool":"` + tool + `"}`)
+	}
+	exact := newSkillToolPolicy([]loadedSkill{{Name: "fs", AllowedTools: []string{"mcp__filesystem__read_file"}}})
+	if !exact.allows("mcp") {
+		t.Fatal("a scoped MCP grant must keep the aggregate tool visible")
+	}
+	if !exact.allowsCall("mcp", call("filesystem", "read_file")) {
+		t.Fatal("the granted server/tool call was refused")
+	}
+	if exact.allowsCall("mcp", call("filesystem", "write_file")) {
+		t.Fatal("another tool on the same server was allowed")
+	}
+	if exact.allowsCall("mcp", call("other", "read_file")) {
+		t.Fatal("another server was allowed")
+	}
+	if exact.allowsCall("mcp", json.RawMessage(`{"action":"list"}`)) {
+		t.Fatal("a metadata action was allowed by a per-tool grant")
+	}
+	if exact.allowsCall("mcp", json.RawMessage(`not-json`)) {
+		t.Fatal("unparseable arguments were allowed")
+	}
+
+	serverWildcard := newSkillToolPolicy([]loadedSkill{{Name: "fs", AllowedTools: []string{"mcp__filesystem__*"}}})
+	if !serverWildcard.allowsCall("mcp", call("filesystem", "delete_file")) {
+		t.Fatal("mcp__server__* should allow any tool on that server")
+	}
+	if serverWildcard.allowsCall("mcp", call("other", "delete_file")) {
+		t.Fatal("mcp__server__* leaked to another server")
+	}
+
+	serverAll := newSkillToolPolicy([]loadedSkill{{Name: "fs", AllowedTools: []string{"mcp__filesystem"}}})
+	if !serverAll.allowsCall("mcp", call("filesystem", "anything")) {
+		t.Fatal("mcp__server should allow that server's tools")
+	}
+	if serverAll.allowsCall("mcp", call("other", "anything")) {
+		t.Fatal("mcp__server leaked to another server")
+	}
+
+	bare := newSkillToolPolicy([]loadedSkill{{Name: "all-mcp", AllowedTools: []string{"mcp"}}})
+	if !bare.allowsCall("mcp", call("any", "anything")) {
+		t.Fatal("a bare mcp grant should allow every MCP call")
+	}
+}
+
 // TestSkillToolPolicyReadsLoadedPin proves the policy is derived from the
 // durable skill.loaded payload (the command host writes allowedTools there).
 func TestSkillToolPolicyReadsLoadedPin(t *testing.T) {

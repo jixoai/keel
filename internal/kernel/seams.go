@@ -113,6 +113,23 @@ type CheckpointPruner interface {
 	PruneCheckpoints(ctx context.Context, scope Scope, req PruneRequest) (int64, error)
 }
 
+// CheckpointRequestPruneRequest bounds the manual-compaction idempotency ledger
+// independently of the projection: a projection can be pruned while the
+// requestId still replays, but the ledger itself must not grow without bound.
+// Both bounds are optional; at least one must be positive.
+type CheckpointRequestPruneRequest struct {
+	// MaxRequests keeps at most this many newest request rows per session.
+	MaxRequests int
+	// TTL deletes request rows older than this. Zero means no expiry.
+	TTL time.Duration
+}
+
+// CheckpointRequestPruner is the retention half of the idempotency ledger. It
+// never touches `checkpoints` or `events`.
+type CheckpointRequestPruner interface {
+	PruneCheckpointRequests(ctx context.Context, scope Scope, req CheckpointRequestPruneRequest) (int64, error)
+}
+
 // CheckpointRequestLookup resolves the manual-compaction idempotency key. It is
 // separate from CheckpointStore so a host that only implements the automatic
 // projection path keeps compiling; a missing implementation means the caller

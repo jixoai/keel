@@ -16,9 +16,13 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -101,9 +105,14 @@ func (g *mcpApprovalGate) Approve(ctx context.Context, request toolsurface.MCPAp
 	if err != nil {
 		return fmt.Errorf("mcp: invalid run session: %w", err)
 	}
-	requestID := mcpApprovalRequestID(ctx, scope)
+	// Every approval question is bound to this exact call: scope, attempt,
+	// provider toolCallId, and a digest of the arguments. A decision answered in
+	// one attempt can never authorize the same tool name in a later attempt,
+	// because the attempt id is part of the decision's request id.
+	requestID, argumentsDigest, argumentsSummary, redacted := mcpApprovalIdentity(ctx, scope, request)
 	kind := approval.KindPrefix + approval.ModeConfirm
-	prompt := fmt.Sprintf("Allow the agent to run the destructive MCP tool %s/%s?", request.Server, request.Tool)
+	prompt := fmt.Sprintf("Allow the agent to run the destructive MCP tool %s/%s?\nArguments: %s",
+		request.Server, request.Tool, argumentsSummary)
 	decision, _, err := deps.decisions.Open(ctx, harnessext.OpenDecisionRequest{
 		TenantID:  tenantID,
 		SessionID: sessionID,
@@ -131,8 +140,13 @@ func (g *mcpApprovalGate) Approve(ctx context.Context, request toolsurface.MCPAp
 			Actor:      "agent",
 			Channel:    approval.ChannelTool,
 			Context: map[string]string{
-				"server": request.Server,
-				"tool":   request.Tool,
+				"server":            request.Server,
+				"tool":              request.Tool,
+				"arguments":         argumentsSummary,
+				"argumentsDigest":   argumentsDigest,
+				"argumentsRedacted": fmt.Sprintf("%t", redacted),
+				"attemptId":         agentcore.MCPAttemptFromContext(ctx),
+				"toolCallId":        agentcore.ToolCallIDFromContext(ctx),
 			},
 		}); err != nil {
 			deps.log.Warn("mcp approval provenance (open) failed",
@@ -164,12 +178,124 @@ func (g *mcpApprovalGate) Approve(ctx context.Context, request toolsurface.MCPAp
 	return nil
 }
 
-// mcpApprovalRequestID names one approval question. The provider's toolCallId
-// makes a retry of the same call re-address the same decision; without it a
-// fresh id keeps two calls from sharing an answer.
-func mcpApprovalRequestID(ctx context.Context, scope agentcore.ToolRunScope) string {
-	if callID := agentcore.ToolCallIDFromContext(ctx); callID != "" {
-		return "mcp-approval:" + scope.TenantID + ":" + scope.SessionID + ":" + callID
+// mcpApprovalIdentity names one approval question and the bounded argument
+// view a human sees. The request id is bound to the attempt, the provider
+// toolCallId and a digest of the exact arguments, so an answered decision can
+// never authorize a later attempt or a different payload.
+func mcpApprovalIdentity(ctx context.Context, scope agentcore.ToolRunScope, request toolsurface.MCPApprovalRequest) (requestID, digest, summary string, redacted bool) {
+	digest = mcpArgumentsDigest(request.Arguments)
+	summary, redacted = mcpArgumentSummary(request.Arguments)
+	attempt := strings.TrimSpace(agentcore.MCPAttemptFromContext(ctx))
+	if attempt == "" {
+		// A call outside an assembled attempt (a test or an alternate host)
+		// still asks per call; it simply has no attempt identity to bind to.
+		attempt = "attemptless"
 	}
-	return "mcp-approval:" + uuid.NewString()
+	callID := strings.TrimSpace(agentcore.ToolCallIDFromContext(ctx))
+	if callID == "" {
+		callID = uuid.NewString()
+	}
+	requestID = "mcp-approval:v2:" + scope.TenantID + ":" + scope.SessionID + ":" +
+		attempt + ":" + callID + ":" + digest
+	return requestID, digest, summary, redacted
+}
+
+// mcpApprovalSummaryLimit bounds the argument text in a decision prompt.
+const mcpApprovalSummaryLimit = 480
+
+func mcpArgumentsDigest(raw json.RawMessage) string {
+	sum := sha256.Sum256(raw)
+	return hex.EncodeToString(sum[:])
+}
+
+// mcpArgumentSummary renders a bounded, redacted view of the call arguments.
+// The second result reports that at least one value was redacted, so the audit
+// row can say so without storing the secret.
+func mcpArgumentSummary(raw json.RawMessage) (string, bool) {
+	trimmed := strings.TrimSpace(string(raw))
+	if trimmed == "" || trimmed == "null" {
+		return "{}", false
+	}
+	var value any
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return "<unparseable arguments; digest only>", true
+	}
+	redacted := false
+	value = redactMCPValue(value, 0, &redacted)
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return "<unprintable arguments; digest only>", true
+	}
+	summary := string(encoded)
+	if runes := []rune(summary); len(runes) > mcpApprovalSummaryLimit {
+		summary = string(runes[:mcpApprovalSummaryLimit]) + "…(truncated)"
+	}
+	return summary, redacted
+}
+
+// mcpSensitiveArgumentKey is deliberately broad: a false positive hides a
+// harmless string from the approval prompt, a false negative leaks a secret.
+var mcpSensitiveArgumentKeys = []string{
+	"token", "secret", "password", "passwd", "api_key", "apikey",
+	"authorization", "cookie", "credential", "private_key", "access_key",
+	"bearer", "session_key", "client_secret",
+}
+
+func redactMCPValue(value any, depth int, redacted *bool) any {
+	if depth > 6 {
+		*redacted = true
+		return "[…]"
+	}
+	switch typed := value.(type) {
+	case map[string]any:
+		out := make(map[string]any, len(typed))
+		count := 0
+		for key, item := range typed {
+			if count >= 32 {
+				out["…"] = "[more fields]"
+				*redacted = true
+				break
+			}
+			count++
+			if mcpSensitiveKey(key) {
+				out[key] = "[redacted]"
+				*redacted = true
+				continue
+			}
+			out[key] = redactMCPValue(item, depth+1, redacted)
+		}
+		return out
+	case []any:
+		limit := len(typed)
+		if limit > 20 {
+			limit = 20
+			*redacted = true
+		}
+		out := make([]any, 0, limit+1)
+		for _, item := range typed[:limit] {
+			out = append(out, redactMCPValue(item, depth+1, redacted))
+		}
+		if len(typed) > limit {
+			out = append(out, "[more items]")
+		}
+		return out
+	case string:
+		if runes := []rune(typed); len(runes) > 120 {
+			*redacted = true
+			return string(runes[:120]) + "…"
+		}
+		return typed
+	default:
+		return value
+	}
+}
+
+func mcpSensitiveKey(key string) bool {
+	normalized := strings.ToLower(strings.ReplaceAll(key, "-", "_"))
+	for _, token := range mcpSensitiveArgumentKeys {
+		if strings.Contains(normalized, token) {
+			return true
+		}
+	}
+	return false
 }

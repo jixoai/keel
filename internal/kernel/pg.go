@@ -594,6 +594,13 @@ func (s *PGStore) CheckpointByRequest(ctx context.Context, tenantID, sessionID u
 		Scan(&cp.UptoSeq, &cp.KeptFromSeq, &cp.Summary, &cp.TokensBefore, &cp.TokensAfter,
 			&cp.PolicyVersion, &cp.SummaryHash, &cp.RequestID, &cp.CreatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
+		exists, existsErr := s.SessionExists(ctx, tenantID, sessionID)
+		if existsErr != nil {
+			return Checkpoint{}, false, existsErr
+		}
+		if !exists {
+			return Checkpoint{}, false, fmt.Errorf("kernel: session %s/%s: %w", tenantID, sessionID, ErrNotFound)
+		}
 		return Checkpoint{}, false, nil
 	}
 	if err != nil {
@@ -658,6 +665,47 @@ func (s *PGStore) PruneCheckpoints(ctx context.Context, tenantID, sessionID uuid
 	return tag.RowsAffected(), nil
 }
 
+// PruneCheckpointRequests bounds the manual-compaction idempotency ledger
+// independently of the checkpoint projection. A missing session answers
+// ErrNotFound; an empty ledger answers 0.
+func (s *PGStore) PruneCheckpointRequests(ctx context.Context, tenantID, sessionID uuid.UUID, req CheckpointRequestPruneRequest) (int64, error) {
+	var ttlSeconds int64
+	if req.TTL > 0 {
+		ttlSeconds = int64(req.TTL / time.Second)
+		if ttlSeconds == 0 {
+			ttlSeconds = 1
+		}
+	}
+	tag, err := s.pool.Exec(ctx,
+		`WITH ranked AS (
+		     SELECT request_id, created_at,
+		            row_number() OVER (ORDER BY created_at DESC, request_id DESC) AS rn
+		     FROM checkpoint_requests
+		     WHERE tenant_id = $1 AND session_id = $2
+		 )
+		 DELETE FROM checkpoint_requests c
+		 WHERE c.tenant_id = $1 AND c.session_id = $2
+		   AND (
+		       ($3 > 0 AND c.request_id IN (SELECT request_id FROM ranked WHERE rn > $3))
+		       OR
+		       ($4 > 0 AND c.created_at < now() - make_interval(secs => $4))
+		   )`,
+		tenantID, sessionID, req.MaxRequests, ttlSeconds)
+	if err != nil {
+		return 0, fmt.Errorf("kernel: prune checkpoint requests: %w", pgFail(err))
+	}
+	if tag.RowsAffected() == 0 {
+		exists, existsErr := s.SessionExists(ctx, tenantID, sessionID)
+		if existsErr != nil {
+			return 0, existsErr
+		}
+		if !exists {
+			return 0, fmt.Errorf("kernel: session %s/%s: %w", tenantID, sessionID, ErrNotFound)
+		}
+	}
+	return tag.RowsAffected(), nil
+}
+
 // SaveCompactionTask upserts one in-flight task checkpoint keyed by request
 // ID. A missing (or foreign) session answers ErrNotFound: the guarded INSERT
 // cannot create recovery state for a session that does not exist.
@@ -709,6 +757,13 @@ func (s *PGStore) LoadCompactionTask(ctx context.Context, tenantID, sessionID uu
 			&checkpoint.TailSeq, &checkpoint.TokensBefore, &checkpoint.PolicyVersion,
 			&checkpoint.Attempt, &retryUntil)
 	if errors.Is(err, pgx.ErrNoRows) {
+		exists, existsErr := s.SessionExists(ctx, tenantID, sessionID)
+		if existsErr != nil {
+			return CompactionTaskCheckpoint{}, false, existsErr
+		}
+		if !exists {
+			return CompactionTaskCheckpoint{}, false, fmt.Errorf("kernel: session %s/%s: %w", tenantID, sessionID, ErrNotFound)
+		}
 		return CompactionTaskCheckpoint{}, false, nil
 	}
 	if err != nil {
@@ -750,6 +805,15 @@ func (s *PGStore) ListCompactionTasks(ctx context.Context, tenantID, sessionID u
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("kernel: list compaction tasks: %w", pgFail(err))
+	}
+	if len(out) == 0 {
+		exists, existsErr := s.SessionExists(ctx, tenantID, sessionID)
+		if existsErr != nil {
+			return nil, existsErr
+		}
+		if !exists {
+			return nil, fmt.Errorf("kernel: session %s/%s: %w", tenantID, sessionID, ErrNotFound)
+		}
 	}
 	return out, nil
 }

@@ -1,6 +1,6 @@
 # Design: keel-pi-parity-closure-2
 
-- CompactionTask/checkpoint: durable kind/state/lease/retry; PI entry/checkpoint semantics; crash matrix.
+- CompactionTask/checkpoint: durable kind/state/attempts/retry, fenced by the session/run lease (no independent task-lease row); PI entry/checkpoint semantics; crash matrix.
 - Skills: `allowed-tools` intersects the actual toolset at execution; deny is typed and audited.
 - MCP: bounded process/pool lifecycle, health/backoff, destructive tools require hook/approval; server crash does not take down a run.
 - Usage ledger: provider usage/observed stream wired to the existing store, not a parallel truth.

@@ -9,6 +9,7 @@ import (
 
 	"github.com/jixoai/keel/internal/agentcore"
 	"github.com/jixoai/keel/internal/kernel"
+	"github.com/jixoai/keel/internal/provider"
 )
 
 // recordingUsage is the ledger seam's test double: it keeps every record in
@@ -77,6 +78,74 @@ func TestUsageStreamRecordsRequestLifecycle(t *testing.T) {
 	}
 	if settled.Seq <= 0 {
 		t.Fatalf("ledger seq = %d, want the prompting event's seq", settled.Seq)
+	}
+}
+
+// TestUsageStreamDoesNotSettleWithoutUsage pins the honest crash/exception
+// row: a terminal event or cancellation without a provider usage report leaves
+// the pre-request marker unaccounted instead of settling a false zero.
+func TestUsageStreamDoesNotSettleWithoutUsage(t *testing.T) {
+	recorder := &recordingUsage{}
+	scope := kernel.Scope{TenantID: uuid.New(), SessionID: uuid.New()}
+	base := func(context.Context, string, provider.LlmContext, provider.StreamConfig) (*provider.AssistantMessageEventStream, error) {
+		msg := agentcore.AssistantMessage{
+			RoleField:  agentcore.RoleAssistant,
+			Content:    agentcore.ContentList{agentcore.NewTextContent("ok")},
+			StopReason: agentcore.StopReasonEndTurn,
+		}
+		s := provider.NewAssistantMessageEventStream(2)
+		go func() {
+			defer s.Close()
+			_ = s.Emit(context.Background(), provider.StreamDoneEvent{Message: msg})
+		}()
+		return s, nil
+	}
+	stream := NewUsageStream(base, recorder, scope, "u1-a0", 3, "prov", "model")
+	out, err := stream(context.Background(), "model", provider.LlmContext{}, provider.StreamConfig{})
+	if err != nil {
+		t.Fatalf("wrapped stream: %v", err)
+	}
+	for range out.Events() {
+	}
+	records := recorder.snapshot()
+	if len(records) != 1 {
+		t.Fatalf("records = %+v, want only the unaccounted marker", records)
+	}
+	if records[0].Settled {
+		t.Fatalf("no-usage terminal event was settled as zero: %+v", records[0])
+	}
+}
+
+// TestUsageStreamSettlesExplicitZeroUsage is the other half: a provider that
+// explicitly reports an empty usage object DID measure zero tokens, so that
+// settles.
+func TestUsageStreamSettlesExplicitZeroUsage(t *testing.T) {
+	recorder := &recordingUsage{}
+	scope := kernel.Scope{TenantID: uuid.New(), SessionID: uuid.New()}
+	base := func(context.Context, string, provider.LlmContext, provider.StreamConfig) (*provider.AssistantMessageEventStream, error) {
+		msg := agentcore.AssistantMessage{
+			RoleField:  agentcore.RoleAssistant,
+			Content:    agentcore.ContentList{agentcore.NewTextContent("ok")},
+			StopReason: agentcore.StopReasonEndTurn,
+			Usage:      &agentcore.Usage{},
+		}
+		s := provider.NewAssistantMessageEventStream(2)
+		go func() {
+			defer s.Close()
+			_ = s.Emit(context.Background(), provider.StreamDoneEvent{Message: msg})
+		}()
+		return s, nil
+	}
+	stream := NewUsageStream(base, recorder, scope, "u1-a0", 3, "prov", "model")
+	out, err := stream(context.Background(), "model", provider.LlmContext{}, provider.StreamConfig{})
+	if err != nil {
+		t.Fatalf("wrapped stream: %v", err)
+	}
+	for range out.Events() {
+	}
+	records := recorder.snapshot()
+	if len(records) != 2 || records[0].Settled || !records[1].Settled {
+		t.Fatalf("records = %+v, want marker then explicit zero settlement", records)
 	}
 }
 

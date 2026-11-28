@@ -2252,6 +2252,38 @@ func (r *Runner) compactionSettingsFor(policy compaction.CheckpointPolicy, windo
 // seam; the policy bounds everything older.
 func (r *Runner) pruneCheckpoints(ctx context.Context, scope kernel.Scope) {
 	r.pruneCheckpointsFor(ctx, scope, r.checkpointPolicy(ctx, scope))
+	// The requestId ledger is bounded independently of the projections, so a
+	// session whose projection policy is unlimited still cannot grow it without
+	// limit. The bounds are deliberately generous: recent requestIds must keep
+	// replaying long after the projection they produced was pruned.
+	r.pruneCheckpointRequests(ctx, scope)
+}
+
+// Bounds of the manual-compaction idempotency ledger. They are independent of
+// the checkpoint policy: a requestId replay is expected to outlive its
+// projection by far, but not forever.
+const (
+	checkpointRequestMax = 1000
+	checkpointRequestTTL = 30 * 24 * time.Hour
+)
+
+func (r *Runner) pruneCheckpointRequests(ctx context.Context, scope kernel.Scope) {
+	pruner, ok := r.Checkpoints.(kernel.CheckpointRequestPruner)
+	if !ok {
+		return
+	}
+	pruned, err := pruner.PruneCheckpointRequests(ctx, scope, kernel.CheckpointRequestPruneRequest{
+		MaxRequests: checkpointRequestMax,
+		TTL:         checkpointRequestTTL,
+	})
+	if err != nil {
+		r.Logger.Warn("prune checkpoint requests", "session_id", scope.SessionID, "err", err)
+		return
+	}
+	if pruned > 0 {
+		r.Logger.Info("pruned checkpoint request rows", "session_id", scope.SessionID, "pruned", pruned,
+			"max", checkpointRequestMax, "ttl", checkpointRequestTTL.String())
+	}
 }
 
 // pruneCheckpointsFor applies retention for an already-resolved policy.

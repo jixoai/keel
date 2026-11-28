@@ -41,6 +41,15 @@ var ErrManualCompactToolCallOpen = errors.New("agent: manual compaction refused:
 // unread input, the inherited fork prefix, or an uncommitted boundary.
 var ErrManualCompactUnsafe = errors.New("agent: manual compaction has no safe cut")
 
+// ErrManualCompactRetry reports that an interrupted task recorded a retry
+// deadline that has not elapsed. The context is unchanged; the same requestId
+// may be retried after the deadline.
+var ErrManualCompactRetry = errors.New("agent: manual compaction retry is not due")
+
+// manualCompactRetryDelay is the backoff written into a failed task's
+// retry_until. It is a variable so tests can remove the wait without sleeping.
+var manualCompactRetryDelay = 30 * time.Second
+
 // ManualCompactResult is the outcome of one manual compaction (or of the
 // idempotent replay of an earlier one).
 type ManualCompactResult struct {
@@ -127,6 +136,21 @@ func (r *Runner) CompactNow(ctx context.Context, lease kernel.Lease, requestID s
 	task, hasTask, err := r.loadCompactionTask(ctx, lease.Scope, requestID)
 	if err != nil {
 		return ManualCompactResult{}, err
+	}
+	// A failed attempt records phase=retry and a durable retry_until. Do not
+	// spend another model call before it elapses; the requestId remains valid.
+	if hasTask && task.Phase == kernel.CompactionPhaseRetry && time.Now().Before(task.RetryUntil) {
+		return ManualCompactResult{
+				TokensBefore:  task.TokensBefore,
+				TokensAfter:   task.TokensBefore,
+				PolicyVersion: task.PolicyVersion,
+				Reason:        "retry-backoff",
+			},
+			fmt.Errorf("%w: retry after %s", ErrManualCompactRetry, task.RetryUntil.UTC().Format(time.RFC3339))
+	}
+	attempt := 1
+	if hasTask {
+		attempt = task.Attempt + 1
 	}
 	// A dangling tool call is an incomplete turn. Summarizing it would hide the
 	// call from the next model request and let the run settle as done; refuse and
@@ -238,7 +262,7 @@ func (r *Runner) CompactNow(ctx context.Context, lease kernel.Lease, requestID s
 	// longer names a committed child event falls back to a fresh selection.
 	cutIndex := 0
 	resumed := false
-	if hasTask && task.Phase == kernel.CompactionPhaseSummarize {
+	if hasTask && (task.Phase == kernel.CompactionPhaseSummarize || task.Phase == kernel.CompactionPhaseRetry) {
 		if pinned := indexOfPositiveSeq(seqs, task.FirstKeptSeq); pinned > 0 {
 			if problem := manualCutUnsafe(seqs, pinned, prefixLen, movedStart, initialLen, isUnread); problem == "" {
 				cutIndex = pinned
@@ -290,7 +314,7 @@ func (r *Runner) CompactNow(ctx context.Context, lease kernel.Lease, requestID s
 		TailSeq:       lastSeq,
 		TokensBefore:  before,
 		PolicyVersion: policy.Version(),
-		Attempt:       task.Attempt,
+		Attempt:       attempt,
 	}); err != nil {
 		return ManualCompactResult{}, fmt.Errorf("agent: save compaction task: %w", err)
 	}
@@ -309,10 +333,26 @@ func (r *Runner) CompactNow(ctx context.Context, lease kernel.Lease, requestID s
 	}
 	if err != nil {
 		// The summary request failed or was cancelled: the original context (the
-		// event log) is untouched and nothing is written.
+		// event log) is untouched and nothing is written. The task keeps the
+		// pinned range, moves to the retry phase, and records the attempt and a
+		// durable retry deadline so a caller does not hammer the provider.
+		retryUntil := time.Now().Add(manualCompactRetryDelay)
+		if saveErr := r.saveCompactionTask(ctx, lease.Scope, kernel.CompactionTaskCheckpoint{
+			RequestID:     requestID,
+			Phase:         kernel.CompactionPhaseRetry,
+			FirstKeptSeq:  anchor,
+			TailSeq:       lastSeq,
+			TokensBefore:  before,
+			PolicyVersion: policy.Version(),
+			Attempt:       attempt,
+			RetryUntil:    retryUntil,
+		}); saveErr != nil {
+			r.Logger.Warn("manual compaction retry checkpoint save failed",
+				"session_id", lease.Scope.SessionID, "request_id", requestID, "err", saveErr)
+		}
 		r.Logger.Warn("manual compaction failed; context unchanged",
 			"tenant_id", lease.Scope.TenantID, "session_id", lease.Scope.SessionID,
-			"tokens_before", before, "err", err)
+			"tokens_before", before, "attempt", attempt, "err", err)
 		if r.CheckpointMetrics != nil {
 			r.CheckpointMetrics.CheckpointFailed("summary")
 		}

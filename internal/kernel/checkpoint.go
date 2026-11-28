@@ -101,3 +101,23 @@ func (k *Kernel) PruneCheckpoints(ctx context.Context, scope Scope, req PruneReq
 	}
 	return pruned, nil
 }
+
+// PruneCheckpointRequests bounds the manual-compaction idempotency ledger. It
+// is independent of projection pruning: deleting a projection never deletes the
+// request row, and this call never deletes a projection or an event.
+func (k *Kernel) PruneCheckpointRequests(ctx context.Context, scope Scope, req CheckpointRequestPruneRequest) (int64, error) {
+	if scope.IsZero() {
+		return 0, k.reject(ReasonInvalidRequest, OpCommit, scope, KindCompaction, OwnerToken{}, "tenant and session are required", ErrInvalidRequest)
+	}
+	if req.MaxRequests < 0 || req.TTL < 0 {
+		return 0, k.reject(ReasonInvalidRequest, OpCommit, scope, KindCompaction, OwnerToken{}, "prune bounds must be >= 0", ErrInvalidRequest)
+	}
+	if req.MaxRequests == 0 && req.TTL == 0 {
+		return 0, nil
+	}
+	pruned, err := k.log.PruneCheckpointRequests(ctx, scope.TenantID, scope.SessionID, req)
+	if err != nil {
+		return 0, k.classifyStoreError(OpCommit, CommitRequest{Scope: scope, Kind: KindCompaction}, err)
+	}
+	return pruned, nil
+}

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/jixoai/keel/internal/kernel"
 	"github.com/jixoai/keel/internal/provider"
@@ -65,6 +66,15 @@ func (s *countedSummaryStream) stream(ctx context.Context, model string, llm pro
 		return failingSummaryStream()(ctx, model, llm, cfg)
 	}
 	return shortSummaryStream()(ctx, model, llm, cfg)
+}
+
+// noManualCompactRetryDelay removes the retry wait for tests that resume
+// immediately after an injected summary failure.
+func noManualCompactRetryDelay(t *testing.T) {
+	t.Helper()
+	previous := manualCompactRetryDelay
+	manualCompactRetryDelay = -time.Second
+	t.Cleanup(func() { manualCompactRetryDelay = previous })
 }
 
 // TestManualCompactRecoversCommittedEntry pins the entry-checkpoint recovery
@@ -134,6 +144,7 @@ func TestManualCompactRecoversCommittedEntry(t *testing.T) {
 // that exact retained boundary instead of selecting a new cut after new input
 // arrived.
 func TestManualCompactResumesPinnedSummarizePhase(t *testing.T) {
+	noManualCompactRetryDelay(t)
 	st := testStore(t)
 	ctx := context.Background()
 	tenant, session, k, scope := seedManualHistory(t, st)
@@ -149,8 +160,14 @@ func TestManualCompactResumesPinnedSummarizePhase(t *testing.T) {
 	if err != nil || !found {
 		t.Fatalf("task after failure = (found=%v, err=%v), want the pinned checkpoint", found, err)
 	}
-	if task.Phase != kernel.CompactionPhaseSummarize || task.FirstKeptSeq <= 0 || task.TailSeq < task.FirstKeptSeq {
-		t.Fatalf("pinned task = %+v", task)
+	if task.Phase != kernel.CompactionPhaseRetry || task.FirstKeptSeq <= 0 || task.TailSeq < task.FirstKeptSeq {
+		t.Fatalf("pinned task = %+v, want a retry-phase pin", task)
+	}
+	if task.RetryUntil.IsZero() {
+		t.Fatalf("task retry_until is zero, want a durable retry deadline")
+	}
+	if task.Attempt != 1 {
+		t.Fatalf("task attempt = %d, want 1 after the first summary failure", task.Attempt)
 	}
 
 	// New input arrives while the task is interrupted. A fresh selection could
@@ -239,6 +256,7 @@ func TestRecoverAutomaticCompactionProjection(t *testing.T) {
 // contiguous seqs (no lost events) and one terminal reply per user input (no
 // duplicate final answers).
 func TestCompactionResumeKeepsLogContiguousAndSingleAnswer(t *testing.T) {
+	noManualCompactRetryDelay(t)
 	st := testStore(t)
 	ctx := context.Background()
 	tenant, session, k, scope := seedManualHistory(t, st)
@@ -305,6 +323,76 @@ func TestCompactionResumeKeepsLogContiguousAndSingleAnswer(t *testing.T) {
 	assertContiguousLog(t, events)
 	if got := countKind(events, store.EventCompaction); got != beforeCompactions+1 {
 		t.Fatalf("compaction events after resume = %d, want %d (exactly one)", got, beforeCompactions+1)
+	}
+}
+
+// TestManualCompactRetryBackoffAndAttempts pins the retry half of the task
+// state machine: a failed summary records attempt=1, phase=retry and a durable
+// retry_until; an immediate retry is refused without a second model call; after
+// the deadline the same requestId resumes and spends exactly one more attempt.
+func TestManualCompactRetryBackoffAndAttempts(t *testing.T) {
+	previous := manualCompactRetryDelay
+	manualCompactRetryDelay = time.Hour
+	t.Cleanup(func() { manualCompactRetryDelay = previous })
+
+	st := testStore(t)
+	ctx := context.Background()
+	tenant, session, k, scope := seedManualHistory(t, st)
+	runner := manualRunner(t, st)
+	summary := &countedSummaryStream{failFirst: 1}
+	runner.Stream = summary.stream
+	lease := claimScope(t, k, tenant, session)
+
+	if _, err := runner.CompactNow(ctx, lease, "manual-retry"); err == nil {
+		t.Fatal("first CompactNow succeeded, want the injected summary failure")
+	}
+	task, found, err := k.LoadCompactionTask(ctx, scope, "manual-retry")
+	if err != nil || !found {
+		t.Fatalf("task after failure = (found=%v, err=%v), want present", found, err)
+	}
+	if task.Phase != kernel.CompactionPhaseRetry || task.Attempt != 1 || task.RetryUntil.IsZero() {
+		t.Fatalf("task after failure = %+v, want retry/attempt 1/deadline", task)
+	}
+	if !task.RetryUntil.After(time.Now()) {
+		t.Fatalf("retry_until = %s, want a future deadline", task.RetryUntil)
+	}
+
+	// The deadline has not elapsed: no model call, typed refusal, same state.
+	if _, err := runner.CompactNow(ctx, lease, "manual-retry"); !errors.Is(err, ErrManualCompactRetry) {
+		t.Fatalf("immediate retry = %v, want ErrManualCompactRetry", err)
+	}
+	if got := summary.callsMade(); got != 1 {
+		t.Fatalf("summary calls after backoff refusal = %d, want 1", got)
+	}
+	still, found, err := k.LoadCompactionTask(ctx, scope, "manual-retry")
+	if err != nil || !found || still.Attempt != 1 || still.Phase != kernel.CompactionPhaseRetry {
+		t.Fatalf("task after backoff refusal = (%+v, found=%v, err=%v)", still, found, err)
+	}
+
+	// Simulate the deadline elapsing, then resume: one more model call and a
+	// performed compaction; the task is consumed.
+	past := time.Now().Add(-time.Second)
+	if err := k.SaveCompactionTask(ctx, scope, kernel.CompactionTaskCheckpoint{
+		RequestID:     task.RequestID,
+		Phase:         kernel.CompactionPhaseRetry,
+		FirstKeptSeq:  task.FirstKeptSeq,
+		TailSeq:       task.TailSeq,
+		TokensBefore:  task.TokensBefore,
+		PolicyVersion: task.PolicyVersion,
+		Attempt:       task.Attempt,
+		RetryUntil:    past,
+	}); err != nil {
+		t.Fatalf("clear retry deadline: %v", err)
+	}
+	res, err := runner.CompactNow(ctx, lease, "manual-retry")
+	if err != nil || !res.Performed {
+		t.Fatalf("resumed retry = (%+v, %v), want performed", res, err)
+	}
+	if got := summary.callsMade(); got != 2 {
+		t.Fatalf("summary calls after resume = %d, want 2 (one failure + one retry)", got)
+	}
+	if _, found, err := k.LoadCompactionTask(ctx, scope, "manual-retry"); err != nil || found {
+		t.Fatalf("task after success = (found=%v, err=%v), want deleted", found, err)
 	}
 }
 

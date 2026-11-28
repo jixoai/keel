@@ -2,7 +2,7 @@
 
 ## 1. CompactionTask / checkpoint
 
-- [x] durable task kind/state/attempts/lease/retry
+- [x] durable task kind/state/attempts/retry, fenced by the session/run lease (no independent task-lease row)
 - [x] PI entry/checkpoint semantics + crash matrix
 - [x] resume test: 0 lost events / 0 duplicate final replies
 
@@ -24,8 +24,8 @@
 
 ## 5. Nightly chaos / conformance
 
-- [x] 10-minute random SIGKILL job in CI
-- [x] conformance golden job on PI pin changes
+- [ ] 10-minute random SIGKILL job in CI (wired in `.github/workflows/ci.yml`; not executed on GitHub Actions from this environment — local 600s run PASS)
+- [ ] conformance golden job on PI pin changes (wired in `.github/workflows/conformance.yml`; not executed on GitHub Actions — local golden run PASS)
 
 ## 6. Capacity/docs
 
