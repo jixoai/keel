@@ -113,7 +113,7 @@ func main() {
 
 关键点由代码而非约定保证：
 
-- 运行路径上任一服务不是 `ACTIVE`，`servicehost.Boot` 就失败（`internal/servicehost/host.go:343`）；
+- 运行路径上任一服务不是 `ACTIVE`，`servicehost.Boot` 就失败（`internal/servicehost/host.go:344`）；
   半装配的图永不启动。
 - 你拿不到事件表。一切 durable 写入都走 `kern.Commit`。
 - 可以在**不带 worker** 的情况下运行装配（`Options.Worker = false`，或 `cmd/runtime -no-worker`），

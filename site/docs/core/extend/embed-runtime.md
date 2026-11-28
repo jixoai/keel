@@ -121,7 +121,7 @@ func main() {
 Key points, all enforced by the code rather than by convention:
 
 - `servicehost.Boot` fails if any service on the run path is not `ACTIVE`
-  (`internal/servicehost/host.go:343`); a half-assembled graph never starts.
+  (`internal/servicehost/host.go:344`); a half-assembled graph never starts.
 - You never receive the events table. Everything durable goes through `kern.Commit`.
 - You can run the assembly **without a worker** (`Options.Worker = false`, or `-no-worker` on
   `cmd/runtime`) to serve API and projection only, and run workers as a separate fleet.

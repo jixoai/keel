@@ -68,7 +68,7 @@ If an attempt failed terminally (provider error), the input stays owed and the
 next claim retries it. An operator or client can also re-ask a committed input
 explicitly: `POST /v1/sessions/{id}/retry` commits the same text under a new
 request id and records `retryOf` (the seq it re-asks) in the payload
-(`internal/httpapi/server.go:156`, `internal/httpapi/input_commit.go:41`).
+(`internal/httpapi/server.go:156`, `internal/httpapi/input_commit.go:42`).
 
 ## 3. Handoff: recovering across processes
 

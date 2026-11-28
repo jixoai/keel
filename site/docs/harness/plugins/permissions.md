@@ -53,7 +53,7 @@ comes from the external gateway: a spawned process gets `MinimalEnv` plus
 explicitly declared variables, with references resolved from `${NAME}` /
 `env:NAME` / `secret:NAME` and **literal secrets refused at validation time**
 (`internal/gateway/process.go:106`, `internal/servicehost/models.go:546`,
-`internal/host/config.go:203`). The same discipline protects model credentials
+`internal/host/config.go:204`). The same discipline protects model credentials
 today: `secret:` references fail closed when the tenant secret store is
 unavailable — nothing is ever stored or served in plaintext
 (`cmd/keel/serve.go:165`).

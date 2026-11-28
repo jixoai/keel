@@ -28,7 +28,7 @@ is built, it compares the tag to the binary's own report:
 
 ```bash
 # what the gate does, locally
-go run ./cmd/keel version          # prints: keel 0.4.0
+go run ./cmd/keel version          # prints: keel 0.5.0
 # tag must be v + that number, or the run fails before publishing
 ```
 
@@ -119,7 +119,7 @@ Rules for the edit:
 GitHub is the origin; the same path suffix is served by mirrors for slow networks:
 
 ```bash
-VER=0.4.0
+VER=0.5.0
 BASE=https://github.com/jixoai/keel/releases/download/v$VER
 MIRROR=https://gh.fde2e.tweb.xin/jixoai/keel/releases/download/v$VER
 
@@ -189,7 +189,7 @@ already verified. Ship the fix as a new patch version.
 ## 9. Verifying a download
 
 ```bash
-VER=0.4.0
+VER=0.5.0
 curl -LO "https://github.com/jixoai/keel/releases/download/v$VER/SHA256SUMS.txt"
 curl -LO "https://github.com/jixoai/keel/releases/download/v$VER/keel-$VER-linux-amd64.tar.gz"
 shasum -a 256 -c SHA256SUMS.txt --ignore-missing

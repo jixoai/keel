@@ -60,7 +60,7 @@ KEEL_TEST_DSN='postgres://…' KEEL_EVIDENCE_DIR=/tmp/keel-evidence \
 - **每次运行前先截断工件**。在同一目录重跑绝不留下两次运行的拼接输出——陈旧工件就是会撒谎的工件
   （`scripts/acceptance-all.sh:52`）。
 - **每个门独占数据库**。会 TRUNCATE/DROP 的工具拒绝跑共享库：`cmd/e2e -reset` 要求专用库，`r1diff`
-  要求库名含 `r1diff`，压测工具要求库名含 `e2e/test/smoke/perf/accept`（`docs/RUNBOOK.md:247`）。
+  要求库名含 `r1diff`，压测工具要求库名含 `e2e/test/smoke/perf/accept`（`docs/RUNBOOK.md:248`）。
   一次打到共享库上的旧 schema 迁移，就足以删掉别的线程正在使用的行——runbook 里登记了这次事故。
 
 ## 3. 单独跑各个门

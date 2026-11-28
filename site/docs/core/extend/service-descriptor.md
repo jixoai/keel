@@ -138,7 +138,7 @@ inst, ok := eng.Lookup("audit-log")   // inspect what is live (engine.go:367)
 
 `Snapshot()` reports each service's state and diagnostics — that is where "PENDING: waiting for
 ctx.store" or a degraded optional dependency appears. `servicehost.Boot` turns a non-`ACTIVE`
-run-path service into a startup failure (`internal/servicehost/host.go:343`), so a broken descriptor
+run-path service into a startup failure (`internal/servicehost/host.go:344`), so a broken descriptor
 cannot be silently ignored in production assembly.
 
 **Step 5 — retire paths.** When a reload changes your service, the old generation goes `RETIRING`

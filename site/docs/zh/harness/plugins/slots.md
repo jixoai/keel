@@ -126,9 +126,9 @@ contributes:
 坏插件不能拖垮宿主，代码就是按这条规则写的：
 
 - **坏声明不会让 manager 失败。** `DecodeExtension` 把字段问题写进 `Problems`，本身不返回错误
-  （`internal/harnessext/plugin_extension.go:184`）。插件可以安装，只是它的 UI 面不加载。
+  （`internal/harnessext/plugin_extension.go:185`）。插件可以安装，只是它的 UI 面不加载。
 - **注册是原子的。** 任何字段错误都让该插件之前的声明原样保留：绝不会出现半个贡献
-  （`web/src/plugins/registry.ts:82`）。
+  （`web/src/plugins/registry.ts:83`）。
 - **chunk 失败是一种界面，不是一个洞。** 贡献被标记 `failed`，带错误码
   （`web/src/plugins/registry.ts:495`），并提供重试（`web/src/plugins/registry.ts:421`）；槽位其余部分
   照常渲染。

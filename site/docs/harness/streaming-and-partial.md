@@ -77,7 +77,7 @@ committed while its run waits behind a full group slot answers **202** with a
 `Retry-After` when the ETA is known) instead of 429 — the durable input is not
 rejected, it is queued FIFO, and 429 stays reserved for the tenant quota and the
 memory ceiling so the queue cannot become an oversell channel
-(`internal/httpapi/server.go:497`, `internal/httpapi/server.go:848`, `internal/httpapi/server.go:924`).
+(`internal/httpapi/server.go:497`, `internal/httpapi/server.go:849`, `internal/httpapi/server.go:924`).
 
 ## 4. Partials: the token-level bypass
 

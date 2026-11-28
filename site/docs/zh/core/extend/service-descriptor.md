@@ -128,7 +128,7 @@ inst, ok := eng.Lookup("audit-log")   // 查看当前活着的是什么（engine
 ```
 
 `Snapshot()` 给出每个服务的状态与诊断——那里能看到「PENDING: 在等 ctx.store」或可选依赖的降级记录。
-`servicehost.Boot` 会把运行路径上非 `ACTIVE` 的服务变成启动失败（`internal/servicehost/host.go:343`），
+`servicehost.Boot` 会把运行路径上非 `ACTIVE` 的服务变成启动失败（`internal/servicehost/host.go:344`），
 因此坏描述符在生产的装配里不会被静默忽略。
 
 **第 5 步——退役路径。** reload 改动你的服务时，旧代进入 `RETIRING`（不接新 run），引用归零或

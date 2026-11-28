@@ -97,7 +97,7 @@ type Plugin struct {
   `/plugins/<id>/`，经 `keel.plugin.*` 桥接（`cmd/keel/plugins_ui.go:17`、
   `internal/harnessapi/plugin_bridge.go:75`）。
 - **槽位与贡献**——`provides.slots` 与 `contributes[]` 被解析、校验并发布到插件清单
-  （`internal/harnessext/plugin_extension.go:64`、`internal/harnessext/plugin_manager_view.go:198`），
+  （`internal/harnessext/plugin_extension.go:65`、`internal/harnessext/plugin_manager_view.go:198`），
   客户端经统一槽位 registry 渲染 `chunk`、`iframe` 与 `data` 贡献；签名 `package` 形态今天
   在客户端是显式的不支持面（`web/src/plugins/slots.tsx:1`、`:590`）。
 - **创造模式**——`keel.creation` 是内置插件，提供六个动作（`catalog`、`scaffold`、`validate`、
@@ -120,7 +120,7 @@ hooks、触发器、诊断（`web/src/screens/settings.tsx:1148`）。
 | `agent_backend` sidecar（OAR 适配器） | sidecar loader 只接受 `tool_provider` 连接；`plugins/keel.oar/plugin.yaml` 作为 **DEFERRED** 目标清单保留 | `plugins/keel.oar/plugin.yaml:3` |
 | 创造模式端到端（G8） | 动作后端、模板与 webview E2E 均已存在；「一句话→运行中的插件」端到端门未通过 | `openspec/changes/archive/2026-11-24-keel-harness-v2/DISPOSITION.md:20` |
 | 创造模式 v2 扩展面聚合、原生 chunk 主路径 | 声明格式已冻结并校验；把每个已安装插件的 `extensibility.json` 聚合为创造面尚未完成 | `plugins/COVERAGE.md`（状态 `partial`） |
-| `net` 与 `secrets` gate 的受中介 fetch/密钥读取动词 | 策略、gate 与审计路径已存在（`PermissionedBroker.Fetch` / `ReadSecret`），但没有已交付的宿主动词路由到它们，因此它们尚未拒绝过任何请求 | `internal/harnessext/plugin_permissions.go:647` |
+| `net` 与 `secrets` gate 的受中介 fetch/密钥读取动词 | 策略、gate 与审计路径已存在（`PermissionedBroker.Fetch` / `ReadSecret`），但没有已交付的宿主动词路由到它们，因此它们尚未拒绝过任何请求 | `internal/harnessext/plugin_permissions.go:648` |
 | per-plugin CPU/内存预算、宿主 `SIGKILL` 后的 pidfile sweep | 进程边界与进程组回收已有；资源预算与遗留进程清扫没有 | [权限](/zh/harness/plugins/permissions) §5 |
 | 客户端安装/更新卡 | 后端安装 API 与生命周期端点已交付；web 插件页在卡片位置仍渲染 Empty | `web/src/screens/plugins.tsx:1` |
 

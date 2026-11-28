@@ -164,7 +164,7 @@ External sessions never enter the native run/lease flow; their events are Keel's
 | 404 | unknown session/tenant for this tenant (a foreign tenant's resource answers exactly the same way) |
 | 409 | conflicting state: external session on a native endpoint, a decision already answered, or a native edge write into an external session |
 | 413 | request body over the configured limit |
-| 429 | capacity refusal: the tenant run quota or a memory budget is spent; retry after `Retry-After`. A full *group slot* is not a 429 — it is the 202 queued admission above (`internal/httpapi/server.go:848`) |
+| 429 | capacity refusal: the tenant run quota or a memory budget is spent; retry after `Retry-After`. A full *group slot* is not a 429 — it is the 202 queued admission above (`internal/httpapi/server.go:849`) |
 | 501 | the operation is not wired in this process (for example cancel across processes) — the API refuses instead of pretending |
 | 503 | not ready, draining, or an unwired product seam ("decisions are not wired", "triggers are not wired") |
 | 502 | sub-agent or backend failure |

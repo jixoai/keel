@@ -157,7 +157,7 @@
 | 404 | 本租户视角下不存在的会话/租户（别家租户的资源给出完全相同的回答） |
 | 409 | 状态冲突：原生端点遇到外部会话、decision 已作答、向外部会话写原生 edge |
 | 413 | 请求体超过配置上限 |
-| 429 | 容量拒绝：租户 run 配额或内存预算已用尽，按 `Retry-After` 重试。**组槽位**满不是 429——而是上面的 202 排队准入（`internal/httpapi/server.go:848`） |
+| 429 | 容量拒绝：租户 run 配额或内存预算已用尽，按 `Retry-After` 重试。**组槽位**满不是 429——而是上面的 202 排队准入（`internal/httpapi/server.go:849`） |
 | 501 | 本进程未接线该操作（例如跨进程 cancel）——API 拒绝，而不是假装成功 |
 | 503 | 未就绪、排水中，或某产品 seam 未接线（"decisions are not wired"、"triggers are not wired"） |
 | 502 | 子代理或 backend 失败 |

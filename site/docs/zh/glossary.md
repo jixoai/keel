@@ -46,7 +46,7 @@ sidebar: false
 | **Handoff** | 跨进程接替：新 runtime、排空旧的、新 epoch、从账本继续。 | `docs/HANDOFF.md` |
 | **Decision（审批/问句）** | 审批/问句原语：durable 行、幂等作答、有界超时。不是内核事件 kind。 | `internal/harnessext/decisions.go:233` |
 | **触发器（Trigger）** | 定时或 webhook 启动的回合（`interval`/`cron`/`webhook`），带幂等键与审计。 | `internal/harnessext/triggers.go:30` |
-| **子代理（Sub-agent）** | 由工具或 API 派生的子会话，带预算与结构化结果。 | `internal/harnessext/subagent.go:21` |
+| **子代理（Sub-agent）** | 由工具或 API 派生的子会话，带预算与结构化结果。 | `internal/harnessext/subagent.go:22` |
 
 ## 装配词汇
 

@@ -134,10 +134,10 @@ cannot overwrite its successor because each load carries a generation
 A broken plugin must not take the host down, and the code is written to that rule:
 
 - **A bad declaration never fails the manager.** `DecodeExtension` reports field problems in
-  `Problems`; it does not error (`internal/harnessext/plugin_extension.go:184`). The plugin may install;
+  `Problems`; it does not error (`internal/harnessext/plugin_extension.go:185`). The plugin may install;
   its UI surface simply does not load.
 - **Registration is atomic.** A field error anywhere leaves the plugin's previous declaration
-  untouched: no half-contribution is ever visible (`web/src/plugins/registry.ts:82`).
+  untouched: no half-contribution is ever visible (`web/src/plugins/registry.ts:83`).
 - **A failed chunk is a face, not a hole.** The contribution is marked `failed` with its code
   (`web/src/plugins/registry.ts:495`) and offers a retry (`web/src/plugins/registry.ts:421`); the rest
   of the slot keeps rendering.

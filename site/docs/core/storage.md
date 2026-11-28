@@ -51,7 +51,7 @@ The schema lives in two places:
 | `file_manifest` / `session_snapshot` | the file plugin's path → hash projection and the tree hash recorded per event seq | both are projections: `fs.write` commits before the manifest changes, and a fork/snapshot materializes the prefix from the tree (`internal/store/schema.sql:855`, `internal/store/schema.sql:871`) |
 | `task_cards` / `task_events` | the task panel's card rows and their event stream | a card is UI memory; a durable `tasks` row is scheduling bookkeeping (`internal/store/schema.sql:749`, `internal/store/schema.sql:773`) |
 | `plugins` / `plugin_audit` | installed plugin inventory and its append-only audit | process-level on purpose: plugin enablement is not a tenant fact, so the tenant role gets no grant (`internal/store/schema.sql:582`, `internal/store/schema.sql:603`) |
-| `notifications` | per-tenant notification rows | `push_attempted_at` is the compare-and-set that makes "push once" survive restarts (`internal/store/schema.sql:824`) |
+| `notifications` | per-tenant notification rows | `push_attempted_at` is the compare-and-set that makes "push once" survive restarts (`internal/store/schema.sql:825`) |
 
 Two database-side behaviours matter for the runtime:
 

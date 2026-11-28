@@ -44,7 +44,7 @@ schema 分两处：
 | `file_manifest` / `session_snapshot` | 文件插件的 path → hash 投影，以及按事件 seq 记录 tree hash | 两者都是投影：`fs.write` 先落账再改 manifest，fork/快照按 tree 物化前缀（`internal/store/schema.sql:855`、`internal/store/schema.sql:871`） |
 | `task_cards` / `task_events` | 任务面板的卡片行与其事件流 | 卡片是 UI 记忆；durable 的 `tasks` 行才是调度记账（`internal/store/schema.sql:749`、`internal/store/schema.sql:773`） |
 | `plugins` / `plugin_audit` | 已安装插件清单与 append-only 审计 | 刻意是进程级：插件启用不是租户事实，租户角色在它上面没有任何授权（`internal/store/schema.sql:582`、`internal/store/schema.sql:603`） |
-| `notifications` | 按租户的通知行 | `push_attempted_at` 是让「只推一次」跨重启成立的 compare-and-set（`internal/store/schema.sql:824`） |
+| `notifications` | 按租户的通知行 | `push_attempted_at` 是让「只推一次」跨重启成立的 compare-and-set（`internal/store/schema.sql:825`） |
 
 两处数据库侧行为对运行时很重要：
 

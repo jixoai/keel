@@ -42,7 +42,7 @@ sidecar 那行由 loader 实现（`internal/harnessext/plugin_sidecar.go:22`）�
 来自外部网关：被 spawn 的进程只拿到 `MinimalEnv` 加显式声明的变量，引用经 `${NAME}` /
 `env:NAME` / `secret:NAME` 解析，且**字面密钥在校验期即被拒绝**
 （`internal/gateway/process.go:106`、`internal/servicehost/models.go:546`、
-`internal/host/config.go:203`）。同一条纪律今天也在保护模型凭据：租户密钥存储不可用时
+`internal/host/config.go:204`）。同一条纪律今天也在保护模型凭据：租户密钥存储不可用时
 `secret:` 引用 fail-closed——绝无明文存取（`cmd/keel/serve.go:165`）。
 
 ### 边界，只讲一次

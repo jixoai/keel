@@ -55,7 +55,7 @@ at-least-once 契约与推导式 generation id，存在的意义就是让「缺�
 若 attempt 以终态失败（provider 错误），输入保持「欠着」，下一次 claim 会重试。运维或客户端
 也可以显式重问一条已提交输入：`POST /v1/sessions/{id}/retry` 以新的 request id 提交同一文本，
 并在载荷里记录 `retryOf`（它重问的 seq）（`internal/httpapi/server.go:156`、
-`internal/httpapi/input_commit.go:41`）。
+`internal/httpapi/input_commit.go:42`）。
 
 ## 3. Handoff：跨进程恢复
 
