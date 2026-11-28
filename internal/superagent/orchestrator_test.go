@@ -382,6 +382,59 @@ func issueEvent(id, threadID string) superagent.Event {
 	}
 }
 
+// TestDispatchTicketBindsImportedWorkerSession is the P1-2 contract: an
+// imported board ticket carries WorkerBot, and dispatching it creates one
+// Assignment bound to a live worker session whose Bot is that WorkerBot. The
+// importer must not write a sessionless OPEN assignment itself; this is the
+// normal pump that turns the imported ticket into work.
+func TestDispatchTicketBindsImportedWorkerSession(t *testing.T) {
+	env := newEnv(t, envOpts{})
+	ctx := context.Background()
+	now := *env.clock
+	item, err := env.work.CreateWorkItem(ctx, superagent.Ticket{
+		WorkItem: collab.WorkItem{
+			ID: uuid.New(), TenantID: env.tenant, ModeID: collab.ModeSuperagent,
+			Title: "imported board task", Status: collab.WorkItemOpen, CreatedAt: now,
+			OwnerSessionID: env.orchestratorSession.SessionID,
+		},
+		Mandate: superagent.Mandate{
+			Strength: superagent.MandateWrite, AcceptedAt: now, AcceptedBy: "board",
+			Thread: superagent.ThreadRef{Source: "board", Kind: "task", ID: "7"},
+		},
+		Thread:    superagent.ThreadRef{Source: "board", Kind: "task", ID: "7"},
+		WorkerBot: "imported-worker",
+	}.Record())
+	if err != nil {
+		t.Fatalf("create imported ticket: %v", err)
+	}
+	dispatched, err := env.orchestrator.DispatchTicket(ctx, env.tenant, item.ID)
+	if err != nil || !dispatched {
+		t.Fatalf("DispatchTicket = %v, %v", dispatched, err)
+	}
+	assignments, err := env.work.ListAssignments(ctx, env.tenant, item.ID)
+	if err != nil || len(assignments) != 1 {
+		t.Fatalf("assignments = %+v, err=%v", assignments, err)
+	}
+	assignment := assignments[0]
+	if assignment.Status != collab.AssignmentActive || assignment.SessionID == uuid.Nil {
+		t.Fatalf("assignment = %+v, want an active session-bound row", assignment)
+	}
+	if assignment.BotID != "imported-worker" {
+		t.Fatalf("assignment BotID = %q, want imported-worker", assignment.BotID)
+	}
+	if launch := env.launcher.lastLaunch(); launch.BotID != "imported-worker" || launch.WorkItemID != item.ID {
+		t.Fatalf("worker launch = %+v, want Bot imported-worker on %s", launch, item.ID)
+	}
+	// A second dispatch is a no-op: the active assignment is the idempotency.
+	again, err := env.orchestrator.DispatchTicket(ctx, env.tenant, item.ID)
+	if err != nil || again {
+		t.Fatalf("second DispatchTicket = %v, %v, want a no-op", again, err)
+	}
+	if assignments, _ := env.work.ListAssignments(ctx, env.tenant, item.ID); len(assignments) != 1 {
+		t.Fatalf("second dispatch created another assignment: %+v", assignments)
+	}
+}
+
 func TestPollCreatesTicketAssignmentAndAck(t *testing.T) {
 	env := newEnv(t, envOpts{})
 	if err := env.source.PushEvent(env.tenant, issueEvent("e1", "issue#1")); err != nil {

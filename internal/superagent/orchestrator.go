@@ -1525,6 +1525,39 @@ func (o *Orchestrator) DispatchQueued(ctx context.Context) (int, error) {
 	return count, err
 }
 
+// OrchestratorSessionID is the supervisor's root session. The board importer
+// records it as an imported ticket's owner, which is what makes the guarded
+// Host accept the orchestrator's assignment call.
+func (o *Orchestrator) OrchestratorSessionID() uuid.UUID { return o.cfg.OrchestratorSession }
+
+// DispatchTicket is the single-ticket dispatch entry point (the board importer
+// uses it). It goes through the same guarded Host as the queue pump, so an
+// imported ticket gets a real worker session with the ticket's WorkerBot
+// instead of a sessionless OPEN assignment that dispatch would skip forever.
+func (o *Orchestrator) DispatchTicket(ctx context.Context, tenantID, ticketID uuid.UUID) (bool, error) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if err := o.checkTenant(tenantID); err != nil {
+		return false, err
+	}
+	if err := o.checkWriterLease(ctx); err != nil {
+		return false, err
+	}
+	item, err := o.cfg.Store.GetWorkItem(ctx, tenantID, ticketID)
+	if err != nil {
+		return false, err
+	}
+	ticket := TicketFromWorkItem(item)
+	if !ticket.CanDispatch() {
+		return false, nil
+	}
+	dispatched, err := o.dispatchTicketLocked(ctx, ticket, false, "imported board task", "")
+	if dispatched {
+		o.changed(tenantID)
+	}
+	return dispatched, err
+}
+
 // dispatchTicketLocked creates one Assignment and Worker Session. The old
 // Assignment is never overwritten: a replacement is a new row so the history
 // stays auditable. The guarded Host is the only authorization gate: this

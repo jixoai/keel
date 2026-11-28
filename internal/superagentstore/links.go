@@ -17,6 +17,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // Board link kinds. They stay open strings so a new mirror surface needs no
@@ -95,6 +96,21 @@ func (s *Store) PutBoardLink(ctx context.Context, link BoardLink) (BoardLink, er
 		return existing, nil
 	}
 	if err != nil {
+		// The natural key is not the only guard: one board task may map to only
+		// one ticket (the partial unique index on kind='ticket'). Two importers
+		// racing on the same projected task, or a retry after a crash, must read
+		// the winner's link instead of failing with a unique violation. The
+		// uniqueness is still enforced; the insert is simply idempotent.
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" && link.Kind == BoardLinkTicket {
+			existing, found, lookupErr := s.GetBoardLinkByTask(ctx, link.TenantID, link.Source, link.Kind, link.BoardTaskID)
+			if lookupErr != nil {
+				return BoardLink{}, lookupErr
+			}
+			if found {
+				return existing, nil
+			}
+		}
 		return BoardLink{}, fmt.Errorf("superagentstore: put board link: %w", err)
 	}
 	return row, nil

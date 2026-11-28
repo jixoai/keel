@@ -1616,30 +1616,21 @@ func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, 
 	})
 
 	// The super-agent queue (change keel-collab-superagent) is assembled only
-	// when KEEL_SUPERAGENT_SOURCE names a Source and both role Bots. It enables
-	// the mode and starts the poller; with no configuration the descriptor stays
-	// disabled exactly as the core change left it.
+	// when KEEL_SUPERAGENT_SOURCE names a Source and both role Bots. The config
+	// is parsed once: it decides whether the plugin is disabled and supplies the
+	// WorkerBot the board importer must stamp on an imported ticket.
 	superagentChanges := newSuperagentChangeSink()
-	// The superagent plugin owns its own domain store; the core store keeps the
-	// sessions/bots/auth facts. A deployment whose board plugin is absent never
-	// constructs the supervisor at all: the plugin graph reports it PENDING.
-	domain := superagentstore.New(st.Pool())
-	var superagentRuntime *superagent.Orchestrator
-	if boardSurface == nil {
-		log.Warn("super-agent plugin is pending: the board plugin is not available")
-	} else {
-		superagentRuntime, err = newSuperagentRuntime(ctx, opts.TenantID, st, domain, collabModes, accessBridge, subagents, starter, superagentChanges.Publish, log)
-		if err != nil {
-			return nil, fmt.Errorf("super-agent: %w", err)
-		}
+	superagentCfg, err := superagentConfigFromEnv(os.Getenv)
+	if err != nil {
+		return nil, fmt.Errorf("super-agent config: %w", err)
 	}
-	// The model-facing report/ask tools were captured at Boot; install the
-	// orchestrator they call. Nil (disabled mode) leaves them answering the
-	// typed unavailable refusal.
-	opts.SuperagentWorkerTools.set(superagentRuntime)
-
-	// Service-plugin graph (change keel-plugin-split): board provides `board`,
-	// superagent requires it. Load order is topological; unload is reverse.
+	// The superagent plugin owns its own domain store; the core store keeps the
+	// sessions/bots/auth facts. The supervisor is built inside the plugin's
+	// Start, after the board plugin published `board`, so a board that is
+	// absent or failed to start leaves superagent PENDING with no orchestrator,
+	// writer or HTTP/tool surface running.
+	domain := superagentstore.New(st.Pool())
+	var supervisor *superagent.Orchestrator
 	serviceBoard := boardService(boardSurface)
 	servicePlugins, err := pluginruntime.New(pluginruntime.Options{
 		Plugins: []*pluginruntime.Plugin{
@@ -1648,10 +1639,28 @@ func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, 
 				Disabled: boardSurface == nil, Logger: log,
 			}),
 			superagentplugin.NewPlugin(superagentplugin.Options{
-				Service:  superagentRuntime,
-				Writer:   newSuperagentBoardWriter(ctx, opts.TenantID, st, domain, boardSurface, serviceBoard, log),
-				Domain:   superagentplugin.DomainStore{Store: domain},
-				Disabled: superagentRuntime == nil, Logger: log,
+				Domain: superagentplugin.DomainStore{Store: domain},
+				// A deployment without a Source is genuinely stopped. A board
+				// dependency problem is not: the plugin must stay PENDING so the
+				// missing requirement is visible.
+				Disabled: !superagentCfg.Enabled,
+				Build: func(buildCtx context.Context, board boardplugin.Service) (*superagentplugin.Built, error) {
+					runtime, err := newSuperagentRuntime(buildCtx, superagentCfg, opts.TenantID, st, domain, collabModes, accessBridge, subagents, starter, superagentChanges.Publish, log)
+					if err != nil {
+						return nil, err
+					}
+					if runtime == nil {
+						return nil, errors.New("superagentplugin: an enabled super-agent produced no supervisor")
+					}
+					writer := newSuperagentBoardWriter(buildCtx, opts.TenantID, st, domain, boardSurface, board, superagentCfg.WorkerBot, runtime.OrchestratorSessionID(),
+						func(ctx context.Context, ticketID uuid.UUID) error {
+							_, err := runtime.DispatchTicket(ctx, opts.TenantID, ticketID)
+							return err
+						}, log)
+					supervisor = runtime
+					return &superagentplugin.Built{Service: runtime, Writer: writer}, nil
+				},
+				Logger: log,
 			}),
 		},
 		Kernel: pg.New(st.Pool()), TenantID: opts.TenantID, Logger: log,
@@ -1667,6 +1676,14 @@ func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, 
 			log.Warn("service plugin is not active", "plugin", status.ID, "state", status.State, "reason", status.Reason)
 		}
 	}
+	// The model-facing report/ask tools were captured at Boot. They may only
+	// name an orchestrator whose plugin actually started: a PENDING/FAILED
+	// superagent leaves them answering the typed unavailable refusal, and the
+	// HTTP product surface sees no supervisor at all. Build can have produced a
+	// supervisor before a later Start step failed, so the kernel state — not the
+	// pointer — is the gate.
+	supervisor = activeSupervisor(servicePlugins, supervisor)
+	opts.SuperagentWorkerTools.set(supervisor)
 
 	surface, err := newPluginSurface(ctx, rt, st, opts, hooks, triggers, decisions, approvals, notifications, subagents, partials, taskLog, tenantSecretLookup(st, secretBox, opts.TenantID, log), log)
 	if err != nil {
@@ -1723,10 +1740,11 @@ func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, 
 	// and tenant scope as the session list; they never become a second ledger.
 	sessionQuery := harnessapi.NewPGSessionQuery(st)
 	// A typed nil *superagent.Orchestrator in an interface would advertise the
-	// board as wired; keep the interface nil unless the queue is assembled.
+	// board as wired; keep the interface nil unless the supervisor's plugin is
+	// active (board published, Build succeeded, services provided).
 	var superagentService harnessapi.SuperagentService
-	if superagentRuntime != nil {
-		superagentService = superagentRuntime
+	if supervisor != nil {
+		superagentService = supervisor
 	}
 	// The superagent -> board mirror and command bridge attach in serve, after
 	// the board surface exists. The service stays on the product layer so the

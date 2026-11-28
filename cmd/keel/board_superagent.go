@@ -12,6 +12,7 @@ import (
 	"github.com/jixoai/keel/internal/access"
 	"github.com/jixoai/keel/internal/boardintegration"
 	"github.com/jixoai/keel/internal/boardplugin"
+	"github.com/jixoai/keel/internal/pluginruntime"
 	"github.com/jixoai/keel/internal/store"
 	"github.com/jixoai/keel/internal/superagent"
 	"github.com/jixoai/keel/internal/superagentplugin"
@@ -39,6 +40,9 @@ func newSuperagentBoardWriter(
 	domain *superagentstore.Store,
 	surface *boardintegration.Surface,
 	service boardplugin.Service,
+	workerBot string,
+	ownerSessionID uuid.UUID,
+	dispatch func(ctx context.Context, ticketID uuid.UUID) error,
 	log *slog.Logger,
 ) *superagentplugin.Writer {
 	if st == nil || domain == nil || surface == nil || service == nil || tenantID == uuid.Nil {
@@ -61,6 +65,11 @@ func newSuperagentBoardWriter(
 	importOptions := superagentplugin.ImportOptions{
 		Store: domain, Links: domain, TenantID: tenantID,
 		Requester: superagent.Actor{ID: "board:" + tenantID.String(), Display: "Board"},
+		WorkerBot: workerBot,
+		// The orchestrator session is the imported ticket's owner: the Host's
+		// Assign gate only admits a member of the work item.
+		OwnerSessionID: ownerSessionID,
+		Dispatch:       dispatch,
 	}
 	writer, err := superagentplugin.NewWriter(&superagentplugin.Writer{
 		TenantID: tenantID,
@@ -87,6 +96,18 @@ func newSuperagentBoardWriter(
 		return nil
 	}
 	return writer
+}
+
+// activeSupervisor is the product exposure gate. The plugin's Start can build
+// the supervisor and still fail a later step (service publication, writer
+// start), so a non-nil pointer alone does not mean the queue is serving. Only
+// an ACTIVE kernel state may expose the supervisor to the HTTP surface and the
+// model-facing report/ask tools.
+func activeSupervisor(runtime *pluginruntime.Runtime, candidate *superagent.Orchestrator) *superagent.Orchestrator {
+	if runtime == nil || !runtime.Active(superagentplugin.PluginID) {
+		return nil
+	}
+	return candidate
 }
 
 // boardChannelACL grants the projected channel's operator relation. The writer
