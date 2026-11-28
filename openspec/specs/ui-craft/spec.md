@@ -1,7 +1,7 @@
 # ui-craft Specification
 
 ## Purpose
-TBD - created by archiving change keel-ui-polish-v1. Update Purpose after archive.
+Keel 的界面打磨线：只改呈现层（样式、文案、可访问性属性、焦点顺序），不改变接口、数据流、组件契约或既有验收；每条改动按「问题 → 证据 → 改动 → 回归」记录，可访问性是硬门。
 
 ## Requirements
 

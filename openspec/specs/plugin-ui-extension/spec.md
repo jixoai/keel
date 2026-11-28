@@ -1,7 +1,7 @@
 # plugin-ui-extension Specification
 
 ## Purpose
-TBD - created by archiving change keel-harness-v2. Update Purpose after archive.
+Keel 的插件 UI 扩展面：Harness 只提供槽位注册机制，具体槽位由插件以命名空间前缀声明；贡献形态由槽位所有者决定，生命周期可逆且失败隔离；VM 配额、主题令牌、桥能力、目标降级与非 Native 外部运行的 tool-renderer 呈现统一约束。
 
 ## Requirements
 

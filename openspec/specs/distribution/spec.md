@@ -1,7 +1,7 @@
 # distribution Specification
 
 ## Purpose
-TBD - created by archiving change keel-self-contained. Update Purpose after archive.
+Keel 的分发契约：每个平台一个自包含二进制，内嵌 PostgreSQL 18 运行树、web 客户端与图标/README；`keel start` 解压并初始化仅回环的本地库，`keel install` 注册平台应用，卸载默认保留数据；发布只产出于本仓 GitHub Release，不镜像聚合仓。
 
 ## Requirements
 

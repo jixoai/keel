@@ -1,7 +1,7 @@
 # tool-surface Specification
 
 ## Purpose
-TBD - created by archiving change keel-harness-v2. Update Purpose after archive.
+Keel 的模型可见工具面契约：内建工具恒定为 11 个，动态能力通过 action 进入而非新增工具名；各聚合工具 action 为闭集，bash 是主桥，输出有界，MCP 只经聚合工具与 CLI 暴露，read/write/edit 是薄接口，后台作业统一由 JobManager 管理。
 
 ## Requirements
 

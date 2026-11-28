@@ -1,7 +1,7 @@
 # ui-kit Specification
 
 ## Purpose
-TBD - created by archiving change keel-ui-kit. Update Purpose after archive.
+Keel 的 UI kit：以 shadcn/ui（zcode 的 radix-mira + neutral + lucide 语汇）为唯一来源逐件复刻实际使用的组件，每件提供 props 表、默认/禁用/错误状态、键盘可达性与主题令牌取值；外壳/内容列参数与 zcode 对齐，Gallery 覆盖三档视口，消费者受门禁约束。
 
 ## Requirements
 

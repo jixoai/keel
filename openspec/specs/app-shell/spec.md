@@ -1,7 +1,7 @@
 # app-shell Specification
 
 ## Purpose
-TBD - created by archiving change keel-harness-shell. Update Purpose after archive.
+Keel 网页客户端的应用外壳与信息架构：zcode 同构的三区布局（会话栏、主区、右侧状态栏）、窄屏单列/抽屉与全局命令面板，覆盖会话列表、对话面、输入区、设置面与插件面；同一信息架构在 web 与 TUI 保持同等结构与回归。
 
 ## Requirements
 

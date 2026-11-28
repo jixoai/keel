@@ -1,7 +1,7 @@
 # collaboration-core Specification
 
 ## Purpose
-TBD - created by archiving change keel-collab-core. Update Purpose after archive.
+Keel 的协作底座：Bot 是角色而非协作模式，CollaborationMode 只能经受控 Host 创建 Session；显式深度策略、创建幂等与容量原子预留、WorkItem 成员边界与 Scope、人工接管权限、Attention 生命周期与 fail-closed 审计共同约束所有协作模式，且模式不得自带权限或审计旁路。
 
 ## Requirements
 

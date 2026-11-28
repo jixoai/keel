@@ -1,7 +1,7 @@
 # client-shell Specification
 
 ## Purpose
-TBD - created by archiving change keel-harness-v2. Update Purpose after archive.
+Keel 桌面与 TUI 客户端的外壳契约：固定 NSH 0.5.0 基线并处理其破坏性变更，约束桌面应用模型与系统集成（深链路由、系统栏、更新与分发）、TUI 一等 target、长会话性能、编辑器与 Markdown、Composer 富文本输入以及字段高度与控制对齐。
 
 ## Requirements
 

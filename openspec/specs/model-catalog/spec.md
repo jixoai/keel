@@ -1,7 +1,7 @@
 # model-catalog Specification
 
 ## Purpose
-TBD - created by archiving change keel-harness-v2. Update Purpose after archive.
+Keel 的模型目录与逐模型配置：用精确 (providerId, modelId) 规则和 RFC 7386 merge patch 表达能力、模态、价格等事实，未知键一律拒绝；设置视图与可执行注册表边界清晰，参数编辑器只写读者真正改动的字段。
 
 ## Requirements
 

@@ -1,7 +1,7 @@
 # naming Specification
 
 ## Purpose
-TBD - created by archiving change keel-harness-naming. Update Purpose after archive.
+Keel 的对外命名规范：产品层统一称 Harness，禁止再把 Agent 当作产品名；协议名保留并在首次出现处标注别名，术语扫描脚本作为零残留门禁。
 
 ## Requirements
 

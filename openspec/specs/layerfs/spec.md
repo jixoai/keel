@@ -1,7 +1,7 @@
 # layerfs Specification
 
 ## Purpose
-TBD - created by archiving change keel-harness-v2. Update Purpose after archive.
+Keel 的内容寻址文件层：只提供不可变的 file object 与 tree object，相同内容与目录只存一份；路径语义属于 DB 且按会话作用域，读写全程流式且有内存上限；引用计数、回收、capture 策略、物化视图写穿与配额错误分类保持一致。
 
 ## Requirements
 

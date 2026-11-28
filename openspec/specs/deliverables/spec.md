@@ -1,7 +1,7 @@
 # deliverables Specification
 
 ## Purpose
-TBD - created by archiving change keel-harness-v2. Update Purpose after archive.
+Keel 的交付物视图：交付物不是独立存储，而是会话 file_manifest 的投影；接口按 path 升序返回 path、hash、size、mode、updatedSeq、lastTaskId 与指向同会话文件预览的 previewUrl，并以 keyset 分页，先校验租户与会话归属。
 
 ## Requirements
 

@@ -69,9 +69,10 @@ development host (`nsh run --target tui`) or an embedded `nsh-platform-tui`
    embed the web client, and cross-compile with `CGO_ENABLED=0`, `-trimpath`, `-s -w`.
 4. **Checksums** — `sha256sum` over every artifact in sorted order (`SHA256SUMS.txt`).
 5. **Publish** — create the release on this repository, or upload to it on a retry.
-6. **Mirror** — when `FDE2E_RELEASES_TOKEN` is configured, the same bytes go to
-   `jixoai/fde2e-releases` under the `keel-v<ver>` tag; without the token the step skips and the run
-   stays green.
+
+The release is published here and nowhere else: there is no aggregate outlet, no mirror into
+another repository and no cross-repository token. The GitHub Release for the tag is the single
+distribution point, so there is no second page whose checksums could drift.
 
 The web build is deliberately fail-closed: v0.2.0 shipped without its zip because the step was
 `continue-on-error`, and a partial release is worse than a red run that can be fixed and re-tagged
@@ -136,8 +137,9 @@ shasum -a 256 -c sums.mirror --ignore-missing
 - `https://gh.fde2e.tweb.xin/` — self-built mirror, domestic first choice; prefix-swap the GitHub
   host and keep the rest of the path.
 - `https://ghfast.top/https://github.com/…` — public proxy fallback; same rule.
-- The aggregate release lives at `jixoai/fde2e-releases` tag `keel-v<ver>` (`.github/workflows/release.yml:138`),
-  with the same `SHA256SUMS.txt`.
+
+Both mirrors are GitHub proxies: they point at the same `jixoai/keel` release path, not at an
+aggregate repository.
 
 A user who verifies the checksum is protected even on a mirror: the file is fetched by hash, not by
 trust.

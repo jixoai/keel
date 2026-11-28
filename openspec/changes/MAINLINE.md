@@ -64,7 +64,8 @@ v0.2.0 发布后仍开的口子（归档板 41 项，按去向分组）：
    attachment/commands/permission/feedback、subprocess/terminal、bundles/presets、
    telemetry OTLP、testkit、credentials/storage/identity、keel.oar、ui-* 槽位内容、
    gbash mcp CLI、fileplugin 锁回收）；多租户插件面；macOS 原生 target；Rust+gRPC layerfs。
-9. **运维/测试债**：聚合仓 `FDE2E_RELEASES_TOKEN` 未配置（镜像跳过）；父仓 8 个子模块检出
+9. **运维/测试债**：keel 只发本仓 GitHub Release（2026-11-28 起删除聚合仓镜像与
+   `FDE2E_RELEASES_TOKEN` 分支，`jixoai/fde2e-releases` 不再接收 keel 发布）；父仓 8 个子模块检出
    待同步（browser 有他人 WIP）。TUI 设置页 raw JSON 1 例与 headless 模式 4 个布局差异已
    于 2026-11-25 修复（keel `f120e70`；headless 409/409、TUI 409/409；Go CI run
    `45604850921` 全绿）。
