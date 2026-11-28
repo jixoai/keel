@@ -224,6 +224,31 @@ func TestSyncBootDisablesUnprovisionedRouteEntry(t *testing.T) {
 	}
 }
 
+// waitChannelOwner waits for the createChannel handler's post-response owner
+// grant. The handler writes the 201 before granting the owner relation, so a
+// test that deletes the relation immediately can race the grant and see it
+// recreated; every real client must tolerate that eventual grant too.
+func (env *testEnv) waitChannelOwner(t *testing.T, channel string, owner kAccount) {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	var relations []keelstore.ResourceRelation
+	var err error
+	for {
+		relations, err = env.st.ListResourceRelations(context.Background(), env.tenant, BoardChannelResourceType, channel, 0)
+		if err == nil {
+			for _, relation := range relations {
+				if relation.Relation == keelstore.RelationOwner && relation.SubjectID == owner.record.ID.String() {
+					return
+				}
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("channel %s owner %s was not recorded: relations=%+v err=%v", channel, owner.record.ID, relations, err)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
 // TestChannelCreateAdoptsOrphanForManager covers the explicit repair path: a
 // tenant board.manage holder may adopt a channel that has zero relations, but
 // never takes over a channel that already has any ACL.
@@ -235,6 +260,7 @@ func TestChannelCreateAdoptsOrphanForManager(t *testing.T) {
 	if resp := env.do(t, server, http.MethodPost, "/v1/board/channels", "alice", map[string]any{"path": "support"}); resp.status != http.StatusCreated {
 		t.Fatalf("create channel: %d %s", resp.status, resp.body)
 	}
+	env.waitChannelOwner(t, "support", env.alice)
 	deleteOwner := func() {
 		t.Helper()
 		if err := env.st.DeleteResourceRelation(ctx, env.tenant, BoardChannelResourceType, "support",
