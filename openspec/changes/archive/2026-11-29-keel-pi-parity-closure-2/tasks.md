@@ -32,7 +32,7 @@
 - [x] 2GB/1000 sessions/64 runs evidence refreshed
 - [x] per-capability runbook
 - [x] independent reviewer P0/P1=0 (PASS, final HEAD)
-- [ ] archive (finalization)
+- [x] archive
 
 > Evidence: `evidence/execution-2026-11-28.md` (tests, conformance golden,
 > formal 600s chaos PASS, 2GB/1000/64 PASS), `RUNBOOK.md`. Review/archive is

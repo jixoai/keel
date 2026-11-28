@@ -43,11 +43,11 @@
 - [x] `nsh check`；board data 24/24、SSE 3/3、TUI 定向 13/13；全量 TUI 留给最终集成批次
 - [x] keel `go test -p 1 ./internal/boardintegration ./cmd/keel`（DSN 集成）
 - [x] 独立子代理复审 P0/P1=0（PASS；P2 closed in evidence/p2-closeout.md；最终门禁 GATE PASS）
-- [ ] 更新 DISPOSITION/README/RUNBOOK；`openspec archive keel-board-sync-v2 --yes`（等独立复审）
+- [x] 更新 README/RUNBOOK/DISPOSITION；`openspec archive keel-board-sync-v2 --yes`
 - [x] 发 v0.6.0（https://github.com/jixoai/keel/releases/tag/v0.6.0，release workflow success）
 
-## 残余 / BLOCKED
+## 残余 / 已完成
 
-- 独立安全/功能/视觉红队 A/B/C 未由本实现代理执行；状态仍 BLOCKED，交由主 Agent 的独立子代理。
-- 全量 TUI（540）与 E2E HTML 报告由最终集成批次执行/补全。
+- 独立安全/功能/视觉 A/B/C 复审 PASS（P0/P1=0）；最终门禁 GATE PASS。
+- 全量 TUI（540）、56 张 UI 实拍与 HTML 报告已生成并发布。
 - 无 SQLite 生产实现；本轮只保留 adapter 边界与 capability 声明。

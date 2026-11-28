@@ -29,7 +29,7 @@ Evidence: `evidence/storage-boundary.md`, `evidence/verification.txt`.
 - [x] E2E：board 插件任务 → superagent ticket/assignment → board 回写
 - [x] `go test -p 1 ./...`、nsh check、OpenSpec strict
 - [x] 独立子代理复审 P0/P1=0（PASS；P2 items closed or documented）
-- [ ] archive (finalization)
+- [x] archive
 
 ## 4. Independent review fixes (2026-11-28)
 

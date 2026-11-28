@@ -12,7 +12,7 @@
 - [x] `openspec validate --specs --strict` 中 keel 相关 spec 通过
 - [x] 记录 v0.5.0 release page、SHA256SUMS、官网下载页、二进制 `keel version` 验收
 - [x] 更新发布/升级文档，明确 keel 独立 Release
-- [ ] 最终 `openspec archive keel-release-closure --yes` + spec strict
+- [x] 最终 `openspec archive keel-release-closure --yes` + spec strict
 
 ## Evidence
 
