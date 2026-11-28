@@ -35,6 +35,7 @@ import type {
   BoardTaskView,
   BoardThreadView,
   BoardWatcherDelivery,
+  BoardWatcherDeliveryDepth,
   BoardWatcherView,
 } from "./board-wire";
 import {
@@ -1193,6 +1194,7 @@ class BoardStoreImpl {
   readonly automationBusy = signal<Record<string, boolean>>({});
   /** The selected watcher's recent deliveries (the read-only drawer). */
   readonly watcherDeliveries = signal<Record<string, BoardWatcherDelivery[]>>({});
+  readonly watcherDeliveryDepth = signal<Record<string, BoardWatcherDeliveryDepth>>({});
   readonly watcherDeliveryBusy = signal<string | null>(null);
   /** The wall clock for countdowns; one ticker for every lease row. */
   readonly clock = signal(Date.now());
@@ -2425,6 +2427,7 @@ class BoardStoreImpl {
     try {
       const result = await api.boardWatcherDeliveries(id);
       this.watcherDeliveries.update((current) => ({ ...current, [id]: result.deliveries }));
+      if (result.depth) this.watcherDeliveryDepth.update((current) => ({ ...current, [id]: result.depth! }));
     } catch (error) {
       this.automationError.set(boardFailureOf(error));
     } finally {
@@ -2440,6 +2443,7 @@ class BoardStoreImpl {
     try {
       const result = await api.boardWatcherDeliveries(id);
       this.watcherDeliveries.update((current) => ({ ...current, [id]: result.deliveries }));
+      if (result.depth) this.watcherDeliveryDepth.update((current) => ({ ...current, [id]: result.depth! }));
       for (const delivery of result.deliveries) {
         if (delivery.state === "dead" || delivery.lastError) {
           await api.boardWatcherRetryDelivery(id, delivery.event);

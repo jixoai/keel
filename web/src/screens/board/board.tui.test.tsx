@@ -156,7 +156,7 @@ test("TUI: 同步——入口、lag/凭据/死信、重试与收件箱", async (
   expect(texts).toContain("24h 失败");
   expect(view.shows("id:board-sync-lag-slack")).toBe(true);
   expect(view.shows("id:board-sync-backend-gap-slack")).toBe(false);
-  expect(view.shows("id:board-sync-targets-unknown-slack")).toBe(false);
+  expect(view.shows("id:board-sync-targets-empty-slack")).toBe(false);
   // Raw provider errors are not product copy.
   expect(texts).toContain("平台限流，稍后重试");
   expect(texts).toContain("平台签名已过期");
@@ -174,6 +174,17 @@ test("TUI: 同步——入口、lag/凭据/死信、重试与收件箱", async (
   expect(view.texts().join("\n")).toContain("不显示正文或凭据");
 }, 120_000);
 
+test("TUI: 同步缺失字段——一句缺口说明，不伪造指标", async () => {
+  const view = await harness(1440, "sync-missing");
+  await view.waitFor("id:board-sync-entry-slack", { timeout: 20_000 });
+  expect(view.shows("id:board-sync-backend-gap-slack")).toBe(true);
+  expect(view.shows("id:board-sync-lag-slack")).toBe(false);
+  expect(view.shows("id:board-sync-failures24h-slack")).toBe(false);
+  expect(view.shows("id:board-sync-targets-empty-slack")).toBe(false);
+  expect(view.texts().join("\n")).toContain("暂未上报");
+  expect(view.texts().join("\n")).not.toContain("滞后未知");
+}, 120_000);
+
 test("TUI: 自动化——watcher 开关、schedule 权限被回收只能取消", async () => {
   const view = await openBoard(1440);
   await view.press("id:board-view-automation");
@@ -189,6 +200,11 @@ test("TUI: 自动化——watcher 开关、schedule 权限被回收只能取消"
   expect(texts).not.toContain("最近 未知");
   expect(view.shows("id:board-schedule-cancel-legacy-reminder")).toBe(false);
   expect(view.shows("id:board-schedule-cancel-stuck-reminder")).toBe(true);
+  // The delivery drawer surfaces the board's real depth, including dead.
+  await view.press("label:查看 triage-inbox 的投递");
+  await view.waitFor("text:/投递 · triage-inbox/", { timeout: 20_000 });
+  expect(view.texts().join("\n")).toContain("死信 1");
+  await view.press("label:关闭投递");
   await view.press("id:board-watcher-switch-triage-inbox");
   await view.waitFor("id:board-notice", { timeout: 20_000 });
   expect(view.texts()).toContain("已停用 triage-inbox");
@@ -330,6 +346,10 @@ test("TUI: 390 任务页——线程根与已有回复首屏可读，Composer �
   expect(composer).toBeDefined();
   expect(composer?.y ?? 0).toBeGreaterThan(0);
   expect((composer?.y ?? 0) + (composer?.height ?? 0)).toBeLessThanOrEqual(844);
+  // The copy link is a real phone entry (PressRow's 44px floor), not
+  // desktop-only. Its label names the task so the target is unambiguous.
+  expect(view.shows("id:board-task-copy-link")).toBe(true);
+  expect(view.accessibility("id:board-task-copy-link")?.label).toContain("复制任务 #809");
   await view.type("id:board-reply-input", "390 首屏回复");
   await view.press("id:board-reply-send");
   await view.waitFor("text:/390 首屏回复/", { timeout: 20_000 });

@@ -1,12 +1,14 @@
 # Design: keel-board-sync-v2
 
-## Storage boundary (board v0.1.3)
+## Storage boundary (board v0.1.3 → v0.1.4)
 
 - Interfaces live in `store`, `syncstore`, `audit` and `automation`; no `pgx`/`database/sql` types cross the boundary.
 - `pgadapter` owns syncstore/audit/automation SQL, transactions and advisory locks; `pgadapter/logstore` owns the log; `pgadapter/schema` owns the embedded migrations and their schema-derived advisory lock.
 - `storage.Capabilities` declares `Durable`, `CrossProcessLeases`, `Migrations` and `ListenNotify`; an absent capability is a typed `storage.ErrUnsupported`, never a silent downgrade. PostgreSQL declares the first three; `ListenNotify` is false because `Wait` polls the head (LISTEN/NOTIFY would live in `pgadapter/logstore` if added).
 - `conformance.RunStorage` runs the append log, sync entry/lease/health, automation lease and audit contracts through interfaces only. PostgreSQL opts in from `pgadapter`; the in-memory adapters run the same suite.
-- `TestStorageBoundary` enforces `go list -deps` for every domain/server/sync/log package and asserts `pgadapter` still owns pgx.
+- `TestStorageBoundary` discovers every module package dynamically (so new subpackages cannot be missed), skips only the adapter/cmd/scripts, and asserts `pgadapter` still owns pgx.
+- The deployment assemblies (`cmd/board`, keel's `internal/boardintegration`) call `Capabilities.Require(Durable, CrossProcessLeases, Migrations)` before serving; a weaker adapter fails at startup with typed `storage.ErrUnsupported`.
+- The conformance suite proves cross-process leases with two handles, not just by comparing declarations.
 
 ## Sync status contract
 

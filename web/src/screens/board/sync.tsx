@@ -175,7 +175,8 @@ function HealthSummary(props: { data: BoardSyncData }) {
   const outboxFailures = () => props.data.failures.length;
   const last = () => {
     const times = entries()
-      .map((entry) => Date.parse(entry.lastDeliveryAt ?? ""))
+      .flatMap((entry) => entry.targets ?? [])
+      .map((target) => Date.parse(target.lastDeliveryAt ?? ""))
       .filter((value) => Number.isFinite(value));
     return times.length ? new Date(Math.max(...times)).toISOString() : undefined;
   };
@@ -209,6 +210,15 @@ function HealthSummary(props: { data: BoardSyncData }) {
   );
 }
 
+/** The newest target fact is a real board field; the entry itself has no
+ * lastDeliveryAt in the v0.1.2 DTO. */
+function entryLastDelivery(entry: BoardSyncEntryView): string | undefined {
+  const times = (entry.targets ?? [])
+    .map((target) => Date.parse(target.lastDeliveryAt ?? ""))
+    .filter((value) => Number.isFinite(value));
+  return times.length ? new Date(Math.max(...times)).toISOString() : undefined;
+}
+
 function EntryCard(props: { entry: BoardSyncEntryView; data: BoardSyncData }) {
   const dead = () => props.data.dead.filter((item) => item.key === props.entry.key);
   const failures = () => props.data.failures.filter((item) => !item.key || item.key === props.entry.key);
@@ -217,12 +227,16 @@ function EntryCard(props: { entry: BoardSyncEntryView; data: BoardSyncData }) {
   const inbox = () => props.entry.inbox ?? { pending: 0, leased: 0, done: 0, dead: 0 };
   const outbox = () => props.entry.outbox ?? props.data.status.outbox;
   const missingStats = () => props.entry.failures24h === undefined;
+  const lagKnown = () =>
+    props.entry.lag !== undefined || typeof props.entry.oldestPendingAgeSeconds === "number";
   const lag = () => lagLine(props.entry.lag, props.entry.oldestPendingAgeSeconds);
   const backendGap = () => {
-    if (!targetsKnown() && missingStats()) return "外部目标与 24h 统计暂未上报，页面不伪造。";
-    if (!targetsKnown()) return "外部目标暂未上报，页面不伪造。";
-    if (missingStats()) return "24h 统计暂未上报，页面不伪造。";
-    return "";
+    const missing: string[] = [];
+    if (!targetsKnown()) missing.push("外部目标");
+    if (!lagKnown()) missing.push("滞后");
+    if (missingStats()) missing.push("24h 统计");
+    if (missing.length === 0) return "";
+    return `${missing.join("、")}暂未上报，页面不伪造。`;
   };
   const retrying = (id: string) => boardStore.syncRetrying()[id] === true;
   return (
@@ -241,9 +255,9 @@ function EntryCard(props: { entry: BoardSyncEntryView; data: BoardSyncData }) {
           <Badge variant="info" label="本实例连接" />
         </If>
         <View style={{ flex: 1 }} />
-        <If when={!!props.entry.lastDeliveryAt}>
+        <If when={!!entryLastDelivery(props.entry)}>
           <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>
-            最后投递 {boardClock(props.entry.lastDeliveryAt)}
+            最后投递 {boardClock(entryLastDelivery(props.entry))}
           </Text>
         </If>
       </View>
@@ -266,12 +280,14 @@ function EntryCard(props: { entry: BoardSyncEntryView; data: BoardSyncData }) {
           value={`${outbox().pending} 待投递`}
           testID={`board-sync-outbox-${props.entry.key}`}
         />
-        <Metric
-          label="滞后"
-          value={lag().text}
-          tone={lag().tone ?? (props.entry.lag === undefined || props.entry.lag === null ? color.mutedForeground : undefined)}
-          testID={`board-sync-lag-${props.entry.key}`}
-        />
+        <If when={lagKnown()}>
+          <Metric
+            label="滞后"
+            value={lag().text}
+            tone={lag().tone}
+            testID={`board-sync-lag-${props.entry.key}`}
+          />
+        </If>
         <If when={props.entry.failures24h !== undefined}>
           <Metric
             label="24h 失败"

@@ -17,7 +17,7 @@ import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d+Z$/, "Z");
-const evidence = join(root, "openspec/changes/keel-board-v1/evidence", `phase-2-ui-gates-${stamp}`);
+const evidence = join(root, "openspec/changes/keel-board-sync-v2/evidence", `ui-gates-${stamp}`);
 const web = join(root, "web");
 const shots = join(evidence, "shots/web");
 mkdirSync(shots, { recursive: true });
@@ -213,7 +213,7 @@ const html = `<!doctype html>
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>keel-board-v1 · Phase 2 UI gates</title>
+<title>keel-board-sync-v2 · UI gates</title>
 <style>
 :root { color-scheme: dark; --bg:#0d0d10; --panel:#17171c; --ink:#f4f4f5; --muted:#a1a1aa; --line:#2a2a32; --ok:#4ade80; --bad:#f87171; --brand:#93c5fd; }
 * { box-sizing: border-box; }
@@ -284,7 +284,7 @@ writeFileSync(join(evidence, "index.html"), html);
 writeFileSync(
   join(evidence, "README.txt"),
   [
-    `keel-board-v1 Phase 2 UI evidence — ${stamp}`,
+    `keel-board-sync-v2 UI evidence — ${stamp}`,
     "",
     ...results.map((result) => `${result.name}: exit ${result.status} (${result.duration}s) — ${result.command}`),
     "",

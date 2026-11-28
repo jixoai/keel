@@ -165,6 +165,8 @@ test("board evidence: task states", async () => {
   inside(phone, "id:board-composer", 390);
   onScreen(phone, "id:board-thread-root", 844);
   onScreen(phone, "id:board-reply-8091", 844);
+  inside(phone, "id:board-task-copy-link", 390);
+  onScreen(phone, "id:board-task-copy-link", 844);
   noDebugCopy(phone, "task 390");
   await shot(phone, "25-task-ready-390");
 

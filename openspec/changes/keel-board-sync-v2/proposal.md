@@ -6,18 +6,19 @@ board Phase 2 归档时仍有两个 API 部分项：sync targets 列表、最老
 
 ## What Changes
 
-### 1. Storage dialect boundary（board v0.1.3）
+### 1. Storage dialect boundary（board v0.1.3 → v0.1.4）
 
 - keel-board 的 append log/store/sync/audit/automation 定义 dialect-neutral 接口；`pgx`、SQL、事务、迁移、advisory lock、lease 语义收进 `pgadapter`。
 - `pgadapter/logstore` 只承载日志适配器，`pgadapter/schema` 独占 embedded migrations；`pgadapter` 承载 syncstore/audit/automation。
 - `storage` 声明 capability（durable / cross-process leases / migrations / listen-notify），未声明能力必须返回 typed `storage.ErrUnsupported`。
 - `conformance.RunStorage` 只依赖接口；PostgreSQL 与 in-memory 适配器跑同一套 suite。
-- `go list -deps` 门禁证明 store/syncstore/audit/automation/server/sync/log 不依赖 pgx。
+- `go list -deps` 门禁动态发现模块包（不手列），证明 store/syncstore/audit/automation/server/sync/log 不依赖 pgx。
+- v0.1.4 在 `cmd/board` 与 keel mount 装配处调用 `Capabilities.Require`；未声明能力在启动时以 typed error 拒绝。
 
 ### 2. Board sync API v0.1.2
 
 - board v0.1.2（已发布，不可重打）提供只读健康：`targets[]`、`lag.{inbox,outbox}`（outstanding / oldestAt / ageSeconds）、`failures24h`；缺字段为 null，不伪造 0。
-- 存储边界变更使用新 tag `v0.1.3`，API 与 v0.1.2 相同；keel 依赖升级到 v0.1.3。
+- 存储边界用 `v0.1.3`；装配门禁与发现式边界证明用 `v0.1.4`。API 与 v0.1.2 相同；keel 依赖 `v0.1.4`。
 - keel mount 映射到 `/v1/board/sync`；权限仍走 `board.manage`。mount 在 board 未提供扁平字段时由 `lag` 派生 `oldestPendingAgeSeconds`，无 outstanding 时为 null。
 - UI 用真实字段替换“后端未上报”的占位；无数据时显示真实空态，不伪造。
 

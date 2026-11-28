@@ -85,16 +85,8 @@ function WatcherRow(props: { watcher: BoardWatcherView }) {
   const busy = () => boardStore.automationBusy()[props.watcher.id] === true;
   const dead = () => props.watcher.dead ?? 0;
   const stats = () => {
-    const parts: string[] = [];
-    if (props.watcher.lastDeliveryAt) parts.push(`最近 ${boardClock(props.watcher.lastDeliveryAt)}`);
-    if (props.watcher.successes24h !== undefined) {
-      parts.push(
-        props.watcher.failures24h === undefined
-          ? `24h ${props.watcher.successes24h} 成功`
-          : `24h ${props.watcher.successes24h} 成功 · ${props.watcher.failures24h} 失败`,
-      );
-    }
-    return parts.join(" · ");
+    if (!props.watcher.lastDeliveryAt) return "";
+    return `最近 ${boardClock(props.watcher.lastDeliveryAt)}`;
   };
   return (
     <View
@@ -255,6 +247,7 @@ function ScheduleRow(props: { schedule: BoardScheduleView }) {
 function WatcherSheet() {
   const id = () => watcherSheetId();
   const deliveries = () => (id() ? boardStore.watcherDeliveries()[id()!] ?? [] : []);
+  const depth = () => (id() ? boardStore.watcherDeliveryDepth()[id()!] : undefined);
   const busy = () => boardStore.watcherDeliveryBusy() === id();
   return (
     <Sheet
@@ -269,6 +262,11 @@ function WatcherSheet() {
     >
       <ScrollArea style={{ flex: 1, minHeight: 0 }}>
         <View style={{ flexDirection: "column", gap: space.sm }}>
+          <If when={depth() !== undefined}>
+            <Text testID={`board-watcher-depth-${id()}`} style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>
+              待处理 {depth()!.pending} · 进行中 {depth()!.leased} · 已完成 {depth()!.done} · 死信 {depth()!.dead}
+            </Text>
+          </If>
           <If when={busy() && deliveries().length === 0}>
             <Skeleton width="70%" height={12} accessibilityLabel="加载中" />
           </If>

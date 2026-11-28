@@ -199,7 +199,6 @@ export interface BoardSyncEntryView {
    * keel derives it from lag when the mounted board does not send one; null
    * means no outstanding row or no measurement, never zero seconds. */
   oldestPendingAgeSeconds?: number | null;
-  lastDeliveryAt?: string;
   failures24h?: number;
   bridgeHost?: string;
   bridgeErrors?: number;
@@ -284,12 +283,17 @@ export interface BoardWatcherView {
   cursor?: string;
   createdAt: string;
   updatedAt: string;
-  /** Design contract: recent-run facts; absent on v0.1.1. */
+  /** Board v0.1.2 watcher health: the optional stats reader. */
   lastDeliveryAt?: string;
-  successes24h?: number;
-  failures24h?: number;
   dead?: number;
   lastError?: string;
+}
+
+export interface BoardWatcherDeliveryDepth {
+  pending: number;
+  leased: number;
+  done: number;
+  dead: number;
 }
 
 export interface BoardWatcherDelivery {
@@ -377,7 +381,7 @@ export interface BoardApi {
   boardSyncRetryOutbox(id: string): Promise<{ retried: boolean }>;
   boardWatchers(): Promise<{ watchers: BoardWatcherView[] }>;
   boardWatcherEnable(id: string, enabled: boolean): Promise<BoardWatcherView>;
-  boardWatcherDeliveries(id: string): Promise<{ deliveries: BoardWatcherDelivery[] }>;
+  boardWatcherDeliveries(id: string): Promise<{ deliveries: BoardWatcherDelivery[]; depth?: BoardWatcherDeliveryDepth }>;
   boardWatcherRetryDelivery(id: string, seq: string): Promise<{ retried: boolean }>;
   boardSchedules(): Promise<{ schedules: BoardScheduleView[] }>;
   boardScheduleEnable(id: string, enabled: boolean): Promise<BoardScheduleView>;
