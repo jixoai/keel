@@ -1,0 +1,31 @@
+keel-plugin-split verification
+branch: task/keel-plugin-split-unified
+base: origin/task/keel-unified-integration @ 0fc714a5
+date: 2026-11-28
+
+Environment
+  PostgreSQL 18 (local), fresh database keel_plugin_split_test
+  KEEL_TEST_DSN=postgres://kzf@localhost:5432/keel_plugin_split_test?sslmode=disable
+
+Targeted gates (all passed)
+  go test ./internal/pluginstore/...                                  ok
+  go test ./internal/pluginruntime/...                                ok
+  go test ./internal/superagentstore/...                              ok
+  KEEL_TEST_DSN=... go test ./internal/superagent/...                 ok
+  KEEL_TEST_DSN=... go test ./internal/boardintegration/...           ok (24.9s)
+  KEEL_TEST_DSN=... go test ./internal/boardplugin/                   ok
+  KEEL_TEST_DSN=... go test ./internal/superagentplugin/              ok
+  KEEL_TEST_DSN=... go test ./internal/store/ -run TestPluginSplitSchemaIsBreaking  ok
+  go test ./internal/architecture/ -run 'PluginSplit|BoardPlugin|Superagent'        ok
+  go vet <new packages + boardintegration + cmd/keel>                  ok
+  cd web && nsh check                                                  exit 0
+  openspec validate keel-plugin-split --strict                        Change 'keel-plugin-split' is valid
+
+Full gate
+  KEEL_TEST_DSN=... go test -p 1 ./...                                 EXIT 0
+  go test -race ./internal/pluginruntime/ ./internal/pluginstore/ ./internal/boardplugin/  ok
+
+Pre-existing test repair (needed for the full gate, not a product change)
+  internal/store/ready_test.go's isolated temp schema omitted checkpoints.summary_hash,
+  which ready.go has required since 0ab6e2dd. Confirmed the test failed on the base
+  commit 0fc714a5 with the same DSN; added the missing column to the test fixture.
