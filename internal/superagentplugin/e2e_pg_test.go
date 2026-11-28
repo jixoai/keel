@@ -3,6 +3,7 @@ package superagentplugin_test
 import (
 	"context"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
@@ -211,5 +212,182 @@ func TestWriterImportDoesNotReimportItsOwnProjection(t *testing.T) {
 	}
 	if link, found, err := domain.GetBoardLinkByTask(ctx, tenantID, superagentplugin.BoardSource, superagentstore.BoardLinkTicket, tasks[0].ID); err != nil || !found || link.SourceID != item.ID.String() {
 		t.Fatalf("board link for projected task = %+v found=%v err=%v", link, found, err)
+	}
+}
+
+type e2eLauncher struct {
+	mu   sync.Mutex
+	last collab.LaunchRequest
+}
+
+func (l *e2eLauncher) Launch(_ context.Context, req collab.LaunchRequest) (collab.SessionRef, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.last = req
+	return collab.SessionRef{
+		TenantID: req.TenantID, SessionID: uuid.New(), ParentSessionID: req.ParentSessionID,
+		BotID: req.BotID, ModeID: req.ModeID, WorkItemID: req.WorkItemID,
+		Depth: req.Depth, State: collab.SessionActive, CreatedAt: time.Now().UTC(),
+	}, nil
+}
+
+func (l *e2eLauncher) CancelSession(context.Context, uuid.UUID, uuid.UUID, string) error { return nil }
+
+func (l *e2eLauncher) lastLaunch() collab.LaunchRequest {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.last
+}
+
+type e2ePermissions struct{}
+
+func (e2ePermissions) CheckBotInvoke(context.Context, uuid.UUID, collab.SessionRef, string) error {
+	return nil
+}
+
+type e2eAudit struct{}
+
+func (e2eAudit) Record(context.Context, collab.AuditEvent) error { return nil }
+
+// TestImportedBoardTaskDispatchesWorkerSession is the P1-2/P2-5 end-to-end
+// path: a board task is imported with WorkerBot, the normal Host dispatch binds
+// an active worker session whose Bot is that WorkerBot, and the production
+// Writer loop runs twice without re-importing its own projection.
+func TestImportedBoardTaskDispatchesWorkerSession(t *testing.T) {
+	dsn := os.Getenv("KEEL_TEST_DSN")
+	if dsn == "" {
+		t.Skip("KEEL_TEST_DSN not set")
+	}
+	ctx := context.Background()
+	keelStore, err := store.Open(ctx, store.Config{DSN: dsn, MaxConns: 4, MinConns: 1})
+	if err != nil {
+		t.Fatalf("open keel store: %v", err)
+	}
+	t.Cleanup(keelStore.Close)
+	domain := superagentstore.New(keelStore.Pool())
+	tenantID := uuid.New()
+	clock := func() time.Time { return time.Date(2026, 11, 28, 12, 0, 0, 0, time.UTC) }
+	board := &boardplugin.LogBoard{
+		Board: boardlog.New(boardlog.Options{Store: boardstore.NewMemory(), Now: clock}),
+		Now:   clock,
+	}
+	task, err := board.EnsureTicketThread(ctx, tenantID, boardplugin.TicketThread{
+		TicketID: "board-task-worker", Channel: "ops", Title: "Dispatch me",
+		Request: "Create one worker session.", Actor: boardplugin.ServiceActor(tenantID),
+	})
+	if err != nil {
+		t.Fatalf("board task: %v", err)
+	}
+
+	registry, err := collab.NewModeRegistry(tenantID, collab.Limits{
+		Depth: collab.LimitedDepth(8), MaxChildren: 8, MaxConcurrent: 8,
+		MaxTurns: 100, MaxTokens: 100_000, MaxDurationMs: 600_000,
+	})
+	if err != nil {
+		t.Fatalf("mode registry: %v", err)
+	}
+	if err := registry.Register(collab.SuperagentMode()); err != nil {
+		t.Fatalf("register mode: %v", err)
+	}
+	if err := registry.SetEnabled(collab.ModeSuperagent, true); err != nil {
+		t.Fatalf("enable mode: %v", err)
+	}
+	launcher := &e2eLauncher{}
+	host, err := collab.NewHost(collab.HostOptions{
+		TenantID: tenantID, Modes: registry, Work: domain, Sessions: domain,
+		Permissions: e2ePermissions{}, Audit: e2eAudit{}, Launcher: launcher,
+		Now: clock,
+	})
+	if err != nil {
+		t.Fatalf("collab host: %v", err)
+	}
+	orchestratorSession := uuid.New()
+	if err := domain.Put(ctx, collab.SessionRef{
+		TenantID: tenantID, SessionID: orchestratorSession, BotID: "orchestrator",
+		State: collab.SessionActive, CreatedAt: clock(),
+	}); err != nil {
+		t.Fatalf("orchestrator session: %v", err)
+	}
+	orchestrator, err := superagent.NewOrchestrator(superagent.Config{
+		TenantID: tenantID, ModeID: collab.ModeSuperagent, Store: domain, Host: host,
+		Policy:   &superagent.AllowlistPolicy{WorkerBot: "worker-bot", PolicyVersion: "e2e"},
+		Sessions: domain, Audit: e2eAudit{},
+		OrchestratorSession: orchestratorSession, OrchestratorBot: "orchestrator",
+		WorkerBot: "worker-bot", Now: clock,
+	})
+	if err != nil {
+		t.Fatalf("orchestrator: %v", err)
+	}
+
+	importOptions := superagentplugin.ImportOptions{
+		Store: domain, Links: domain, TenantID: tenantID, WorkerBot: "worker-bot",
+		OwnerSessionID: orchestratorSession, Now: clock,
+		Dispatch: func(ctx context.Context, ticketID uuid.UUID) error {
+			_, err := orchestrator.DispatchTicket(ctx, tenantID, ticketID)
+			return err
+		},
+	}
+	if _, created, err := superagentplugin.ImportBoardTask(ctx, importOptions, task); err != nil || !created {
+		t.Fatalf("import: created=%v err=%v", created, err)
+	}
+	ticketRef, found, err := domain.GetBoardLinkByTask(ctx, tenantID, superagentplugin.BoardSource, superagentstore.BoardLinkTicket, task.ID)
+	if err != nil || !found {
+		t.Fatalf("ticket link: found=%v err=%v", found, err)
+	}
+	ticketID, err := uuid.Parse(ticketRef.SourceID)
+	if err != nil {
+		t.Fatalf("ticket id: %v", err)
+	}
+	assignments, err := domain.ListAssignments(ctx, tenantID, ticketID)
+	if err != nil || len(assignments) != 1 {
+		t.Fatalf("assignments = %+v err=%v, want one", assignments, err)
+	}
+	assignment := assignments[0]
+	if assignment.SessionID == uuid.Nil || assignment.Status != collab.AssignmentActive {
+		t.Fatalf("assignment = %+v, want an active worker session", assignment)
+	}
+	if assignment.BotID != "worker-bot" {
+		t.Fatalf("assignment BotID = %q, want worker-bot", assignment.BotID)
+	}
+	if launch := launcher.lastLaunch(); launch.BotID != "worker-bot" || launch.WorkItemID != ticketID {
+		t.Fatalf("launch = %+v, want worker-bot on %s", launch, ticketID)
+	}
+
+	tokens, err := superagentplugin.NewTokenSource("test-secret")
+	if err != nil {
+		t.Fatalf("token source: %v", err)
+	}
+	writer, err := superagentplugin.NewWriter(&superagentplugin.Writer{
+		TenantID: tenantID, Store: domain, Board: board, Links: domain,
+		Config: superagentplugin.StaticConfigReader{Config: superagentplugin.SuperagentConfig{
+			Mirror: true, Channel: "ops",
+		}},
+		Secret: tokens, Now: clock,
+		Import: func(ctx context.Context) error {
+			_, err := superagentplugin.ImportChannel(ctx, board, importOptions, "ops", 200)
+			return err
+		},
+	})
+	if err != nil {
+		t.Fatalf("writer: %v", err)
+	}
+	for pass := 1; pass <= 2; pass++ {
+		report, err := writer.SyncOnce(ctx)
+		if err != nil {
+			t.Fatalf("SyncOnce pass %d: %v", pass, err)
+		}
+		if report.Claims != 1 && pass == 1 {
+			t.Fatalf("first pass report = %+v, want the assignment mirrored as one claim", report)
+		}
+	}
+	claimed, err := board.Task(ctx, tenantID, task.ID)
+	if err != nil {
+		t.Fatalf("board task: %v", err)
+	}
+	if claimed.State != boardplugin.StateClaimed {
+		t.Fatalf("board task state = %s, want claimed", claimed.State)
+	}
+	if items, err := domain.ListWorkItems(ctx, tenantID, collab.WorkFilter{ModeID: superagent.DefaultModeID}); err != nil || len(items) != 1 {
+		t.Fatalf("tickets = %d err=%v, want one (no re-import)", len(items), err)
 	}
 }
