@@ -12,8 +12,8 @@
 `cmd/keel serve` 从未调用。结果是任何 fresh 产品数据库的 `/v1/ready` 永远 503，
 不只 Windows。发布门 / 产品 E2E 只等 `/v1/health`，因此没有拦住。
 
-证据：`keel-windows-verification` 的 `05-fixed-noarg-start.txt`、
-`05b-fixed-ready.txt`；Windows 11 实机，修复后的 0.6.1 测试二进制。
+证据：本 change 的 `evidence/repro-before-fix.txt`、`evidence/repro-ready-503.txt`；
+Windows 11 实机，修复后的 0.6.1 测试二进制。
 
 ## What Changes
 

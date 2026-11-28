@@ -22,7 +22,7 @@
 
 ## 3. v0.6.1 修复验证（预览构建）
 
-- [x] 3.1 两个修复的 Linux/Windows 回归测试 PASS
+- [x] 3.1 两个修复的 Linux/Windows 回归测试 PASS（Linux: `evidence/commands/19-linux-tests.txt`；Windows: `../../fix-windows-pg-start/evidence/regression-test-windows.txt`）
 - [x] 3.2 0.6.1 测试二进制：`keel db start` 3s 返回；无参启动 health 1.6s / ready 0.1s
 - [x] 3.3 会话 + 消息 API 201；完整停机重启后会话仍在、用户消息仍在
 - [x] 3.4 `KEEL_BOARD_ENABLED=1` + tenant `board.enabled=true`：任务创建并在重启后仍在
@@ -31,7 +31,7 @@
 
 ## 4. v0.6.1 发布与真实资产复验
 
-- [ ] 4.1 版本 0.6.1；OpenSpec strict 通过；独立复审 P0/P1=0
+- [ ] 4.1 版本 0.6.1；三个 change strict 通过（全量 specs 既有警告基线见 `evidence/spec-validation.txt`）；独立复审 P0/P1=0
 - [ ] 4.2 提交并推送 main；tag `v0.6.1`；release workflow 成功
 - [ ] 4.3 下载 `keel-0.6.1-windows-amd64.zip`；SHA-256 与 `SHA256SUMS.txt` 一致
 - [ ] 4.4 真实资产无参首启：health/ready/capabilities/Web/静态资源 200

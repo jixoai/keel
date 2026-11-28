@@ -21,7 +21,7 @@ v0.6.1.
   `pg_ctl -w start`. On Windows the daemonized postmaster inherits the pipe
   write end, so `CombinedOutput` waits for EOF forever.
 - Evidence: `../../fix-windows-pg-start/evidence/04a-start-hang-diagnosis.txt`,
-  `04c-db-start-repro.txt`, `dev-pg.log`.
+  `04c-db-start-repro.txt`, `dev-pg.log.txt`.
 - Fix change: `fix-windows-pg-start` (startPGDaemon writes pg_ctl stdio to a
   file and uses Run; regression tests on Linux + Windows).
 

@@ -415,9 +415,7 @@ func runDBReset(args []string, stdout, stderr io.Writer) int {
 	info, err := os.Stat(d.dir)
 	switch {
 	case errors.Is(err, os.ErrNotExist):
-		_ = os.Remove(d.passFile())
-		_ = os.Remove(d.logFile())
-		_ = os.Remove(d.metaFile())
+		removeDevDBAuxFiles(d)
 		fmt.Fprintln(stdout, "not initialized")
 		return 0
 	case err != nil:
@@ -438,9 +436,7 @@ func runDBReset(args []string, stdout, stderr io.Writer) int {
 			return 1
 		}
 		_ = os.Remove(d.dir)
-		_ = os.Remove(d.passFile())
-		_ = os.Remove(d.logFile())
-		_ = os.Remove(d.metaFile())
+		removeDevDBAuxFiles(d)
 		fmt.Fprintln(stdout, "cluster removed")
 		return 0
 	}
@@ -459,11 +455,19 @@ func runDBReset(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "keel db: %v\n", err)
 		return 1
 	}
-	_ = os.Remove(d.passFile())
-	_ = os.Remove(d.logFile())
-	_ = os.Remove(d.metaFile())
+	removeDevDBAuxFiles(d)
 	fmt.Fprintln(stdout, "cluster removed")
 	return 0
+}
+
+// removeDevDBAuxFiles deletes the sidecar files beside the cluster directory.
+// The .ctl log is the pg_ctl startup log (see startPGDaemon); reset/remove must
+// not leave it behind.
+func removeDevDBAuxFiles(d devDB) {
+	_ = os.Remove(d.passFile())
+	_ = os.Remove(d.logFile())
+	_ = os.Remove(d.logFile() + ".ctl")
+	_ = os.Remove(d.metaFile())
 }
 
 func initDevDBCluster(d devDB, stderr io.Writer) error {

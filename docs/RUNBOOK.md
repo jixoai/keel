@@ -57,17 +57,29 @@ Expand-Archive .\keel-0.6.1-windows-amd64.zip -DestinationPath .\keel-0.6.1 -For
 # 2) 无参首启（等价双击）：首次会自动安装到 %LOCALAPPDATA%\Keel
 $env:KEEL_DSN = $null; $env:KEEL_HOME = $null; $env:KEEL_BOARD_ENABLED = $null
 Start-Process .\keel-0.6.1\keel.exe
-# 等 ready 200；serving 127.0.0.1:13750，PG 127.0.0.1:13741
+# 等 ready 200（首次会解压运行时）；serving 127.0.0.1:13750，PG 127.0.0.1:13741
+for ($i=0; $i -lt 120; $i++) {
+  try { if ((Invoke-WebRequest http://127.0.0.1:13750/v1/ready -UseBasicParsing).StatusCode -eq 200) { break } } catch {}
+  Start-Sleep -Seconds 1
+}
 Invoke-WebRequest http://127.0.0.1:13750/v1/health -UseBasicParsing
 Invoke-WebRequest http://127.0.0.1:13750/v1/ready -UseBasicParsing
 Invoke-WebRequest http://127.0.0.1:13750/v1/capabilities -UseBasicParsing
 
-# 3) 隔离数据目录（不污染默认安装）
+# 3) 隔离数据目录（不污染默认安装）；先停上一实例与本地 PG，13741/13750 必须空闲
+Stop-Process -Name keel -ErrorAction SilentlyContinue
+.\keel-0.6.1\keel.exe db stop
 $env:KEEL_HOME = 'D:\Keel 验收 测试\home'
 Start-Process .\keel-0.6.1\keel.exe
 
 # 4) 重启持久化：停进程 + keel db stop 后再启动，确认会话/看板任务仍在
-# 5) 看板：部署级 KEEL_BOARD_ENABLED=1 + tenant 级 board.enabled=true（operator 路由）
+# 5) 看板：先停当前实例，部署级开关 + 本机 operator key 重启（同一 KEEL_HOME）
+Stop-Process -Name keel -ErrorAction SilentlyContinue
+.\keel-0.6.1\keel.exe db stop
+$env:KEEL_BOARD_ENABLED = '1'
+$env:KEEL_ADMIN_KEY = '<local-test-key>'       # 仅本机测试；不要写入公开材料
+Start-Process .\keel-0.6.1\keel.exe
+# 等 ready 200（同 step 2），然后写 tenant 级 board.enabled
 $tenant = (Invoke-RestMethod http://127.0.0.1:13750/v1/auth/session).tenantId
 Invoke-RestMethod -Method Put -Headers @{Authorization="Bearer $env:KEEL_ADMIN_KEY"} `
   -ContentType application/json `
@@ -79,7 +91,8 @@ Invoke-RestMethod -Method Put -Headers @{Authorization="Bearer $env:KEEL_ADMIN_K
 - Windows 无 code signing：浏览器下载的 zip 可能带 Mark-of-the-Web，SmartScreen 可能提示；
   `gh`/`curl` 下载通常不带 MOTW。记录实际提示，不要声称已签名。
 - `keel start` 是前台控制台进程；本版本没有托盘。关闭控制台会停止服务，浏览器标签失去连接。
-- `keel install` 只写 HKCU `Software\Classes\keel`、开始菜单快捷方式与 `%LOCALAPPDATA%\Keel`，
+- `keel install` 只写 HKCU `Software\Classes\keel`、开始菜单快捷方式、`%LOCALAPPDATA%\Keel`，
+  以及首次启动时解压的 `%USERPROFILE%\.keel\runtime\<version>`（或 `$KEEL_HOME\runtime\<version>`）；
   不触发 UAC；`keel uninstall --purge` 才删数据。
 
 ### 首启排障（0.6.1 已修）

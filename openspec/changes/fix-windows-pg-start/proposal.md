@@ -20,11 +20,11 @@ Ubuntu CI 不覆盖 Windows 的句柄继承行为，v0.6.0 因此只在 Windows 
 ## What Changes
 
 - `startDevDBCluster` 不再用 `CombinedOutput()`；新增 `startPGDaemon`：
-  - 把 `pg_ctl` 的 stdout/stderr 写到 `<dev-pg>.ctl.log`（普通文件，不是管道）；
+  - 把 `pg_ctl` 的 stdout/stderr 写到 `<dev-pg>.log.ctl`（普通文件，不是管道）；
   - 用 `Run()` 只等待 `pg_ctl` 自身退出，不等待 postmaster 的 stdio；
   - 失败时返回错误，并带 ctl log 与 PG log 路径，便于排障。
 - 新增跨平台回归测试：fake `pg_ctl` 启动一个继承 stdio、存活 5s 的子进程后立即退出；
-  `startPGDaemon` 必须在 2s 内返回并写出 ctl log。旧实现会等 5s，测试失败。
+  `startPGDaemon` 必须在 4s 内返回并写出 ctl log。旧实现会等 5s，测试失败。
 - 版本 bump 到 `0.6.1`；按 Keel release workflow 发布 `v0.6.1`，不改 `v0.6.0`
   tag 或已发布资产。
 - 在 `docs/RUNBOOK.md` 的 Windows 验收/排障段落记录该缺陷与修复，明确“PG ready”

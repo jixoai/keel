@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -101,18 +102,24 @@ func TestDefaultDevDBDirHonoursKeelHome(t *testing.T) {
 func fakePGDaemonScript(t *testing.T, dir string, spawnChild bool, code int) (string, []string) {
 	t.Helper()
 	if runtime.GOOS == "windows" {
+		comspec := os.Getenv("COMSPEC")
+		if comspec == "" {
+			comspec = "cmd.exe"
+		}
 		script := filepath.Join(dir, "fake-pgctl.cmd")
 		var b strings.Builder
 		b.WriteString("@echo off\r\n")
 		b.WriteString("echo fake pg_ctl start\r\n")
 		if spawnChild {
-			b.WriteString("start \"\" /b cmd /c \"ping -n 6 127.0.0.1 >nul\"\r\n")
+			// PowerShell holds the inherited stdio without relying on ICMP or a
+			// console (timeout.exe refuses redirected input).
+			b.WriteString("start \"\" /b powershell -NoProfile -Command \"Start-Sleep -Seconds 5\"\r\n")
 		}
 		fmt.Fprintf(&b, "exit /b %d\r\n", code)
 		if err := os.WriteFile(script, []byte(b.String()), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		return os.Getenv("COMSPEC"), []string{"/c", script}
+		return comspec, []string{"/c", script}
 	}
 	script := filepath.Join(dir, "fake-pgctl.sh")
 	var b strings.Builder
@@ -130,22 +137,47 @@ func fakePGDaemonScript(t *testing.T, dir string, spawnChild bool, code int) (st
 
 func TestStartPGDaemonDoesNotWaitForInheritedStdio(t *testing.T) {
 	dir := t.TempDir()
+	logPath := filepath.Join(dir, "dev-pg.log")
 	// The fake child keeps the ctl log open for ~5s. POSIX lets TempDir unlink
-	// an open file; Windows cannot, so give the child time to exit before the
-	// cleanup registered by t.TempDir runs (cleanup is LIFO).
+	// an open file; Windows cannot, so remove the ctl file after the child
+	// exits, before the cleanup registered by t.TempDir runs (cleanup is LIFO).
 	t.Cleanup(func() {
-		if runtime.GOOS == "windows" {
-			time.Sleep(5 * time.Second)
+		if runtime.GOOS != "windows" {
+			return
+		}
+		ctlPath := logPath + ".ctl"
+		for i := 0; i < 80; i++ {
+			if _, err := os.Stat(ctlPath); err != nil {
+				return
+			}
+			if err := os.Remove(ctlPath); err == nil {
+				return
+			}
+			time.Sleep(100 * time.Millisecond)
 		}
 	})
-	logPath := filepath.Join(dir, "dev-pg.log")
 	bin, args := fakePGDaemonScript(t, dir, true, 0)
+	// Control: the old implementation would call CombinedOutput on this fake.
+	// It must stay blocked on the child's inherited stdio; otherwise the test
+	// could pass even if the pipe bug came back.
+	control := make(chan struct{})
+	go func() {
+		_, _ = exec.Command(bin, args...).CombinedOutput()
+		close(control)
+	}()
+	select {
+	case <-control:
+		t.Fatal("fake pg_ctl child did not hold the inherited stdio; the regression guard is ineffective")
+	case <-time.After(1 * time.Second):
+	}
 	started := time.Now()
 	if err := startPGDaemon(bin, args, logPath); err != nil {
 		t.Fatalf("startPGDaemon: %v", err)
 	}
-	if elapsed := time.Since(started); elapsed > 2*time.Second {
-		t.Fatalf("startPGDaemon waited %v for the daemon's inherited stdio; want < 2s", elapsed)
+	// The fake child holds inherited stdio for ~5s; a 4s bound still catches
+	// the old CombinedOutput path without failing on slow process creation.
+	if elapsed := time.Since(started); elapsed > 4*time.Second {
+		t.Fatalf("startPGDaemon waited %v for the daemon's inherited stdio; want < 4s", elapsed)
 	}
 	ctl, err := os.ReadFile(logPath + ".ctl")
 	if err != nil {

@@ -200,12 +200,13 @@ func startServer(t *testing.T, bin, dsn, work string, tenant uuid.UUID) *serverP
 		}
 	})
 	deadline := time.Now().Add(40 * time.Second)
+	client := &http.Client{Timeout: 2 * time.Second}
 	healthy := false
 	for time.Now().Before(deadline) {
 		if err := cmd.Process.Signal(syscall.Signal(0)); err != nil {
 			t.Fatalf("keel serve exited before health; log:\n%s", tailFile(logPath, 40))
 		}
-		res, err := http.Get(base + "/v1/health")
+		res, err := client.Get(base + "/v1/health")
 		if err == nil {
 			res.Body.Close()
 			if res.StatusCode == 200 {
@@ -227,7 +228,7 @@ func startServer(t *testing.T, bin, dsn, work string, tenant uuid.UUID) *serverP
 		if err := cmd.Process.Signal(syscall.Signal(0)); err != nil {
 			t.Fatalf("keel serve exited before ready; log:\n%s", tailFile(logPath, 40))
 		}
-		res, err := http.Get(base + "/v1/ready")
+		res, err := client.Get(base + "/v1/ready")
 		if err == nil {
 			res.Body.Close()
 			if res.StatusCode == 200 {

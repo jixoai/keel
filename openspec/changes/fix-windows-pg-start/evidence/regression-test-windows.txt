@@ -1,5 +1,5 @@
-# Windows regression test — startPGDaemon does not wait for inherited stdio
-date: 2026-11-29T01:58:48+08:00
+# Windows regression tests — after P2 hardening
+date: 2026-11-29T02:34:28+08:00
 binary: /e/dev/github/keel-win-acceptance/artifacts/keel-cmd-test.exe
 
 === RUN   TestParsePGMajor
@@ -9,9 +9,9 @@ binary: /e/dev/github/keel-win-acceptance/artifacts/keel-cmd-test.exe
 === RUN   TestDevDBMetaRoundTrip
 --- PASS: TestDevDBMetaRoundTrip (0.00s)
 === RUN   TestStartPGDaemonDoesNotWaitForInheritedStdio
---- PASS: TestStartPGDaemonDoesNotWaitForInheritedStdio (5.12s)
+--- PASS: TestStartPGDaemonDoesNotWaitForInheritedStdio (6.39s)
 === RUN   TestStartPGDaemonErrorNamesLogs
---- PASS: TestStartPGDaemonErrorNamesLogs (0.03s)
+--- PASS: TestStartPGDaemonErrorNamesLogs (0.04s)
 === RUN   TestResetRefusesForeignDirectory
 --- PASS: TestResetRefusesForeignDirectory (0.00s)
 === RUN   TestResetRequiresYes

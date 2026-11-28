@@ -9,9 +9,9 @@
 
 ## 2. Fix
 
-- [x] 2.1 新增 `startPGDaemon`：`pg_ctl` stdout/stderr 写 `<dev-pg>.ctl.log`，`Run()` 不用管道
+- [x] 2.1 新增 `startPGDaemon`：`pg_ctl` stdout/stderr 写 `<dev-pg>.log.ctl`，`Run()` 不用管道
 - [x] 2.2 `startDevDBCluster` 改用 `startPGDaemon`；失败错误带 ctl/PG 日志路径
-- [x] 2.3 新增跨平台回归测试：fake pg_ctl 派生继承 stdio 的 5s 子进程，start 必须 <2s 返回
+- [x] 2.3 新增跨平台回归测试：fake pg_ctl 派生继承 stdio 的 5s 子进程，start 必须 <4s 返回
 - [x] 2.4 `gofmt -l`、`go vet ./...`、`go test ./cmd/keel` 通过
 
 ## 3. Windows regression
@@ -19,7 +19,7 @@
 - [x] 3.1 WSL 交叉构建 Windows 测试二进制，运行新增回归测试
 - [x] 3.2 构建 `0.6.1` Windows 测试二进制（外部 PG/web 目录即可），干净 `KEEL_HOME`
 - [x] 3.3 `keel db start` 在 15s 内返回；`dev-pg` 数据库存在；PG 继续监听 13741
-- [x] 3.4 无参 `keel.exe` 启动后 `/v1/health`、`/v1/ready` 200，13750 监听
+- [x] 3.4 无参 `keel.exe` 启动后 `/v1/health`、`/v1/ready` 200，13750 监听（最终 200 证据见 `../../fix-serve-ready-schema/evidence/fixed-ready.txt`）
 - [x] 3.5 记录修复前后对照输出到 `evidence/`
 
 ## 4. Review, release, verify
@@ -34,7 +34,9 @@
 
 ## Evidence
 
-- `evidence/repro-windows-0.6.0.md` — v0.6.0 卡死现象与根因
+- `evidence/04a-start-hang-diagnosis.txt` — v0.6.0 卡死现象、PG 日志与泄漏复现
+- `evidence/04c-db-start-repro.txt` — v0.6.0 `keel db start` 20s 超时（PG 已启动）
 - `evidence/before-after.txt` — 修复前后 `keel db start` / 无参启动对照
-- `evidence/regression-test.txt` — 跨平台测试与 Windows 测试二进制输出
-- `evidence/release-v0.6.1.md` — tag/Release/SHA/CI/Windows 复验
+- `evidence/dev-pg.log.txt` — v0.6.0 PostgreSQL 启动日志
+- `evidence/regression-test-windows.txt` — Windows 测试二进制回归输出
+- `evidence/release-v0.6.1.md` — tag/Release/SHA/CI/Windows 复验（发布后填）
