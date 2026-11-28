@@ -52,6 +52,65 @@ func openApproval(t *testing.T, server *httptest.Server, tenant, session uuid.UU
 	return opened.Decision
 }
 
+// TestApprovalAnswerKeepsOpenContext pins P1-A: the real HTTP answer path must
+// merge the open provenance row (MCP arguments/digest/attempt identity) with
+// the answer metadata, not replace the whole Context with requestId etc.
+func TestApprovalAnswerKeepsOpenContext(t *testing.T) {
+	server, _, service := newApprovalAPI(t)
+	tenant, session := uuid.New(), uuid.New()
+	decision := openApproval(t, server, tenant, session, map[string]any{
+		"kind":    "approval.confirm",
+		"prompt":  "Delete?",
+		"options": []map[string]string{{"id": "allow", "label": "Allow"}, {"id": "deny", "label": "Deny"}},
+	})
+	opened := map[string]string{
+		"arguments":         `{"path":"/tmp/x"}`,
+		"argumentsDigest":   "sha256:abc",
+		"argumentsRedacted": "true",
+		"attemptId":         "attempt-1",
+		"toolCallId":        "call-1",
+		"server":            "filesystem",
+		"tool":              "delete_file",
+	}
+	if _, _, err := service.Open(context.Background(), approval.Record{
+		TenantID: tenant.String(), SessionID: session.String(), DecisionID: decision.DecisionID,
+		Kind: decision.Kind, Mode: approval.ModeConfirm, Actor: "agent",
+		Channel: approval.ChannelTool, Context: opened,
+	}); err != nil {
+		t.Fatalf("open provenance: %v", err)
+	}
+
+	var answered struct {
+		Provenance approval.Record `json:"provenance"`
+	}
+	req, _ := http.NewRequest(http.MethodPost,
+		server.URL+"/v1/sessions/"+session.String()+"/decisions/"+decision.DecisionID,
+		jsonBody(t, map[string]any{"optionId": "allow"}))
+	req.Header.Set("X-Tenant-ID", tenant.String())
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Keel-Actor", "owner@example.test")
+	res, err := server.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("answer = %d", res.StatusCode)
+	}
+	if err := json.NewDecoder(res.Body).Decode(&answered); err != nil {
+		t.Fatal(err)
+	}
+	for key, value := range opened {
+		if answered.Provenance.Context[key] != value {
+			t.Fatalf("answer lost open context[%s] = %q, want %q (context=%v)",
+				key, answered.Provenance.Context[key], value, answered.Provenance.Context)
+		}
+	}
+	if answered.Provenance.Context["requestId"] != decision.RequestID {
+		t.Fatalf("answer context requestId = %q, want %q", answered.Provenance.Context["requestId"], decision.RequestID)
+	}
+}
+
 func TestApprovalAnswerRecordsValidatedProvenance(t *testing.T) {
 	server, _, _ := newApprovalAPI(t)
 	tenant, session := uuid.New(), uuid.New()

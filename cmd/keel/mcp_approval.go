@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -249,8 +250,17 @@ func redactMCPValue(value any, depth int, redacted *bool) any {
 	switch typed := value.(type) {
 	case map[string]any:
 		out := make(map[string]any, len(typed))
+		keys := make([]string, 0, len(typed))
+		for key := range typed {
+			keys = append(keys, key)
+		}
+		// Deterministic order is load-bearing: the summary is part of the
+		// decision prompt, and Open refuses a repeated requestId with a
+		// different prompt. A random 32-key slice would make a same-attempt
+		// retry conflict.
+		sort.Strings(keys)
 		count := 0
-		for key, item := range typed {
+		for _, key := range keys {
 			if count >= 32 {
 				out["…"] = "[more fields]"
 				*redacted = true
@@ -262,7 +272,7 @@ func redactMCPValue(value any, depth int, redacted *bool) any {
 				*redacted = true
 				continue
 			}
-			out[key] = redactMCPValue(item, depth+1, redacted)
+			out[key] = redactMCPValue(typed[key], depth+1, redacted)
 		}
 		return out
 	case []any:

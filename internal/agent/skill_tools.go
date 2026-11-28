@@ -186,7 +186,7 @@ func (p skillToolPolicy) allowsCall(tool string, arguments json.RawMessage) bool
 		return false
 	}
 	for _, scope := range p.mcpScopes {
-		if scope.server != server {
+		if scope.server != "*" && scope.server != server {
 			continue
 		}
 		if scope.tool == "*" || scope.tool == toolName {
@@ -203,7 +203,10 @@ func (p skillToolPolicy) allowsCall(tool string, arguments json.RawMessage) bool
 
 // parseMCPAllowedTool recognises the PI MCP spellings. It reports (scope, all,
 // isMCP): a bare `mcp`/`mcp*` grants every MCP tool; `mcp__server__tool` and
-// `mcp__server__*` grant one server/tool; `mcp__server` grants that server.
+// `mcp__server__*` grant one server/tool; `mcp__server` grants that server;
+// `mcp__*__tool` grants that tool on any server. A malformed spelling
+// (`mcp__server__` with an empty tool, `mcp__`) is reported as MCP with an
+// empty scope and grants nothing — it is never widened to all MCP tools.
 func parseMCPAllowedTool(entry string) (mcpToolScope, bool, bool) {
 	value := strings.ToLower(strings.TrimSpace(entry))
 	if index := strings.IndexByte(value, '('); index >= 0 {
@@ -216,20 +219,30 @@ func parseMCPAllowedTool(entry string) (mcpToolScope, bool, bool) {
 	if !strings.HasPrefix(value, "mcp__") {
 		return mcpToolScope{}, false, false
 	}
-	parts := strings.Split(strings.TrimPrefix(value, "mcp__"), "__")
-	server := strings.TrimSpace(parts[0])
-	if server == "*" {
-		return mcpToolScope{}, true, true
+	rest := strings.TrimPrefix(value, "mcp__")
+	if rest == "" {
+		return mcpToolScope{}, false, true
 	}
+	parts := strings.Split(rest, "__")
+	server := strings.TrimSpace(parts[0])
 	if server == "" {
 		return mcpToolScope{}, false, true
 	}
-	toolName := "*"
-	if len(parts) > 1 {
-		toolName = strings.TrimSpace(strings.Join(parts[1:], "__"))
-		if toolName == "" {
-			toolName = "*"
+	if len(parts) == 1 {
+		if server == "*" {
+			return mcpToolScope{}, true, true
 		}
+		// `mcp__server` is an explicit server-wide grant.
+		return mcpToolScope{server: server, tool: "*"}, false, true
+	}
+	toolName := strings.TrimSpace(strings.Join(parts[1:], "__"))
+	if toolName == "" {
+		// A trailing empty tool segment is malformed; refuse rather than
+		// silently granting the whole server.
+		return mcpToolScope{}, false, true
+	}
+	if server == "*" && toolName == "*" {
+		return mcpToolScope{}, true, true
 	}
 	return mcpToolScope{server: server, tool: toolName}, false, true
 }

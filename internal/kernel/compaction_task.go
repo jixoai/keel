@@ -63,6 +63,25 @@ func (k *Kernel) DeleteCompactionTask(ctx context.Context, scope Scope, requestI
 	return nil
 }
 
+// PruneCompactionTasks bounds the in-flight/abandoned task rows of one session.
+// It is independent of checkpoints and events.
+func (k *Kernel) PruneCompactionTasks(ctx context.Context, scope Scope, req CompactionTaskPruneRequest) (int64, error) {
+	if scope.IsZero() {
+		return 0, k.reject(ReasonInvalidRequest, OpCommit, scope, KindCompaction, OwnerToken{}, "tenant and session are required", ErrInvalidRequest)
+	}
+	if req.MaxTasks < 0 {
+		return 0, k.reject(ReasonInvalidRequest, OpCommit, scope, KindCompaction, OwnerToken{}, "prune bounds must be >= 0", ErrInvalidRequest)
+	}
+	if req.MaxTasks == 0 {
+		return 0, nil
+	}
+	pruned, err := k.log.PruneCompactionTasks(ctx, scope.TenantID, scope.SessionID, req)
+	if err != nil {
+		return 0, k.classifyStoreError(OpCommit, CommitRequest{Scope: scope, Kind: KindCompaction}, err)
+	}
+	return pruned, nil
+}
+
 // validateCompactionTask is the shared structural validation (PG and memory
 // both enforce it through the kernel). Field errors are stable enough to log;
 // they never contain message bodies.

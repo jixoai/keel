@@ -138,6 +138,33 @@ func TestSkillToolPolicyMCPCallScope(t *testing.T) {
 	if !bare.allowsCall("mcp", call("any", "anything")) {
 		t.Fatal("a bare mcp grant should allow every MCP call")
 	}
+
+	// P1-B: a wildcard SERVER with a concrete tool must stay tool-scoped. It
+	// must not become mcpAll and must never allow delete_file.
+	anyServerRead := newSkillToolPolicy([]loadedSkill{{Name: "read-any", AllowedTools: []string{"mcp__*__read_file"}}})
+	if !anyServerRead.allows("mcp") {
+		t.Fatal("mcp__*__read_file must keep the aggregate tool visible")
+	}
+	for _, server := range []string{"filesystem", "github", "other"} {
+		if !anyServerRead.allowsCall("mcp", call(server, "read_file")) {
+			t.Fatalf("read_file on %s was refused", server)
+		}
+	}
+	for _, server := range []string{"filesystem", "other"} {
+		if anyServerRead.allowsCall("mcp", call(server, "delete_file")) {
+			t.Fatalf("delete_file on %s was allowed by a read_file-only grant", server)
+		}
+	}
+	// Malformed spellings grant nothing; they are never widened to all MCP.
+	for _, spelling := range []string{"mcp__", "mcp__filesystem__", "mcp__*__"} {
+		malformed := newSkillToolPolicy([]loadedSkill{{Name: "bad", AllowedTools: []string{spelling}}})
+		if malformed.allows("mcp") {
+			t.Fatalf("%q widened a malformed MCP spelling to the aggregate tool", spelling)
+		}
+		if malformed.allowsCall("mcp", call("filesystem", "read_file")) {
+			t.Fatalf("%q allowed an MCP call", spelling)
+		}
+	}
 }
 
 // TestSkillToolPolicyReadsLoadedPin proves the policy is derived from the

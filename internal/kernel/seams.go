@@ -167,6 +167,23 @@ type CompactionTaskCheckpoint struct {
 	PolicyVersion string
 	Attempt       int
 	RetryUntil    time.Time
+	// UpdatedAt is the projection's last-write time (memory store ordering;
+	// PostgreSQL orders by its own updated_at column). It is maintenance
+	// metadata, never part of the task identity.
+	UpdatedAt time.Time
+}
+
+// CompactionTaskPruneRequest bounds abandoned/in-flight task rows so a session
+// that keeps crashing cannot accumulate them without limit. MaxTasks keeps the
+// newest N rows; zero means no cap.
+type CompactionTaskPruneRequest struct {
+	MaxTasks int
+}
+
+// CompactionTaskPruner is the retention half of the task seam. It never touches
+// the event log or checkpoint projections.
+type CompactionTaskPruner interface {
+	PruneCompactionTasks(ctx context.Context, scope Scope, req CompactionTaskPruneRequest) (int64, error)
 }
 
 // CompactionTaskStore is the compaction-task seam. Saving is an upsert keyed

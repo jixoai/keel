@@ -63,6 +63,11 @@ func mapManualCompactError(err error) error {
 	if errors.Is(err, kernel.ErrNotFound) {
 		return harnessapi.ErrSessionNotFound
 	}
+	if errors.Is(err, agent.ErrManualCompactRetry) {
+		// The retry deadline has not elapsed: a transient "try again later"
+		// state (HTTP 409), not an internal failure.
+		return harnessapi.ErrCompactBusy
+	}
 	return err
 }
 

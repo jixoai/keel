@@ -36,13 +36,15 @@ func TestPostgresProvenanceRoundTrip(t *testing.T) {
 	decision := uuid.New()
 	service := NewService(Options{Store: NewPostgresStore(st)})
 	opened, created, err := service.Open(ctx, Record{
-		TenantID:   tenant.String(),
-		SessionID:  session.String(),
-		DecisionID: decision.String(),
-		Kind:       KindConfirm,
-		Mode:       ModeConfirm,
-		Actor:      "agent",
-		Channel:    ChannelTool,
+		TenantID: tenant.String(), SessionID: session.String(), DecisionID: decision.String(),
+		Kind: KindConfirm, Mode: ModeConfirm, Actor: "agent", Channel: ChannelTool,
+		Context: map[string]string{
+			"arguments":         `{"path":"/tmp/x"}`,
+			"argumentsDigest":   "sha256:abc",
+			"argumentsRedacted": "true",
+			"attemptId":         "attempt-1",
+			"toolCallId":        "call-1",
+		},
 	})
 	if err != nil || !created {
 		t.Fatalf("open: created=%v err=%v", created, err)
@@ -72,6 +74,14 @@ func TestPostgresProvenanceRoundTrip(t *testing.T) {
 	}
 	if stored.Context["remoteAddr"] != "127.0.0.1:1" {
 		t.Fatalf("context lost: %+v", stored.Context)
+	}
+	for key, want := range map[string]string{
+		"arguments": `{"path":"/tmp/x"}`, "argumentsDigest": "sha256:abc",
+		"argumentsRedacted": "true", "attemptId": "attempt-1", "toolCallId": "call-1",
+	} {
+		if stored.Context[key] != want {
+			t.Fatalf("open context[%s] = %q, want %q (context=%v)", key, stored.Context[key], want, stored.Context)
+		}
 	}
 	again, duplicate, err := service.RecordAnswer(ctx, answer)
 	if err != nil || !duplicate {

@@ -249,6 +249,10 @@ func (s *Service) RecordAnswer(ctx context.Context, row Record) (Record, bool, e
 		return Record{}, false, err
 	}
 	if !created {
+		// Preserve the context recorded when the question was opened (the
+		// approval arguments/digest/attempt identity). The answer's own keys
+		// override, but they must never replace the whole audit row.
+		row.Context = mergeProvenanceContext(existing.Context, row.Context)
 		switch existing.Status {
 		case StatusAnswered:
 			if existing.OptionID != row.OptionID || existing.Text != row.Text {
@@ -259,6 +263,15 @@ func (s *Service) RecordAnswer(ctx context.Context, row Record) (Record, bool, e
 			// arrive a moment later. Upgrade the provenance instead of keeping
 			// the weaker record — never downgrade a known actor.
 			if existing.Actor != UnknownActor || row.Actor == UnknownActor {
+				// Still persist any newly added answer context (remoteAddr,
+				// userAgent, requestId) without changing the answer identity.
+				if !sameContext(existing.Context, row.Context) {
+					existing.Context = row.Context
+					existing.UpdatedAt = now
+					if err := s.store.Save(ctx, existing); err != nil {
+						return Record{}, false, err
+					}
+				}
 				return existing, true, nil
 			}
 			if existing.OpenedAt != nil {
@@ -323,6 +336,7 @@ func (s *Service) RecordOutcome(ctx context.Context, row Record) (Record, bool, 
 		return Record{}, false, err
 	}
 	if !created {
+		row.Context = mergeProvenanceContext(existing.Context, row.Context)
 		switch existing.Status {
 		case row.Status:
 			return existing, true, nil
@@ -434,6 +448,42 @@ func boundedActor(actor string) string {
 }
 
 // boundedContext caps the audit context so a client cannot balloon a row.
+// mergeProvenanceContext keeps every fact recorded at open time and lets the
+// answer's own non-empty keys override them. An empty answer value never erases
+// an existing fact (no actor/user-agent header must not delete the open row's
+// argument summary).
+func mergeProvenanceContext(existing, incoming map[string]string) map[string]string {
+	if len(existing) == 0 && len(incoming) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(existing)+len(incoming))
+	for key, value := range existing {
+		if strings.TrimSpace(key) == "" {
+			continue
+		}
+		out[key] = value
+	}
+	for key, value := range incoming {
+		if strings.TrimSpace(key) == "" || value == "" {
+			continue
+		}
+		out[key] = value
+	}
+	return boundedContext(out)
+}
+
+func sameContext(a, b map[string]string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for key, value := range a {
+		if b[key] != value {
+			return false
+		}
+	}
+	return true
+}
+
 func boundedContext(context map[string]string) map[string]string {
 	if len(context) == 0 {
 		return nil

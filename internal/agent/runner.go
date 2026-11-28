@@ -2265,6 +2265,9 @@ func (r *Runner) pruneCheckpoints(ctx context.Context, scope kernel.Scope) {
 const (
 	checkpointRequestMax = 1000
 	checkpointRequestTTL = 30 * 24 * time.Hour
+	// compactionTaskMax bounds abandoned/in-flight task rows per session. A
+	// healthy path deletes its row; this cap only catches repeated crashes.
+	compactionTaskMax = 100
 )
 
 func (r *Runner) pruneCheckpointRequests(ctx context.Context, scope kernel.Scope) {
@@ -2272,7 +2275,11 @@ func (r *Runner) pruneCheckpointRequests(ctx context.Context, scope kernel.Scope
 	if !ok {
 		return
 	}
-	pruned, err := pruner.PruneCheckpointRequests(ctx, scope, kernel.CheckpointRequestPruneRequest{
+	// The caller may be a cancelled manual compaction; pruning is maintenance
+	// and must not inherit that cancellation.
+	pruneCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	pruned, err := pruner.PruneCheckpointRequests(pruneCtx, scope, kernel.CheckpointRequestPruneRequest{
 		MaxRequests: checkpointRequestMax,
 		TTL:         checkpointRequestTTL,
 	})
@@ -2283,6 +2290,23 @@ func (r *Runner) pruneCheckpointRequests(ctx context.Context, scope kernel.Scope
 	if pruned > 0 {
 		r.Logger.Info("pruned checkpoint request rows", "session_id", scope.SessionID, "pruned", pruned,
 			"max", checkpointRequestMax, "ttl", checkpointRequestTTL.String())
+	}
+	r.pruneCompactionTasks(pruneCtx, scope)
+}
+
+// pruneCompactionTasks caps abandoned task rows; the task seam is optional.
+func (r *Runner) pruneCompactionTasks(ctx context.Context, scope kernel.Scope) {
+	pruner, ok := r.CompactionTasks.(kernel.CompactionTaskPruner)
+	if !ok {
+		return
+	}
+	pruned, err := pruner.PruneCompactionTasks(ctx, scope, kernel.CompactionTaskPruneRequest{MaxTasks: compactionTaskMax})
+	if err != nil {
+		r.Logger.Warn("prune compaction tasks", "session_id", scope.SessionID, "err", err)
+		return
+	}
+	if pruned > 0 {
+		r.Logger.Info("pruned compaction task rows", "session_id", scope.SessionID, "pruned", pruned, "max", compactionTaskMax)
 	}
 }
 

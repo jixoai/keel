@@ -841,6 +841,37 @@ func (s *PGStore) DeleteCompactionTask(ctx context.Context, tenantID, sessionID 
 	return nil
 }
 
+// PruneCompactionTasks keeps the newest MaxTasks task rows of one session. A
+// missing session answers ErrNotFound; an empty set answers 0.
+func (s *PGStore) PruneCompactionTasks(ctx context.Context, tenantID, sessionID uuid.UUID, req CompactionTaskPruneRequest) (int64, error) {
+	if req.MaxTasks == 0 {
+		return 0, nil
+	}
+	tag, err := s.pool.Exec(ctx,
+		`DELETE FROM compaction_tasks c
+		 WHERE c.tenant_id = $1 AND c.session_id = $2
+		   AND c.request_id NOT IN (
+		       SELECT request_id FROM compaction_tasks
+		        WHERE tenant_id = $1 AND session_id = $2
+		        ORDER BY updated_at DESC, request_id DESC
+		        LIMIT $3
+		   )`,
+		tenantID, sessionID, req.MaxTasks)
+	if err != nil {
+		return 0, fmt.Errorf("kernel: prune compaction tasks: %w", pgFail(err))
+	}
+	if tag.RowsAffected() == 0 {
+		exists, existsErr := s.SessionExists(ctx, tenantID, sessionID)
+		if existsErr != nil {
+			return 0, existsErr
+		}
+		if !exists {
+			return 0, fmt.Errorf("kernel: session %s/%s: %w", tenantID, sessionID, ErrNotFound)
+		}
+	}
+	return tag.RowsAffected(), nil
+}
+
 // FindDedupe looks up one committed event by its namespaced dedupe key.
 func (s *PGStore) FindDedupe(ctx context.Context, tenantID, sessionID uuid.UUID, key string) (Event, bool, error) {
 	if key == "" {

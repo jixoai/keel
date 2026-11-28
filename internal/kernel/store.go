@@ -78,6 +78,10 @@ type LogStore interface {
 	// DeleteCompactionTask removes a finished (or abandoned) task checkpoint.
 	DeleteCompactionTask(ctx context.Context, tenantID, sessionID uuid.UUID, requestID string) error
 
+	// PruneCompactionTasks bounds the number of task rows per session, keeping
+	// the newest MaxTasks. It never touches events or checkpoint projections.
+	PruneCompactionTasks(ctx context.Context, tenantID, sessionID uuid.UUID, req CompactionTaskPruneRequest) (int64, error)
+
 	// FindDedupe looks up one committed event by its namespaced dedupe key
 	// without taking the session write lock (the Lookup path is read-only).
 	FindDedupe(ctx context.Context, tenantID, sessionID uuid.UUID, key string) (Event, bool, error)

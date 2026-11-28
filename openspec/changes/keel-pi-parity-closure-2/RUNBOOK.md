@@ -153,7 +153,10 @@ machine (`select → summarize → retry`). `attempt` is the durable retry count
   unknown, so zero would be a false claim. An explicit empty usage object is a
   measurement and settles zero. Accounting is best-effort and bounded (5s) on a
   detached context; it never fails the model request.
-- The attempt summary sums the same provider usage events.
+- The attempt summary sums the same provider usage events; the ledger settles
+  the exact same values (not an independently estimated source).
+  `TestUsageStreamRecordsRequestLifecycle` asserts `RunSummary.Tokens ==` the
+  settled ledger record for one provider request.
 
 **Inspect**
 
