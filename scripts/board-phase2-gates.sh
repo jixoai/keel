@@ -26,7 +26,7 @@
 #   KEEL_BOARD_BASE            default 4cbc3e50
 #   KEEL_BOARD_CONTRACT        default f00097e7
 #   EXPECTED_TUI_TESTS         default 540
-#   EXPECTED_UI_SCREENSHOTS    default 55
+#   EXPECTED_UI_SCREENSHOTS    default 56
 #   EXPECTED_UI_MATRIX_CELLS   default 26
 #
 # Exit 0 only when every gate passes, file coverage has UNCOVERED=0, the full
@@ -87,7 +87,7 @@ cd "$repo_root"
 base_ref=${KEEL_BOARD_BASE:-4cbc3e50}
 contract_ref=${KEEL_BOARD_CONTRACT:-f00097e7}
 expected_tui_tests=${EXPECTED_TUI_TESTS:-540}
-expected_ui_screenshots=${EXPECTED_UI_SCREENSHOTS:-55}
+expected_ui_screenshots=${EXPECTED_UI_SCREENSHOTS:-56}
 expected_ui_matrix=${EXPECTED_UI_MATRIX_CELLS:-26}
 
 for tool in git go node nsh openspec; do
@@ -295,7 +295,7 @@ const rules = [
   { re: /^scripts\/archive\/retired-superagent\/.*\.go$/, cov: "`go test -p 1 ./...` (archive package compile) + retired-surface check" },
   { re: /^scripts\/archive\/retired-superagent\/.*\.html$/, cov: "retired-surface check + board gone screenshot 36" },
   { re: /^scripts\/board-fake-sse-server\.mjs$/, cov: "SSE live fake-server test" },
-  { re: /^scripts\/board-phase2-ui-evidence\.mjs$/, cov: "UI evidence (HTML / 55 shots / 26 matrix)" },
+  { re: /^scripts\/board-phase2-ui-evidence\.mjs$/, cov: "UI evidence (HTML / 56 shots / 26 matrix)" },
   { re: /^scripts\/board-phase2-gates\.sh$/, cov: "this gate (`bash -n` + executed in this run)" },
   { re: /^scripts\/.*\.sh$/, cov: "`bash -n` + phase-1 evidence" },
   { re: /^scripts\/summarize-conformance\.py$/, cov: "conformance golden (`scripts/conformance.sh`)" },
@@ -758,7 +758,7 @@ else
     printf 'gates line: %s\n' "$ui_gates_line"
     printf 'directory: %s\n' "$ui_rel"
   } >>"$ui_log"
-  record_gate "ui-evidence-check" "55 screenshots / 26 matrix / PASS" 1 "0s" "ui-evidence.log"
+  record_gate "ui-evidence-check" "56 screenshots / 26 matrix / PASS" 1 "0s" "ui-evidence.log"
 fi
 
 # 4. The full TUI runs only after the UI suite has completely exited.
