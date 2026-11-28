@@ -1,8 +1,9 @@
 # keel-plugin-split — storage and plugin boundary
 
 Date: 2026-11-28
-Branch: `task/keel-plugin-split-unified`
-Base: `origin/task/keel-unified-integration` @ `0fc714a5`
+Branch: `task/keel-plugin-fix`
+Base: `77cea0bc` (board P2 v0.1.4 + plugin split)
+Code commits: `6d75fab8` (P1), `03569a74` (P2 batch), `5a9cd668` (pluginstore owner), `01912296` (worker-session E2E)
 
 ## Ownership
 
@@ -69,8 +70,25 @@ ownership boundary.
 
 ## E2E
 
-`internal/superagentplugin/e2e_pg_test.go` (`TestBoardTaskToTicketToBoardWriteback`,
-requires `KEEL_TEST_DSN`): board plugin task → board service import → superagent
-ticket + open assignment in real PostgreSQL → assignment/ticket completion →
-writer claim/complete through the board service → board task `completed`.
+`internal/superagentplugin/e2e_pg_test.go` (requires `KEEL_TEST_DSN`):
+
+- `TestBoardTaskToTicketToBoardWriteback`: board task → board service import →
+  ticket in real PostgreSQL (the importer writes no assignment) → ticket
+  completion → writer claim/complete through the board service → board task
+  `completed`.
+- `TestImportedBoardTaskDispatchesWorkerSession`: board task → import with
+  `WorkerBot` → the normal guarded Host dispatch binds an ACTIVE assignment with
+  a worker session and Bot `worker-bot` → two production `Writer.SyncOnce`
+  passes (import + projection) mirror one claim and do not re-import the
+  projection.
+- `TestWriterImportDoesNotReimportItsOwnProjection`: two/three production
+  `SyncOnce` passes over a non-imported ticket's projection stay stable (one
+  ticket, one board task, link points at the original ticket).
+
 No board table is read by the superagent side.
+
+Import decisions are unit-pinned in `internal/superagentplugin/importer_test.go`
+(projected/terminal/archived tasks skipped, `WorkerBot` and owner session
+stamped, dispatch called, no sessionless assignment) and in
+`internal/superagent/orchestrator_test.go`
+(`TestDispatchTicketBindsImportedWorkerSession`).
