@@ -42,27 +42,39 @@ func (d DomainStore) Ready(ctx context.Context) error {
 	return d.Store.Ping(ctx)
 }
 
-// BuildFunc materializes the supervisor service once the board dependency is
-// available. Returning a typed nil is a programming error; return nil plus an
-// error for a disabled deployment.
-type BuildFunc func(ctx context.Context, board boardplugin.Service) (any, error)
+// Built is one materialized supervisor. Stop releases everything Start
+// acquired (the orchestrator goroutine, its writer lease, the writer ticker).
+type Built struct {
+	Service any
+	Writer  *Writer
+	Stop    func(ctx context.Context) error
+}
+
+// BuildFunc materializes the supervisor once the board dependency is
+// available. It runs inside Start, after the board plugin published `board`;
+// returning a typed nil is a programming error. A deployment whose mode is
+// disabled must set Options.Disabled instead of returning a nil service.
+type BuildFunc func(ctx context.Context, board boardplugin.Service) (*Built, error)
 
 // Options wires the superagent plugin.
 type Options struct {
 	// BoardCapability is the required service name (normally "board").
 	BoardCapability string
-	// Build creates the supervisor service. Nil uses Service.
+	// Build creates the supervisor service and its board writer. Nil uses
+	// Service/Writer (tests, an embedding host).
 	Build BuildFunc
 	// Service is a prebuilt supervisor service (tests, an embedding host).
 	Service any
-	// Stop releases the supervisor. Nil is allowed.
-	Stop func(ctx context.Context) error
-	// Writer is the board projection/import loop. Nil disables it.
+	// Writer is a prebuilt board projection loop (tests, an embedding host).
 	Writer *Writer
+	// Stop releases a prebuilt supervisor. Nil is allowed.
+	Stop func(ctx context.Context) error
 	// Domain is the plugin's independent storage. Required for a production
 	// deployment; a test may pass a memory-backed adapter.
 	Domain pluginstore.DomainStore
-	// Disabled keeps the plugin PENDING (or stopped) without starting.
+	// Disabled keeps the plugin in the graph without starting it. A missing or
+	// failed board is not "disabled": the plugin must stay PENDING so the
+	// dependency truth is visible instead of collapsing to Stopped.
 	Disabled bool
 	Logger   *slog.Logger
 }
@@ -80,10 +92,25 @@ func NewPlugin(opts Options) *pluginruntime.Plugin {
 		logger = slog.Default()
 	}
 	var (
+		mu       sync.Mutex
+		running  bool
 		services *pluginruntime.Services
-		cancel   context.CancelFunc
-		stopOnce sync.Once
+		release  func(context.Context) error
+		stopRun  context.CancelFunc
 	)
+	// stopLocked detaches the per-run state and returns what Stop must release.
+	// Re-arming on Start makes a reload (Unload then Load) start a second
+	// generation instead of leaving the first one's goroutine and services
+	// behind; a second Stop without a Start is a no-op.
+	stopLocked := func() (context.CancelFunc, *pluginruntime.Services, func(context.Context) error) {
+		if !running {
+			return nil, nil, nil
+		}
+		running = false
+		cancel, svc, rel := stopRun, services, release
+		stopRun, services, release = nil, nil, nil
+		return cancel, svc, rel
+	}
 	return &pluginruntime.Plugin{
 		Spec: pluginruntime.Spec{
 			ID:       PluginID,
@@ -106,46 +133,62 @@ func NewPlugin(opts Options) *pluginruntime.Plugin {
 					return err
 				}
 			}
+			// The run context covers the supervisor goroutine and the writer:
+			// stopping the plugin cancels both, so a reload cannot leak the
+			// previous generation.
+			runCtx, cancel := context.WithCancel(ctx)
 			service := opts.Service
+			writer := opts.Writer
+			stop := opts.Stop
 			if opts.Build != nil {
-				built, err := opts.Build(ctx, board)
+				built, err := opts.Build(runCtx, board)
 				if err != nil {
+					cancel()
 					return err
 				}
-				if built == nil {
+				if built == nil || built.Service == nil {
+					cancel()
 					return errors.New("superagentplugin: supervisor builder returned nil")
 				}
-				service = built
+				service = built.Service
+				writer = built.Writer
+				stop = built.Stop
 			}
 			if service == nil {
+				cancel()
 				return errors.New("superagentplugin: supervisor service is not configured")
 			}
 			if err := env.Services.Provide(PluginID, Capability, service); err != nil {
+				cancel()
 				return err
 			}
-			services = env.Services
-			if opts.Writer != nil {
-				var writerCtx context.Context
-				writerCtx, cancel = context.WithCancel(ctx)
-				go opts.Writer.Run(writerCtx)
+			if writer != nil {
+				go writer.Run(runCtx)
 			}
+			mu.Lock()
+			running = true
+			services = env.Services
+			release = stop
+			stopRun = cancel
+			mu.Unlock()
 			logger.Info("superagent plugin active")
 			return nil
 		},
 		Stop: func(ctx context.Context) error {
-			var err error
-			stopOnce.Do(func() {
-				if cancel != nil {
-					cancel()
-				}
-				if services != nil {
-					services.Remove(PluginID, Capability)
-				}
-				if opts.Stop != nil {
-					err = opts.Stop(ctx)
-				}
-			})
-			return err
+			mu.Lock()
+			cancel, svc, rel := stopLocked()
+			mu.Unlock()
+			if cancel == nil {
+				return nil
+			}
+			cancel()
+			if svc != nil {
+				svc.Remove(PluginID, Capability)
+			}
+			if rel != nil {
+				return rel(ctx)
+			}
+			return nil
 		},
 	}
 }

@@ -242,6 +242,11 @@ func (r *Runtime) Load(ctx context.Context) error {
 		for _, capability := range plugin.Spec.Provides {
 			provided[capability] = true
 		}
+		// topologicalOrder resolves a requirement against a capability first,
+		// then against a plugin id. Activation must publish both forms or a
+		// `requires: [keel.board]` declaration would order correctly and then
+		// stay PENDING forever.
+		provided[id] = true
 		activated = append(activated, id)
 		r.setStatus(id, StateActive, "")
 	}

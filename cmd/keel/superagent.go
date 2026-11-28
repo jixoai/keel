@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -108,11 +107,10 @@ func superagentConfigFromEnv(getenv func(string) string) (superagentConfig, erro
 
 // newSuperagentRuntime assembles the orchestrator and enables the mode. It
 // returns nil when no Source is configured, which is the default deployment.
-func newSuperagentRuntime(ctx context.Context, tenantID uuid.UUID, st *store.Store, domain *superagentstore.Store, registry *collab.ModeRegistry, bridge *accesswire.Bridge, subagents *harnessext.SubagentRunner, starter *harnessext.TurnStarter, changed func(uuid.UUID), log *slog.Logger) (*superagent.Orchestrator, error) {
-	cfg, err := superagentConfigFromEnv(os.Getenv)
-	if err != nil {
-		return nil, err
-	}
+// The caller parses the config once: the same cfg decides whether the plugin is
+// disabled and supplies the WorkerBot the board importer must stamp on an
+// imported ticket.
+func newSuperagentRuntime(ctx context.Context, cfg superagentConfig, tenantID uuid.UUID, st *store.Store, domain *superagentstore.Store, registry *collab.ModeRegistry, bridge *accesswire.Bridge, subagents *harnessext.SubagentRunner, starter *harnessext.TurnStarter, changed func(uuid.UUID), log *slog.Logger) (*superagent.Orchestrator, error) {
 	if !cfg.Enabled {
 		return nil, nil
 	}

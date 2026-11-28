@@ -54,6 +54,14 @@ func TestBoardLinksTenantIsolationAndIdempotency(t *testing.T) {
 	}); err == nil {
 		t.Fatal("a second task for one source key was accepted")
 	}
+	// One board task may map to only one ticket. A second source id naming the
+	// same task is the import loop's self-collision (the writer projected the
+	// task); the adapter must return the winner's link, not fail the pass.
+	if existing, err := adapter.PutBoardLink(ctx, superagentstore.BoardLink{
+		TenantID: tenantA, Source: "superagent", SourceID: "ticket-b", Kind: superagentstore.BoardLinkTicket, BoardTaskID: 7,
+	}); err != nil || existing.SourceID != "ticket-a" || existing.BoardTaskID != 7 {
+		t.Fatalf("board task conflict = %+v err=%v, want the existing ticket-a link", existing, err)
+	}
 	if _, err := adapter.PutBoardLink(ctx, superagentstore.BoardLink{
 		TenantID: tenantB, Source: "superagent", SourceID: "ticket-a", Kind: superagentstore.BoardLinkTicket, BoardTaskID: 7,
 	}); err != nil {
