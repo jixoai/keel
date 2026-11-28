@@ -57,13 +57,13 @@ func NewUsageStream(base provider.StreamFn, recorder UsageRecorder, scope kernel
 		return base
 	}
 	observer := &usageObserver{
-		base:      base,
-		recorder:  recorder,
-		scope:     scope,
-		baseID:    baseID,
-		seq:       seq,
-		provider:  providerName,
-		model:     modelName,
+		base:     base,
+		recorder: recorder,
+		scope:    scope,
+		baseID:   baseID,
+		seq:      seq,
+		provider: providerName,
+		model:    modelName,
 	}
 	return observer.stream
 }
@@ -108,9 +108,9 @@ func (o *usageObserver) stream(ctx context.Context, model string, llm provider.L
 // the best available fact; a nil usage is settled as zero ("not measurable").
 func (o *usageObserver) consume(ctx context.Context, requestID, modelName string, base, out *provider.AssistantMessageEventStream) {
 	var (
-		usage    *agentcore.Usage
-		provider = o.provider
-		terminal bool
+		usage      *agentcore.Usage
+		providerID = o.provider
+		terminal   bool
 	)
 	defer out.Close()
 	for {
@@ -118,14 +118,14 @@ func (o *usageObserver) consume(ctx context.Context, requestID, modelName string
 		case event, ok := <-base.Events():
 			if !ok {
 				if !terminal {
-					o.settle(ctx, requestID, modelName, provider, usage)
+					o.settle(ctx, requestID, modelName, providerID, usage)
 				}
 				return
 			}
 			switch e := event.(type) {
 			case provider.StreamStartEvent:
 				if e.Partial.Provider != "" {
-					provider = e.Partial.Provider
+					providerID = e.Partial.Provider
 				}
 				if e.Partial.Usage != nil {
 					usage = e.Partial.Usage
@@ -145,7 +145,7 @@ func (o *usageObserver) consume(ctx context.Context, requestID, modelName string
 			case provider.StreamDoneEvent:
 				terminal = true
 				if e.Message.Provider != "" {
-					provider = e.Message.Provider
+					providerID = e.Message.Provider
 				}
 				if e.Message.Usage != nil {
 					usage = e.Message.Usage
@@ -153,7 +153,7 @@ func (o *usageObserver) consume(ctx context.Context, requestID, modelName string
 			case provider.StreamErrorEvent:
 				terminal = true
 				if e.Message.Provider != "" {
-					provider = e.Message.Provider
+					providerID = e.Message.Provider
 				}
 				if e.Message.Usage != nil {
 					usage = e.Message.Usage
@@ -161,15 +161,15 @@ func (o *usageObserver) consume(ctx context.Context, requestID, modelName string
 			}
 			if err := out.Emit(ctx, event); err != nil {
 				// The consumer stopped reading: settle what was observed.
-				o.settle(ctx, requestID, modelName, provider, usage)
+				o.settle(ctx, requestID, modelName, providerID, usage)
 				return
 			}
 			if terminal {
-				o.settle(ctx, requestID, modelName, provider, usage)
+				o.settle(ctx, requestID, modelName, providerID, usage)
 				return
 			}
 		case <-ctx.Done():
-			o.settle(ctx, requestID, modelName, provider, usage)
+			o.settle(ctx, requestID, modelName, providerID, usage)
 			return
 		}
 	}
