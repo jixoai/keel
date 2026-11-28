@@ -1,7 +1,7 @@
 # checkpoint-policy Specification
 
 ## Purpose
-TBD - created by archiving change keel-checkpoint. Update Purpose after archive.
+Keel 的 checkpoint 与压缩策略：事件日志是唯一真值，checkpoint 只记录压缩后可恢复的投影；压缩切点必须安全，恢复结果必须与事件回放一致；策略决定何时保留多少 checkpoint，手动压缩与可观测/脱敏口径共用同一套语义。
 
 ## Requirements
 

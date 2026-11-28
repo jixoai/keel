@@ -1,7 +1,7 @@
 # supervision Specification
 
 ## Purpose
-TBD - created by archiving change keel-harness-v2. Update Purpose after archive.
+Keel 的自动监督与恢复：进程启动即扫描非终态 run 并从账本自动恢复，无需人工点击；恢复策略由 config.toml 决定，提供显式 resume 接口，子代理必须可续跑；护栏/升级阶梯与插件化 super-agent 的边界明确。
 
 ## Requirements
 

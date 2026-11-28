@@ -1,7 +1,7 @@
 # trace-hygiene Specification
 
 ## Purpose
-TBD - created by archiving change keel-trace-triage-v1. Update Purpose after archive.
+Keel 的 trace 卫生：客户端日志与错误不得携带 Provider 密钥、会话 cookie、Authorization 头或完整请求头，错误消息必须脱敏；trace 异常必须能追溯到具体代码位置，便于定位而不泄露。
 
 ## Requirements
 

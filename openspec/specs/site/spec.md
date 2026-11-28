@@ -1,7 +1,7 @@
 # site Specification
 
 ## Purpose
-TBD - created by archiving change keel-site. Update Purpose after archive.
+Keel 官网与文档站契约：site/ 静态构建并部署到 GitHub Pages 自定义域 keel.jixoai.com，构建失败即不发布；EN/ZH 双语对等，Core 与 Harness 两条主线齐备，每条路径/行号引用必须可解析，架构事实保持新鲜并由质量门兜底。
 
 ## Requirements
 

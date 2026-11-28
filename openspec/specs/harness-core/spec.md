@@ -1,7 +1,7 @@
 # harness-core Specification
 
 ## Purpose
-TBD - created by archiving change keel-harness-v2. Update Purpose after archive.
+Keel 的内核/Harness 边界与共享运行时契约：内核只把一次 run 跑成可重放账本，Harness 通过注入提供能力；Group 是放置与协作单元、会话归属是 lease、并发槽位与配额分层；通知/审批是持久事实且 webhook 投递真实可验，触发器去重/漏跑补偿/并发归属明确；单进程多租户与多用户装配隔离并存，内存预算按统一协议测量。
 
 ## Requirements
 

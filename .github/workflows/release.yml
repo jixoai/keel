@@ -8,9 +8,9 @@ name: Release
 # artifacts (PostgreSQL licence), extracted at build time and embedded xz-tar.
 # Nothing is built on a laptop: a tag (or manual dispatch) is the only trigger.
 #
-# Assets land on this repository's Release page. `jixoai/fde2e-releases` (the
-# aggregate outlet) needs FDE2E_RELEASES_TOKEN; when present the same bytes are
-# mirrored under `keel-v<ver>`.
+# Assets land on this repository's Release page. A keel release is published
+# here only: no aggregate outlet, no cross-repository token, no second release
+# page to drift. The GitHub Release for the tag is the single outlet.
 
 on:
   push:
@@ -144,18 +144,3 @@ jobs:
           installed .app is ad-hoc signed locally. SHA256SUMS.txt has every asset."
           gh release create "$TAG" dist/* --repo "$GITHUB_REPOSITORY" --title "keel ${{ steps.ver.outputs.version }}" --notes "$NOTES" --verify-tag || \
             gh release upload "$TAG" dist/* --repo "$GITHUB_REPOSITORY" --clobber
-
-      - name: mirror to the aggregate outlet (when the token is configured)
-        env:
-          AGG_TOKEN: ${{ secrets.FDE2E_RELEASES_TOKEN }}
-        run: |
-          if [ -z "${AGG_TOKEN:-}" ]; then
-            echo "no FDE2E_RELEASES_TOKEN configured — skipping the aggregate mirror"
-            exit 0
-          fi
-          export GH_TOKEN="$AGG_TOKEN"
-          TAG="keel-${{ steps.ver.outputs.tag }}"
-          gh release create "$TAG" dist/* --repo jixoai/fde2e-releases \
-            --title "keel ${{ steps.ver.outputs.version }}" \
-            --notes "keel ${{ steps.ver.outputs.version }} — mirrored from ${{ github.repository }}" || \
-          gh release upload "$TAG" dist/* --repo jixoai/fde2e-releases --clobber

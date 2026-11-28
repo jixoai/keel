@@ -65,8 +65,9 @@ TUI 不是打包产物：`nsh package` 没有 `tui` target，所以 `keel tui` �
    `CGO_ENABLED=0`、`-trimpath`、`-s -w` 交叉编译。
 4. **校验和**——对 `dist` 内全部产物 `sha256sum`，按排序输出（`SHA256SUMS.txt`）。
 5. **发布**——在本仓创建 release；重试时上传到同一条。
-6. **镜像**——配置了 `FDE2E_RELEASES_TOKEN` 时，同样的字节进 `jixoai/fde2e-releases`，tag 为
-   `keel-v<ver>`；没有 token 则跳过且保持绿灯。
+
+发布只发生在本仓：没有聚合仓、没有跨仓镜像、没有跨仓 token。tag 对应的 GitHub Release 是
+唯一分发出口，不存在第二份会漂移的发布页。
 
 网页构建刻意 fail-closed：v0.2.0 曾因该步骤是 `continue-on-error` 而漏发 zip，而「半个发布」比一次
 可修复的红色构建更糟（`.github/workflows/release.yml:85`）。
@@ -126,8 +127,8 @@ shasum -a 256 -c sums.mirror --ignore-missing
 
 - `https://gh.fde2e.tweb.xin/`——自建镜像，国内首选；把 GitHub 域名换掉，路径其余部分不变。
 - `https://ghfast.top/https://github.com/…`——公共代理兜底；规则相同。
-- 聚合仓在 `jixoai/fde2e-releases`，tag `keel-v<ver>`（`.github/workflows/release.yml:138`），带同一份
-  `SHA256SUMS.txt`。
+
+两个镜像都是 GitHub 代理：指向同一份 `jixoai/keel` Release 路径，不是聚合仓。
 
 校验过的用户即使在镜像上也是安全的：文件按哈希校验，而不是按信任。
 

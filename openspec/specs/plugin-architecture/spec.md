@@ -1,7 +1,7 @@
 # plugin-architecture Specification
 
 ## Purpose
-TBD - created by archiving change keel-harness-v2. Update Purpose after archive.
+Keel 的插件分层与装载边界：layer（kernel/harness/provider/ui/service）与 kind（in-process/sidecar/webview）正交；kernel 只实现 loop seam、provider 崩溃隔离、ui 只消费投影、service 只走 gRPC，Harness 按 layer 选择装载、隔离与回收，副作用可逆且可热重载。
 
 ## Requirements
 

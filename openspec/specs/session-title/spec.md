@@ -1,7 +1,7 @@
 # session-title Specification
 
 ## Purpose
-TBD - created by archiving change keel-harness-v2. Update Purpose after archive.
+Keel 的会话标题规则：标题只从首条用户消息的 text 派生，折叠空白并按码点截断，是纯函数且没有隐藏状态；一个标题在所有读取面保持一致。
 
 ## Requirements
 

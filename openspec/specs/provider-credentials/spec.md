@@ -1,7 +1,7 @@
 # provider-credentials Specification
 
 ## Purpose
-TBD - created by archiving change provider-secret-direct-config. Update Purpose after archive.
+Keel 的 Provider 凭据双轨解析：部署环境变量与租户密钥库（直接配置）都可提供凭据，解析优先级固定且凭据绝不内联进文档、事件、日志或响应；可用性投影与实际 run 解析共用同一判定，缺失时 fail closed 并给出可读 issue。
 
 ## Requirements
 

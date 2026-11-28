@@ -1,7 +1,7 @@
 # pi-hooks Specification
 
 ## Purpose
-TBD - created by archiving change keel-pi-parity-closure. Update Purpose after archive.
+Keel 的 PI 兼容 hooks：租户 hooks 配置进入出货执行路径，命令钩子按 PI 事件名分发，工具参数/结果可修改、压缩前钩子可取消；未识别事件在装配期报错，钩子超时不挂 run，调用留审计。
 
 ## Requirements
 

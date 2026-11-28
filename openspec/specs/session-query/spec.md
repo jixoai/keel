@@ -1,7 +1,7 @@
 # session-query Specification
 
 ## Purpose
-TBD - created by archiving change keel-harness-v2. Update Purpose after archive.
+Keel 的会话检索与导出：支持 messages 与 sessions 两种有界作用域，查询长度与条数有上限，分页只用 keyset 且不越过租户与会话可见性；归档会话不出现，导出有界且只含转写文本，客户端提供对应的检索/导出入口。
 
 ## Requirements
 

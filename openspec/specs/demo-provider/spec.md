@@ -1,7 +1,7 @@
 # demo-provider Specification
 
 ## Purpose
-TBD - created by archiving change keel-demo-provider-v1. Update Purpose after archive.
+Keel 的演示 Provider：演示能力只存在于服务端 provider，客户端不内置演示模型、演示数据或演示模式；演示内容确定性且来源可识别，目录中列出的 demo 模型必须可服务，面板必须把选中的模型传给网关。
 
 ## Requirements
 

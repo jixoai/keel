@@ -1,7 +1,7 @@
 # plugin-system Specification
 
 ## Purpose
-TBD - created by archiving change keel-plugin-core. Update Purpose after archive.
+Keel 的插件体系总契约：插件包与 plugin.yaml 清单、发现/安装/包存储、wire 安全发布名、生命周期与三种 kind、UI 承载与桥接、权限/沙箱/审计、作为内置插件的创造模式、TUI 行为与官方插件套件覆盖矩阵；插件状态按租户隔离。
 
 ## Requirements
 

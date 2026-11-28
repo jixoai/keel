@@ -1,0 +1,53 @@
+# Verification — chore-keel-release-closure
+
+- Date: 2026-11-28
+- Worktree: `/Users/kzf/Development/GitHub/jixoai/fde2e/.worktrees/keel-release-closure`
+- Branch: `task/keel-release-closure` (base `origin/main` `2c1245e9`)
+- Scope: release workflow + release docs + 28 spec Purpose + v0.5.0 closure record.
+  No Go/web/plugin source changes.
+
+## Results
+
+| # | Command | Exit | Key output |
+|---|---|---|---|
+| 1 | `actionlint -ignore SC2010 .github/workflows/release.yml` | 0 | no output |
+| 2 | `ruby -ryaml -e 'YAML.load_file(...)' .github/workflows/release.yml` | 0 | `jobs=release; steps=7` |
+| 3 | `openspec validate chore-keel-release-closure --strict` | 0 | `Change 'chore-keel-release-closure' is valid` |
+| 4 | `openspec validate --specs --strict` | 0 | `Totals: 44 passed, 0 failed (44 items)` |
+| 5 | `node site/scripts/check-citations.mjs` | 0 | `CITATIONS OK (1465)` |
+| 6 | `cd site && pnpm install --frozen-lockfile` | 0 | 126 packages from store, lockfile unchanged |
+| 7 | `cd site && pnpm build` | 0 | `SITE BUILD OK — 37 page pairs, 3314 links, 1465 citations verified` |
+| 8 | `go build ./...` | 0 | no output |
+| 9 | `go vet ./...` | 0 | no output |
+| 10 | `go test -run '^$' ./cmd/keel/...` | 0 | `ok github.com/jixoai/keel/cmd/keel 0.564s [no tests to run]` |
+
+### Note on actionlint
+
+Plain `actionlint .github/workflows/release.yml` exits 1 with a **pre-existing** shellcheck
+warning, not a YAML error:
+
+```
+release.yml:123:9: shellcheck SC2010:warning:3:12: Don't use ls | grep.
+```
+
+The same warning exists on unmodified `origin/main:.github/workflows/release.yml` (checked by
+running actionlint against a copy of the base file). It is in the checksums step and is unrelated
+to this change; the workflow YAML parses and all other actionlint checks pass. The unrelated
+checksum step was not rewritten to avoid changing artifact ordering in a release-closure change.
+
+### Active aggregate-repo references
+
+```bash
+grep -rn "FDE2E_RELEASES_TOKEN\|fde2e-releases\|AGG_TOKEN" \
+  .github/workflows site/docs docs README.md openspec/changes/MAINLINE.md
+```
+
+Only hit: `openspec/changes/MAINLINE.md` records that the token/mirror was **removed** on
+2026-11-28. No workflow or user-facing document points keel at the aggregate repo.
+
+## Not run (deferred to final integration)
+
+- Full TUI/e2e suite (`nsh test --target tui`, browser E2E) — unchanged client code.
+- Full `go test ./...` — unchanged Go code; build/vet + cmd test compilation are the compile-level gate.
+- A real tag-triggered release run — `v0.5.0` run `46103711132` already succeeded under the old
+  workflow; the next tag verifies the trimmed pipeline. Do not rebuild `v0.5.0`.

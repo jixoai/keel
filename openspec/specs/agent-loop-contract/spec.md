@@ -1,7 +1,7 @@
 # agent-loop-contract Specification
 
 ## Purpose
-TBD - created by archiving change keel-harness-v2. Update Purpose after archive.
+Keel 的 agent 内核契约：一次 run 只通过注入的工具清单、system sections、message-parts 与 invoke 回调工作，内核不读文件、不连数据库、不选模型、不持有跨 run 状态；run 内注入物不可变、上下文只追加、记忆卫生只派生请求视图；fork/resume 以 eventSeq 为原点，外部内核按能力矩阵显式降级并以类型化错误拒绝不支持的能力。
 
 ## Requirements
 

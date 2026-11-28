@@ -1,7 +1,7 @@
 # creation-mode Specification
 
 ## Purpose
-TBD - created by archiving change keel-creation. Update Purpose after archive.
+Keel 的 AI 创建插件闭环：从只读发现扩展面、生成插件包、校验、审批、安装到列举/渲染/禁用/卸载，每一步返回结构化结果并在校验失败时 fail closed；插件状态按租户隔离，Native chunk 零残留卸载，五态与可观测齐备，不引入第二套插件框架。
 
 ## Requirements
 

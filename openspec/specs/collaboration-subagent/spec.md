@@ -1,7 +1,7 @@
 # collaboration-subagent Specification
 
 ## Purpose
-TBD - created by archiving change keel-collab-subagent. Update Purpose after archive.
+Keel 的 sub-agent 树形委派模式：main Bot 在一次 WorkItem 中派生 sub 角色，深度与扇出受显式上限约束；所有派生经单一 spawn 门并留下 durable 链接，预算、取消、权限与租户边界一致，fork 不计入委派深度，结果与 UI 可追溯。
 
 ## Requirements
 

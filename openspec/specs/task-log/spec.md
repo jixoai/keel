@@ -1,7 +1,7 @@
 # task-log Specification
 
 ## Purpose
-TBD - created by archiving change keel-harness-v2. Update Purpose after archive.
+Keel 的任务账本：任务卡是数据库行，一切变化以追加事件表达，当前状态是事件投影；每次工具调用必须归属任务卡，任务树可跨会话拼接，fork 以 eventSeq 为原点，资源关联只记引用可解绑，bash 只追加执行事实。
 
 ## Requirements
 
