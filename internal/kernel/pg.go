@@ -527,7 +527,7 @@ func (s *PGStore) SaveCheckpoint(ctx context.Context, tenantID, sessionID uuid.U
 			      tokens_before, tokens_after, policy_version, created_at)
 			 SELECT tenant_id, session_id, $3,
 			        upto_seq, COALESCE(kept_from_seq, 0), summary, summary_hash,
-			        tokens_before, tokens_after, policy_version, created_at
+			        tokens_before, tokens_after, policy_version, now()
 			   FROM checkpoints
 			  WHERE tenant_id = $1 AND session_id = $2 AND upto_seq = $4
 			 ON CONFLICT (tenant_id, session_id, request_id) DO UPDATE
