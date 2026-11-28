@@ -16,7 +16,9 @@ package agent
 // Semantics:
 //   - no active skill, or every active skill declares no allowed-tools: no
 //     restriction (an empty declaration is "all tools", as in PI);
-//   - otherwise the allowed set is the union of every restricted skill's list;
+//   - otherwise the allowed set is the union of every skill that DID declare a
+//     list; a sibling skill without a declaration adds nothing (it does not
+//     widen the restricted set);
 //   - entries are case-insensitive tool names; a parenthetical scope such as
 //     `Bash(git:*)` names the `bash` tool; `mcp__<server>__<tool>` names the
 //     aggregate `mcp` tool (Keel does not expose per-server names); `*` and
@@ -52,9 +54,9 @@ func newSkillToolPolicy(loaded []loadedSkill) skillToolPolicy {
 	for _, skill := range loaded {
 		name := strings.TrimSpace(skill.Name)
 		if name == "" || len(skill.AllowedTools) == 0 {
-			// A skill without a declaration is unrestricted; PI treats absence
-			// as "no restriction", and a single unrestricted active skill makes
-			// the union unrestricted.
+			// A skill without a declaration imposes no restriction of its own.
+			// When it is the only active skill the turn stays unrestricted; next
+			// to a restricted skill it does not widen that skill's set.
 			continue
 		}
 		policy.restricted = true

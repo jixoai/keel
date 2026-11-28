@@ -15,6 +15,11 @@
 # ceiling, sessions != 1000, no text load, or any non-429 SSE error makes the
 # script exit non-zero. The merged result (loadtest fields + acceptance fields)
 # is written to $KEEL_PERF_OUT (default /tmp/keel-perf/acceptance.json).
+#
+# KEEL_PERF_PREFILL_RUNS posts that many inputs immediately, so the queue holds
+# more work than the runtime's run slots. KEEL_PERF_MIN_ACTIVE_RUNS (default 0)
+# then asserts the observed runsActiveMax reached the configured slot count;
+# the 2GB/1000/64 profile sets it to 64.
 set -euo pipefail
 
 SESSIONS="${1:-1000}"
@@ -28,6 +33,8 @@ OUT_DIR="${KEEL_PERF_DIR:-/tmp/keel-perf}"
 JSON_OUT="${KEEL_PERF_OUT:-$OUT_DIR/acceptance.json}"
 CEILING_MB="${KEEL_PERF_CEILING_MB:-1536}"
 EXPECTED_SESSIONS="${KEEL_PERF_EXPECTED_SESSIONS:-1000}"
+PREFILL_RUNS="${KEEL_PERF_PREFILL_RUNS:-0}"
+MIN_ACTIVE_RUNS="${KEEL_PERF_MIN_ACTIVE_RUNS:-0}"
 CTR=keel-perf-2g
 PG_CTR="${KEEL_PG_CTR:-keel-pg}"
 
@@ -41,6 +48,12 @@ case "$EXPECTED_SESSIONS" in
 esac
 [ "$CEILING_MB" -gt 0 ] || { echo "FATAL: KEEL_PERF_CEILING_MB must be > 0"; exit 1; }
 [ "$EXPECTED_SESSIONS" -gt 0 ] || { echo "FATAL: KEEL_PERF_EXPECTED_SESSIONS must be > 0"; exit 1; }
+case "$PREFILL_RUNS" in
+  ''|*[!0-9]*) echo "FATAL: KEEL_PERF_PREFILL_RUNS must be a non-negative integer (got \"$PREFILL_RUNS\")"; exit 1 ;;
+esac
+case "$MIN_ACTIVE_RUNS" in
+  ''|*[!0-9]*) echo "FATAL: KEEL_PERF_MIN_ACTIVE_RUNS must be a non-negative integer (got \"$MIN_ACTIVE_RUNS\")"; exit 1 ;;
+esac
 
 mkdir -p "$OUT_DIR" /tmp/keel-perf-cas "$(dirname "$JSON_OUT")"
 
@@ -86,13 +99,14 @@ done
 docker exec "$CTR" wget -qO- "http://127.0.0.1:$PORT/v1/health" >/dev/null || { say 'runtime did not become healthy'; docker logs "$CTR" | tail -20; exit 1; }
 say "runtime healthy (pid $(docker exec "$CTR" pidof /runtime 2>/dev/null || echo '?'))"
 
-say "== loadtest: $SESSIONS sessions / $DURATION (sidecar shares the netns) =="
+say "== loadtest: $SESSIONS sessions / $DURATION (sidecar shares the netns), prefill $PREFILL_RUNS runs =="
 docker run --rm --network "container:$CTR" \
   -v /tmp/keel-perf-loadtest:/loadtest:ro \
   -e "KEEL_ADMIN_KEY=$ADMIN_KEY" \
   alpine:3.20 /loadtest -base "http://127.0.0.1:$PORT" \
   -sessions "$SESSIONS" -duration "$DURATION" \
   -text-every 10s -image-every 60s -image-size 1048576 -images 20 \
+  -prefill-runs "$PREFILL_RUNS" -wait-drain 60s \
   -client-rate 51200 > "$OUT_DIR/bench.json" 2> "$OUT_DIR/loadtest.log" || true
 
 # memory.peak is the cgroup's own high-water mark; memory.current sampled after
@@ -107,13 +121,14 @@ if [ ! -s "$OUT_DIR/bench.json" ]; then
   exit 1
 fi
 
-python3 - "$OUT_DIR/bench.json" "$PEAK" "$JSON_OUT" "$CEILING_MB" "$EXPECTED_SESSIONS" "$REQ_DURATION_SEC" <<'PY'
+python3 - "$OUT_DIR/bench.json" "$PEAK" "$JSON_OUT" "$CEILING_MB" "$EXPECTED_SESSIONS" "$REQ_DURATION_SEC" "$MIN_ACTIVE_RUNS" <<'PY'
 import json, os, sys
 
-bench_path, peak_raw, out_path, ceiling_mb, expected_sessions, req_duration = sys.argv[1:7]
+bench_path, peak_raw, out_path, ceiling_mb, expected_sessions, req_duration, min_active_runs = sys.argv[1:8]
 ceiling_mb = float(ceiling_mb)
 expected_sessions = int(expected_sessions)
 expected_duration = float(req_duration)
+min_active_runs = int(min_active_runs)
 failures = []
 
 try:
@@ -158,6 +173,11 @@ if not isinstance(images_ok, int) or images_ok <= 0:
     failures.append(f"imagesOK = {images_ok}, want > 0 (the image channel was never exercised)")
 if hard != 0:
     failures.append(f"hard SSE errors = {hard} (sseErrors {sse_errors} - 429 {throttled}), want 0")
+if min_active_runs > 0:
+    active_max = int(bench.get("runsActiveMax") or 0)
+    if active_max < min_active_runs:
+        failures.append(
+            f"runsActiveMax = {active_max}, want >= {min_active_runs} (the run slots were never saturated)")
 if peak is not None and peak / 1e6 > ceiling_mb:
     failures.append(f"cgroup peak {peak / 1e6:.0f} MB exceeds the {ceiling_mb:.0f} MB ceiling")
 
@@ -185,7 +205,8 @@ with open(out_path, "w") as fh:
 
 print(json.dumps({k: summary.get(k) for k in (
     "mode", "sessions", "texts", "durationSec", "sseErrors", "statusCounts429",
-    "hardErrors", "imagesOK", "imagesErr", "throughputMBs", "peakMB", "peakBytes",
+    "hardErrors", "imagesOK", "imagesErr", "throughputMBs", "runsActiveMax",
+    "runsPendingMax", "runsFinishedDone", "runsFinishedFail", "peakMB", "peakBytes",
     "ceilingMB", "verdict",
 )}, ensure_ascii=False, indent=2))
 if peak is None:

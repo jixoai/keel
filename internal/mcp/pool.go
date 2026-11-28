@@ -237,8 +237,9 @@ func (m *Manager) EnsureConnected(ctx context.Context, name string) error {
 
 	for {
 		slot.mu.Lock()
+		now := time.Now()
 		// A live, recently checked connection is returned without I/O.
-		if server.Err == nil && server.Client != nil && slot.healthy && !slot.due(time.Now()) {
+		if server.Err == nil && server.Client != nil && slot.healthy && !slot.due(now) {
 			slot.mu.Unlock()
 			return nil
 		}
@@ -257,20 +258,33 @@ func (m *Manager) EnsureConnected(ctx context.Context, name string) error {
 				return ctx.Err()
 			}
 		}
-		// Probe first: a healthy server recovers without tearing the transport.
-		if server.Err == nil && server.Client != nil {
-			if _, err := server.Client.ListTools(ctx); err == nil {
-				slot.recordSuccess(false, time.Now())
+		// An unhealthy or disconnected slot needs a reconnect, not another
+		// probe. Checking the backoff BEFORE probing is what makes the backoff
+		// real: a failed probe schedules the next attempt, and a subsequent
+		// borrow inside that window must not spend a request on the dead
+		// transport. (Previously the probe ran first, re-scheduled the backoff,
+		// and then refused the reconnect, so a crashed server was never
+		// reconnected.)
+		if !slot.healthy || slot.disconnected || server.Err != nil || server.Client == nil {
+			if ok, wait := slot.canAttempt(now); !ok {
 				slot.mu.Unlock()
-				return nil
-			} else {
-				slot.recordFailure(err, time.Now())
-				m.logger.Warn("mcp health check failed; reconnecting", "server", name, "err", err)
+				return &ReconnectBackoffError{Server: name, RetryAfter: wait}
 			}
-		}
-		if ok, wait := slot.canAttempt(time.Now()); !ok {
+		} else {
+			// The slot looks healthy but a probe is due: prove it with one
+			// tools/list. A failure marks the slot unhealthy and schedules the
+			// reconnect; the reconnect itself happens on the next borrow (or the
+			// monitor tick) when the backoff allows it.
+			if _, err := server.Client.ListTools(ctx); err != nil {
+				slot.recordFailure(err, now)
+				delay := slot.nextAttempt.Sub(now)
+				slot.mu.Unlock()
+				m.logger.Warn("mcp health check failed", "server", name, "retry_in", delay, "err", err)
+				return &ReconnectBackoffError{Server: name, RetryAfter: delay}
+			}
+			slot.recordSuccess(false, now)
 			slot.mu.Unlock()
-			return &ReconnectBackoffError{Server: name, RetryAfter: wait}
+			return nil
 		}
 		slot.attempting = true
 		slot.attemptDone = make(chan struct{})
@@ -332,14 +346,13 @@ func (m *Manager) StartHealthMonitor(ctx context.Context, interval time.Duration
 			case <-ticker.C:
 				for _, server := range m.Servers() {
 					name := server.Entry.Name
+					// EnsureConnected owns the whole decision: probe a healthy
+					// but due slot, reconnect a disconnected one when its
+					// backoff allows. Probing first here would re-schedule the
+					// backoff and starve the reconnect.
 					probeCtx, probeCancel := context.WithTimeout(runCtx, interval)
-					err := m.HealthCheck(probeCtx, name)
+					_ = m.EnsureConnected(probeCtx, name)
 					probeCancel()
-					if err != nil {
-						reconnectCtx, reconnectCancel := context.WithTimeout(runCtx, interval)
-						_ = m.EnsureConnected(reconnectCtx, name)
-						reconnectCancel()
-					}
 				}
 			}
 		}

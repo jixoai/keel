@@ -84,6 +84,58 @@ func TestHealthCheckUnhealthyBacksOff(t *testing.T) {
 	}
 }
 
+// TestEnsureConnectedReconnectsAfterBackoff pins the ordering bug this suite
+// guards: a failed probe schedules the reconnect, and the next borrow after the
+// backoff window actually performs it. Probing again before checking the
+// backoff would re-schedule it forever and never reconnect.
+func TestEnsureConnectedReconnectsAfterBackoff(t *testing.T) {
+	clientTransport, server := newTestServer(t)
+	server.setHandler("tools/list", func(json.RawMessage) (any, *ErrorObject) {
+		return map[string]any{"tools": []any{}}, nil
+	})
+	client := connectTestClient(t, clientTransport)
+	manager := &Manager{
+		servers: []*Server{{Entry: ServerEntry{Name: "fixture"}, Client: client}},
+		entries: map[string]ServerEntry{"fixture": {
+			Name:   "fixture",
+			Config: map[string]any{"command": "/nonexistent-keel-mcp-binary"},
+		}},
+		options: ConnectOptions{},
+		logger:  slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}
+	ctx := context.Background()
+	if err := client.Close(); err != nil {
+		t.Fatalf("close client: %v", err)
+	}
+	// Force the probe due: a freshly created slot is otherwise "checked just
+	// now" and the cheap path would return it without I/O.
+	slot := manager.slot("fixture")
+	slot.mu.Lock()
+	slot.lastCheck = time.Time{}
+	slot.mu.Unlock()
+	// The failed probe marks the slot unhealthy and schedules the reconnect.
+	err := manager.EnsureConnected(ctx, "fixture")
+	var backoff *ReconnectBackoffError
+	if !errors.As(err, &backoff) {
+		t.Fatalf("first borrow = %v, want ReconnectBackoffError", err)
+	}
+	// Simulate the backoff window elapsing.
+	slot.mu.Lock()
+	slot.nextAttempt = time.Time{}
+	slot.mu.Unlock()
+
+	err = manager.EnsureConnected(ctx, "fixture")
+	if err == nil {
+		t.Fatal("reconnect to a nonexistent binary succeeded")
+	}
+	if errors.Is(err, ErrReconnectBackoff) {
+		t.Fatalf("second borrow = %v, want the reconnect attempt (not another backoff)", err)
+	}
+	if !errors.Is(err, ErrServerUnavailable) {
+		t.Fatalf("second borrow = %v, want ErrServerUnavailable from the reconnect", err)
+	}
+}
+
 // TestEnsureConnectedUsesHealthySlot pins the cheap path: a freshly connected,
 // healthy slot is returned without a reconnect and without a probe.
 func TestEnsureConnectedUsesHealthySlot(t *testing.T) {

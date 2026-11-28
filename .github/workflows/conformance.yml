@@ -1,0 +1,70 @@
+name: PI Conformance
+
+# The PI pin is a behavior contract, not a version string: upgrading it must
+# prove the translated conformance suite still passes and has not shrunk. This
+# job runs on pin/doc changes, on conformance-suite changes and on demand. The
+# golden floor (docs/conformance-golden.json) makes a silent loss of tests a
+# failure rather than a smaller green run.
+on:
+  push:
+    paths:
+      - "docs/UPSTREAM.md"
+      - "docs/PI-PARITY.md"
+      - "docs/PI-CONFORMANCE.md"
+      - "docs/conformance-golden.json"
+      - "scripts/conformance.sh"
+      - "scripts/summarize-conformance.py"
+      - "internal/**/conformance_test.go"
+      - "internal/**/conformance_suite_test.go"
+  pull_request:
+    paths:
+      - "docs/UPSTREAM.md"
+      - "docs/PI-PARITY.md"
+      - "docs/PI-CONFORMANCE.md"
+      - "docs/conformance-golden.json"
+      - "scripts/conformance.sh"
+      - "scripts/summarize-conformance.py"
+      - "internal/**/conformance_test.go"
+      - "internal/**/conformance_suite_test.go"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  conformance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_PASSWORD: runtime
+          POSTGRES_DB: runtime
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d runtime"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.27.3"
+          cache: true
+      - name: conformance + golden floor
+        env:
+          KEEL_TEST_DSN: postgres://postgres:runtime@127.0.0.1:5432/runtime?sslmode=disable
+          KEEL_CONFORMANCE_GOLDEN: docs/conformance-golden.json
+        run: scripts/conformance.sh /tmp/keel-conformance.json
+      - name: upload summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: conformance-summary
+          path: |
+            /tmp/keel-conformance-summary.json
+            /tmp/keel-conformance.json
+          if-no-files-found: warn

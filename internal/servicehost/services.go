@@ -730,6 +730,12 @@ func newPiLoopFactory(tenant host.TenantConfig, cfg Config) servicegraph.Factory
 		if metrics, ok := cfg.Metrics.(agent.CheckpointMetrics); ok {
 			runner.CheckpointMetrics = metrics
 		}
+		// Provider usage is a durable ledger fact. The recorder appends the
+		// pre-request marker and settles it with the provider's numbers; a nil
+		// seam keeps the pre-feature behavior.
+		if cfg.Usage != nil {
+			runner.UsageRecorder = cfg.Usage
+		}
 		// Every model tool call is authorized against the session's principal
 		// (Bot Account ∩ Harness). A nil seam stays fail-closed in the runner;
 		// the product layer's absence is a deployment gap, never an open surface.

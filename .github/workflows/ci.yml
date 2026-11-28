@@ -3,9 +3,10 @@ name: CI
 on:
   push:
   pull_request:
+  workflow_dispatch:
   schedule:
-    # Nightly chaos placeholder: the job structure is wired, the scenario is
-    # still a TODO (see the chaos-nightly job).
+    # Nightly 10-minute SIGKILL chaos (see the chaos-nightly job). It is the
+    # only scheduled job in this workflow; ordinary pushes never pay for it.
     - cron: "0 4 * * *"
 
 permissions:
@@ -100,13 +101,45 @@ jobs:
         run: docker build -t keel:ci .
 
   chaos-nightly:
-    # Placeholder only: scheduled runs execute a no-op until the random-kill
-    # matrix (cmd/e2e, 10 minutes, kill -9 every 30s) is wired.
-    if: github.event_name == 'schedule'
+    # The 10-minute random-SIGKILL soak: cmd/chaos restarts the runtime every
+    # 30s while clients keep posting input, then asserts the ledger invariants
+    # (contiguous seq, one user.message per requestId, at most one final reply
+    # per turn, no stuck run). Scheduled or manually dispatched; it is far too
+    # slow for every push.
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
-      - name: nightly chaos (TODO)
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.27.3"
+          cache: true
+      # The acceptance wrapper drives the fault loop and its strict ledger
+      # audit; it expects a dedicated container named keel-pg (KEEL_PG_CTR).
+      - name: start dedicated postgres
         run: |
-          echo "TODO: run cmd/e2e random-kill matrix for 10 minutes"
-          go build ./...
+          docker run -d --name keel-pg \
+            -e POSTGRES_PASSWORD=runtime -e POSTGRES_USER=postgres -e POSTGRES_DB=runtime \
+            -p 5432:5432 postgres:18
+          for i in $(seq 1 60); do
+            if docker exec keel-pg pg_isready -U postgres -d runtime >/dev/null 2>&1; then
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "postgres did not become ready" >&2
+          docker logs keel-pg >&2 || true
+          exit 1
+      - name: nightly chaos (600s, SIGKILL every 30s)
+        env:
+          KEEL_TEST_DSN: postgres://postgres:runtime@127.0.0.1:5432/runtime?sslmode=disable
+          KEEL_PG_CTR: keel-pg
+        run: scripts/acceptance-g5-chaos.sh evidence/chaos
+      - name: upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: chaos-evidence
+          path: evidence/chaos
+          if-no-files-found: warn

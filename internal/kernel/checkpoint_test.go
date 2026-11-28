@@ -162,6 +162,20 @@ func TestCheckpointRecordRoundTrip(t *testing.T) {
 			if err := h.k.SaveCheckpoint(ctx, scope, CheckpointRecord{UptoSeq: 9, KeptFromSeq: 7, Summary: "other", RequestID: "req-1"}); err == nil {
 				t.Fatal("a reused requestId for a different seq must fail")
 			}
+			// Two different requests may select the same cut: both requestIds
+			// resolve to it, and the projection keeps one row. Memory and PG
+			// must agree on this (mem parity).
+			if err := h.k.SaveCheckpoint(ctx, scope, CheckpointRecord{
+				UptoSeq: 5, KeptFromSeq: 3, Summary: "s2", RequestID: "req-2",
+			}); err != nil {
+				t.Fatalf("a second requestId for the same seq: %v", err)
+			}
+			for _, requestID := range []string{"req-1", "req-2"} {
+				byRequest, found, err := h.k.CheckpointByRequest(ctx, scope, requestID)
+				if err != nil || !found || byRequest.UptoSeq != 5 {
+					t.Fatalf("request %q = (%+v, found=%v, err=%v), want seq 5", requestID, byRequest, found, err)
+				}
+			}
 			// Empty summary/tokens validation.
 			if err := h.k.SaveCheckpoint(ctx, scope, CheckpointRecord{UptoSeq: 10, Summary: "  "}); !errors.Is(err, ErrInvalidRequest) {
 				t.Fatalf("empty summary err = %v, want ErrInvalidRequest", err)

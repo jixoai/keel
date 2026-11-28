@@ -65,6 +65,10 @@ func TestAssignRejectsBoundSessionAcrossWorkItems(t *testing.T) {
 	if err != nil || len(assignments) != 0 {
 		t.Fatalf("second work assignments = %+v, %v, want none", assignments, err)
 	}
+	original, err := env.host.Assignments(ctx, env.tenant, first.ID)
+	if err != nil || len(original) != 1 || original[0].SessionID != worker.SessionID {
+		t.Fatalf("original assignment changed = %+v, %v, want the first binding intact", original, err)
+	}
 }
 
 func TestAssignSameSessionTwiceInWorkItemRejected(t *testing.T) {
@@ -140,6 +144,61 @@ func TestAssignIdempotentParameterConflicts(t *testing.T) {
 	assignments, err := env.host.Assignments(ctx, env.tenant, item.ID)
 	if err != nil || len(assignments) != 2 {
 		t.Fatalf("assignments = %d (%v), want 2", len(assignments), err)
+	}
+}
+
+// TestAssignConcurrentCrossWorkItemBindsOnce pins the serialisation of the
+// binding guard: two concurrent Assign calls for the same session on different
+// WorkItems cannot both observe "unbound". Exactly one wins; the other is a
+// typed session_already_assigned refusal, and only one assignment row exists.
+func TestAssignConcurrentCrossWorkItemBindsOnce(t *testing.T) {
+	env := newTestEnv(t, defaultCeiling(), defaultModeLimits())
+	first := env.openWork(t, "first")
+	second := env.openWork(t, "second")
+	worker := env.addWorker(t)
+	ctx := context.Background()
+
+	start := make(chan struct{})
+	errs := make([]error, 2)
+	var wg sync.WaitGroup
+	for index, item := range []collab.WorkItem{first, second} {
+		index, item := index, item
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			_, errs[index] = env.host.Assign(ctx, env.tenant, item.ID, "worker", collab.AssignmentRequest{
+				CallerSessionID: env.parent.SessionID, SessionID: worker.SessionID,
+			})
+		}()
+	}
+	close(start)
+	wg.Wait()
+
+	accepted, refused := 0, 0
+	for _, err := range errs {
+		switch {
+		case err == nil:
+			accepted++
+		case errors.Is(err, collab.ErrSessionAssigned):
+			refused++
+		default:
+			t.Fatalf("concurrent Assign error = %v, want nil or ErrSessionAssigned", err)
+		}
+	}
+	if accepted != 1 || refused != 1 {
+		t.Fatalf("concurrent outcomes = accepted %d / refused %d, want 1/1 (%v)", accepted, refused, errs)
+	}
+	total := 0
+	for _, item := range []collab.WorkItem{first, second} {
+		assignments, err := env.host.Assignments(ctx, env.tenant, item.ID)
+		if err != nil {
+			t.Fatalf("Assignments(%s): %v", item.ID, err)
+		}
+		total += len(assignments)
+	}
+	if total != 1 {
+		t.Fatalf("assignment rows = %d, want exactly one winner", total)
 	}
 }
 
