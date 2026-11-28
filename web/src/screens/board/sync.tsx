@@ -29,14 +29,106 @@ import {
   boardFailureCopy,
   boardPlatformLabel,
   boardProviderErrorCopy,
+  boardProviderErrorLine,
   boardStore,
   boardThreadRefLabel,
   type BoardSyncData,
 } from "../../data/board";
-import type { BoardSyncEntryView, BoardSyncFailure, BoardSyncInboxItem } from "../../data/board-wire";
+import type {
+  BoardSyncEntryView,
+  BoardSyncFailure,
+  BoardSyncInboxItem,
+  BoardSyncLag,
+  BoardSyncTargetView,
+} from "../../data/board-wire";
 import { store } from "../../data/store";
 import { PageEmpty, PageError, PagePermission, StateNote, isMobile, touchStyle } from "../books/common";
 import { syncInboxOpen } from "./state";
+
+function lagAgeText(seconds: number | undefined): string {
+  if (seconds === undefined) return "未知";
+  if (seconds < 60) return `${seconds} 秒`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes} 分钟`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} 小时`;
+  return `${Math.floor(hours / 24)} 天`;
+}
+
+/** A measured lag object is real data; null/undefined is unknown. An object
+ * with both queues null means the queues are empty, not that lag is zero. */
+function lagLine(lag: BoardSyncLag | null | undefined): { text: string; tone?: string } {
+  if (lag === undefined || lag === null) return { text: "滞后未知" };
+  const parts: string[] = [];
+  let worst = 0;
+  for (const [label, queue] of [["入站", lag.inbox], ["出站", lag.outbox]] as const) {
+    if (!queue) continue;
+    worst = Math.max(worst, queue.ageSeconds ?? 0);
+    parts.push(`${label} ${queue.outstanding} 待处理 · 最老 ${lagAgeText(queue.ageSeconds)}`);
+  }
+  if (parts.length === 0) return { text: "无积压" };
+  return { text: parts.join(" · "), tone: worst > 300 ? color.warning : undefined };
+}
+
+function targetStatus(status: string): {
+  label: string;
+  variant: "success" | "warning" | "destructive" | "secondary";
+} {
+  switch (status) {
+    case "synced":
+      return { label: "已同步", variant: "success" };
+    case "pending":
+      return { label: "待投递", variant: "warning" };
+    case "failed":
+      return { label: "失败", variant: "destructive" };
+    default:
+      return { label: status || "未知", variant: "secondary" };
+  }
+}
+
+function TargetRow(props: { target: BoardSyncTargetView }) {
+  const status = () => targetStatus(props.target.status);
+  const details = () => {
+    const parts: string[] = [];
+    if ((props.target.dead ?? 0) > 0) parts.push(`${props.target.dead} 死信`);
+    if ((props.target.undelivered ?? 0) > 0) parts.push(`${props.target.undelivered} 待投递`);
+    if (props.target.attempts) parts.push(`${props.target.attempts} 次尝试`);
+    if (props.target.lastError) parts.push(boardProviderErrorCopy(props.target.lastError));
+    return parts.join(" · ");
+  };
+  return (
+    <View style={{ flexDirection: "column", gap: 2 }}>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm, minWidth: 0 }}>
+        <Text
+          style={{
+            flex: 1,
+            minWidth: 0,
+            fontSize: typeScale.sm,
+            color: color.mutedForeground,
+            numberOfLines: 1,
+            textOverflow: "ellipsis",
+          }}
+        >
+          {boardThreadRefLabel(props.target.target)}
+        </Text>
+        <If when={props.target.root !== undefined}>
+          <Button
+            variant="link"
+            size="sm"
+            label={`#${props.target.root}`}
+            accessibilityLabel={`打开任务 #${props.target.root}`}
+            onPress={() => store.openBoardTask(props.target.root!)}
+            style={isMobile() ? { minHeight: 44 } : undefined}
+          />
+        </If>
+        <Badge variant={status().variant} label={status().label} />
+      </View>
+      <If when={details() !== ""}>
+        <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>{details()}</Text>
+      </If>
+    </View>
+  );
+}
 
 function credentialBadge(entry: BoardSyncEntryView, data: BoardSyncData) {
   const credential = data.credentials[entry.key]?.credential ?? entry.credential ?? "unknown";
@@ -109,13 +201,15 @@ function HealthSummary(props: { data: BoardSyncData }) {
 function EntryCard(props: { entry: BoardSyncEntryView; data: BoardSyncData }) {
   const dead = () => props.data.dead.filter((item) => item.key === props.entry.key);
   const failures = () => props.data.failures.filter((item) => !item.key || item.key === props.entry.key);
+  const targetsKnown = () => props.entry.targets !== undefined;
   const targets = () => props.entry.targets ?? [];
   const inbox = () => props.entry.inbox ?? { pending: 0, leased: 0, done: 0, dead: 0 };
-  const missingTargets = () => targets().length === 0;
+  const outbox = () => props.entry.outbox ?? props.data.status.outbox;
   const missingStats = () => props.entry.failures24h === undefined;
+  const lag = () => lagLine(props.entry.lag);
   const backendGap = () => {
-    if (missingTargets() && missingStats()) return "外部目标与 24h 统计暂未上报，页面不伪造。";
-    if (missingTargets()) return "外部目标暂未上报，页面不伪造。";
+    if (!targetsKnown() && missingStats()) return "外部目标与 24h 统计暂未上报，页面不伪造。";
+    if (!targetsKnown()) return "外部目标暂未上报，页面不伪造。";
     if (missingStats()) return "24h 统计暂未上报，页面不伪造。";
     return "";
   };
@@ -158,14 +252,21 @@ function EntryCard(props: { entry: BoardSyncEntryView; data: BoardSyncData }) {
         />
         <Metric
           label="出站"
-          value={`${props.data.status.outbox.pending} 待投递`}
+          value={`${outbox().pending} 待投递`}
           testID={`board-sync-outbox-${props.entry.key}`}
+        />
+        <Metric
+          label="滞后"
+          value={lag().text}
+          tone={lag().tone ?? (props.entry.lag === undefined || props.entry.lag === null ? color.mutedForeground : undefined)}
+          testID={`board-sync-lag-${props.entry.key}`}
         />
         <If when={props.entry.failures24h !== undefined}>
           <Metric
             label="24h 失败"
             value={`${props.entry.failures24h} 次`}
             tone={(props.entry.failures24h ?? 0) > 0 ? color.destructive : undefined}
+            testID={`board-sync-failures24h-${props.entry.key}`}
           />
         </If>
         <Metric label="死信" value={`${dead().length} 条`} tone={dead().length > 0 ? color.destructive : undefined} />
@@ -191,31 +292,16 @@ function EntryCard(props: { entry: BoardSyncEntryView; data: BoardSyncData }) {
           </Each>
         </View>
       </If>
+      <If when={targetsKnown() && targets().length === 0}>
+        <Text testID={`board-sync-targets-empty-${props.entry.key}`} style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>
+          还没有外部目标；发起同步后，这里会列出对应的 board 线程。
+        </Text>
+      </If>
       <If when={targets().length > 0}>
-        <View style={{ flexDirection: "column", gap: 2 }}>
+        <View style={{ flexDirection: "column", gap: space.xs }}>
           <Text style={{ fontSize: typeScale.sm, fontWeight: weight.medium, color: color.foreground }}>目标</Text>
           <Each of={targets().slice(0, 3)} key={(target) => `${target.target}-${target.root ?? ""}`}>
-            {(target) => (
-              <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm, minWidth: 0 }}>
-                <Text style={{ flex: 1, minWidth: 0, fontSize: typeScale.sm, color: color.mutedForeground, numberOfLines: 1, textOverflow: "ellipsis" }}>
-                  {boardThreadRefLabel(target().target)}
-                </Text>
-                <If when={target().root !== undefined}>
-                  <Button
-                    variant="link"
-                    size="sm"
-                    label={`#${target().root}`}
-                    accessibilityLabel={`打开任务 #${target().root}`}
-                    onPress={() => store.openBoardTask(target().root!)}
-                    style={isMobile() ? { minHeight: 44 } : undefined}
-                  />
-                </If>
-                <Badge
-                  variant={target().status.includes("同步") ? "success" : target().status.includes("重试") ? "warning" : "secondary"}
-                  label={target().status}
-                />
-              </View>
-            )}
+            {(target) => <TargetRow target={target()} />}
           </Each>
           <If when={targets().length > 3}>
             <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>还有 {targets().length - 3} 个目标</Text>
@@ -328,7 +414,7 @@ function DeadLetters(props: { data: BoardSyncData }) {
                 {boardEventRefLabel(item().dedupe ?? item().id)}
               </Text>
               <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground, flex: 1, minWidth: 0 }}>
-                {boardProviderErrorCopy(item().lastError)}
+                {boardProviderErrorLine(item().lastError)}
               </Text>
               <Text style={{ fontFamily: font.mono, fontSize: typeScale.sm, color: color.mutedForeground }}>
                 {item().attempts} 次
@@ -368,7 +454,7 @@ function Failures(props: { failures: BoardSyncFailure[] }) {
               <Text style={{ flex: 1, minWidth: 0, fontSize: typeScale.sm, color: color.mutedForeground }}>
                 {boardThreadRefLabel(failure().target)}
               </Text>
-              <Text style={{ fontSize: typeScale.sm, color: color.destructive }}>{boardProviderErrorCopy(failure().error)}</Text>
+              <Text style={{ fontSize: typeScale.sm, color: color.destructive }}>{boardProviderErrorLine(failure().error)}</Text>
               <Button
                 variant="outline"
                 size="sm"
@@ -427,7 +513,7 @@ function InboxSheet(props: { data: BoardSyncData }) {
               <View style={{ flexDirection: "column", gap: 2, paddingVertical: space.sm, borderBottomWidth: 1, borderBottomColor: color.border }}>
                 <Text style={{ fontSize: typeScale.sm, color: color.foreground }}>{boardEventRefLabel(item().dedupe ?? item().id)}</Text>
                 <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>
-                  死信 · {item().attempts} 次 · {boardProviderErrorCopy(item().lastError)}
+                  死信 · {item().attempts} 次 · {boardProviderErrorLine(item().lastError)}
                 </Text>
               </View>
             )}

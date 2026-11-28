@@ -920,10 +920,12 @@ func TestSyncEntriesMergeCredentialStatusAndUnknownLag(t *testing.T) {
 	}
 	var entryBody struct {
 		Entries []struct {
-			Key        string          `json:"key"`
-			Credential string          `json:"credential"`
-			Restart    bool            `json:"restartRequired"`
-			Lag        json.RawMessage `json:"lag"`
+			Key         string            `json:"key"`
+			Credential  string            `json:"credential"`
+			Restart     bool              `json:"restartRequired"`
+			Lag         json.RawMessage   `json:"lag"`
+			Targets     []json.RawMessage `json:"targets"`
+			Failures24h *int              `json:"failures24h"`
 		} `json:"entries"`
 		Lag json.RawMessage `json:"lag"`
 	}
@@ -934,8 +936,17 @@ func TestSyncEntriesMergeCredentialStatusAndUnknownLag(t *testing.T) {
 	if entryBody.Entries[0].Credential != "invalid" {
 		t.Fatalf("credential = %q: %s", entryBody.Entries[0].Credential, entries.body)
 	}
-	if string(entryBody.Lag) != "null" || string(entryBody.Entries[0].Lag) != "null" {
-		t.Fatalf("lag not explicit null: %s", entries.body)
+	// board v0.1.2 measures the empty queues as {inbox:null,outbox:null}.
+	// The mount must pass that through, not overwrite it with a bare null.
+	assertEmptyLag(t, entryBody.Entries[0].Lag, entries.body)
+	if entryBody.Entries[0].Failures24h == nil || *entryBody.Entries[0].Failures24h != 0 {
+		t.Fatalf("failures24h = %v: %s", entryBody.Entries[0].Failures24h, entries.body)
+	}
+	if entryBody.Entries[0].Targets == nil {
+		t.Fatalf("targets is null, want []: %s", entries.body)
+	}
+	if string(entryBody.Lag) != "null" {
+		t.Fatalf("entries root lag = %s, want null: %s", entryBody.Lag, entries.body)
 	}
 	var entryRaw map[string]json.RawMessage
 	if err := json.Unmarshal(entries.body, &entryRaw); err != nil {
@@ -951,9 +962,10 @@ func TestSyncEntriesMergeCredentialStatusAndUnknownLag(t *testing.T) {
 	}
 	var statusBody struct {
 		Keys []struct {
-			Key        string          `json:"key"`
-			Credential string          `json:"credential"`
-			Lag        json.RawMessage `json:"lag"`
+			Key         string          `json:"key"`
+			Credential  string          `json:"credential"`
+			Lag         json.RawMessage `json:"lag"`
+			Failures24h *int            `json:"failures24h"`
 		} `json:"keys"`
 		SyncEnabled *bool           `json:"syncEnabled"`
 		Lag         json.RawMessage `json:"lag"`
@@ -965,8 +977,10 @@ func TestSyncEntriesMergeCredentialStatusAndUnknownLag(t *testing.T) {
 	if statusBody.SyncEnabled == nil || !*statusBody.SyncEnabled {
 		t.Fatalf("syncEnabled = %v", statusBody.SyncEnabled)
 	}
-	if string(statusBody.Lag) != "null" || string(statusBody.Keys[0].Lag) != "null" {
-		t.Fatalf("status lag not explicit null: %s", status.body)
+	assertEmptyLag(t, statusBody.Lag, status.body)
+	assertEmptyLag(t, statusBody.Keys[0].Lag, status.body)
+	if statusBody.Keys[0].Failures24h == nil || *statusBody.Keys[0].Failures24h != 0 {
+		t.Fatalf("status failures24h = %v: %s", statusBody.Keys[0].Failures24h, status.body)
 	}
 
 	// Another tenant never sees the deployment's entry list merged with its
@@ -974,5 +988,24 @@ func TestSyncEntriesMergeCredentialStatusAndUnknownLag(t *testing.T) {
 	daveEntries := env.do(t, server, http.MethodGet, "/v1/board/sync/entries", "dave", nil)
 	if daveEntries.status != http.StatusOK || strings.Contains(string(daveEntries.body), `"slack"`) {
 		t.Fatalf("cross-tenant sync entries = %d %s", daveEntries.status, daveEntries.body)
+	}
+}
+
+// assertEmptyLag requires a measured lag object whose two queues are null.
+// A bare null is unknown (an older board), which is a different fact.
+func assertEmptyLag(t *testing.T, raw json.RawMessage, body []byte) {
+	t.Helper()
+	if string(raw) == "null" {
+		t.Fatalf("lag = null, want a measured {inbox:null,outbox:null}: %s", body)
+	}
+	var lag struct {
+		Inbox  *json.RawMessage `json:"inbox"`
+		Outbox *json.RawMessage `json:"outbox"`
+	}
+	if err := json.Unmarshal(raw, &lag); err != nil {
+		t.Fatalf("decode lag %s: %v", raw, err)
+	}
+	if lag.Inbox != nil || lag.Outbox != nil {
+		t.Fatalf("lag = %s, want both queues null", raw)
 	}
 }

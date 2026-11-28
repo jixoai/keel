@@ -86,6 +86,8 @@ import type {
   BoardSyncEntryView,
   BoardSyncFailure,
   BoardSyncInboxItem,
+  BoardSyncLag,
+  BoardSyncQueueLag,
   BoardSyncStatusView,
   BoardTaskClaim,
   BoardTaskMutation,
@@ -737,9 +739,36 @@ const boardText = (value: unknown): string | undefined =>
 /** One sync entry as the management API sends it. The Phase 0 DTO carries the
  * key/platform/enabled/owned facts and an inbox depth; the Phase 2 design's
  * health facts stay optional until the adapter provides them. */
+function parseSyncQueueLag(value: unknown): BoardSyncQueueLag | null | undefined {
+  if (value === null) return null;
+  const row = asRecord(value);
+  if (!row) return undefined;
+  return {
+    outstanding: boardNumber(row.outstanding),
+    ...(typeof row.oldestAt === "string" ? { oldestAt: row.oldestAt } : {}),
+    ...(typeof row.ageSeconds === "number" ? { ageSeconds: row.ageSeconds } : {}),
+  };
+}
+
+/** `undefined` means the board didn't send lag; `null` means it couldn't
+ * measure it. A measured object with null members means the queues are empty. */
+function parseSyncLag(value: unknown): BoardSyncLag | null | undefined {
+  if (value === null) return null;
+  const row = asRecord(value);
+  if (!row) return undefined;
+  const inbox = parseSyncQueueLag(row.inbox);
+  const outbox = parseSyncQueueLag(row.outbox);
+  if (inbox === undefined && outbox === undefined) return undefined;
+  return { inbox: inbox ?? null, outbox: outbox ?? null };
+}
+
+/** Parse GET /sync/entries, /sync/status key and /sync/entries/{key}/status.
+ * key/platform/enabled/owned facts and the measured health fields are optional:
+ * an older mounted board omits them, and the UI shows unknown rather than 0. */
 function parseSyncEntry(value: unknown): BoardSyncEntryView {
   const row = asRecord(value);
   const inbox = asRecord(row?.inbox);
+  const outbox = asRecord(row?.outbox);
   const entry: BoardSyncEntryView = {
     key: String(row?.key ?? ""),
     platform: String(row?.platform ?? ""),
@@ -754,6 +783,14 @@ function parseSyncEntry(value: unknown): BoardSyncEntryView {
       leased: boardNumber(inbox.leased),
       done: boardNumber(inbox.done),
       dead: boardNumber(inbox.dead),
+    };
+  }
+  if (outbox) {
+    entry.outbox = {
+      pending: boardNumber(outbox.pending),
+      leased: boardNumber(outbox.leased),
+      done: boardNumber(outbox.done),
+      dead: boardNumber(outbox.dead),
     };
   }
   const credential = boardText(row?.credential);
@@ -772,10 +809,18 @@ function parseSyncEntry(value: unknown): BoardSyncEntryView {
         target: String(item.target ?? ""),
         ...(typeof item.root === "string" || typeof item.root === "number" ? { root: String(item.root) } : {}),
         status: String(item.status ?? ""),
+        ...(typeof item.pending === "number" ? { pending: item.pending } : {}),
+        ...(typeof item.leased === "number" ? { leased: item.leased } : {}),
+        ...(typeof item.dead === "number" ? { dead: item.dead } : {}),
         ...(typeof item.attempts === "number" ? { attempts: item.attempts } : {}),
         ...(typeof item.lastError === "string" ? { lastError: item.lastError } : {}),
         ...(typeof item.undelivered === "number" ? { undelivered: item.undelivered } : {}),
+        ...(typeof item.lastDeliveryAt === "string" ? { lastDeliveryAt: item.lastDeliveryAt } : {}),
       }));
+  }
+  if ("lag" in (row ?? {})) {
+    const lag = parseSyncLag(row?.lag);
+    if (lag !== undefined) entry.lag = lag;
   }
   if (typeof row?.lastDeliveryAt === "string") entry.lastDeliveryAt = row.lastDeliveryAt;
   if (typeof row?.failures24h === "number") entry.failures24h = row.failures24h;
@@ -2362,6 +2407,7 @@ export class KeelHttp implements SettingsApi, BoardApi {
     const body = asRecord(await response.json());
     const keys = listOf(body.keys).map(parseSyncEntry);
     const outbox = asRecord(body.outbox);
+    const lag = "lag" in (body ?? {}) ? parseSyncLag(body.lag) : undefined;
     return {
       keys,
       outbox: {
@@ -2370,6 +2416,8 @@ export class KeelHttp implements SettingsApi, BoardApi {
         done: numberOr(outbox?.done),
         dead: numberOr(outbox?.dead),
       },
+      ...(lag !== undefined ? { lag } : {}),
+      ...(typeof body.failures24h === "number" ? { failures24h: body.failures24h } : {}),
       ...(typeof body.updatedAt === "string" ? { updatedAt: body.updatedAt } : {}),
       ...(typeof body.syncEnabled === "boolean" ? { syncEnabled: body.syncEnabled } : {}),
     };

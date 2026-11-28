@@ -187,23 +187,44 @@ export interface BoardSyncEntryView {
   createdAt: string;
   updatedAt: string;
   inbox?: { pending: number; leased: number; done: number; dead: number };
-  /** Design contract: health facts the Phase 0 DTO does not carry yet. */
+  outbox?: { pending: number; leased: number; done: number; dead: number };
+  /** board.manage health facts. `undefined` means the mounted board didn't
+   * send the field; `null` lag means the board couldn't measure it. */
   credential?: "valid" | "invalid" | "unknown";
   routes?: Array<{ from: string; to: string }>;
   targets?: BoardSyncTargetView[];
+  /** Measured queues; a null member is an empty queue, not unknown. */
+  lag?: BoardSyncLag | null;
   lastDeliveryAt?: string;
   failures24h?: number;
   bridgeHost?: string;
   bridgeErrors?: number;
 }
 
+/** One measured queue: no outstanding row is represented by a null queue at
+ * the `BoardSyncLag` level, so it never reads as a zero-second lag. */
+export interface BoardSyncQueueLag {
+  outstanding: number;
+  oldestAt?: string;
+  ageSeconds?: number;
+}
+
+export interface BoardSyncLag {
+  inbox: BoardSyncQueueLag | null;
+  outbox: BoardSyncQueueLag | null;
+}
+
 export interface BoardSyncTargetView {
   target: string;
   root?: BoardRef;
   status: string;
+  pending?: number;
+  leased?: number;
+  dead?: number;
   attempts?: number;
   lastError?: string;
   undelivered?: number;
+  lastDeliveryAt?: string;
 }
 
 /** `GET /v1/board/sync/credentials` (keel adapter): whether each entry has a
@@ -219,7 +240,9 @@ export interface BoardSyncCredentialView {
 export interface BoardSyncStatusView {
   keys: BoardSyncEntryView[];
   outbox: { pending: number; leased: number; done: number; dead: number };
-  /** Design contract: tenant-wide facts when the deployment provides them. */
+  /** Tenant-wide measured queues; null/undefined means unknown. */
+  lag?: BoardSyncLag | null;
+  failures24h?: number;
   updatedAt?: string;
   syncEnabled?: boolean;
 }

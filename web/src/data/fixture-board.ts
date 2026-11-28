@@ -305,6 +305,18 @@ export class FixtureBoard implements BoardApi {
       createdAt: iso(-90 * 86400),
       updatedAt: iso(-3600),
       inbox: { pending: 2, leased: 0, done: 128, dead: 1 },
+      outbox: { pending: 1, leased: 0, done: 120, dead: 1 },
+      targets: [
+        { target: "slack:C08:174.002", root: "814", status: "pending", pending: 1, undelivered: 1, attempts: 2 },
+        { target: "slack:C08:172.018", root: "812", status: "failed", dead: 1, attempts: 5, lastError: "provider answered 429" },
+        { target: "slack:C09:site", root: "820", status: "synced", undelivered: 0 },
+      ],
+      lag: {
+        inbox: { outstanding: 2, oldestAt: iso(-640), ageSeconds: 640 },
+        outbox: { outstanding: 1, oldestAt: iso(-120), ageSeconds: 120 },
+      },
+      lastDeliveryAt: iso(-300),
+      failures24h: 1,
     },
     {
       key: "github",
@@ -314,6 +326,11 @@ export class FixtureBoard implements BoardApi {
       createdAt: iso(-60 * 86400),
       updatedAt: iso(-7200),
       inbox: { pending: 0, leased: 0, done: 42, dead: 0 },
+      outbox: { pending: 0, leased: 0, done: 42, dead: 0 },
+      targets: [{ target: "github:acme/www:pulls:123", root: "816", status: "synced", undelivered: 0 }],
+      lag: { inbox: null, outbox: null },
+      lastDeliveryAt: iso(-7200),
+      failures24h: 0,
     },
     {
       key: "linear",
@@ -323,6 +340,10 @@ export class FixtureBoard implements BoardApi {
       createdAt: iso(-20 * 86400),
       updatedAt: iso(-86400),
       inbox: { pending: 0, leased: 0, done: 0, dead: 0 },
+      outbox: { pending: 0, leased: 0, done: 0, dead: 0 },
+      targets: [],
+      lag: { inbox: null, outbox: null },
+      failures24h: 0,
     },
   ];
   /** The adapter's credential status read; never part of the entry DTO. */
@@ -373,6 +394,11 @@ export class FixtureBoard implements BoardApi {
       bot: ACTOR_BY_HANDLE("butler"),
       enabled: true,
       cursor: "812",
+      dead: 1,
+      lastError: "rate limited",
+      lastDeliveryAt: iso(-300),
+      successes24h: 42,
+      failures24h: 1,
       createdAt: iso(-40 * 86400),
       updatedAt: iso(-300),
     },
@@ -384,6 +410,10 @@ export class FixtureBoard implements BoardApi {
       bot: ACTOR_BY_HANDLE("release-bot"),
       enabled: true,
       cursor: "814",
+      dead: 0,
+      lastDeliveryAt: iso(-900),
+      successes24h: 0,
+      failures24h: 0,
       createdAt: iso(-30 * 86400),
       updatedAt: iso(-900),
     },
@@ -811,6 +841,11 @@ export class FixtureBoard implements BoardApi {
     return {
       keys: this.syncEntries.map((entry) => ({ ...entry })),
       outbox: { pending: 1, leased: 1, done: 30, dead: this.failures.length },
+      lag: {
+        inbox: { outstanding: 2, oldestAt: iso(-640), ageSeconds: 640 },
+        outbox: { outstanding: 1, oldestAt: iso(-120), ageSeconds: 120 },
+      },
+      failures24h: 1,
       updatedAt: new Date().toISOString(),
       syncEnabled: true,
     };

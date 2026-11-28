@@ -565,9 +565,12 @@ func filterBridgeMoves(moves []string) []string {
 // ---- sync credential merge ------------------------------------------------
 
 // augmentSync merges the keel-side credential state into the board's entry
-// views and states the sync lag it cannot measure as null. The board's own
-// response shape and status are unchanged; an entry missing from this process's
-// configuration is reported as credential "unknown", never invented as valid.
+// views. board v0.1.2 measures targets, lag and 24h failures itself; those
+// fields pass through untouched. A field the mounted board didn't send is
+// stated as null, which the client reads as unknown rather than a zero.
+// The board's own response shape and status are unchanged; an entry missing
+// from this process's configuration is reported as credential "unknown",
+// never invented as valid.
 func (s *Surface) augmentSync(r *http.Request, value any) bool {
 	tenantID, ok := requestTenant(r)
 	if !ok {
@@ -606,9 +609,11 @@ func (s *Surface) augmentSync(r *http.Request, value any) bool {
 			} else {
 				entry["credential"] = "unknown"
 			}
-			// board v0.1.1 records no per-entry lag timestamps. null says
-			// "unknown" instead of a fixture-shaped zero.
-			entry["lag"] = nil
+			// A mounted board older than v0.1.2 sends no lag. null says
+			// "unknown"; a measured board value is preserved as-is.
+			if _, measured := entry["lag"]; !measured {
+				entry["lag"] = nil
+			}
 			changed = true
 		}
 	}
@@ -631,7 +636,9 @@ func (s *Surface) augmentSync(r *http.Request, value any) bool {
 		}
 	}
 	if changed {
-		root["lag"] = nil
+		if _, measured := root["lag"]; !measured {
+			root["lag"] = nil
+		}
 	}
 	return changed
 }

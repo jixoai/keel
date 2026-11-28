@@ -19,7 +19,16 @@ import {
   typeScale,
   weight,
 } from "../../ui/kit";
-import { boardActorName, boardClock, boardFailureCopy, boardProviderErrorCopy, boardStore, boardWatcherActionLabel } from "../../data/board";
+import {
+  boardActorName,
+  boardClock,
+  boardDateTime,
+  boardFailureCopy,
+  boardProviderErrorCopy,
+  boardProviderErrorLine,
+  boardStore,
+  boardWatcherActionLabel,
+} from "../../data/board";
 import type { BoardScheduleView, BoardWatcherView } from "../../data/board-wire";
 import { store } from "../../data/store";
 import { PageEmpty, PageError, PagePermission, StateNote, isMobile, touchStyle } from "../books/common";
@@ -119,7 +128,7 @@ function WatcherRow(props: { watcher: BoardWatcherView }) {
         </If>
         <If when={!!props.watcher.lastError}>
           <Text style={{ fontSize: typeScale.sm, color: color.destructive }}>
-            最近一次失败：{boardProviderErrorCopy(props.watcher.lastError)}
+            最近一次失败：{boardProviderErrorLine(props.watcher.lastError)}
           </Text>
         </If>
       </View>
@@ -189,7 +198,7 @@ function ScheduleRow(props: { schedule: BoardScheduleView }) {
           />
         </View>
         <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground, numberOfLines: 2 }}>
-          {props.schedule.channel} · {cadence(props.schedule)} · 下次 {boardClock(props.schedule.nextRunAt)} · 已发{" "}
+          {props.schedule.channel} · {cadence(props.schedule)} · 下次 {boardDateTime(props.schedule.nextRunAt)} · 已发{" "}
           {props.schedule.sent} 次
         </Text>
         <If when={revoked()}>
@@ -199,7 +208,7 @@ function ScheduleRow(props: { schedule: BoardScheduleView }) {
         </If>
         <If when={!revoked() && !!props.schedule.lastError}>
           <Text style={{ fontSize: typeScale.sm, color: color.destructive }}>
-            最近一次失败：{boardProviderErrorCopy(props.schedule.lastError)}
+            最近一次失败：{boardProviderErrorLine(props.schedule.lastError)}
           </Text>
         </If>
       </View>
@@ -220,7 +229,7 @@ function ScheduleRow(props: { schedule: BoardScheduleView }) {
         <If when={canCancel()}>
           <Button
             testID={`board-schedule-cancel-${props.schedule.id}`}
-            variant="outline"
+            variant="destructive"
             size="sm"
             icon="x"
             label="取消"
@@ -274,7 +283,7 @@ function WatcherSheet() {
                 </Text>
                 <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>
                   尝试 {delivery().attempts} 次 · 下次 {boardClock(delivery().nextAt)}
-                  {delivery().lastError ? ` · ${boardProviderErrorCopy(delivery().lastError)}` : ""}
+                  {delivery().lastError ? ` · ${boardProviderErrorLine(delivery().lastError)}` : ""}
                 </Text>
               </View>
             )}

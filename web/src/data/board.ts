@@ -508,6 +508,14 @@ export function boardClock(iso: string | number | undefined): string {
   return `${two(at.getHours())}:${two(at.getMinutes())}:${two(at.getSeconds())}`;
 }
 
+/** `11-28 09:00` — a scheduled future needs its date, not only a clock. */
+export function boardDateTime(iso: string | number | undefined): string {
+  if (iso === undefined) return "—";
+  const at = typeof iso === "number" ? new Date(iso) : new Date(iso);
+  if (!Number.isFinite(at.getTime())) return "—";
+  return `${two(at.getMonth() + 1)}-${two(at.getDate())} ${two(at.getHours())}:${two(at.getMinutes())}`;
+}
+
 /** `3 小时前` (without the 前): 刚刚 / 12 分钟 / 3 小时 / 2 天. */
 export function boardAgeText(iso: string | undefined, now: number): string {
   if (!iso) return "";
@@ -749,19 +757,36 @@ export function boardThreadRefLabel(ref: string | undefined): string {
   return human ? human : raw.startsWith("#") ? raw : "外部线程";
 }
 
-/** Provider errors are operator facts, not UI copy. Keep the category and
- * discard the raw provider sentence. */
-export function boardProviderErrorCopy(error: string | undefined | null): string {
+/** Provider errors are operator facts, not raw UI copy. Return the product
+ * category and its next step; the raw provider sentence stays in server logs. */
+export interface BoardProviderErrorDetail {
+  summary: string;
+  action: string;
+}
+
+export function boardProviderErrorDetail(error: string | undefined | null): BoardProviderErrorDetail {
   const raw = (error ?? "").trim();
-  if (!raw) return "";
-  const lower = raw.toLowerCase();
+  if (!raw) return { summary: "", action: "" };
+  const lower = raw.toLowerCase().replaceAll("_", " ").replaceAll("-", " ");
   if (lower.includes("429") || lower.includes("rate limit") || lower.includes("rate limited")) {
-    return "平台限流，稍后重试";
+    return { summary: "平台限流，稍后重试", action: "系统会按退避自动重试；无需手动操作。" };
   }
-  if (lower.includes("timeout") || lower.includes("timed out")) return "平台响应超时";
-  if (lower.includes("signature") && lower.includes("expired")) return "平台签名已过期，需要重新投递";
-  if (lower.includes("401") || lower.includes("403") || lower.includes("unauthorized") || lower.includes("forbidden")) {
-    return "平台凭据被拒绝";
+  if (lower.includes("timeout") || lower.includes("timed out") || lower.includes("deadline")) {
+    return { summary: "平台响应超时", action: "系统会重试；持续超时请检查网络与平台状态。" };
+  }
+  if (lower.includes("signature") && lower.includes("expired")) {
+    return { summary: "平台签名已过期，需要重新投递", action: "重试会生成新的签名；无需轮换凭据。" };
+  }
+  if (
+    lower.includes("401") ||
+    lower.includes("403") ||
+    lower.includes("unauthorized") ||
+    lower.includes("forbidden") ||
+    lower.includes("permission") ||
+    lower.includes("not in channel") ||
+    lower.includes("missing scope")
+  ) {
+    return { summary: "平台凭据或频道权限被拒绝", action: "确认 Bot 仍在频道内且凭据 scope 未变；轮换后自动恢复。" };
   }
   if (
     lower.includes("5xx") ||
@@ -769,13 +794,34 @@ export function boardProviderErrorCopy(error: string | undefined | null): string
     lower.includes("502") ||
     lower.includes("503") ||
     lower.includes("504") ||
-    lower.includes("server error")
+    lower.includes("server error") ||
+    lower.includes("unavailable") ||
+    lower.includes("bad gateway")
   ) {
-    return "平台暂时不可用";
+    return { summary: "平台暂时不可用", action: "平台恢复后重试；任务主路径不受影响。" };
   }
-  if (lower.includes("hmac") || lower.includes("nonce")) return "桥接签名校验失败";
-  if (lower.includes("connection") || lower.includes("network") || lower.includes("refused")) return "无法连接平台";
-  return "平台返回错误，详情见服务端日志";
+  if (lower.includes("hmac") || lower.includes("nonce")) {
+    return { summary: "桥接签名校验失败", action: "检查 bridge 密钥与双方时钟；重放窗口外的请求会被拒绝。" };
+  }
+  if (lower.includes("connection") || lower.includes("network") || lower.includes("refused") || lower.includes("dns")) {
+    return { summary: "无法连接平台", action: "检查网络、代理与平台状态后重试。" };
+  }
+  if (lower.includes("permanent")) {
+    return { summary: "平台拒绝且不会自动恢复", action: "先修复平台侧配置，再手动重试这条投递。" };
+  }
+  return { summary: "平台返回错误", action: "详情在服务端日志；先按失败类别排查后重试。" };
+}
+
+/** The one-line category. Kept for callers that only need the summary. */
+export function boardProviderErrorCopy(error: string | undefined | null): string {
+  return boardProviderErrorDetail(error).summary;
+}
+
+/** Category plus next step, for a row that has room for a sentence. */
+export function boardProviderErrorLine(error: string | undefined | null): string {
+  const detail = boardProviderErrorDetail(error);
+  if (!detail.summary) return "";
+  return `${detail.summary} · ${detail.action}`;
 }
 
 export function boardWatcherActionLabel(action: string | undefined): string {
