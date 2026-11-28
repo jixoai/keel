@@ -3,10 +3,12 @@
 //
 // The platform owns one tenant-scoped state surface for every plugin:
 //
-//   - install/version provenance (the inventory row),
 //   - opaque per-plugin state keys,
 //   - one opaque JSON configuration document per plugin,
 //   - the dependency status the host computed for the last assembly.
+//
+// The install/version inventory stays with the core store and harnessext
+// manager; it has one writer, not a second plugin-platform copy.
 //
 // Domain data does NOT live here. Only plugins with an independent domain
 // (board and superagent in this change) declare a DomainStore; attachment,

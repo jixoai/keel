@@ -64,10 +64,10 @@ keel serve --addr 127.0.0.1:13750
 - **零兼容**：`KEEL_SERVE_PASSWORD`、旧 cookie、旧 `api_keys`、旧 `agents`/`agent_teams` schema
   全部失效；启动会拒绝旧 schema 并给出重建指令，不提供迁移。升级即重新初始化账号与 Bot。
 
-### Board（keel-board v0.1.1）
+### Board（keel-board v0.1.4）
 
-`keel serve` 启动时在同一个进程内挂载 board 表面（`github.com/jixoai/keel-board@v0.1.1`，
-commit `70b503f0cdbd8f860ac1a373a6d1576175018ff0`，tag `v0.1.1`）。board 是独立授权面：
+`keel serve` 启动时在同一个进程内挂载 board 表面（`github.com/jixoai/keel-board@v0.1.4`，
+commit `3d6115b68a1cc0ef1de73364e03787ceb610785f`，tag `v0.1.4`）。board 是独立授权面：
 `board.read/write/manage` + 频道 `resource_relations`，不经过 keel 的 `accessgate` 矩阵。
 
 **开关与存储**

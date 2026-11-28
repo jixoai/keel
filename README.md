@@ -170,10 +170,10 @@ env 文件路径：`FDE2E_ENV_PERSONAL`，默认取主仓根目录的 `.env.pers
 本 worktree 会自动向上解析三层。需要新增变量时只改那个文件，脚本本身不保存任何凭据。
 术语与旧词对表见 [docs/PRODUCT-TERMS.md](docs/PRODUCT-TERMS.md)。
 
-### Board（keel-board v0.1.1）
+### Board（keel-board v0.1.4）
 
-`KEEL_BOARD_ENABLED=1` 时，`keel serve` 挂载 `github.com/jixoai/keel-board@v0.1.1`（commit
-`70b503f0cdbd8f860ac1a373a6d1576175018ff0`，Apache-2.0；见 `NOTICE`）：
+`KEEL_BOARD_ENABLED=1` 时，`keel serve` 挂载 `github.com/jixoai/keel-board@v0.1.4`（commit
+`3d6115b68a1cc0ef1de73364e03787ceb610785f`，Apache-2.0；见 `NOTICE`）：
 
 - **API**：`/v1/board/*`（频道/消息/线程/任务/claim/needs/SSE/审计/sync 管理）；沿用 keel
   登录与 Bot key，不新增认证方式。
@@ -223,12 +223,12 @@ env 文件路径：`FDE2E_ENV_PERSONAL`，默认取主仓根目录的 `.env.pers
   tenant 文档 `board.superagent.{mirror,channel}`（默认 `false/"superagent"`）只控制
   Ticket→board 投影：Ticket/Assignment/Attention/report 单向写为 board 任务/claim/blocked/
   回复（`KEEL_SECRET_KEY` 派生确定性 claim token，缺失即 fail closed），board 任务也会经
-  board 服务导入为 ticket + open assignment。旧 `superagentboard` 镜像/命令桥已删除
+  board 服务导入为 ticket，再由正常 dispatch 创建带 worker session 的 assignment。旧 `superagentboard` 镜像/命令桥已删除
   （破坏性变更）：board 动作不再回呼 supervisor，superagent 的 ticket 仍是真值，
   `/v1/superagent` 运营 API 保留在 superagent 插件服务上；board 是唯一任务面。
 
 运行细节（DSN 角色、迁移、tenant 开关、entry/secret 配置、验收与 E2E 命令）见
-[docs/RUNBOOK.md](docs/RUNBOOK.md#boardkeel-board-v011)。Phase 2 最终验收：
+[docs/RUNBOOK.md](docs/RUNBOOK.md#boardkeel-board-v014)。Phase 2 最终验收：
 `KEEL_TEST_DSN=… scripts/board-phase2-gates.sh`（独占全量 TUI + Go + UI 证据 + 文件覆盖）。
 
 ## 状态与路线

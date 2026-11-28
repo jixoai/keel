@@ -1671,6 +1671,19 @@ func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, 
 	if err := servicePlugins.Load(ctx); err != nil {
 		return nil, fmt.Errorf("service plugins: %w", err)
 	}
+	// Until the product layer owns the runtime, an error below must not leave
+	// the already-started supervisors and writer goroutines behind. Successful
+	// assembly transfers ownership by clearing this guard.
+	pluginsUnowned := servicePlugins
+	defer func() {
+		if pluginsUnowned != nil {
+			unloadCtx, cancel := context.WithTimeout(context.Background(), serveShutdownTimeout)
+			defer cancel()
+			if err := pluginsUnowned.Unload(unloadCtx); err != nil {
+				log.Warn("service plugin unload after assembly failure", "err", err)
+			}
+		}
+	}()
 	for _, status := range servicePlugins.Snapshot() {
 		if status.State != pluginruntime.StateActive {
 			log.Warn("service plugin is not active", "plugin", status.ID, "state", status.State, "reason", status.Reason)
@@ -1984,6 +1997,8 @@ func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, 
 		func(context.Context) { decisions.Close() },
 		func(context.Context) { hooks.Close() },
 	}
+	// productLayer.close owns the reverse unload from here on.
+	pluginsUnowned = nil
 	return layer, nil
 }
 
