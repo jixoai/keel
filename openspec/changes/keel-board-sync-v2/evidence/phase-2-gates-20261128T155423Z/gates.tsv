@@ -1,0 +1,9 @@
+file-coverage	inline node map of git diff --name-only	0	0s	file-coverage.log
+script-syntax	bash -n / node --check changed scripts	0	1s	script-syntax.log
+retired-surface	old board files/scripts absent; archive only	0	1s	retired-surface.log
+docs-pin	module/commit/docs scan	0	0s	docs-pin.log
+nsh-check	nsh check	0	3s	nsh-check.log
+ui-evidence	node scripts/board-phase2-ui-evidence.mjs	0	2m 14s	ui-evidence.log
+full-tui	nsh test --target tui (exclusive)	0	9m 55s	full-tui.log
+go-test	KEEL_TEST_DSN=*** go test -p 1 ./... -count=1	0	4m 58s	go-tests.log
+openspec-validate	openspec validate keel-board-sync-v2 --strict	0	2s	openspec-validate.log

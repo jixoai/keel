@@ -1,0 +1,589 @@
+file	status	coverage
+.github/workflows/ci.yml	COVERED	CI parity: `go test -p 1 ./...` + `nsh check`
+.github/workflows/conformance.yml	COVERED	`actionlint` + the matching CI/release gate
+.github/workflows/release.yml	COVERED	`actionlint` + the matching CI/release gate
+NOTICE	COVERED	docs pin scan (module/version/commit)
+README.md	COVERED	docs pin scan + `openspec validate --strict`
+cmd/board-sync-e2e/main.go	COVERED	`go test -p 1 ./...` (compile)
+cmd/keel/board.go	COVERED	`go test -p 1 ./...` (cmd/keel mount/serve)
+cmd/keel/board_serve_options_test.go	COVERED	`go test -p 1 ./...` (cmd/keel mount options)
+cmd/keel/board_superagent.go	COVERED	`go test` cmd/keel gate + board 404 TUI
+cmd/keel/board_superagent_test.go	COVERED	`go test` cmd/keel gate + board 404 TUI
+cmd/keel/collab.go	COVERED	`go test -p 1 ./...` (compile)
+cmd/keel/collab_host.go	COVERED	`go test -p 1 ./...` (compile)
+cmd/keel/main.go	COVERED	`go test -p 1 ./...` (compile)
+cmd/keel/manual_compact.go	COVERED	`go test -p 1 ./...` (compile)
+cmd/keel/manual_compact_test.go	COVERED	`go test -p 1 ./...` (compile)
+cmd/keel/mcp_approval.go	COVERED	`go test -p 1 ./...` (compile)
+cmd/keel/mcp_approval_test.go	COVERED	`go test -p 1 ./...` (compile)
+cmd/keel/plugin_split_test.go	COVERED	`go test -p 1 ./...` (compile)
+cmd/keel/serve.go	COVERED	`go test -p 1 ./...` (cmd/keel mount/serve)
+cmd/keel/superagent.go	COVERED	`go test -p 1 ./...` (compile)
+cmd/runtime/main.go	COVERED	`go test -p 1 ./...` (compile)
+docs/HARNESS.md	COVERED	docs validation (`openspec validate` / citation scan)
+docs/RUNBOOK.md	COVERED	docs validation (`openspec validate` / citation scan)
+docs/conformance-golden.json	COVERED	conformance golden floor (`scripts/conformance.sh`)
+go.mod	COVERED	`go build`/`go test -p 1 ./...` + board module pin scan
+go.sum	COVERED	`go build`/`go test -p 1 ./...` + board module pin scan
+internal/access/builtin.go	COVERED	`go test` access/builtin + permission screenshots
+internal/access/builtin_test.go	COVERED	`go test` access/builtin + permission screenshots
+internal/accessgate/matrix.go	COVERED	`go test` accessgate (report/ask only) + 404 TUI
+internal/agent/compaction_task.go	COVERED	`go test -p 1 ./...`
+internal/agent/compaction_task_test.go	COVERED	`go test -p 1 ./...`
+internal/agent/manual_compact.go	COVERED	`go test -p 1 ./...`
+internal/agent/p2_checkpoint_test.go	COVERED	`go test -p 1 ./...`
+internal/agent/runner.go	COVERED	`go test -p 1 ./...`
+internal/agent/skill_tools.go	COVERED	`go test -p 1 ./...`
+internal/agent/skill_tools_test.go	COVERED	`go test -p 1 ./...`
+internal/agent/skills_preload.go	COVERED	`go test -p 1 ./...`
+internal/agent/usage_stream.go	COVERED	`go test -p 1 ./...`
+internal/agent/usage_stream_test.go	COVERED	`go test -p 1 ./...`
+internal/approval/approval.go	COVERED	`go test -p 1 ./...`
+internal/approval/approval_test.go	COVERED	`go test -p 1 ./...`
+internal/approval/store_pg_test.go	COVERED	`go test -p 1 ./...`
+internal/architecture/plugin_split_boundary_test.go	COVERED	`go test -p 1 ./...`
+internal/boardintegration/augment.go	COVERED	`go test` boardintegration moves/me + SSE augment live
+internal/boardintegration/authorizer.go	COVERED	`go test` boardintegration authorization
+internal/boardintegration/channel_owners.go	COVERED	`go test` boardintegration channel-owner tests
+internal/boardintegration/domain.go	COVERED	`go test -p 1 ./...` (KEEL_TEST_DSN)
+internal/boardintegration/domain_pg_test.go	COVERED	`go test -p 1 ./...` (KEEL_TEST_DSN)
+internal/boardintegration/flags_pg_test.go	COVERED	`go test` boardintegration flag matrix PG
+internal/boardintegration/me.go	COVERED	`go test` TestBoardMe + identity badge
+internal/boardintegration/moves_pg_test.go	COVERED	`go test` TestTaskMoves* / TestBoardMe / sync merge
+internal/boardintegration/pg_helpers_test.go	COVERED	`go test` boardintegration PG helpers
+internal/boardintegration/surface.go	COVERED	`go test` boardintegration HTTP/RBAC surface
+internal/boardintegration/sync_admin.go	COVERED	`go test` boardintegration sync/admin/runtime PG
+internal/boardintegration/sync_admin_pg_test.go	COVERED	`go test` boardintegration sync/admin/runtime PG
+internal/boardintegration/sync_config.go	COVERED	`go test` boardintegration sync/admin/runtime PG
+internal/boardintegration/sync_health_pg_test.go	COVERED	`go test` boardintegration sync/admin/runtime PG
+internal/boardintegration/sync_manager.go	COVERED	`go test` boardintegration sync/admin/runtime PG
+internal/boardintegration/sync_routes.go	COVERED	`go test` boardintegration sync/admin/runtime PG
+internal/boardintegration/sync_routes_pg_test.go	COVERED	`go test` boardintegration sync/admin/runtime PG
+internal/boardintegration/sync_runtime_pg_test.go	COVERED	`go test` boardintegration sync/admin/runtime PG
+internal/boardintegration/sync_workers.go	COVERED	`go test` boardintegration sync/admin/runtime PG
+internal/boardplugin/board.go	COVERED	`go test -p 1 ./...`
+internal/boardplugin/plugin.go	COVERED	`go test -p 1 ./...`
+internal/boardplugin/plugin_test.go	COVERED	`go test -p 1 ./...`
+internal/collab/errors.go	COVERED	`go test -p 1 ./...`
+internal/collab/host.go	COVERED	`go test -p 1 ./...`
+internal/collab/host_test.go	COVERED	`go test -p 1 ./...`
+internal/collab/p2_test.go	COVERED	`go test -p 1 ./...`
+internal/collab/store.go	COVERED	`go test -p 1 ./...`
+internal/collab/tenants.go	COVERED	`go test -p 1 ./...`
+internal/compaction/compact.go	COVERED	`go test -p 1 ./...`
+internal/harnessapi/approvals_notifications_test.go	COVERED	`go test` harnessapi 404 + worker report/ask
+internal/harnessapi/commands.go	COVERED	`go test` harnessapi 404 + worker report/ask
+internal/harnessapi/commands_test.go	COVERED	`go test` harnessapi 404 + worker report/ask
+internal/harnessapi/superagent.go	COVERED	`go test` harnessapi 404 + worker report/ask
+internal/harnessapi/superagent_test.go	COVERED	`go test` harnessapi 404 + worker report/ask
+internal/kernel/checkpoint.go	COVERED	`go test -p 1 ./...`
+internal/kernel/checkpoint_test.go	COVERED	`go test -p 1 ./...`
+internal/kernel/compaction_task.go	COVERED	`go test -p 1 ./...`
+internal/kernel/compaction_task_test.go	COVERED	`go test -p 1 ./...`
+internal/kernel/mem.go	COVERED	`go test -p 1 ./...`
+internal/kernel/pg.go	COVERED	`go test -p 1 ./...`
+internal/kernel/seams.go	COVERED	`go test -p 1 ./...`
+internal/kernel/store.go	COVERED	`go test -p 1 ./...`
+internal/mcp/aggregate.go	COVERED	`go test -p 1 ./...`
+internal/mcp/manager.go	COVERED	`go test -p 1 ./...`
+internal/mcp/pool.go	COVERED	`go test -p 1 ./...`
+internal/mcp/pool_test.go	COVERED	`go test -p 1 ./...`
+internal/pluginruntime/runtime.go	COVERED	`go test -p 1 ./...`
+internal/pluginruntime/runtime_test.go	COVERED	`go test -p 1 ./...`
+internal/pluginstore/conformance/conformance.go	COVERED	`go test -p 1 ./...`
+internal/pluginstore/memory.go	COVERED	`go test -p 1 ./...`
+internal/pluginstore/memory_test.go	COVERED	`go test -p 1 ./...`
+internal/pluginstore/pg/store.go	COVERED	`go test -p 1 ./...`
+internal/pluginstore/pg/store_test.go	COVERED	`go test -p 1 ./...`
+internal/pluginstore/store.go	COVERED	`go test -p 1 ./...`
+internal/servicehost/host.go	COVERED	`go test -p 1 ./...`
+internal/servicehost/services.go	COVERED	`go test -p 1 ./...`
+internal/skilllib/library.go	COVERED	`go test -p 1 ./...`
+internal/store/board_links_pg_test.go	COVERED	`go test -p 1 ./...`
+internal/store/compaction_tasks_test.go	COVERED	`go test -p 1 ./...`
+internal/store/legacy_schema_test.go	COVERED	`go test -p 1 ./...`
+internal/store/plugin_split_ready_test.go	COVERED	`go test -p 1 ./...`
+internal/store/plugin_split_schema_test.go	COVERED	`go test -p 1 ./...`
+internal/store/ready.go	COVERED	`go test -p 1 ./...`
+internal/store/ready_test.go	COVERED	`go test -p 1 ./...`
+internal/store/relations.go	COVERED	`go test` store relations/orphan PG
+internal/store/relations_orphan_pg_test.go	COVERED	`go test` store relations/orphan PG
+internal/store/rls.go	COVERED	`go test -p 1 ./...`
+internal/store/schema.sql	COVERED	`go test -p 1 ./...`
+internal/store/store.go	COVERED	`go test -p 1 ./...`
+internal/store/superagent_lease_pg_test.go	COVERED	`go test -p 1 ./...`
+internal/store/superagent_test.go	COVERED	`go test -p 1 ./...`
+internal/superagent/answer_state_pg_test.go	COVERED	`go test -p 1 ./...`
+internal/superagent/e2e_pg_test.go	COVERED	`go test -p 1 ./...`
+internal/superagent/orchestrator.go	COVERED	`go test -p 1 ./...`
+internal/superagent/orchestrator_test.go	COVERED	`go test -p 1 ./...`
+internal/superagent/store.go	COVERED	`go test -p 1 ./...`
+internal/superagent/thread_snapshot_pg_test.go	COVERED	`go test -p 1 ./...`
+internal/superagentboard/board_test.go	COVERED	`go test -p 1 ./...`
+internal/superagentboard/bridge.go	COVERED	`go test -p 1 ./...`
+internal/superagentboard/bridge_test.go	COVERED	`go test -p 1 ./...`
+internal/superagentboard/commands.go	COVERED	`go test -p 1 ./...`
+internal/superagentboard/config_test.go	COVERED	`go test -p 1 ./...`
+internal/superagentboard/helpers_test.go	COVERED	`go test -p 1 ./...`
+internal/superagentboard/journey_test.go	COVERED	`go test -p 1 ./...`
+internal/superagentboard/mirror_pg_test.go	COVERED	`go test -p 1 ./...`
+internal/superagentboard/mirror_test.go	COVERED	`go test -p 1 ./...`
+internal/superagentplugin/config.go	COVERED	`go test -p 1 ./...`
+internal/superagentplugin/e2e_pg_test.go	COVERED	`go test -p 1 ./...`
+internal/superagentplugin/importer.go	COVERED	`go test -p 1 ./...`
+internal/superagentplugin/importer_test.go	COVERED	`go test -p 1 ./...`
+internal/superagentplugin/plugin.go	COVERED	`go test -p 1 ./...`
+internal/superagentplugin/plugin_test.go	COVERED	`go test -p 1 ./...`
+internal/superagentplugin/token.go	COVERED	`go test -p 1 ./...`
+internal/superagentplugin/types.go	COVERED	`go test -p 1 ./...`
+internal/superagentplugin/writer.go	COVERED	`go test -p 1 ./...`
+internal/superagentstore/links.go	COVERED	`go test -p 1 ./...`
+internal/superagentstore/links_test.go	COVERED	`go test -p 1 ./...`
+internal/superagentstore/p2_test.go	COVERED	`go test -p 1 ./...`
+internal/superagentstore/store.go	COVERED	`go test -p 1 ./...`
+internal/toolsurface/builtins.go	COVERED	`go test -p 1 ./...`
+internal/toolsurface/mcp.go	COVERED	`go test -p 1 ./...`
+internal/toolsurface/mcp_approval_test.go	COVERED	`go test -p 1 ./...`
+internal/toolsurface/mcp_crash_test.go	COVERED	`go test -p 1 ./...`
+internal/toolsurface/realfilesystem_test.go	COVERED	`go test -p 1 ./...`
+internal/toolsurface/surface.go	COVERED	`go test -p 1 ./...`
+internal/usage/recorder.go	COVERED	`go test -p 1 ./...`
+internal/usage/recorder_test.go	COVERED	`go test -p 1 ./...`
+openspec/changes/MAINLINE.md	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/.openspec.yaml	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/DISPOSITION.md	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/design.md	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-0-gates-20261127T073344Z/e2e/fake-platform.json	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-0-gates-20261127T073344Z/e2e/logs/board-build.txt	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-0-gates-20261127T073344Z/e2e/report.html	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-0-gates-20261127T073344Z/e2e/report.json	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-0-gates-20261127T073344Z/gates.tsv	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-0-gates-20261127T073344Z/phase-0-gates.md	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-0-gates-20261127T073344Z/phase-0-independent-review-round-1.md	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-0-gates-20261127T073344Z/phase-0-independent-review.md	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-0-independent-review-round-1.md	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-0-independent-review.md	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-0-pin.txt	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-1-independent-review.md	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-1-infrastructure.md	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-1-pin.txt	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-1-superagent.md	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-1-sync-e2e.html	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-1-sync.md	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-gates-20261127T202736Z/changed-scripts.txt	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-gates-20261127T202736Z/excluded-paths.txt	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-gates-20261127T202736Z/file-coverage.json	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-gates-20261127T202736Z/file-coverage.md	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-gates-20261127T202736Z/file-coverage.tsv	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-gates-20261127T202736Z/full-tui-junit.xml	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-gates-20261127T202736Z/full-tui.json	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-gates-20261127T202736Z/gates.tsv	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-gates.md	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-independent-review.md	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-pin.txt	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T154424Z/README.txt	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T154424Z/full-tui-junit.xml	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T154424Z/full-tui.json	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T154424Z/index.html	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T154424Z/shots/web/01-queue-success-1440.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T154424Z/shots/web/02-queue-success-1024.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T154424Z/shots/web/03-queue-success-768.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T154424Z/shots/web/04-queue-success-390.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T154424Z/shots/web/05-queue-loading-1440.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T154424Z/shots/web/05b-queue-loading-390.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T154424Z/shots/web/06-queue-empty-1440.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T154424Z/shots/web/07-queue-no-channels-1440.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T154424Z/shots/web/08-queue-error-1440.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T154424Z/shots/web/09-queue-disabled-1440.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T154424Z/shots/web/10-queue-not-found-1440.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T154424Z/shots/web/11-queue-migrate-1440.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T154424Z/shots/web/12-queue-reader-1440.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T154424Z/shots/web/13-queue-archive-1440.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T154424Z/shots/web/14-queue-empty-390.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T154424Z/shots/web/20-task-claim-lost-1440.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T154424Z/shots/web/21-task-ready-1440.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T154424Z/shots/web/22-task-blocked-mirror-1440.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T154424Z/shots/web/23-task-completed-1440.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T154424Z/shots/web/23b-task-empty-thread-1440.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T154424Z/shots/web/24-task-archived-1440.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T154424Z/shots/web/25-task-ready-390.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T154424Z/shots/web/25b-task-permission-1440.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T154424Z/shots/web/25c-task-loading-1440.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T154424Z/shots/web/25d-task-error-1440.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T154424Z/shots/web/26-dialog-assign-1440.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T154424Z/shots/web/27-dialog-needs-1440.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T154424Z/shots/web/28-dialog-cancel-1440.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T154424Z/shots/web/30-sync-success-1440.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T154424Z/shots/web/30b-sync-success-390.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T154424Z/shots/web/31-sync-inbox-1440.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T154424Z/shots/web/32-sync-error-1440.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T154424Z/shots/web/33-sync-permission-1440.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T154424Z/shots/web/33b-sync-loading-1440.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T154424Z/shots/web/33c-sync-empty-1440.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T154424Z/shots/web/34-automation-success-1440.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T154424Z/shots/web/34b-automation-permission-1440.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T154424Z/shots/web/35-automation-error-1440.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T154424Z/shots/web/35b-automation-loading-1440.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T154424Z/shots/web/35c-automation-empty-1440.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T154424Z/shots/web/36-superagent-gone-1440.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T154424Z/shots/web/37-automation-390.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T154424Z/shots/web/40-before-claim-1440.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T154424Z/shots/web/41-after-claim-1440.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T154424Z/shots/web/42-before-complete-1440.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T154424Z/shots/web/43-after-complete-1440.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T154424Z/shots/web/44-before-retry-1440.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T154424Z/shots/web/45-after-retry-1440.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T154424Z/shots/web/46-before-watcher-toggle-1440.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T154424Z/shots/web/47-after-watcher-toggle-1440.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T154424Z/shots/web/48-before-filter-390.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T154424Z/shots/web/49-filter-sheet-390.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T154424Z/shots/web/50-sse-live-after-1440.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T154424Z/tui-junit.xml	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T202742Z/README.txt	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T202742Z/index.html	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T202742Z/shots/web/01-queue-success-1440.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T202742Z/shots/web/02-queue-success-1024.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T202742Z/shots/web/03-queue-success-768.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T202742Z/shots/web/04-queue-success-390.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T202742Z/shots/web/05-queue-loading-1440.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T202742Z/shots/web/05b-queue-loading-390.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T202742Z/shots/web/06-queue-empty-1440.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T202742Z/shots/web/07-queue-no-channels-1440.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T202742Z/shots/web/08-queue-error-1440.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T202742Z/shots/web/09-queue-disabled-1440.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T202742Z/shots/web/10-queue-not-found-1440.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T202742Z/shots/web/11-queue-migrate-1440.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T202742Z/shots/web/12-queue-reader-1440.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T202742Z/shots/web/13-queue-archive-1440.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T202742Z/shots/web/14-queue-empty-390.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T202742Z/shots/web/20-task-claim-lost-1440.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T202742Z/shots/web/21-task-ready-1440.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T202742Z/shots/web/22-task-blocked-mirror-1440.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T202742Z/shots/web/23-task-completed-1440.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T202742Z/shots/web/23b-task-empty-thread-1440.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T202742Z/shots/web/24-task-archived-1440.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T202742Z/shots/web/25-task-ready-390.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T202742Z/shots/web/25b-task-permission-1440.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T202742Z/shots/web/25c-task-loading-1440.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T202742Z/shots/web/25d-task-error-1440.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T202742Z/shots/web/26-dialog-assign-1440.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T202742Z/shots/web/27-dialog-needs-1440.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T202742Z/shots/web/28-dialog-cancel-1440.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T202742Z/shots/web/30-sync-success-1440.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T202742Z/shots/web/30b-sync-success-390.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T202742Z/shots/web/31-sync-inbox-1440.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T202742Z/shots/web/32-sync-error-1440.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T202742Z/shots/web/33-sync-permission-1440.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T202742Z/shots/web/33b-sync-loading-1440.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T202742Z/shots/web/33c-sync-empty-1440.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T202742Z/shots/web/34-automation-success-1440.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T202742Z/shots/web/34b-automation-permission-1440.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T202742Z/shots/web/35-automation-error-1440.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T202742Z/shots/web/35b-automation-loading-1440.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T202742Z/shots/web/35c-automation-empty-1440.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T202742Z/shots/web/36-superagent-gone-1440.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T202742Z/shots/web/37-automation-390.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T202742Z/shots/web/40-before-claim-1440.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T202742Z/shots/web/41-after-claim-1440.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T202742Z/shots/web/42-before-complete-1440.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T202742Z/shots/web/43-after-complete-1440.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T202742Z/shots/web/44-before-retry-1440.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T202742Z/shots/web/45-after-retry-1440.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T202742Z/shots/web/46-before-watcher-toggle-1440.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T202742Z/shots/web/47-after-watcher-toggle-1440.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T202742Z/shots/web/48-before-filter-390.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T202742Z/shots/web/49-filter-sheet-390.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T202742Z/shots/web/50-sse-live-after-1440.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/evidence/phase-2-ui-gates-20261127T202742Z/tui-junit.xml	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/proposal.md	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/specs/agent-board/spec.md	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/tasks.md	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/ui/DESIGN.md	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/ui/REVIEW.md	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/ui/prototype/index.html	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/ui/prototype/interact.mjs	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/ui/prototype/shoot.mjs	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/ui/prototype/shots/automation-1440-empty.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/ui/prototype/shots/automation-1440-error.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/ui/prototype/shots/automation-1440-failure.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/ui/prototype/shots/automation-1440-loading.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/ui/prototype/shots/automation-1440-noread-deeplink.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/ui/prototype/shots/automation-1440-permission.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/ui/prototype/shots/automation-1440-success.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/ui/prototype/shots/automation-390.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/ui/prototype/shots/automation-768.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/ui/prototype/shots/gone-1440.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/ui/prototype/shots/gone-390.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/ui/prototype/shots/manifest.json	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/ui/prototype/shots/queue-1024.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/ui/prototype/shots/queue-1180.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/ui/prototype/shots/queue-1440-archive.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/ui/prototype/shots/queue-1440-disabled.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/ui/prototype/shots/queue-1440-empty.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/ui/prototype/shots/queue-1440-error.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/ui/prototype/shots/queue-1440-filtered-empty.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/ui/prototype/shots/queue-1440-light-empty.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/ui/prototype/shots/queue-1440-light-error.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/ui/prototype/shots/queue-1440-light-loading.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/ui/prototype/shots/queue-1440-light-noread-404.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/ui/prototype/shots/queue-1440-light-success.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/ui/prototype/shots/queue-1440-loading.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/ui/prototype/shots/queue-1440-migrate.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/ui/prototype/shots/queue-1440-noread-deeplink.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/ui/prototype/shots/queue-1440-readonly.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/ui/prototype/shots/queue-1440-stale.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/ui/prototype/shots/queue-1440-success.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/ui/prototype/shots/queue-390-archive.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/ui/prototype/shots/queue-390-empty.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/ui/prototype/shots/queue-390-error.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/ui/prototype/shots/queue-390-filters.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/ui/prototype/shots/queue-390-loading.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/ui/prototype/shots/queue-390-migrate.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/ui/prototype/shots/queue-390-noread-deeplink.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/ui/prototype/shots/queue-390-success.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/ui/prototype/shots/queue-768-loading.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/ui/prototype/shots/queue-768.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/ui/prototype/shots/sync-1440-credential-invalid.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/ui/prototype/shots/sync-1440-deadletters.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/ui/prototype/shots/sync-1440-empty.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/ui/prototype/shots/sync-1440-error.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/ui/prototype/shots/sync-1440-loading.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/ui/prototype/shots/sync-1440-noread-deeplink.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/ui/prototype/shots/sync-1440-permission.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/ui/prototype/shots/sync-1440-success.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/ui/prototype/shots/sync-390.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/ui/prototype/shots/sync-768.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/ui/prototype/shots/task-1024.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/ui/prototype/shots/task-1180.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/ui/prototype/shots/task-1440-archived.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/ui/prototype/shots/task-1440-blocked-owner.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/ui/prototype/shots/task-1440-blocked.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/ui/prototype/shots/task-1440-canceled.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/ui/prototype/shots/task-1440-claim-lost.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/ui/prototype/shots/task-1440-claimed.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/ui/prototype/shots/task-1440-completed.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/ui/prototype/shots/task-1440-composer-error.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/ui/prototype/shots/task-1440-dialog-access.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/ui/prototype/shots/task-1440-dialog-answer.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/ui/prototype/shots/task-1440-dialog-assign.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/ui/prototype/shots/task-1440-dialog-block.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/ui/prototype/shots/task-1440-dialog-cancel.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/ui/prototype/shots/task-1440-dialog-complete.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/ui/prototype/shots/task-1440-dialog-fail.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/ui/prototype/shots/task-1440-dialog-force-release.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/ui/prototype/shots/task-1440-dialog-needs.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/ui/prototype/shots/task-1440-dialog-new.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/ui/prototype/shots/task-1440-dialog-release.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/ui/prototype/shots/task-1440-dialog-reopen.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/ui/prototype/shots/task-1440-dialog-shortcuts.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/ui/prototype/shots/task-1440-dialog-unblock.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/ui/prototype/shots/task-1440-empty-replies.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/ui/prototype/shots/task-1440-error.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/ui/prototype/shots/task-1440-failed-readonly.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/ui/prototype/shots/task-1440-failed.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/ui/prototype/shots/task-1440-light-claimed.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/ui/prototype/shots/task-1440-loading.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/ui/prototype/shots/task-1440-mirror-readonly.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/ui/prototype/shots/task-1440-noread-deeplink.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/ui/prototype/shots/task-1440-readonly.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/ui/prototype/shots/task-1440-ready.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/ui/prototype/shots/task-1440-waiting.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/ui/prototype/shots/task-390-archived.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/ui/prototype/shots/task-390-claimed.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/ui/prototype/shots/task-390-dialog-answer.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/ui/prototype/shots/task-390-dialog-complete.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/ui/prototype/shots/task-390-dialog-new.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/ui/prototype/shots/task-390-facts.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/ui/prototype/shots/task-390-max-scroll.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/ui/prototype/shots/task-390-more.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/ui/prototype/shots/task-390-reply-focus.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/ui/prototype/shots/task-390-thread.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/ui/prototype/shots/task-768-claimed.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/archive/2026-11-28-keel-board-v1/ui/prototype/shots/task-768-dialog-block.png	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/keel-board-sync-v2/.openspec.yaml	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/keel-board-sync-v2/README.md	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/keel-board-sync-v2/design.md	COVERED	`openspec validate --strict`
+openspec/changes/keel-board-sync-v2/proposal.md	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/keel-board-sync-v2/specs/agent-board-sync/spec.md	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/keel-board-sync-v2/tasks.md	COVERED	`openspec validate --strict`
+openspec/changes/keel-board-v1/evidence/phase-1-infrastructure.md	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/keel-board-v1/evidence/phase-1-sync.md	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/keel-board-v1/ui/prototype/interact.log	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/keel-collab-p2/.openspec.yaml	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/keel-collab-p2/README.md	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/keel-collab-p2/design.md	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/keel-collab-p2/evidence/execution-2026-11-28.md	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/keel-collab-p2/evidence/lane-tasks.md	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/keel-collab-p2/proposal.md	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/keel-collab-p2/specs/collaboration-p2/spec.md	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/keel-collab-p2/tasks.md	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/keel-pi-parity-closure-2/.openspec.yaml	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/keel-pi-parity-closure-2/README.md	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/keel-pi-parity-closure-2/RUNBOOK.md	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/keel-pi-parity-closure-2/design.md	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/keel-pi-parity-closure-2/evidence/capacity-2026-11-28-64/acceptance.json	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/keel-pi-parity-closure-2/evidence/capacity-2026-11-28-64/bench.json	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/keel-pi-parity-closure-2/evidence/capacity-2026-11-28-64/loadtest.log	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/keel-pi-parity-closure-2/evidence/capacity-2026-11-28-64/memory.peak	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/keel-pi-parity-closure-2/evidence/capacity-2026-11-28-64/provider-status.json	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/keel-pi-parity-closure-2/evidence/capacity-2026-11-28-64/runtime.log.gz	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/keel-pi-parity-closure-2/evidence/capacity-2026-11-28-64/subject.json	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/keel-pi-parity-closure-2/evidence/capacity-2026-11-28/acceptance.json	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/keel-pi-parity-closure-2/evidence/capacity-2026-11-28/bench.json	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/keel-pi-parity-closure-2/evidence/capacity-2026-11-28/loadtest.log	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/keel-pi-parity-closure-2/evidence/capacity-2026-11-28/subject.json	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/keel-pi-parity-closure-2/evidence/chaos-2026-11-28/chaos-kill.json	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/keel-pi-parity-closure-2/evidence/chaos-2026-11-28/chaos.log	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/keel-pi-parity-closure-2/evidence/chaos-2026-11-28/cleanup.txt	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/keel-pi-parity-closure-2/evidence/chaos-2026-11-28/result.json	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/keel-pi-parity-closure-2/evidence/chaos-2026-11-28/runtime-tail.log	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/keel-pi-parity-closure-2/evidence/chaos-2026-11-28/runtime.log.gz	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/keel-pi-parity-closure-2/evidence/chaos-2026-11-28/subject.json	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/keel-pi-parity-closure-2/evidence/execution-2026-11-28.md	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/keel-pi-parity-closure-2/evidence/review-closure-2026-11-28.md	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/keel-pi-parity-closure-2/proposal.md	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/keel-pi-parity-closure-2/specs/pi-parity-closure/spec.md	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/keel-pi-parity-closure-2/tasks.md	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/keel-plugin-split/.openspec.yaml	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/keel-plugin-split/README.md	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/keel-plugin-split/design.md	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/keel-plugin-split/evidence/storage-boundary.md	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/keel-plugin-split/evidence/verification.txt	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/keel-plugin-split/proposal.md	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/keel-plugin-split/specs/plugin-split/spec.md	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/keel-plugin-split/tasks.md	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/keel-release-closure/.openspec.yaml	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/keel-release-closure/README.md	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/keel-release-closure/design.md	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/keel-release-closure/evidence/lane-tasks.md	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/keel-release-closure/evidence/release-v0.5.0.md	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/keel-release-closure/evidence/verification.txt	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/keel-release-closure/proposal.md	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/keel-release-closure/specs/release-distribution/spec.md	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/changes/keel-release-closure/tasks.md	COVERED	`openspec validate --strict` + the change's own evidence
+openspec/specs/agent-board/spec.md	COVERED	`openspec validate --specs --strict`
+openspec/specs/agent-loop-contract/spec.md	COVERED	`openspec validate --specs --strict`
+openspec/specs/app-shell/spec.md	COVERED	`openspec validate --specs --strict`
+openspec/specs/checkpoint-policy/spec.md	COVERED	`openspec validate --specs --strict`
+openspec/specs/client-shell/spec.md	COVERED	`openspec validate --specs --strict`
+openspec/specs/collaboration-core/spec.md	COVERED	`openspec validate --specs --strict`
+openspec/specs/collaboration-subagent/spec.md	COVERED	`openspec validate --specs --strict`
+openspec/specs/creation-mode/spec.md	COVERED	`openspec validate --specs --strict`
+openspec/specs/deliverables/spec.md	COVERED	`openspec validate --specs --strict`
+openspec/specs/demo-provider/spec.md	COVERED	`openspec validate --specs --strict`
+openspec/specs/distribution/spec.md	COVERED	`openspec validate --specs --strict`
+openspec/specs/harness-core/spec.md	COVERED	`openspec validate --specs --strict`
+openspec/specs/layerfs/spec.md	COVERED	`openspec validate --specs --strict`
+openspec/specs/model-catalog/spec.md	COVERED	`openspec validate --specs --strict`
+openspec/specs/naming/spec.md	COVERED	`openspec validate --specs --strict`
+openspec/specs/pi-hooks/spec.md	COVERED	`openspec validate --specs --strict`
+openspec/specs/plugin-architecture/spec.md	COVERED	`openspec validate --specs --strict`
+openspec/specs/plugin-system/spec.md	COVERED	`openspec validate --specs --strict`
+openspec/specs/plugin-ui-extension/spec.md	COVERED	`openspec validate --specs --strict`
+openspec/specs/provider-credentials/spec.md	COVERED	`openspec validate --specs --strict`
+openspec/specs/session-query/spec.md	COVERED	`openspec validate --specs --strict`
+openspec/specs/session-title/spec.md	COVERED	`openspec validate --specs --strict`
+openspec/specs/site/spec.md	COVERED	`openspec validate --specs --strict`
+openspec/specs/supervision/spec.md	COVERED	`openspec validate --specs --strict`
+openspec/specs/task-log/spec.md	COVERED	`openspec validate --specs --strict`
+openspec/specs/tool-surface/spec.md	COVERED	`openspec validate --specs --strict`
+openspec/specs/trace-hygiene/spec.md	COVERED	`openspec validate --specs --strict`
+openspec/specs/ui-craft/spec.md	COVERED	`openspec validate --specs --strict`
+openspec/specs/ui-kit/spec.md	COVERED	`openspec validate --specs --strict`
+scripts/acceptance-perf.sh	COVERED	`bash -n` + phase-1 evidence
+scripts/archive/retired-superagent/README.md	COVERED	retired-surface check + `openspec validate`
+scripts/archive/retired-superagent/acceptance/main.go	COVERED	`go test -p 1 ./...` (archive package compile) + retired-surface check
+scripts/archive/retired-superagent/acceptance/page.html	COVERED	retired-surface check + board gone screenshot 36
+scripts/archive/retired-superagent/acceptance/product.mjs	COVERED	`node --check`/`bash -n` + retired-surface check
+scripts/archive/retired-superagent/acceptance/report.mjs	COVERED	`node --check`/`bash -n` + retired-surface check
+scripts/archive/retired-superagent/acceptance/serve.sh	COVERED	`node --check`/`bash -n` + retired-surface check
+scripts/archive/retired-superagent/acceptance/tui.mjs	COVERED	`node --check`/`bash -n` + retired-surface check
+scripts/archive/retired-superagent/live-github/README.md	COVERED	retired-surface check + `openspec validate`
+scripts/archive/retired-superagent/live-github/bootstrap.mjs	COVERED	`node --check`/`bash -n` + retired-surface check
+scripts/archive/retired-superagent/live-github/e2e.mjs	COVERED	`node --check`/`bash -n` + retired-surface check
+scripts/archive/retired-superagent/live-github/provider.mjs	COVERED	`node --check`/`bash -n` + retired-surface check
+scripts/archive/retired-superagent/live-github/run.sh	COVERED	`node --check`/`bash -n` + retired-surface check
+scripts/archive/retired-superagent/live-github/set-worker-tools.mjs	COVERED	`node --check`/`bash -n` + retired-surface check
+scripts/binary-size.sh	COVERED	`bash -n` + phase-1 evidence
+scripts/board-fake-sse-server.mjs	COVERED	SSE live fake-server test
+scripts/board-phase2-gates.sh	COVERED	this gate (`bash -n` + executed in this run)
+scripts/board-phase2-ui-evidence.mjs	COVERED	UI evidence (HTML / 56 shots / 26 matrix)
+scripts/conformance.sh	COVERED	`bash -n` + phase-1 evidence
+scripts/keel-board-phase1-gate.sh	COVERED	`bash -n` + phase-1 evidence
+scripts/keel-board-phase1-superagent-gate.sh	COVERED	`bash -n` + phase-1 evidence
+scripts/keel-board-phase1-superagent-mutations.sh	COVERED	`bash -n` + phase-1 evidence
+scripts/keel-board-phase1-sync-gate.sh	COVERED	`bash -n` + phase-1 evidence
+scripts/keel-creation-e2e/e2e.mjs	COVERED	`node --check`
+scripts/summarize-conformance.py	COVERED	conformance golden (`scripts/conformance.sh`)
+site/docs/core/agentapi.md	COVERED	`pnpm --dir site build` (dead links, parity, citations)
+site/docs/core/extend/embed-runtime.md	COVERED	`pnpm --dir site build` (dead links, parity, citations)
+site/docs/core/extend/service-descriptor.md	COVERED	`pnpm --dir site build` (dead links, parity, citations)
+site/docs/core/extend/testing.md	COVERED	`pnpm --dir site build` (dead links, parity, citations)
+site/docs/core/storage.md	COVERED	`pnpm --dir site build` (dead links, parity, citations)
+site/docs/downloads.md	COVERED	`pnpm --dir site build` (dead links, parity, citations)
+site/docs/glossary.md	COVERED	`pnpm --dir site build` (dead links, parity, citations)
+site/docs/harness/index.md	COVERED	`pnpm --dir site build` (dead links, parity, citations)
+site/docs/harness/plugins/index.md	COVERED	`pnpm --dir site build` (dead links, parity, citations)
+site/docs/harness/plugins/permissions.md	COVERED	`pnpm --dir site build` (dead links, parity, citations)
+site/docs/harness/plugins/slots.md	COVERED	`pnpm --dir site build` (dead links, parity, citations)
+site/docs/harness/recovery-and-compaction.md	COVERED	`pnpm --dir site build` (dead links, parity, citations)
+site/docs/harness/release.md	COVERED	`pnpm --dir site build` (dead links, parity, citations)
+site/docs/harness/streaming-and-partial.md	COVERED	`pnpm --dir site build` (dead links, parity, citations)
+site/docs/index.md	COVERED	`pnpm --dir site build` (dead links, parity, citations)
+site/docs/zh/core/agentapi.md	COVERED	`pnpm --dir site build` (dead links, parity, citations)
+site/docs/zh/core/extend/embed-runtime.md	COVERED	`pnpm --dir site build` (dead links, parity, citations)
+site/docs/zh/core/extend/service-descriptor.md	COVERED	`pnpm --dir site build` (dead links, parity, citations)
+site/docs/zh/core/extend/testing.md	COVERED	`pnpm --dir site build` (dead links, parity, citations)
+site/docs/zh/core/storage.md	COVERED	`pnpm --dir site build` (dead links, parity, citations)
+site/docs/zh/downloads.md	COVERED	`pnpm --dir site build` (dead links, parity, citations)
+site/docs/zh/glossary.md	COVERED	`pnpm --dir site build` (dead links, parity, citations)
+site/docs/zh/harness/index.md	COVERED	`pnpm --dir site build` (dead links, parity, citations)
+site/docs/zh/harness/plugins/index.md	COVERED	`pnpm --dir site build` (dead links, parity, citations)
+site/docs/zh/harness/plugins/permissions.md	COVERED	`pnpm --dir site build` (dead links, parity, citations)
+site/docs/zh/harness/plugins/slots.md	COVERED	`pnpm --dir site build` (dead links, parity, citations)
+site/docs/zh/harness/recovery-and-compaction.md	COVERED	`pnpm --dir site build` (dead links, parity, citations)
+site/docs/zh/harness/release.md	COVERED	`pnpm --dir site build` (dead links, parity, citations)
+site/docs/zh/harness/streaming-and-partial.md	COVERED	`pnpm --dir site build` (dead links, parity, citations)
+web/App.tsx	COVERED	`nsh check` + `nsh test --target tui`
+web/README.md	COVERED	`nsh check` + `nsh test --target tui`
+web/evidence/board-capture.template.tsx	COVERED	`nsh check` + `nsh test --target tui`
+web/evidence/board-sse-live.template.tsx	COVERED	`nsh check` + `nsh test --target tui`
+web/nsh.json	COVERED	`nsh check` + `nsh test --target tui`
+web/src/data/board-sse.test.ts	COVERED	`nsh check` + `nsh test --target tui`
+web/src/data/board-wire.ts	COVERED	`nsh check` + `nsh test --target tui`
+web/src/data/board.test.ts	COVERED	`nsh check` + `nsh test --target tui`
+web/src/data/board.ts	COVERED	`nsh check` + `nsh test --target tui`
+web/src/data/contract.ts	COVERED	`nsh check` + `nsh test --target tui`
+web/src/data/fixture-board.ts	COVERED	`nsh check` + `nsh test --target tui`
+web/src/data/fixture-identity.ts	COVERED	`nsh check` + `nsh test --target tui`
+web/src/data/fixture.ts	COVERED	`nsh check` + `nsh test --target tui`
+web/src/data/http.ts	COVERED	`nsh check` + `nsh test --target tui`
+web/src/data/identity-stream.test.ts	COVERED	`nsh check` + `nsh test --target tui`
+web/src/data/identity-stream.ts	COVERED	`nsh check` + `nsh test --target tui`
+web/src/data/permission-catalog.ts	COVERED	`nsh check` + `nsh test --target tui`
+web/src/data/route.test.ts	COVERED	`nsh check` + `nsh test --target tui`
+web/src/data/route.ts	COVERED	`nsh check` + `nsh test --target tui`
+web/src/data/store.ts	COVERED	`nsh check` + `nsh test --target tui`
+web/src/data/superagent.test.ts	COVERED	`nsh check` + `nsh test --target tui`
+web/src/data/superagent.ts	COVERED	`nsh check` + `nsh test --target tui`
+web/src/screens/board/automation.tsx	COVERED	`nsh check` + `nsh test --target tui`
+web/src/screens/board/board.tui.test.tsx	COVERED	`nsh check` + `nsh test --target tui`
+web/src/screens/board/harness.tsx	COVERED	`nsh check` + `nsh test --target tui`
+web/src/screens/board/page.tsx	COVERED	`nsh check` + `nsh test --target tui`
+web/src/screens/board/queue.tsx	COVERED	`nsh check` + `nsh test --target tui`
+web/src/screens/board/state.ts	COVERED	`nsh check` + `nsh test --target tui`
+web/src/screens/board/sync.tsx	COVERED	`nsh check` + `nsh test --target tui`
+web/src/screens/board/task.tsx	COVERED	`nsh check` + `nsh test --target tui`
+web/src/screens/books/books.tui.test.tsx	COVERED	`nsh check` + `nsh test --target tui`
+web/src/screens/books/chapters.tsx	COVERED	`nsh check` + `nsh test --target tui`
+web/src/screens/books/management.ts	COVERED	`nsh check` + `nsh test --target tui`
+web/src/screens/books/shell.tsx	COVERED	`nsh check` + `nsh test --target tui`
+web/src/screens/books/superagent.harness.tsx	COVERED	`nsh check` + `nsh test --target tui`
+web/src/screens/books/superagent.tsx	COVERED	`nsh check` + `nsh test --target tui`
+web/src/screens/books/superagent.tui.test.tsx	COVERED	`nsh check` + `nsh test --target tui`
+web/src/screens/command-palette.tsx	COVERED	`nsh check` + `nsh test --target tui`
+web/src/screens/commands-local-error.test.tsx	COVERED	`nsh check` + `nsh test --target tui`
+web/src/screens/settings-models.test.tsx	COVERED	`nsh check` + `nsh test --target tui`
+web/src/ui/kit/components/sheet.tsx	COVERED	`nsh check` + `nsh test --target tui`
+web/src/ui/kit/components/tabs.tsx	COVERED	`nsh check` + `nsh test --target tui`
+web/theme.json	COVERED	`nsh check` + `nsh test --target tui`

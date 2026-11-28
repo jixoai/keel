@@ -43,3 +43,17 @@ NOT RUN (deferred to main integration)
   full E2E HTML report
   independent adversarial review A/B/C
   openspec archive / v0.6.0 release
+
+FINAL INTEGRATION (2026-11-29, task/keel-unified-integration)
+  independent review: PASS, P0/P1=0; P2 closeout in p2-closeout.md
+  KEEL_TEST_DSN=... scripts/board-phase2-gates.sh                  GATE PASS
+    full TUI                                                        540/540, exit 0, exclusive
+    UI evidence                                                     56 screenshots, matrix 26/26
+    file coverage                                                   588/588 covered, UNCOVERED=0
+    go test -p 1 ./... (real PostgreSQL)                            exit 0, 4m58s
+    openspec validate keel-board-sync-v2 --strict                   exit 0
+  evidence/phase-2-gates.md
+  evidence/phase-2-gates-20261128T155423Z/
+  evidence/ui-gates-20261128T155429Z/
+  remote CI: https://github.com/jixoai/keel/actions/runs/46161849322 (success)
+  conformance: https://github.com/jixoai/keel/actions/runs/46161858886 (success)

@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites name="nsh test" tests="13" failures="0" errors="0" skipped="0" time="46.624">
+  <testsuite name="src/screens/board/board.tui.test.tsx" tests="13" failures="0" errors="0" skipped="0" time="46.532">
+    <testcase classname="src/screens/board/board.tui.test.tsx" name="TUI: 任务队列——状态 tabs、最早优先、行内状态/依赖/租约，筛选与分页保留" time="6.400"/>
+    <testcase classname="src/screens/board/board.tui.test.tsx" name="TUI: 任务页——claim 丢失单一真相，正常任务完成与回复" time="9.106"/>
+    <testcase classname="src/screens/board/board.tui.test.tsx" name="TUI: 可认领任务——认领后出现续租/完成，释放回到 ready" time="2.743"/>
+    <testcase classname="src/screens/board/board.tui.test.tsx" name="TUI: 回复空态、筛选无结果、完成筛选与返回队列" time="2.535"/>
+    <testcase classname="src/screens/board/board.tui.test.tsx" name="TUI: 同步——入口、lag/凭据/死信、重试与收件箱" time="2.821"/>
+    <testcase classname="src/screens/board/board.tui.test.tsx" name="TUI: 同步缺失字段——一句缺口说明，不伪造指标" time="0.667"/>
+    <testcase classname="src/screens/board/board.tui.test.tsx" name="TUI: 自动化——watcher 开关、schedule 权限被回收只能取消" time="5.143"/>
+    <testcase classname="src/screens/board/board.tui.test.tsx" name="TUI: 五态——loading/empty/error/disabled/404/迁移/只读权限" time="7.414"/>
+    <testcase classname="src/screens/board/board.tui.test.tsx" name="TUI: 旧 /superagent 下线页，不是重定向" time="0.516"/>
+    <testcase classname="src/screens/board/board.tui.test.tsx" name="TUI: 假时钟——认领租约到点，卡片按 ready 呈现并说明 lease ran out" time="2.059"/>
+    <testcase classname="src/screens/board/board.tui.test.tsx" name="TUI: 390 任务页——线程根与已有回复首屏可读，Composer 固定在 tab 之上" time="3.122"/>
+    <testcase classname="src/screens/board/board.tui.test.tsx" name="TUI: 390 筛选参数——活动条件以 chips 展示，可逐个移除" time="0.840"/>
+    <testcase classname="src/screens/board/board.tui.test.tsx" name="TUI: 390 手机——单行横向 tabs、筛选收口、44px 控件、无横向溢出" time="3.166"/>
+  </testsuite>
+</testsuites>

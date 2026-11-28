@@ -24,14 +24,15 @@
 
 ## 5. Nightly chaos / conformance
 
-- [ ] 10-minute random SIGKILL job in CI (wired in `.github/workflows/ci.yml`; not executed on GitHub Actions from this environment — local 600s run PASS)
-- [ ] conformance golden job on PI pin changes (wired in `.github/workflows/conformance.yml`; not executed on GitHub Actions — local golden run PASS)
+- [x] 10-minute random SIGKILL job in CI (run 46161849322, chaos-nightly success; 600s)
+- [x] conformance golden job on PI pin changes (run 46161858886, success)
 
 ## 6. Capacity/docs
 
 - [x] 2GB/1000 sessions/64 runs evidence refreshed
 - [x] per-capability runbook
-- [ ] independent reviewer P0/P1=0; archive
+- [x] independent reviewer P0/P1=0 (PASS, final HEAD)
+- [ ] archive (finalization)
 
 > Evidence: `evidence/execution-2026-11-28.md` (tests, conformance golden,
 > formal 600s chaos PASS, 2GB/1000/64 PASS), `RUNBOOK.md`. Review/archive is

@@ -42,7 +42,7 @@
 - [x] board `go test ./...` + `go test -race ./...` + PG conformance（`KEEL_BOARD_TEST_DSN`）
 - [x] `nsh check`；board data 24/24、SSE 3/3、TUI 定向 13/13；全量 TUI 留给最终集成批次
 - [x] keel `go test -p 1 ./internal/boardintegration ./cmd/keel`（DSN 集成）
-- [ ] 独立子代理复审 P0/P1=0（本 lane 为单实现子代理，由主 Agent 最终集成批次执行）
+- [x] 独立子代理复审 P0/P1=0（PASS；P2 closed in evidence/p2-closeout.md；最终门禁 GATE PASS）
 - [ ] 更新 DISPOSITION/README/RUNBOOK；`openspec archive keel-board-sync-v2 --yes`（等独立复审）
 - [ ] 发 v0.6.0（与 release closure 协调）
 

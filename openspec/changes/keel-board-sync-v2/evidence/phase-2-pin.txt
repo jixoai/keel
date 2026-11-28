@@ -1,0 +1,19 @@
+# keel-board-sync-v2 Phase 2 gate pin
+generated_at: 2026-11-28T16:11:39Z
+gate: PASS
+head: 44574a49ec0de1881583ac41cfb68e0ae0960aa9
+head_short: 44574a49
+base: 4cbc3e50
+base_full: 4cbc3e50a05680443f8f534a47aaab17358ff93c
+contract: f00097e7
+contract_full: f00097e70605b7d38b33603a3983ae3db985a1f8
+board_module: github.com/jixoai/keel-board v0.1.4
+board_commit: 3d6115b68a1cc0ef1de73364e03787ceb610785f
+ui_evidence: openspec/changes/keel-board-sync-v2/evidence/ui-gates-20261128T155429Z
+ui_screenshots: 56
+ui_matrix: 26/26
+full_tui: 540/540 (exit 0, 9m 55s, exclusive=true)
+go_test: exit 0
+openspec_validate: exit 0
+file_coverage: 588/588, UNCOVERED=0, excluded=60
+evidence_raw: phase-2-gates-20261128T155423Z

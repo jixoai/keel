@@ -15,7 +15,7 @@
 ## 3. Gates
 
 - [x] 定向 Go/PG 测试 + `-race`
-- [ ] 独立子代理复审 P0/P1=0
+- [x] 独立子代理复审 P0/P1=0（PASS，final HEAD）
 - [ ] 更新归档 change 的 disposition；`openspec archive keel-collab-p2 --yes`
 
 > Evidence: `evidence/execution-2026-11-28.md` (commands, PG rows, mem/PG
