@@ -121,3 +121,52 @@ func TestLegacyEmptyTableIsDropped(t *testing.T) {
 		t.Fatal("an empty legacy agents table survived the migration")
 	}
 }
+
+// TestLegacyPluginRowsRefuseStartup is the plugin-split half of the loud
+// refusal: the retired collab_*/board_links tables are dropped only when empty.
+// A table with rows stops the migration with an export instruction instead of
+// silently discarding the old supervisor/board-link truth.
+func TestLegacyPluginRowsRefuseStartup(t *testing.T) {
+	st := readyTestStore(t)
+	ctx := context.Background()
+	if _, err := st.Pool().Exec(ctx, `CREATE TABLE public.board_links (tenant_id uuid NOT NULL)`); err != nil {
+		t.Fatalf("create legacy board_links: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = st.Pool().Exec(context.Background(), `DROP TABLE IF EXISTS public.board_links CASCADE`)
+	})
+	if _, err := st.Pool().Exec(ctx, `INSERT INTO public.board_links (tenant_id) VALUES ($1)`, uuid.New()); err != nil {
+		t.Fatal(err)
+	}
+	err := st.Migrate(ctx)
+	if err == nil || !strings.Contains(err.Error(), "board_links") || !strings.Contains(err.Error(), "still holds") {
+		t.Fatalf("Migrate with legacy board_links rows = %v, want the export instruction", err)
+	}
+	var exists bool
+	if err := st.Pool().QueryRow(ctx, `SELECT to_regclass('public.board_links') IS NOT NULL`).Scan(&exists); err != nil {
+		t.Fatal(err)
+	}
+	if !exists {
+		t.Fatal("the refused migration dropped board_links")
+	}
+}
+
+// TestLegacyEmptyPluginTableIsDropped pins the other half: an empty old
+// collab table is retired so it cannot become an unreadable second truth.
+func TestLegacyEmptyPluginTableIsDropped(t *testing.T) {
+	st := readyTestStore(t)
+	ctx := context.Background()
+	if _, err := st.Pool().Exec(ctx, `CREATE TABLE public.collab_work_items (tenant_id uuid NOT NULL)`); err != nil {
+		t.Fatalf("create legacy table: %v", err)
+	}
+	if err := st.Migrate(ctx); err != nil {
+		t.Fatalf("Migrate with an empty legacy collab table: %v", err)
+	}
+	var exists bool
+	if err := st.Pool().QueryRow(ctx, `SELECT to_regclass('public.collab_work_items') IS NOT NULL`).Scan(&exists); err != nil {
+		t.Fatal(err)
+	}
+	if exists {
+		t.Fatal("an empty legacy collab_work_items table survived the migration")
+	}
+}

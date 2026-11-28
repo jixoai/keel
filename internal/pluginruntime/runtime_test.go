@@ -228,3 +228,80 @@ func TestStatusTimesOutPendingDeterministically(t *testing.T) {
 		}
 	}
 }
+
+// TestReloadAfterUnloadRunsAFreshGeneration pins the lifecycle a service plugin
+// manager needs: Unload then Load starts the graph again (plugins may be
+// toggled without a process restart), and the services of the second
+// generation are published, not the first generation's leftovers.
+func TestReloadAfterUnloadRunsAFreshGeneration(t *testing.T) {
+	events := make([]string, 0, 8)
+	services := pluginruntime.NewServices()
+	runtime, err := pluginruntime.New(pluginruntime.Options{
+		Plugins:  []*pluginruntime.Plugin{boardPlugin(&events), superagentPlugin(&events)},
+		Services: services,
+	})
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+	load := func() {
+		t.Helper()
+		if err := runtime.Load(context.Background()); err != nil {
+			t.Fatalf("load: %v", err)
+		}
+	}
+	unload := func() {
+		t.Helper()
+		if err := runtime.Unload(context.Background()); err != nil {
+			t.Fatalf("unload: %v", err)
+		}
+		if _, ok := services.Get("board"); ok {
+			t.Fatal("board service survived unload")
+		}
+		if _, ok := services.Get("superagent"); ok {
+			t.Fatal("superagent service survived unload")
+		}
+	}
+	load()
+	if !runtime.Active("keel.board") || !runtime.Active("keel.superagent") {
+		t.Fatalf("first generation = %+v", runtime.Snapshot())
+	}
+	unload()
+	load()
+	if !runtime.Active("keel.board") || !runtime.Active("keel.superagent") {
+		t.Fatalf("second generation = %+v", runtime.Snapshot())
+	}
+	unload()
+	if len(events) != 8 {
+		t.Fatalf("events = %v, want four starts and four stops", events)
+	}
+	if events[0] != "start:board" || events[1] != "start:superagent" ||
+		events[2] != "stop:superagent" || events[3] != "stop:board" ||
+		events[4] != "start:board" || events[5] != "start:superagent" ||
+		events[6] != "stop:superagent" || events[7] != "stop:board" {
+		t.Fatalf("reload order = %v", events)
+	}
+}
+
+// TestRequiresByPluginIDResolves pins the second requirement form: Kahn's
+// ordering already allowed `requires: [keel.board]`, but Load only published
+// capabilities, so the dependent activated order-correctly and then stayed
+// PENDING forever.
+func TestRequiresByPluginIDResolves(t *testing.T) {
+	events := make([]string, 0)
+	board := boardPlugin(&events)
+	super := superagentPlugin(&events)
+	super.Spec.Requires = []string{"keel.board"}
+	runtime, err := pluginruntime.New(pluginruntime.Options{Plugins: []*pluginruntime.Plugin{super, board}})
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+	if err := runtime.Load(context.Background()); err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if status, _ := runtime.Status("keel.superagent"); status.State != pluginruntime.StateActive {
+		t.Fatalf("superagent = %+v, want active", status)
+	}
+	if len(events) != 2 || events[0] != "start:board" || events[1] != "start:superagent" {
+		t.Fatalf("activation order = %v", events)
+	}
+}

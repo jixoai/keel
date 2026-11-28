@@ -6,11 +6,11 @@
 // by the server. This module only names the shapes; it never folds the log.
 //
 // Design contract additions (documented in openspec/changes/keel-board-v1/ui
-// DESIGN §15): `TaskView.moves`, `TaskView.mirror`, `task.archived`, `origin`
-// and the request-level `takeover`/`release.force` actions are optional here
-// because board v0.1.1 does not emit them yet. A view without `moves` is read
-// only — the UI MUST NOT invent an action from `source=`, a label or a client
-// state machine.
+// DESIGN §15): `TaskView.moves`, `task.archived`, `origin` and the
+// request-level `takeover`/`release.force` actions are optional here because a
+// board version may not emit them yet. A view without `moves` is read only —
+// the UI MUST NOT invent an action from `source=`, a label or a client state
+// machine. The deleted mirror/bridge fields are not part of the contract.
 
 /** A board reference: the decimal sequence as a string (`"812"`). */
 export type BoardRef = string;
@@ -43,12 +43,6 @@ export interface BoardHoldView {
   reason: string;
 }
 
-export interface BoardTaskMirror {
-  source?: string;
-  readOnly?: boolean;
-  bridge?: boolean;
-}
-
 export interface BoardTaskOrigin {
   platform?: string;
   ref?: string;
@@ -69,8 +63,6 @@ export interface BoardTaskView {
   author?: BoardActorView | null;
   /** The server's authoritative action list. Absent means read-only. */
   moves?: string[];
-  /** Whether this task is a mirrored copy of an external system. */
-  mirror?: BoardTaskMirror;
   /** Archived tasks are read-only history, not a second task face. */
   archived?: boolean;
   origin?: BoardTaskOrigin;
@@ -364,9 +356,6 @@ export interface BoardApi {
   ): Promise<BoardTaskMutation>;
   boardUnblock(id: BoardRef, input: { reply?: string }): Promise<BoardTaskMutation>;
   boardReopen(id: BoardRef): Promise<BoardTaskMutation>;
-  /** The mirrored-answer bridge (a superagent command bridge). Optional: a
-   * deployment without it leaves `answer` out of `moves`. */
-  boardAnswer?(id: BoardRef, input: { text: string }): Promise<BoardTaskMutation>;
   boardAssign(id: BoardRef, input: { for: string | null }): Promise<BoardTaskMutation>;
   boardNeeds(id: BoardRef, needs: BoardRef[]): Promise<BoardTaskMutation>;
   boardCancel(id: BoardRef, input: { reason: string }): Promise<BoardTaskMutation>;
@@ -541,13 +530,9 @@ export function parseTask(value: unknown): BoardTaskView | undefined {
   if (Array.isArray(row.moves)) {
     task.moves = row.moves.filter((move): move is string => typeof move === "string");
   }
-  const mirror = recordOf(row.mirror);
-  if (mirror) {
-    task.mirror = {};
-    if (typeof mirror.source === "string") task.mirror.source = mirror.source;
-    if (typeof mirror.readOnly === "boolean") task.mirror.readOnly = mirror.readOnly;
-    if (typeof mirror.bridge === "boolean") task.mirror.bridge = mirror.bridge;
-  }
+  // The deleted superagent mirror/bridge fields (`mirror.readOnly`,
+  // `mirror.bridge`) are intentionally not parsed: a projector's task is an
+  // ordinary board task, and `moves` is the only action authority.
   if (typeof row.archived === "boolean") task.archived = row.archived;
   const origin = recordOf(row.origin);
   if (origin) {

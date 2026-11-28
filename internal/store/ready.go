@@ -33,12 +33,20 @@ func (s *Store) notifyEvent(kind string) {
 
 // requiredTables is the schema contract checked by CheckReady. It covers every
 // table the HTTP/worker paths touch, including the migration-added columns and
-// the handoff audit tables (internal/handoff schema 0001).
+// the handoff audit tables (internal/handoff schema 0001). The plugin platform
+// (plugin_state/config/dependency) and the superagent plugin's own domain
+// tables are part of the same boot schema: a missing one means the assembly
+// could report Active for a plugin whose storage cannot answer.
 var requiredTables = []string{
 	"tenants", "sessions", "events", "checkpoints", "checkpoint_requests", "compaction_tasks", "session_checkpoint_policies", "submissions",
 	"tasks", "blobs", "blob_chunks", "blob_refs", "runs",
 	"usage_ledger", "mcp_oauth_pending", "mcp_oauth_credentials",
 	"runtime_instances", "handoffs",
+	"plugin_state", "plugin_config", "plugin_dependency",
+	"superagent_work_items", "superagent_assignments", "superagent_worker_reports",
+	"superagent_attentions", "superagent_links", "superagent_subscriptions",
+	"superagent_source_cursors", "superagent_source_events", "superagent_outbox",
+	"superagent_session_index", "superagent_board_links",
 }
 
 // CheckReady verifies that PostgreSQL is reachable and the runtime schema is

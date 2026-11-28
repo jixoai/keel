@@ -1,6 +1,8 @@
 package architecture
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -89,5 +91,62 @@ func TestPluginSplitGuardedPackagesResolve(t *testing.T) {
 	}
 	if len(out) != 3 {
 		t.Fatalf("resolved %d guarded packages, want 3: %v", len(out), out)
+	}
+}
+
+// TestCoreStoreDoesNotReadPluginOwnedTables is the storage half of the split:
+// after the import boundary, the core store must not grow a second write/read
+// path into the superagent plugin's tables or the board log. The readiness
+// listing (ready.go) and the RLS table list (rls.go) name the tables without
+// querying them; schema.sql is DDL, not a read path.
+func TestCoreStoreDoesNotReadPluginOwnedTables(t *testing.T) {
+	dir := filepath.Join("..", "store")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("read core store dir: %v", err)
+	}
+	allowed := map[string]bool{
+		"ready.go": true, // the readiness table list, not a query
+		"rls.go":   true, // the RLS apply list, not a query
+	}
+	// The board log's table names and the superagent plugin's tables. A core
+	// store query naming one of these is a boundary regression.
+	forbidden := []string{
+		"superagent_",
+		"board_heads", "board_events", "board_requests",
+		"board_actors", "board_watchers", "board_watch_deliveries",
+		"board_schedules", "board_audit", "board_sync_",
+	}
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") || allowed[name] {
+			continue
+		}
+		content, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil {
+			t.Fatalf("read %s: %v", name, err)
+		}
+		for _, table := range forbidden {
+			if strings.Contains(string(content), table) {
+				t.Errorf("internal/store/%s references plugin-owned table %q; the owning plugin's adapter must serve it", name, table)
+			}
+		}
+	}
+}
+
+// TestImporterUsesBoardTaskLink pins the import idempotency mechanism: the
+// importer must look up a task's ticket link before creating a ticket (the
+// self-projection regression), not only the source-id key after the insert.
+func TestImporterUsesBoardTaskLink(t *testing.T) {
+	content, err := os.ReadFile(filepath.Join("..", "superagentplugin", "importer.go"))
+	if err != nil {
+		t.Fatalf("read importer: %v", err)
+	}
+	source := string(content)
+	if !strings.Contains(source, "GetBoardLinkByTask(") {
+		t.Fatal("importer does not call GetBoardLinkByTask; a projected board task would be imported as a second ticket")
+	}
+	if !strings.Contains(source, "projectedBoardTask(") {
+		t.Fatal("importer has no projected-task label check")
 	}
 }
