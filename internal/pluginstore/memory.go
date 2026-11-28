@@ -16,12 +16,11 @@ import (
 // at process exit. It implements the same contract as the PostgreSQL adapter and
 // passes the same conformance suite.
 type Memory struct {
-	mu       sync.Mutex
-	now      func() time.Time
-	installs map[string]Install
-	states   map[string]map[string]StateEntry
-	configs  map[string]Config
-	deps     map[string]Dependency
+	mu      sync.Mutex
+	now     func() time.Time
+	states  map[string]map[string]StateEntry
+	configs map[string]Config
+	deps    map[string]Dependency
 }
 
 // NewMemory builds an empty store. A nil clock uses time.Now (UTC).
@@ -30,85 +29,17 @@ func NewMemory(now func() time.Time) *Memory {
 		now = func() time.Time { return time.Now().UTC() }
 	}
 	return &Memory{
-		now:      now,
-		installs: make(map[string]Install),
-		states:   make(map[string]map[string]StateEntry),
-		configs:  make(map[string]Config),
-		deps:     make(map[string]Dependency),
+		now:     now,
+		states:  make(map[string]map[string]StateEntry),
+		configs: make(map[string]Config),
+		deps:    make(map[string]Dependency),
 	}
 }
 
 var _ Store = (*Memory)(nil)
 
-func installKey(tenantID uuid.UUID, pluginID string) string {
-	return tenantID.String() + "\x00" + pluginID
-}
-
 func stateKey(tenantID uuid.UUID, pluginID string) string {
 	return tenantID.String() + "\x00" + pluginID
-}
-
-func (m *Memory) PutInstall(_ context.Context, install Install) (Install, error) {
-	if err := ValidateInstall(install); err != nil {
-		return Install{}, err
-	}
-	if install.State == "" {
-		install.State = StateInstalled
-	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	now := m.now()
-	key := installKey(install.TenantID, install.PluginID)
-	if existing, ok := m.installs[key]; ok {
-		if install.InstalledAt.IsZero() {
-			install.InstalledAt = existing.InstalledAt
-		}
-	}
-	if install.InstalledAt.IsZero() {
-		install.InstalledAt = now
-	}
-	if install.UpdatedAt.IsZero() {
-		install.UpdatedAt = now
-	}
-	install.Diagnostics = append([]string(nil), install.Diagnostics...)
-	install.Manifest = append(json.RawMessage(nil), install.Manifest...)
-	m.installs[key] = install
-	return cloneInstall(install), nil
-}
-
-func (m *Memory) GetInstall(_ context.Context, tenantID uuid.UUID, pluginID string) (Install, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	install, ok := m.installs[installKey(tenantID, pluginID)]
-	if !ok {
-		return Install{}, ErrNotFound
-	}
-	return cloneInstall(install), nil
-}
-
-func (m *Memory) ListInstalls(_ context.Context, tenantID uuid.UUID) ([]Install, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	prefix := tenantID.String() + "\x00"
-	out := make([]Install, 0)
-	for key, install := range m.installs {
-		if len(key) >= len(prefix) && key[:len(prefix)] == prefix {
-			out = append(out, cloneInstall(install))
-		}
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].PluginID < out[j].PluginID })
-	return out, nil
-}
-
-func (m *Memory) DeleteInstall(_ context.Context, tenantID uuid.UUID, pluginID string) (bool, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	key := installKey(tenantID, pluginID)
-	if _, ok := m.installs[key]; !ok {
-		return false, nil
-	}
-	delete(m.installs, key)
-	return true, nil
 }
 
 func (m *Memory) GetState(_ context.Context, tenantID uuid.UUID, pluginID, key string) (string, bool, error) {
@@ -208,7 +139,7 @@ func (m *Memory) PutDependency(_ context.Context, tenantID uuid.UUID, dependency
 		dependency.UpdatedAt = m.now()
 	}
 	dependency.Requires = append([]string(nil), dependency.Requires...)
-	m.deps[installKey(tenantID, dependency.PluginID)] = dependency
+	m.deps[stateKey(tenantID, dependency.PluginID)] = dependency
 	return dependency, nil
 }
 
@@ -225,12 +156,6 @@ func (m *Memory) ListDependencies(_ context.Context, tenantID uuid.UUID) ([]Depe
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].PluginID < out[j].PluginID })
 	return out, nil
-}
-
-func cloneInstall(install Install) Install {
-	install.Diagnostics = append([]string(nil), install.Diagnostics...)
-	install.Manifest = append(json.RawMessage(nil), install.Manifest...)
-	return install
 }
 
 var errStateKey = errors.New("pluginstore: plugin id and state key are required")

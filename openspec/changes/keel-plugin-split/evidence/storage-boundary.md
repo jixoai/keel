@@ -8,8 +8,9 @@ Base: `origin/task/keel-unified-integration` @ `0fc714a5`
 
 | Owner | Tables / surface | Adapter |
 |---|---|---|
-| Plugin platform | `plugins` (install/version), `plugin_state`, `plugin_config`, `plugin_dependency` | `internal/pluginstore` contract; `internal/pluginstore/pg` PostgreSQL adapter; `Memory` test adapter; shared `conformance` suite |
-| Board plugin | board log/task/channel/thread tables (owned and migrated by `keel-board` v0.1.3 `pgadapter`), `board_tenant_sync_entries`, `board_tenant_blob_keys` | `boardintegration.Surface` (implements `pluginstore.DomainStore`); `boardplugin.LogBoard` over the board log API |
+| Plugin platform | `plugin_state`, `plugin_config`, `plugin_dependency` | `internal/pluginstore` contract; `internal/pluginstore/pg` PostgreSQL adapter; `Memory` test adapter; shared `conformance` suite |
+| Core plugin inventory | `plugins` (install/version/state) | `internal/store` + `harnessext.Manager`; `pluginstore` has no install writer (single owner) |
+| Board plugin | board log/task/channel/thread tables (owned and migrated by `keel-board` v0.1.4 `pgadapter`), `board_tenant_sync_entries`, `board_tenant_blob_keys` | `boardintegration.Surface` (implements `pluginstore.DomainStore`); `boardplugin.LogBoard` over the board log API |
 | Superagent plugin | `superagent_work_items`, `superagent_assignments`, `superagent_worker_reports`, `superagent_attentions`, `superagent_links`, `superagent_subscriptions`, `superagent_source_cursors`, `superagent_source_events`, `superagent_outbox`, `superagent_session_index`, `superagent_board_links` | `internal/superagentstore` PostgreSQL adapter (implements `superagent.Store` + `collab.SessionIndex`) |
 | Attachment | blob + platform metadata; no independent domain schema | existing blob/attachment services |
 | Telemetry | bounded telemetry store/config; no business relational store | existing telemetry plugin/platform |
@@ -46,7 +47,7 @@ the board log directly:
   thread/reply read.
 
 No board storage API, SQL or table was changed for the split, and the board
-module is pinned at v0.1.3 (read-only use). This is the minimum extension; a
+module is pinned at v0.1.4 (read-only use). This is the minimum extension; a
 future board service can add write-side bulk operations without changing the
 ownership boundary.
 

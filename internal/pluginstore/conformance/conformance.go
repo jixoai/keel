@@ -7,7 +7,6 @@ package conformance
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"testing"
 
 	"github.com/google/uuid"
@@ -22,67 +21,10 @@ type Factory func(t *testing.T) pluginstore.Store
 // Run executes the full contract suite.
 func Run(t *testing.T, newStore Factory) {
 	t.Helper()
-	t.Run("install inventory", func(t *testing.T) { runInstall(t, newStore(t)) })
 	t.Run("opaque state", func(t *testing.T) { runState(t, newStore(t)) })
 	t.Run("opaque config", func(t *testing.T) { runConfig(t, newStore(t)) })
 	t.Run("dependency status", func(t *testing.T) { runDependency(t, newStore(t)) })
 	t.Run("tenant isolation", func(t *testing.T) { runTenantIsolation(t, newStore(t)) })
-}
-
-func runInstall(t *testing.T, store pluginstore.Store) {
-	ctx := context.Background()
-	tenant := uuid.New()
-	install := pluginstore.Install{
-		TenantID: tenant, PluginID: "keel.board", Version: "1.0.0", Kind: "in-process",
-		State: pluginstore.StateInstalled, Manifest: json.RawMessage(`{"id":"keel.board"}`),
-	}
-	created, err := store.PutInstall(ctx, install)
-	if err != nil {
-		t.Fatalf("put install: %v", err)
-	}
-	if created.PluginID != install.PluginID || created.State != pluginstore.StateInstalled {
-		t.Fatalf("created = %+v", created)
-	}
-	if created.InstalledAt.IsZero() {
-		t.Fatal("installed_at is zero")
-	}
-	// A state change preserves the installation age.
-	enabled := created
-	enabled.State = pluginstore.StateEnabled
-	updated, err := store.PutInstall(ctx, enabled)
-	if err != nil {
-		t.Fatalf("update install: %v", err)
-	}
-	if !updated.InstalledAt.Equal(created.InstalledAt) {
-		t.Fatalf("installed_at changed: %v -> %v", created.InstalledAt, updated.InstalledAt)
-	}
-	if updated.State != pluginstore.StateEnabled {
-		t.Fatalf("state = %s", updated.State)
-	}
-	got, err := store.GetInstall(ctx, tenant, install.PluginID)
-	if err != nil {
-		t.Fatalf("get install: %v", err)
-	}
-	if got.State != pluginstore.StateEnabled {
-		t.Fatalf("got state = %s", got.State)
-	}
-	list, err := store.ListInstalls(ctx, tenant)
-	if err != nil {
-		t.Fatalf("list installs: %v", err)
-	}
-	if len(list) != 1 || list[0].PluginID != install.PluginID {
-		t.Fatalf("list = %+v", list)
-	}
-	deleted, err := store.DeleteInstall(ctx, tenant, install.PluginID)
-	if err != nil || !deleted {
-		t.Fatalf("delete install: deleted=%v err=%v", deleted, err)
-	}
-	if _, err := store.GetInstall(ctx, tenant, install.PluginID); !errors.Is(err, pluginstore.ErrNotFound) {
-		t.Fatalf("get after delete err = %v, want ErrNotFound", err)
-	}
-	if _, err := store.PutInstall(ctx, pluginstore.Install{PluginID: "x"}); err == nil {
-		t.Fatal("install without a tenant was accepted")
-	}
 }
 
 func runState(t *testing.T, store pluginstore.Store) {
@@ -189,17 +131,6 @@ func runTenantIsolation(t *testing.T, store pluginstore.Store) {
 	}
 	if _, ok, err := store.GetState(ctx, tenantB, "keel.board", "cursor"); err != nil || ok {
 		t.Fatalf("tenant B read A's state: ok=%v err=%v", ok, err)
-	}
-	if _, err := store.PutInstall(ctx, pluginstore.Install{
-		TenantID: tenantA, PluginID: "keel.board", Version: "1.0.0", Kind: "in-process",
-	}); err != nil {
-		t.Fatalf("put install A: %v", err)
-	}
-	if _, err := store.GetInstall(ctx, tenantB, "keel.board"); !errors.Is(err, pluginstore.ErrNotFound) {
-		t.Fatalf("tenant B read A's install: err=%v", err)
-	}
-	if list, err := store.ListInstalls(ctx, tenantB); err != nil || len(list) != 0 {
-		t.Fatalf("tenant B installs = %+v err=%v", list, err)
 	}
 	if _, err := store.PutConfig(ctx, tenantA, "keel.superagent", json.RawMessage(`{"a":1}`)); err != nil {
 		t.Fatalf("put config A: %v", err)

@@ -1,7 +1,9 @@
 // Package pg is the PostgreSQL adapter for the plugin platform storage
 // contract (change keel-plugin-split). It owns the SQL for plugin_state,
-// plugin_config and plugin_dependency, and reuses the plugin inventory table
-// (plugins) for install/version provenance.
+// plugin_config and plugin_dependency. The install inventory row (`plugins`) is
+// deliberately not written here: the core store and the harnessext plugin
+// manager own it (store.UpsertPlugin), so two writers cannot overwrite each
+// other's version, state and timestamps.
 //
 // The adapter is deliberately a separate package from internal/store: the
 // contract package carries no driver, and this adapter can be built over any
@@ -14,7 +16,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"sort"
 	"time"
 
 	"github.com/google/uuid"
@@ -36,88 +37,6 @@ var _ pluginstore.Store = (*Store)(nil)
 // the platform schema (internal/store/schema.sql).
 func New(pool *pgxpool.Pool) *Store {
 	return &Store{pool: pool, now: func() time.Time { return time.Now().UTC() }}
-}
-
-// PutInstall upserts one inventory row. installed_at is preserved on update:
-// the age of an installation is not reset by a state change.
-func (s *Store) PutInstall(ctx context.Context, install pluginstore.Install) (pluginstore.Install, error) {
-	if err := pluginstore.ValidateInstall(install); err != nil {
-		return pluginstore.Install{}, err
-	}
-	if install.State == "" {
-		install.State = pluginstore.StateInstalled
-	}
-	manifest := install.Manifest
-	if len(manifest) == 0 {
-		manifest = json.RawMessage(`{}`)
-	}
-	diagnostics, err := json.Marshal(install.Diagnostics)
-	if err != nil {
-		return pluginstore.Install{}, fmt.Errorf("pluginstore: encode diagnostics: %w", err)
-	}
-	installedAt := install.InstalledAt
-	if installedAt.IsZero() {
-		installedAt = s.now()
-	}
-	updatedAt := install.UpdatedAt
-	if updatedAt.IsZero() {
-		updatedAt = installedAt
-	}
-	row := s.pool.QueryRow(ctx, `
-		INSERT INTO plugins (tenant_id, id, version, kind, state, bundled, source, manifest,
-		                     content_hash, path, diagnostics, installed_at, updated_at)
-		VALUES ($1,$2,$3,$4,$5,$6,'{}'::jsonb,$7::jsonb,'','',$8::jsonb,$9,$10)
-		ON CONFLICT (tenant_id, id) DO UPDATE SET
-		    version = EXCLUDED.version,
-		    kind = EXCLUDED.kind,
-		    state = EXCLUDED.state,
-		    bundled = EXCLUDED.bundled,
-		    manifest = EXCLUDED.manifest,
-		    diagnostics = EXCLUDED.diagnostics,
-		    updated_at = EXCLUDED.updated_at,
-		    installed_at = plugins.installed_at
-		RETURNING tenant_id, id, version, kind, state, bundled, manifest, diagnostics, installed_at, updated_at`,
-		install.TenantID, install.PluginID, install.Version, install.Kind, install.State,
-		install.Bundled, manifest, diagnostics, installedAt, updatedAt)
-	return scanInstall(row)
-}
-
-func (s *Store) GetInstall(ctx context.Context, tenantID uuid.UUID, pluginID string) (pluginstore.Install, error) {
-	row := s.pool.QueryRow(ctx, `
-		SELECT tenant_id, id, version, kind, state, bundled, manifest, diagnostics, installed_at, updated_at
-		  FROM plugins WHERE tenant_id = $1 AND id = $2`, tenantID, pluginID)
-	install, err := scanInstall(row)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return pluginstore.Install{}, pluginstore.ErrNotFound
-	}
-	return install, err
-}
-
-func (s *Store) ListInstalls(ctx context.Context, tenantID uuid.UUID) ([]pluginstore.Install, error) {
-	rows, err := s.pool.Query(ctx, `
-		SELECT tenant_id, id, version, kind, state, bundled, manifest, diagnostics, installed_at, updated_at
-		  FROM plugins WHERE tenant_id = $1 ORDER BY id`, tenantID)
-	if err != nil {
-		return nil, fmt.Errorf("pluginstore: list installs: %w", err)
-	}
-	defer rows.Close()
-	out := make([]pluginstore.Install, 0)
-	for rows.Next() {
-		install, err := scanInstall(rows)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, install)
-	}
-	return out, rows.Err()
-}
-
-func (s *Store) DeleteInstall(ctx context.Context, tenantID uuid.UUID, pluginID string) (bool, error) {
-	tag, err := s.pool.Exec(ctx, `DELETE FROM plugins WHERE tenant_id = $1 AND id = $2`, tenantID, pluginID)
-	if err != nil {
-		return false, fmt.Errorf("pluginstore: delete install: %w", err)
-	}
-	return tag.RowsAffected() > 0, nil
 }
 
 func (s *Store) GetState(ctx context.Context, tenantID uuid.UUID, pluginID, key string) (string, bool, error) {
@@ -272,21 +191,4 @@ func (s *Store) ListDependencies(ctx context.Context, tenantID uuid.UUID) ([]plu
 
 type scanner interface {
 	Scan(dest ...any) error
-}
-
-func scanInstall(row scanner) (pluginstore.Install, error) {
-	var install pluginstore.Install
-	var manifest, diagnostics []byte
-	if err := row.Scan(&install.TenantID, &install.PluginID, &install.Version, &install.Kind,
-		&install.State, &install.Bundled, &manifest, &diagnostics, &install.InstalledAt, &install.UpdatedAt); err != nil {
-		return pluginstore.Install{}, err
-	}
-	install.Manifest = append(json.RawMessage(nil), manifest...)
-	if len(diagnostics) > 0 {
-		if err := json.Unmarshal(diagnostics, &install.Diagnostics); err != nil {
-			return pluginstore.Install{}, fmt.Errorf("pluginstore: decode diagnostics: %w", err)
-		}
-	}
-	sort.Strings(install.Diagnostics)
-	return install, nil
 }
