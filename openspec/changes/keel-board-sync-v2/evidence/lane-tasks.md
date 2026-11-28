@@ -1,3 +1,8 @@
+
+> 2026-11-28 交付说明：board `v0.1.2`（`006a43b`）已发布为只读健康 API，不可重打；
+> 存储边界以 `v0.1.3`（`80bff1b`）交付，API 与 v0.1.2 相同；keel 依赖已升级到 v0.1.3。
+> 本文件保留 lane 原始记录，勾选状态以 `tasks.md` 与 `verification.txt` 为准。
+
 # Tasks: feat-keel-board-sync-v2
 
 > 基线：keel `origin/main` `2c1245e9`；board `origin/main` `70b503f`（v0.1.1）。
