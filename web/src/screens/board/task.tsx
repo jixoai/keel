@@ -6,13 +6,15 @@
 // and every dangerous action asks once with its consequence spelled out. The
 // claim token lives in the data layer's memory; a reload shows one truth —
 // 「认领凭据不在本标签页」— and waits for expiry or an owner action.
-import { effect, keymap, Text, View, windowSize } from "nsh";
+import { effect, keymap, signal, Text, View, windowSize } from "nsh";
 import {
   AlertDialog,
   Badge,
   Button,
   Card,
   Checkbox,
+  Collapsible,
+  CollapsibleTrigger,
   Dialog,
   Empty,
   EmptyContent,
@@ -45,6 +47,7 @@ import {
   boardLeaseFacts,
   boardNeedsFact,
   boardPlatformLabel,
+  boardProviderErrorLine,
   boardRenderableMoves,
   boardStateIcon,
   boardStateLabel,
@@ -59,7 +62,7 @@ import {
   type BoardQueueRow,
   type BoardTone,
 } from "../../data/board";
-import type { BoardMessageView, BoardTaskView } from "../../data/board-wire";
+import type { BoardMessageView, BoardTaskCopy, BoardTaskView } from "../../data/board-wire";
 import { can } from "../../data/permissions";
 import { store } from "../../data/store";
 import {
@@ -239,6 +242,47 @@ function TaskFacts(props: { task: BoardTaskView; message: BoardMessageView }) {
   );
 }
 
+/** One external copy. The failure sentence stays product-level; the raw
+ * provider code is behind an explicit disclosure so an operator can copy it
+ * without putting it in every reader's face. */
+function CopyRow(props: { copy: BoardTaskCopy }) {
+  const open = signal(false);
+  const id = (props.copy.target ?? props.copy.platform ?? "copy").replace(/[^a-zA-Z0-9_-]+/g, "-");
+  const copyLabel = () => (props.copy.target ? boardThreadRefLabel(props.copy.target) : boardPlatformLabel(props.copy.platform));
+  return (
+    <View style={{ flexDirection: "column", gap: space.xxs, minWidth: 0 }}>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm, minWidth: 0 }}>
+        <Text style={{ flex: 1, minWidth: 0, fontSize: typeScale.sm, color: color.mutedForeground, numberOfLines: 1, textOverflow: "ellipsis" }}>
+          {copyLabel()}
+        </Text>
+        <Badge
+          variant={props.copy.status === "synced" || props.copy.status === "已同步" ? "success" : props.copy.status === "failed" ? "destructive" : "warning"}
+          label={props.copy.status ?? "未知"}
+        />
+      </View>
+      <If when={!!props.copy.lastError}>
+        <Text style={{ fontSize: typeScale.sm, color: color.destructive }}>{boardProviderErrorLine(props.copy.lastError)}</Text>
+        <Collapsible
+          open={open()}
+          testID={`board-task-copy-error-panel-${id}`}
+          content={
+            <Text testID={`board-task-copy-error-raw-${id}`} style={{ fontFamily: font.mono, fontSize: typeScale.xs, color: color.mutedForeground }}>
+              原始错误：{props.copy.lastError}
+            </Text>
+          }
+        >
+          <CollapsibleTrigger
+            testID={`board-task-copy-error-toggle-${id}`}
+            label={open() ? "收起原始错误" : "查看原始错误"}
+            expanded={open()}
+            onPress={() => open.set(!open())}
+          />
+        </Collapsible>
+      </If>
+    </View>
+  );
+}
+
 function CopiesList(props: { task: BoardTaskView }) {
   const copies = props.task.copies ?? [];
   return (
@@ -246,17 +290,7 @@ function CopiesList(props: { task: BoardTaskView }) {
       <View style={{ flexDirection: "column", gap: space.xs }}>
         <SectionLabel text="外部副本" />
         <Each of={copies} key={(copy) => `${copy.target}-${copy.status}`}>
-          {(copy) => (
-            <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm, minWidth: 0 }}>
-              <Text style={{ flex: 1, minWidth: 0, fontSize: typeScale.sm, color: color.mutedForeground, numberOfLines: 1, textOverflow: "ellipsis" }}>
-                {copy().target ? boardThreadRefLabel(copy().target) : boardPlatformLabel(copy().platform)}
-              </Text>
-              <Badge
-                variant={copy().status === "synced" || copy().status === "已同步" ? "success" : copy().status === "failed" ? "destructive" : "warning"}
-                label={copy().status ?? "未知"}
-              />
-            </View>
-          )}
+          {(copy) => <CopyRow copy={copy()} />}
         </Each>
       </View>
     </If>

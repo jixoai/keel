@@ -195,6 +195,10 @@ export interface BoardSyncEntryView {
   targets?: BoardSyncTargetView[];
   /** Measured queues; a null member is an empty queue, not unknown. */
   lag?: BoardSyncLag | null;
+  /** The design's flat view of the oldest outstanding row across both queues.
+   * keel derives it from lag when the mounted board does not send one; null
+   * means no outstanding row or no measurement, never zero seconds. */
+  oldestPendingAgeSeconds?: number | null;
   lastDeliveryAt?: string;
   failures24h?: number;
   bridgeHost?: string;

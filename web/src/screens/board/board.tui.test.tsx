@@ -148,11 +148,14 @@ test("TUI: 同步——入口、lag/凭据/死信、重试与收件箱", async (
   expect(view.shows("id:board-sync-credential-github")).toBe(true);
   expect(texts).toContain("凭据失效");
   expect(texts).toContain("凭据缺失");
-  // Missing backend fields are one honest note per card, not repeated metrics.
+  // board v0.1.2 sends real targets, lag and 24h failures, so there is no
+  // backend-gap note and no repeated "unknown" metric.
   expect(texts).not.toContain("滞后未知");
   expect(texts).not.toContain("目标 · 未知");
-  expect(texts).toContain("外部目标与 24h 统计暂未上报");
-  expect(view.shows("id:board-sync-backend-gap-slack")).toBe(true);
+  expect(texts).toContain("最老");
+  expect(texts).toContain("24h 失败");
+  expect(view.shows("id:board-sync-lag-slack")).toBe(true);
+  expect(view.shows("id:board-sync-backend-gap-slack")).toBe(false);
   expect(view.shows("id:board-sync-targets-unknown-slack")).toBe(false);
   // Raw provider errors are not product copy.
   expect(texts).toContain("平台限流，稍后重试");

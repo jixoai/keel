@@ -25,7 +25,7 @@
 //
 // States: selected · unselected · disabled · hover. TUI: the terminal draws the
 // selected tab bold (an underline when the app underlines its label).
-import type { JSX, StyleProp, ViewStyle } from "nsh";
+import type { Bounds, JSX, StyleProp, ViewRef, ViewStyle } from "nsh";
 import { Text, View } from "nsh";
 import { Tab as NativeTab, Tabs as NativeTabs } from "nsh/base";
 import { Icon, type IconName } from "../../icons";
@@ -83,11 +83,13 @@ export function Tabs(props: {
 }
 
 export function Tab(props: {
+  ref?: ViewRef | ((node: ViewRef) => void);
   label?: string;
   icon?: IconName;
   selected?: boolean;
   disabled?: boolean;
   onPress?: () => void;
+  onLayout?: (event: { bounds: Bounds }) => void;
   children?: JSX.Element;
   accessibilityLabel?: string;
   testID?: string;
@@ -95,6 +97,8 @@ export function Tab(props: {
 }) {
   return (
     <NativeTab
+      onLayout={props.onLayout}
+      ref={props.ref}
       testID={props.testID}
       selected={props.selected}
       disabled={props.disabled}

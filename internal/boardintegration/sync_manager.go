@@ -33,6 +33,7 @@ import (
 	boardaudit "github.com/jixoai/keel-board/audit"
 	boardlog "github.com/jixoai/keel-board/log"
 	boardmetrics "github.com/jixoai/keel-board/metrics"
+	"github.com/jixoai/keel-board/pgadapter"
 	boardserver "github.com/jixoai/keel-board/server"
 	boardsync "github.com/jixoai/keel-board/sync"
 	boardsyncstore "github.com/jixoai/keel-board/syncstore"
@@ -101,8 +102,8 @@ type loadedSyncEntry struct {
 // enable/disable path, and the workers.
 type syncManager struct {
 	store    *store.Store
-	syncdb   *boardsyncstore.Postgres
-	audit    *boardaudit.Postgres
+	syncdb   *pgadapter.SyncStore
+	audit    *pgadapter.AuditStore
 	board    *boardlog.Board
 	tenant   uuid.UUID
 	resolver SecretResolver
@@ -137,7 +138,7 @@ type syncManager struct {
 // loadSyncBoot reads the tenant's entries and builds the registry. It never
 // fails the board surface for one bad entry: a bad entry is logged (without a
 // credential) and disabled.
-func loadSyncBoot(ctx context.Context, opts Options, syncEnabled bool, syncdb *boardsyncstore.Postgres, board *boardlog.Board) (*syncBoot, error) {
+func loadSyncBoot(ctx context.Context, opts Options, syncEnabled bool, syncdb *pgadapter.SyncStore, board *boardlog.Board) (*syncBoot, error) {
 	boot := &syncBoot{
 		registry:      boardsync.NewRegistry(),
 		startChannels: make(map[boardserver.SyncKey][]string),
@@ -271,7 +272,7 @@ func syncFunctions(routes map[string]string) (boardsync.SyncFunc, boardsync.Rout
 // upsertSyncStoreEntry creates/aligns the board module's local entry row. An
 // existing row's enabled flag is operator state, so UpsertEntry preserves it;
 // SetEntryEnabled then applies the desired state explicitly.
-func upsertSyncStoreEntry(ctx context.Context, syncdb *boardsyncstore.Postgres, tenant, key, platform string, enabled bool, logger *slog.Logger) error {
+func upsertSyncStoreEntry(ctx context.Context, syncdb *pgadapter.SyncStore, tenant, key, platform string, enabled bool, logger *slog.Logger) error {
 	if syncdb == nil {
 		return errors.New("boardintegration: sync store is not wired")
 	}
@@ -308,7 +309,7 @@ func sanitizedBuildError(err error) string {
 
 // newSyncManager wraps a boot result with the process store, audit, tenant
 // switches and gauge.
-func newSyncManager(boot *syncBoot, st *store.Store, syncdb *boardsyncstore.Postgres, audit *boardaudit.Postgres, board *boardlog.Board, tenant uuid.UUID, box *store.SecretBox, logger *slog.Logger, metricsRegistry *boardmetrics.Registry, flags BoardFlagReader, monitor time.Duration, providerHosts []string) *syncManager {
+func newSyncManager(boot *syncBoot, st *store.Store, syncdb *pgadapter.SyncStore, audit *pgadapter.AuditStore, board *boardlog.Board, tenant uuid.UUID, box *store.SecretBox, logger *slog.Logger, metricsRegistry *boardmetrics.Registry, flags BoardFlagReader, monitor time.Duration, providerHosts []string) *syncManager {
 	if boot == nil {
 		boot = &syncBoot{
 			registry:      boardsync.NewRegistry(),

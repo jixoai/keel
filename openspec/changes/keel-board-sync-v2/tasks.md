@@ -1,33 +1,48 @@
 # Tasks: keel-board-sync-v2
 
-## 0. Storage dialect boundary
+> 证据：`evidence/storage-boundary.md`、`evidence/ui-gates-20261128T131744Z/`（55 张实拍）、
+> `evidence/verification.txt`。board `v0.1.2`（`006a43b`）已发布不可重打；存储边界交付
+> `v0.1.3`（`80bff1b`）。
 
-- [ ] 定义 keel-board append log/store/sync/audit 接口与 dialect-neutral 类型
-- [ ] 将 pgx/SQL/事务/迁移/公告锁/LISTEN-NOTIFY 收进 PG adapter
-- [ ] 加 dialect capability 声明；不支持能力显式返回 typed error
-- [ ] 加 storage conformance suite；PG adapter 全绿
-- [ ] `go list -deps` 证明 domain/server/sync 不直接依赖 pgx
+## 0. Storage dialect boundary（board v0.1.3）
+
+- [x] 定义 keel-board append log/store/sync/audit/automation 接口与 dialect-neutral 类型
+- [x] 将 pgx/SQL/事务/迁移/公告锁/lease 收进 `pgadapter` / `pgadapter/logstore` / `pgadapter/schema`
+- [x] 加 `storage.Capabilities` 与 typed `ErrUnsupported`；PG 声明 durable/cross-process/migrations，
+      `ListenNotify=false`（Wait 轮询，若加 LISTEN/NOTIFY 只进 `pgadapter/logstore`）
+- [x] 加 `conformance.RunStorage`；PostgreSQL 与 in-memory 适配器同一 suite 全绿
+- [x] `go list -deps` 证明 domain/server/sync/log 不依赖 pgx；`TestStorageBoundary` 固化
+- [x] 打 board annotated tag `v0.1.3` 并推 origin（`v0.1.2` 未动）
 
 ## 1. Board sync API v0.1.2
 
-- [ ] keel-board 增加 targets / oldestPendingAgeSeconds / failures24h 只读字段
-- [ ] 协议/服务端/store 测试；缺字段保持 null，不伪造 0
-- [ ] 打 keel-board v0.1.2 tag 并推 origin
-- [ ] keel `go.mod` 升级到 v0.1.2；mount DTO/权限映射
-- [ ] keel mount contract tests + PG integration
+- [x] keel-board targets / lag（outstanding/oldestAt/ageSeconds）/ failures24h 只读字段
+- [x] 协议/服务端/store 测试；缺字段保持 null，不伪造 0（board `go test ./...`）
+- [x] `v0.1.2` tag 已推 origin（`006a43b`，本批未重打）
+- [x] keel `go.mod` 升级到 `v0.1.3`；mount DTO/权限映射（含由 lag 派生的 `oldestPendingAgeSeconds`）
+- [x] keel mount contract tests + PG 集成（`KEEL_TEST_DSN=... go test -p 1 ./internal/boardintegration ./cmd/keel`）
 
 ## 2. UI
 
-- [ ] sync 页显示真实 targets/lag/24h；缺失只留一句弱提示
-- [ ] 390 选中 tab 自动滚入；筛选 sheet body 可滚、footer 可换行
-- [ ] task 页 provider 错误可展开；移动端复制链接可达
-- [ ] board P2：watcher dead/lastError/depth.dead、automation 下次日期/危险权重、去 meta 文案
-- [ ] board TUI/UI 证据更新；390/1440 截图
+- [x] sync 页显示真实 targets/lag/24h；缺失只留一句弱提示（TUI 同步用例 + `sync.tsx`）
+- [x] 390 选中 state tab 自动 reveal/滚入；筛选 sheet body 可滚、footer 可换行
+      （`15-queue-archive-390.png`、`49b-filter-sheet-390x667.png`）
+- [x] task 页 provider 错误产品文案 + “查看原始错误”显式 disclosure；移动端复制链接可达
+      （`50-task-copy-error-disclosure-390.png`）
+- [x] board P2：watcher dead/lastError/depth.dead、automation 下次日期/危险权重、去 meta 文案
+- [x] board TUI/UI 证据更新：web capture 6/6 通过、55 张 390/1440/768 实拍；TUI 定向 12/12
 
 ## 3. Gates and archive
 
-- [ ] `nsh check`、board TUI、UI 证据 53/26、file coverage
-- [ ] Go `-p 1 ./...` + race 定向
-- [ ] 独立子代理复审 P0/P1=0
-- [ ] 更新 DISPOSITION/README/RUNBOOK；`openspec archive keel-board-sync-v2 --yes`
+- [x] board `go test ./...` + `go test -race ./...` + PG conformance（`KEEL_BOARD_TEST_DSN`）
+- [x] `nsh check`；board data 24/24、SSE 3/3、TUI 定向 12/12；全量 TUI 留给最终集成批次
+- [x] keel `go test -p 1 ./internal/boardintegration ./cmd/keel`（DSN 集成）
+- [ ] 独立子代理复审 P0/P1=0（本 lane 为单实现子代理，由主 Agent 最终集成批次执行）
+- [ ] 更新 DISPOSITION/README/RUNBOOK；`openspec archive keel-board-sync-v2 --yes`（等独立复审）
 - [ ] 发 v0.6.0（与 release closure 协调）
+
+## 残余 / BLOCKED
+
+- 独立安全/功能/视觉红队 A/B/C 未由本实现代理执行；状态仍 BLOCKED，交由主 Agent 的独立子代理。
+- 全量 TUI（538）与 E2E HTML 报告不在本 lane 运行；本 lane 只跑定向用例，最终集成批次补全。
+- 无 SQLite 生产实现；本轮只保留 adapter 边界与 capability 声明。

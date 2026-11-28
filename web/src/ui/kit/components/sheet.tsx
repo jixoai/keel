@@ -121,7 +121,7 @@ export function Sheet(props: {
           vertical scrollers. */}
       <View style={{ flexDirection: "column", gap: space.md, flex: 1, minHeight: 0 }}>{props.children}</View>
       {props.footer !== undefined ? (
-        <View style={{ flexDirection: "row", justifyContent: "flex-end", gap: space.md }}>{props.footer}</View>
+        <View style={{ flexDirection: "row", flexWrap: "wrap", justifyContent: "flex-end", alignItems: "center", gap: space.md, rowGap: space.sm }}>{props.footer}</View>
       ) : null}
       </View>
     </NativeSheet>

@@ -45,6 +45,7 @@ import (
 	"github.com/jixoai/keel/internal/boardintegration"
 	keelstore "github.com/jixoai/keel/internal/store"
 
+	"github.com/jixoai/keel-board/pgadapter"
 	boardsync "github.com/jixoai/keel-board/sync"
 	"github.com/jixoai/keel-board/sync/chatsdk"
 	"github.com/jixoai/keel-board/sync/github"
@@ -1717,7 +1718,7 @@ func (e *env) scenarioRestart(scenario *Scenario) error {
 		// Stop the process's workers, push one normalized record directly into
 		// the durable inbox, then start a fresh surface over the same schema.
 		e.stopSurface()
-		syncdb, err := boardsyncstore.OpenPostgres(e.ctx, boardsyncstore.PostgresOptions{DSN: e.dsn, SearchPath: e.schema})
+		syncdb, err := pgadapter.OpenSync(e.ctx, pgadapter.SyncOptions{DSN: e.dsn, SearchPath: e.schema})
 		if err != nil {
 			return "", fmt.Errorf("open sync store: %w", err)
 		}

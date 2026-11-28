@@ -7,7 +7,7 @@ require (
 	github.com/ewhauser/gbash v0.0.41
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.12.0
-	github.com/jixoai/keel-board v0.1.2
+	github.com/jixoai/keel-board v0.1.3
 	github.com/openai/openai-go v1.12.0
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3
 	github.com/ulikunitz/xz v0.5.12

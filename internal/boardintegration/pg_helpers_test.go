@@ -19,12 +19,12 @@ import (
 	"github.com/jixoai/keel/internal/accesswire"
 	"github.com/jixoai/keel/internal/auth"
 
+	"github.com/jixoai/keel-board/pgadapter/logstore"
 	"github.com/jixoai/keel-board/protocol"
 	keelstore "github.com/jixoai/keel/internal/store"
 
 	boardaudit "github.com/jixoai/keel-board/audit"
 	boardlog "github.com/jixoai/keel-board/log"
-	boardstore "github.com/jixoai/keel-board/store"
 	boardsync "github.com/jixoai/keel-board/sync"
 )
 
@@ -190,7 +190,7 @@ func (e *testEnv) seedChannel(channel string, owner kAccount) {
 	if err := ensureSchema(ctx, e.dsn, e.schema); err != nil {
 		e.t.Fatalf("seed channel schema: %v", err)
 	}
-	boardStore, err := boardstore.OpenPostgres(ctx, boardstore.PostgresOptions{DSN: e.dsn, SearchPath: e.schema})
+	boardStore, err := pglogstore.OpenLog(ctx, pglogstore.LogOptions{DSN: e.dsn, SearchPath: e.schema})
 	if err != nil {
 		e.t.Fatalf("seed channel store: %v", err)
 	}

@@ -1,0 +1,38 @@
+keel-board-sync-v2 verification
+date: 2026-11-28
+board repo: github.com/jixoai/keel-board
+  v0.1.1 commit 70b503f (unchanged)
+  v0.1.2 commit 006a43b (read-only sync/automation health; unchanged, not retagged)
+  v0.1.3 commit 80bff1b (storage boundary; annotated tag, pushed)
+  branch: feat/storage-dialect-v0.1.3 (pushed)
+keel worktree: .worktrees/keel-board-unified, branch task/keel-board-unified
+keel dependency: github.com/jixoai/keel-board v0.1.3
+
+BOARD
+  go build ./...                                      exit 0
+  go vet ./...                                        exit 0
+  KEEL_BOARD_TEST_DSN=... go test -count=1 ./...      exit 0 (all packages ok)
+  KEEL_BOARD_TEST_DSN=... go test -race -count=1 ./... exit 0 (all packages ok)
+  KEEL_BOARD_TEST_DSN=... go test ./conformance ./pgadapter/...
+                                                      ok (TestStorageMemory, TestStoragePostgres, TestStorageBoundary)
+  go list -deps <domain/server/sync/log> | grep pgx   no output
+  gofmt -l .                                          no output
+
+KEEL
+  go build ./...                                      exit 0
+  KEEL_TEST_DSN=... go test -count=1 -p 1 ./internal/boardintegration ./cmd/keel
+                                                      ok both
+  nsh check (web)                                     exit 0
+  nsh test src/data/board.test.ts                     24 tests, 24 passed
+  nsh test src/data/board-sse.test.ts                 3 tests, 3 passed
+  nsh test --target tui src/screens/board/board.tui.test.tsx
+                                                      12 tests, 12 passed
+  web capture (nsh test --target web board-phase2-capture.test.tsx)
+                                                      6 tests, 6 passed; 55 screenshots;
+                                                      evidence/ui-gates-20261128T131744Z
+
+NOT RUN (deferred to main integration)
+  full TUI suite (538 cases)
+  full E2E HTML report
+  independent adversarial review A/B/C -> remains BLOCKED for the main agent
+  openspec archive / v0.6.0 release

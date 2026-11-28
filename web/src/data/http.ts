@@ -822,6 +822,10 @@ function parseSyncEntry(value: unknown): BoardSyncEntryView {
     const lag = parseSyncLag(row?.lag);
     if (lag !== undefined) entry.lag = lag;
   }
+  if ("oldestPendingAgeSeconds" in (row ?? {})) {
+    if (row?.oldestPendingAgeSeconds === null) entry.oldestPendingAgeSeconds = null;
+    else if (typeof row?.oldestPendingAgeSeconds === "number") entry.oldestPendingAgeSeconds = row.oldestPendingAgeSeconds;
+  }
   if (typeof row?.lastDeliveryAt === "string") entry.lastDeliveryAt = row.lastDeliveryAt;
   if (typeof row?.failures24h === "number") entry.failures24h = row.failures24h;
   if (typeof row?.bridgeHost === "string") entry.bridgeHost = row.bridgeHost;

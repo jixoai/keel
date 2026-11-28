@@ -4,7 +4,7 @@
 // first (the server's order, never re-sorted), a row per task with its state,
 // needs, owner and lease/outcome. The five states keep the tabs and filters
 // visible, so a retry never loses the reader's place.
-import { Text, View, keymap } from "nsh";
+import { Text, View, keymap, type ViewRef } from "nsh";
 import {
   Badge,
   Button,
@@ -101,16 +101,34 @@ function StateTabs(props: { query: BoardQuery }) {
         <View style={{ flexDirection: "row", paddingBottom: space.xs, paddingRight: isMobile() ? 40 : 0 }}>
           <Tabs variant="line" accessibilityLabel="任务状态" testID="board-state-tablist">
             <Each of={BOARD_STATE_TABS} key={(state) => state}>
-              {(state) => (
-                <Tab
-                  testID={`board-state-tab-${state()}`}
-                  label={BOARD_STATE_TAB_LABEL[state()]}
-                  selected={props.query.state === state()}
-                  onPress={() => applyBoardQuery({ state: state() })}
-                  accessibilityLabel={`${BOARD_STATE_TAB_LABEL[state()]}${props.query.state === state() ? "，当前" : ""}`}
-                  style={{ minHeight: isMobile() ? 44 : 36, paddingHorizontal: space.md }}
-                />
-              )}
+              {(state) => {
+                let node: ViewRef | null = null;
+                const selected = () => props.query.state === state();
+                const reveal = () => node?.reveal({ horizontal: "nearest", animated: false });
+                return (
+                  <Tab
+                    ref={(next) => {
+                      node = next;
+                    }}
+                    onLayout={() => {
+                      if (!selected()) return;
+                      // A deep link can select a tab outside the first screen.
+                      // Reveal after this layout pass settles; calling from the
+                      // ref itself is too early (the view is not laid out yet).
+                      setTimeout(reveal, 0);
+                    }}
+                    testID={`board-state-tab-${state()}`}
+                    label={BOARD_STATE_TAB_LABEL[state()]}
+                    selected={selected()}
+                    onPress={() => {
+                      applyBoardQuery({ state: state() });
+                      reveal();
+                    }}
+                    accessibilityLabel={`${BOARD_STATE_TAB_LABEL[state()]}${selected() ? "，当前" : ""}`}
+                    style={{ minHeight: isMobile() ? 44 : 36, paddingHorizontal: space.md }}
+                  />
+                );
+              }}
             </Each>
           </Tabs>
         </View>
@@ -638,8 +656,10 @@ export function BoardQueue(props: { onOpenTask: (id: string) => void; onNewTask:
           </>
         }
       >
-        <ActiveFilterChips query={query()} />
-        <FilterBar query={query()} />
+        <ScrollArea testID="board-filter-sheet-body" style={{ flex: 1, minHeight: 0 }}>
+          <ActiveFilterChips query={query()} />
+          <FilterBar query={query()} />
+        </ScrollArea>
       </Sheet>
       <If when={stale() && error() !== null}>
         <View testID="board-queue-stale" style={{ paddingBottom: space.sm }}>

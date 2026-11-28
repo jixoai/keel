@@ -57,8 +57,19 @@ function lagAgeText(seconds: number | undefined): string {
 
 /** A measured lag object is real data; null/undefined is unknown. An object
  * with both queues null means the queues are empty, not that lag is zero. */
-function lagLine(lag: BoardSyncLag | null | undefined): { text: string; tone?: string } {
-  if (lag === undefined || lag === null) return { text: "滞后未知" };
+function lagLine(
+  lag: BoardSyncLag | null | undefined,
+  oldestPendingAgeSeconds?: number | null,
+): { text: string; tone?: string } {
+  if (lag === undefined || lag === null) {
+    if (typeof oldestPendingAgeSeconds === "number") {
+      return {
+        text: `最老积压 ${lagAgeText(oldestPendingAgeSeconds)}`,
+        tone: oldestPendingAgeSeconds > 300 ? color.warning : undefined,
+      };
+    }
+    return { text: "滞后未知" };
+  }
   const parts: string[] = [];
   let worst = 0;
   for (const [label, queue] of [["入站", lag.inbox], ["出站", lag.outbox]] as const) {
@@ -206,7 +217,7 @@ function EntryCard(props: { entry: BoardSyncEntryView; data: BoardSyncData }) {
   const inbox = () => props.entry.inbox ?? { pending: 0, leased: 0, done: 0, dead: 0 };
   const outbox = () => props.entry.outbox ?? props.data.status.outbox;
   const missingStats = () => props.entry.failures24h === undefined;
-  const lag = () => lagLine(props.entry.lag);
+  const lag = () => lagLine(props.entry.lag, props.entry.oldestPendingAgeSeconds);
   const backendGap = () => {
     if (!targetsKnown() && missingStats()) return "外部目标与 24h 统计暂未上报，页面不伪造。";
     if (!targetsKnown()) return "外部目标暂未上报，页面不伪造。";

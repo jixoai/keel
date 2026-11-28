@@ -188,6 +188,7 @@ export class FixtureBoard implements BoardApi {
         reply("8121", "812", "work/production", fixtureCurrentAccountId, "已复现：重复点击会把 submit token 带两次。", -2400),
         reply("8122", "812", "work/production", fixtureAccountId("butler"), "已加防抖和幂等键，正在压测。", -1200),
       ],
+      copies: [{ target: "slack:#work-production", platform: "slack", root: "812", status: "failed", attempts: 5, lastError: "provider answered 429" }],
       createdAt: iso(-90 * 60),
     },
     {

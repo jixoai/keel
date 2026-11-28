@@ -18,13 +18,13 @@ import (
 	"github.com/jixoai/keel/internal/accesswire"
 	keelstore "github.com/jixoai/keel/internal/store"
 
-	boardaudit "github.com/jixoai/keel-board/audit"
 	"github.com/jixoai/keel-board/automation"
 	boardblob "github.com/jixoai/keel-board/blob"
 	boardlog "github.com/jixoai/keel-board/log"
 	boardmetrics "github.com/jixoai/keel-board/metrics"
+	"github.com/jixoai/keel-board/pgadapter"
+	"github.com/jixoai/keel-board/pgadapter/logstore"
 	boardserver "github.com/jixoai/keel-board/server"
-	boardstore "github.com/jixoai/keel-board/store"
 	boardsync "github.com/jixoai/keel-board/sync"
 	boardsyncstore "github.com/jixoai/keel-board/syncstore"
 )
@@ -119,10 +119,10 @@ type Surface struct {
 	handler       *handler
 	webhook       *boardserver.Server
 	board         *boardlog.Board
-	store         *boardstore.Postgres
-	syncdb        *boardsyncstore.Postgres
-	audit         *boardaudit.Postgres
-	automation    *automation.Postgres
+	store         *pglogstore.LogStore
+	syncdb        *pgadapter.SyncStore
+	audit         *pgadapter.AuditStore
+	automation    *pgadapter.Automation
 	owners        *ChannelOwners
 	metrics       *boardmetrics.Registry
 	identity      *Identity
@@ -172,28 +172,28 @@ func New(ctx context.Context, opts Options) (*Surface, error) {
 		}
 	}
 
-	store, err := boardstore.OpenPostgres(ctx, boardstore.PostgresOptions{DSN: opts.DSN, SearchPath: opts.Schema})
+	store, err := pglogstore.OpenLog(ctx, pglogstore.LogOptions{DSN: opts.DSN, SearchPath: opts.Schema})
 	if err != nil {
 		return nil, openError("open board store", err, opts.DSN)
 	}
 	board := boardlog.New(boardlog.Options{Store: store})
 
-	syncdb, err := boardsyncstore.OpenPostgres(ctx, boardsyncstore.PostgresOptions{
+	syncdb, err := pgadapter.OpenSync(ctx, pgadapter.SyncOptions{
 		DSN: opts.DSN, SearchPath: opts.Schema, Config: opts.SyncStoreConfig,
 	})
 	if err != nil {
 		store.Close()
 		return nil, openError("open sync store", err, opts.DSN)
 	}
-	auditStore, err := boardaudit.OpenPostgres(ctx, boardaudit.PostgresOptions{DSN: opts.DSN, SearchPath: opts.Schema})
+	auditStore, err := pgadapter.OpenAudit(ctx, pgadapter.AuditOptions{DSN: opts.DSN, SearchPath: opts.Schema})
 	if err != nil {
 		syncdb.Close()
 		store.Close()
 		return nil, openError("open board audit", err, opts.DSN)
 	}
-	var automationStore *automation.Postgres
+	var automationStore *pgadapter.Automation
 	if !opts.DisableAutomation {
-		automationStore, err = automation.OpenPostgres(ctx, automation.PostgresOptions{DSN: opts.DSN, SearchPath: opts.Schema})
+		automationStore, err = pgadapter.OpenAutomation(ctx, pgadapter.AutomationOptions{DSN: opts.DSN, SearchPath: opts.Schema})
 		if err != nil {
 			auditStore.Close()
 			syncdb.Close()
@@ -583,11 +583,11 @@ func (s *Surface) Authorizer() *Authorizer { return s.authorizer }
 
 // SyncStore returns the durable sync store. The tenant entry manager writes
 // the board module's local entry rows through it.
-func (s *Surface) SyncStore() *boardsyncstore.Postgres { return s.syncdb }
+func (s *Surface) SyncStore() *pgadapter.SyncStore { return s.syncdb }
 
 // AuditStore returns the board audit store (operational audit; the domain
 // audit is board_events).
-func (s *Surface) AuditStore() *boardaudit.Postgres { return s.audit }
+func (s *Surface) AuditStore() *pgadapter.AuditStore { return s.audit }
 
 // Expo forms one Prometheus exporter over keel's registry followed by the
 // board's. Both use disjoint family names (keel_* and board_*), so the

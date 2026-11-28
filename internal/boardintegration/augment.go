@@ -609,10 +609,23 @@ func (s *Surface) augmentSync(r *http.Request, value any) bool {
 			} else {
 				entry["credential"] = "unknown"
 			}
-			// A mounted board older than v0.1.2 sends no lag. null says
-			// "unknown"; a measured board value is preserved as-is.
+			// A mounted board older than v0.1.2 sends no health facts. null
+			// says "unknown"; a measured board value is preserved as-is.
 			if _, measured := entry["lag"]; !measured {
 				entry["lag"] = nil
+			}
+			if _, measured := entry["targets"]; !measured {
+				entry["targets"] = nil
+			}
+			if _, measured := entry["failures24h"]; !measured {
+				entry["failures24h"] = nil
+			}
+			// The design names the flat oldest-pending age; the mounted board
+			// reports the same fact as lag.{inbox,outbox}.ageSeconds. Derive
+			// the flat field only when the board did not send one, and leave
+			// it null when no queue has an outstanding row.
+			if _, measured := entry["oldestPendingAgeSeconds"]; !measured {
+				entry["oldestPendingAgeSeconds"] = oldestPendingAgeSeconds(entry["lag"])
 			}
 			changed = true
 		}
@@ -639,8 +652,57 @@ func (s *Surface) augmentSync(r *http.Request, value any) bool {
 		if _, measured := root["lag"]; !measured {
 			root["lag"] = nil
 		}
+		if _, measured := root["oldestPendingAgeSeconds"]; !measured {
+			root["oldestPendingAgeSeconds"] = oldestPendingAgeSeconds(root["lag"])
+		}
 	}
 	return changed
+}
+
+// oldestPendingAgeSeconds is the design's flat field over the board's lag
+// shape: the oldest outstanding row across both queues, or null when neither
+// queue has one (or the board sent no measurement).
+func oldestPendingAgeSeconds(lag any) any {
+	row, ok := lag.(map[string]any)
+	if !ok {
+		return nil
+	}
+	var oldest int64
+	found := false
+	for _, name := range []string{"inbox", "outbox"} {
+		queue, ok := row[name].(map[string]any)
+		if !ok {
+			continue
+		}
+		age, ok := jsonAgeSeconds(queue["ageSeconds"])
+		if !ok {
+			continue
+		}
+		if !found || age > oldest {
+			oldest = age
+			found = true
+		}
+	}
+	if !found {
+		return nil
+	}
+	return oldest
+}
+
+func jsonAgeSeconds(value any) (int64, bool) {
+	switch number := value.(type) {
+	case json.Number:
+		age, err := number.Int64()
+		return age, err == nil
+	case float64:
+		return int64(number), true
+	case int64:
+		return number, true
+	case int:
+		return int64(number), true
+	default:
+		return 0, false
+	}
 }
 
 func boardCredentialLabel(status CredentialStatus) string {

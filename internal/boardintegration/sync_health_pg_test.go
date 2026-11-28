@@ -76,10 +76,11 @@ func TestSyncHealthFromBoardStore(t *testing.T) {
 		Undelivered int    `json:"undelivered"`
 	}
 	type keyView struct {
-		Key         string       `json:"key"`
-		Lag         lagView      `json:"lag"`
-		Targets     []targetView `json:"targets"`
-		Failures24h int          `json:"failures24h"`
+		Key                     string       `json:"key"`
+		Lag                     lagView      `json:"lag"`
+		Targets                 []targetView `json:"targets"`
+		Failures24h             int          `json:"failures24h"`
+		OldestPendingAgeSeconds *int64       `json:"oldestPendingAgeSeconds"`
 	}
 
 	readStatus := func() (keyView, lagView) {
@@ -104,6 +105,9 @@ func TestSyncHealthFromBoardStore(t *testing.T) {
 	}
 	if key.Lag.Outbox == nil || key.Lag.Outbox.Outstanding != 1 || key.Lag.Outbox.AgeSeconds < 0 {
 		t.Fatalf("outbox lag = %+v", key.Lag.Outbox)
+	}
+	if key.OldestPendingAgeSeconds == nil || *key.OldestPendingAgeSeconds < 0 {
+		t.Fatalf("oldestPendingAgeSeconds = %v", key.OldestPendingAgeSeconds)
 	}
 	if rootLag.Inbox == nil || rootLag.Outbox == nil {
 		t.Fatalf("tenant lag = %+v", rootLag)

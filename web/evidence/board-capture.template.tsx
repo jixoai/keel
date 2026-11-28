@@ -9,8 +9,8 @@ import { open, test } from "nsh/test";
 
 const OUT = "__REPORT_DIR__/shots/web";
 
-const view = (width: number, scenario: string, extra: Record<string, string> = {}) =>
-  open("./src/screens/board/harness.tsx", { width, host: { params: { scenario, ...extra } } });
+const view = (width: number, scenario: string, extra: Record<string, string> = {}, height = 844) =>
+  open("./src/screens/board/harness.tsx", { width, height, host: { params: { scenario, ...extra } } });
 
 const shot = async (app: { screenshot: (path?: string | null) => Promise<Uint8Array> }, name: string) => {
   await app.screenshot(`${OUT}/${name}.png`);
@@ -116,6 +116,13 @@ test("board evidence: queue and five states", async () => {
   const phoneEmpty = await view(390, "empty");
   await phoneEmpty.waitFor("id:board-queue-empty");
   await shot(phoneEmpty, "14-queue-empty-390");
+
+  // A deep link selects the last state tab; it must be revealed inside the
+  // horizontal tab strip instead of staying past the right edge.
+  const phoneArchive = await view(390, "success", { search: "state=all&archived=1" });
+  await phoneArchive.waitFor("id:board-row-826");
+  inside(phoneArchive, "id:board-state-tab-all", 390);
+  await shot(phoneArchive, "15-queue-archive-390");
 }, 600_000);
 
 test("board evidence: task states", async () => {
@@ -318,4 +325,25 @@ test("board evidence: before/after action transitions", async () => {
     throw new Error(`archive width ${archiveField.width} != select width ${forField.width}`);
   }
   await shot(phone, "49-filter-sheet-390");
+
+  // 390x667: the sheet body scrolls and the footer wraps, so every action is
+  // still reachable above the home indicator.
+  const short = await view(390, "success", {}, 667);
+  await short.waitFor("id:board-row-812");
+  await short.press("id:board-filter-open");
+  await short.waitFor("id:board-filter-reset", { timeout: 20_000 });
+  inside(short, "id:board-filter-sheet-body", 390);
+  onScreen(short, "id:board-filter-reset", 667);
+  await shot(short, "49b-filter-sheet-390x667");
+
+  // The task copy's raw provider sentence is behind a disclosure, not in the
+  // first screen a reader sees.
+  const copy = await view(390, "success", { task: "812" });
+  await copy.waitFor("id:board-thread-root", { timeout: 20_000 });
+  if (copy.texts().join("\n").includes("provider answered 429")) {
+    throw new Error("raw provider error is visible without opening the disclosure");
+  }
+  await copy.press("id:board-task-copy-error-toggle-slack-work-production");
+  await copy.waitFor("text:/provider answered 429/", { timeout: 20_000 });
+  await shot(copy, "50-task-copy-error-disclosure-390");
 }, 600_000);
