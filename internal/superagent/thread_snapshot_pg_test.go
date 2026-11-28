@@ -12,6 +12,7 @@ import (
 	"github.com/jixoai/keel/internal/collab"
 	"github.com/jixoai/keel/internal/store"
 	"github.com/jixoai/keel/internal/superagent"
+	"github.com/jixoai/keel/internal/superagentstore"
 )
 
 // TestIssueUpdateSnapshotIsDurableAcrossRestart is the P1 regression for the
@@ -38,17 +39,18 @@ func TestIssueUpdateSnapshotIsDurableAcrossRestart(t *testing.T) {
 	}
 	build := func(st *store.Store) (*superagent.Orchestrator, *recordingSink, *superagent.FixtureSource) {
 		t.Helper()
+		domain := superagentstore.New(st.Pool())
 		registry := e2eRegistry(t, tenant)
 		source := superagent.NewFixtureSource(func() time.Time { return time.Now().UTC() })
-		outbox, err := superagent.NewOutbox(superagent.OutboxOptions{Store: st, Channel: source, Audit: &fakeAudit{}})
+		outbox, err := superagent.NewOutbox(superagent.OutboxOptions{Store: domain, Channel: source, Audit: &fakeAudit{}})
 		if err != nil {
 			t.Fatalf("NewOutbox: %v", err)
 		}
-		host := e2eHost(t, st, registry, outbox)
+		host := e2eHost(t, domain, registry, outbox)
 		inputs := &recordingSink{}
 		orch, err := superagent.NewOrchestrator(superagent.Config{
-			TenantID: tenant, ModeID: collab.ModeSuperagent, Store: st, Host: host,
-			Source: source, Channel: source, Inputs: inputs, Sessions: st,
+			TenantID: tenant, ModeID: collab.ModeSuperagent, Store: domain, Host: host,
+			Source: source, Channel: source, Inputs: inputs, Sessions: domain,
 			Policy: &superagent.AllowlistPolicy{Actors: map[string]bool{"alice": true}, WorkerBot: "worker", PolicyVersion: "pg-snapshot-v1"},
 			Audit:  &fakeAudit{}, Outbox: outbox, Operator: allowOperator{},
 			OrchestratorSession: ownerSession, OrchestratorBot: "orchestrator",
@@ -62,10 +64,11 @@ func TestIssueUpdateSnapshotIsDurableAcrossRestart(t *testing.T) {
 
 	// First process: accept the ticket and deliver one real edit.
 	st1 := openStore()
+	d1 := superagentstore.New(st1.Pool())
 	if err := st1.CreateTenant(ctx, tenant, "snapshot-"+tenant.String()[:8]); err != nil {
 		t.Fatalf("CreateTenant: %v", err)
 	}
-	if err := st1.Put(ctx, collab.SessionRef{
+	if err := d1.Put(ctx, collab.SessionRef{
 		TenantID: tenant, SessionID: ownerSession, BotID: "orchestrator",
 		State: collab.SessionActive, CreatedAt: time.Now().UTC(),
 	}); err != nil {
@@ -98,8 +101,9 @@ func TestIssueUpdateSnapshotIsDurableAcrossRestart(t *testing.T) {
 	// reset so the new in-memory fixture starts at zero; the durable seen-event
 	// log makes any replay harmless and the new event ids are what matter.
 	st2 := openStore()
+	d2 := superagentstore.New(st2.Pool())
 	t.Cleanup(st2.Close)
-	if err := st2.SetSourceCursor(ctx, tenant, "fixture", ""); err != nil {
+	if err := d2.SetSourceCursor(ctx, tenant, "fixture", ""); err != nil {
 		t.Fatalf("reset cursor: %v", err)
 	}
 	orch2, sink2, source2 := build(st2)
@@ -130,7 +134,7 @@ func TestIssueUpdateSnapshotIsDurableAcrossRestart(t *testing.T) {
 		t.Fatalf("restart deliveries after a title edit = %d, want 1", sink2.count())
 	}
 
-	items, err := st2.ListWorkItems(ctx, tenant, collab.WorkFilter{ModeID: collab.ModeSuperagent})
+	items, err := d2.ListWorkItems(ctx, tenant, collab.WorkFilter{ModeID: collab.ModeSuperagent})
 	if err != nil {
 		t.Fatalf("ListWorkItems: %v", err)
 	}
@@ -166,14 +170,15 @@ func TestPendingFollowUpSurvivesRestart(t *testing.T) {
 	}
 	build := func(st *store.Store, launcher *fakeLauncher, now func() time.Time) (*superagent.Orchestrator, *recordingSink, *superagent.FixtureSource) {
 		t.Helper()
+		domain := superagentstore.New(st.Pool())
 		registry := e2eRegistry(t, tenant)
 		source := superagent.NewFixtureSource(now)
-		outbox, err := superagent.NewOutbox(superagent.OutboxOptions{Store: st, Channel: source, Audit: &fakeAudit{}})
+		outbox, err := superagent.NewOutbox(superagent.OutboxOptions{Store: domain, Channel: source, Audit: &fakeAudit{}})
 		if err != nil {
 			t.Fatalf("NewOutbox: %v", err)
 		}
 		host, err := collab.NewHost(collab.HostOptions{
-			TenantID: tenant, Modes: registry, Work: st, Sessions: st,
+			TenantID: tenant, Modes: registry, Work: domain, Sessions: domain,
 			Permissions: fakePermissions{}, Audit: &fakeAudit{}, Launcher: launcher,
 			Attention: outbox,
 		})
@@ -182,8 +187,8 @@ func TestPendingFollowUpSurvivesRestart(t *testing.T) {
 		}
 		inputs := &recordingSink{}
 		orch, err := superagent.NewOrchestrator(superagent.Config{
-			TenantID: tenant, ModeID: collab.ModeSuperagent, Store: st, Host: host,
-			Source: source, Channel: source, Inputs: inputs, Sessions: st,
+			TenantID: tenant, ModeID: collab.ModeSuperagent, Store: domain, Host: host,
+			Source: source, Channel: source, Inputs: inputs, Sessions: domain,
 			Policy: &superagent.AllowlistPolicy{Actors: map[string]bool{"alice": true}, WorkerBot: "worker", PolicyVersion: "pg-pending-v1"},
 			Audit:  &fakeAudit{}, Outbox: outbox, Operator: allowOperator{},
 			OrchestratorSession: ownerSession, OrchestratorBot: "orchestrator",
@@ -196,10 +201,11 @@ func TestPendingFollowUpSurvivesRestart(t *testing.T) {
 	}
 
 	st1 := openStore()
+	d1 := superagentstore.New(st1.Pool())
 	if err := st1.CreateTenant(ctx, tenant, "pending-"+tenant.String()[:8]); err != nil {
 		t.Fatalf("CreateTenant: %v", err)
 	}
-	if err := st1.Put(ctx, collab.SessionRef{
+	if err := d1.Put(ctx, collab.SessionRef{
 		TenantID: tenant, SessionID: ownerSession, BotID: "orchestrator",
 		State: collab.SessionActive, CreatedAt: time.Now().UTC(),
 	}); err != nil {
@@ -227,7 +233,7 @@ func TestPendingFollowUpSurvivesRestart(t *testing.T) {
 	}
 	assignment := *ticket.ActiveAssignment
 	assignment.Status = collab.AssignmentFailed
-	if _, err := st1.UpdateAssignment(ctx, assignment); err != nil {
+	if _, err := d1.UpdateAssignment(ctx, assignment); err != nil {
 		t.Fatalf("fail assignment: %v", err)
 	}
 	launcher1.launchErr = errors.New("launch down")
@@ -239,7 +245,7 @@ func TestPendingFollowUpSurvivesRestart(t *testing.T) {
 	if _, err := orch1.HandleSourceEvent(ctx, fixtureEvent(t, edited)); err != nil {
 		t.Fatalf("failed dispatch must not fail the page: %v", err)
 	}
-	items, err := st1.ListWorkItems(ctx, tenant, collab.WorkFilter{ModeID: collab.ModeSuperagent})
+	items, err := d1.ListWorkItems(ctx, tenant, collab.WorkFilter{ModeID: collab.ModeSuperagent})
 	if err != nil || len(items) != 1 {
 		t.Fatalf("work items = %d, err=%v", len(items), err)
 	}
@@ -252,6 +258,7 @@ func TestPendingFollowUpSurvivesRestart(t *testing.T) {
 	// Restart: new store handle, new orchestrator, launcher recovered. The
 	// pending entry must still be in the ticket document and deliverable.
 	st2 := openStore()
+	d2 := superagentstore.New(st2.Pool())
 	t.Cleanup(st2.Close)
 	later := time.Now().UTC().Add(2 * time.Second)
 	launcher2 := &fakeLauncher{}
@@ -262,7 +269,7 @@ func TestPendingFollowUpSurvivesRestart(t *testing.T) {
 	if launch := launcher2.lastLaunch(); !strings.Contains(launch.Task, "Also update the tests") {
 		t.Fatalf("restart delivery task = %q, want the pending text", launch.Task)
 	}
-	items, err = st2.ListWorkItems(ctx, tenant, collab.WorkFilter{ModeID: collab.ModeSuperagent})
+	items, err = d2.ListWorkItems(ctx, tenant, collab.WorkFilter{ModeID: collab.ModeSuperagent})
 	if err != nil || len(items) != 1 {
 		t.Fatalf("work items after restart = %d, err=%v", len(items), err)
 	}

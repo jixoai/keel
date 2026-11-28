@@ -34,6 +34,7 @@ import (
 	"github.com/jixoai/keel/internal/harnessapi"
 	"github.com/jixoai/keel/internal/store"
 	"github.com/jixoai/keel/internal/superagent"
+	"github.com/jixoai/keel/internal/superagentstore"
 )
 
 //go:embed page.html
@@ -141,7 +142,8 @@ func seed(ctx context.Context, dsn string) (*store.Store, *superagent.Orchestrat
 		TenantID: info.SeededTenant, SessionID: uuid.New(), BotID: orchestratorBot,
 		State: collab.SessionActive, CreatedAt: time.Now().UTC(),
 	}
-	if err := st.Put(ctx, owner); err != nil {
+	domain := superagentstore.New(st.Pool())
+	if err := domain.Put(ctx, owner); err != nil {
 		st.Close()
 		return nil, nil, seedInfo{}, fmt.Errorf("owner session: %w", err)
 	}
@@ -162,13 +164,13 @@ func seed(ctx context.Context, dsn string) (*store.Store, *superagent.Orchestrat
 		return nil, nil, seedInfo{}, fmt.Errorf("enable mode: %w", err)
 	}
 	source := superagent.NewFixtureSource(func() time.Time { return time.Now().UTC() })
-	outbox, err := superagent.NewOutbox(superagent.OutboxOptions{Store: st, Channel: source, Audit: silentAudit{}})
+	outbox, err := superagent.NewOutbox(superagent.OutboxOptions{Store: domain, Channel: source, Audit: silentAudit{}})
 	if err != nil {
 		st.Close()
 		return nil, nil, seedInfo{}, fmt.Errorf("outbox: %w", err)
 	}
 	host, err := collab.NewHost(collab.HostOptions{
-		TenantID: info.SeededTenant, Modes: registry, Work: st, Sessions: st,
+		TenantID: info.SeededTenant, Modes: registry, Work: domain, Sessions: domain,
 		Permissions: permissivePermissions{}, Audit: silentAudit{}, Launcher: &fixtureLauncher{},
 		Attention: outbox,
 	})
@@ -177,11 +179,11 @@ func seed(ctx context.Context, dsn string) (*store.Store, *superagent.Orchestrat
 		return nil, nil, seedInfo{}, fmt.Errorf("host: %w", err)
 	}
 	orch, err := superagent.NewOrchestrator(superagent.Config{
-		TenantID: info.SeededTenant, Store: st, Host: host, Source: source, Channel: source,
+		TenantID: info.SeededTenant, Store: domain, Host: host, Source: source, Channel: source,
 		Policy: &superagent.AllowlistPolicy{
 			Actors: map[string]bool{"alice": true}, WorkerBot: workerBot, PolicyVersion: "acceptance-v1",
 		},
-		Inputs: noopInputs{}, Sessions: st, Audit: silentAudit{}, Outbox: outbox,
+		Inputs: noopInputs{}, Sessions: domain, Audit: silentAudit{}, Outbox: outbox,
 		Operator:            permissiveOperator{},
 		OrchestratorSession: owner.SessionID, OrchestratorBot: orchestratorBot,
 		WorkerBot: workerBot, MaxPoll: 20,

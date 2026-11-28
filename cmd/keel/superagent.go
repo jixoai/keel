@@ -20,6 +20,7 @@ import (
 	"github.com/jixoai/keel/internal/harnessext"
 	"github.com/jixoai/keel/internal/store"
 	"github.com/jixoai/keel/internal/superagent"
+	"github.com/jixoai/keel/internal/superagentstore"
 	"github.com/jixoai/keel/internal/toolsurface"
 )
 
@@ -107,7 +108,7 @@ func superagentConfigFromEnv(getenv func(string) string) (superagentConfig, erro
 
 // newSuperagentRuntime assembles the orchestrator and enables the mode. It
 // returns nil when no Source is configured, which is the default deployment.
-func newSuperagentRuntime(ctx context.Context, tenantID uuid.UUID, st *store.Store, registry *collab.ModeRegistry, bridge *accesswire.Bridge, subagents *harnessext.SubagentRunner, starter *harnessext.TurnStarter, changed func(uuid.UUID), log *slog.Logger) (*superagent.Orchestrator, error) {
+func newSuperagentRuntime(ctx context.Context, tenantID uuid.UUID, st *store.Store, domain *superagentstore.Store, registry *collab.ModeRegistry, bridge *accesswire.Bridge, subagents *harnessext.SubagentRunner, starter *harnessext.TurnStarter, changed func(uuid.UUID), log *slog.Logger) (*superagent.Orchestrator, error) {
 	cfg, err := superagentConfigFromEnv(os.Getenv)
 	if err != nil {
 		return nil, err
@@ -115,8 +116,8 @@ func newSuperagentRuntime(ctx context.Context, tenantID uuid.UUID, st *store.Sto
 	if !cfg.Enabled {
 		return nil, nil
 	}
-	if st == nil || registry == nil || bridge == nil {
-		return nil, errors.New("super-agent needs the store, mode registry and access bridge")
+	if st == nil || domain == nil || registry == nil || bridge == nil {
+		return nil, errors.New("super-agent needs the core store, domain store, mode registry and access bridge")
 	}
 	if subagents == nil {
 		return nil, errors.New("super-agent needs the sub-agent runner to create worker sessions")
@@ -128,7 +129,7 @@ func newSuperagentRuntime(ctx context.Context, tenantID uuid.UUID, st *store.Sto
 	// previous process's worker sessions, so a second replica must be refused
 	// before it can disturb the first one. Run releases the lease on shutdown (a
 	// crashed process releases it with its connection).
-	lease, err := st.AcquireWriterLease(ctx, tenantID)
+	lease, err := domain.AcquireWriterLease(ctx, tenantID)
 	if err != nil {
 		return nil, fmt.Errorf("super-agent single-writer lease: %w", err)
 	}
@@ -173,20 +174,20 @@ func newSuperagentRuntime(ctx context.Context, tenantID uuid.UUID, st *store.Sto
 		TenantID: tenantID, SessionID: sessionID, BotID: cfg.OrchestratorBot,
 		Depth: 0, State: collab.SessionActive, CreatedAt: time.Now().UTC(),
 	}
-	if _, err := st.Session(ctx, tenantID, sessionID); err != nil {
+	if _, err := domain.Session(ctx, tenantID, sessionID); err != nil {
 		if !errors.Is(err, collab.ErrSessionNotFound) {
 			return nil, fmt.Errorf("super-agent session index: %w", err)
 		}
-		if err := st.Put(ctx, orchRef); err != nil {
+		if err := domain.Put(ctx, orchRef); err != nil {
 			return nil, fmt.Errorf("super-agent session index: %w", err)
 		}
-	} else if err := st.SetState(ctx, tenantID, sessionID, collab.SessionActive); err != nil {
+	} else if err := domain.SetState(ctx, tenantID, sessionID, collab.SessionActive); err != nil {
 		return nil, fmt.Errorf("super-agent session state: %w", err)
 	}
 	// A restart kills the previous process's worker runners and watchers. Mark
 	// their durable index rows interrupted before Recover so a stale "active"
 	// row cannot hold a slot forever. The orchestrator root is excluded.
-	interrupted, err := st.InterruptActiveCollabSessions(ctx, tenantID, superagentModeID, sessionID)
+	interrupted, err := domain.InterruptActiveCollabSessions(ctx, tenantID, superagentModeID, sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("super-agent interrupt stale workers: %w", err)
 	}
@@ -214,7 +215,7 @@ func newSuperagentRuntime(ctx context.Context, tenantID uuid.UUID, st *store.Sto
 
 	audit := collabAuditSink{store: st, log: log}
 	outbox, err := superagent.NewOutbox(superagent.OutboxOptions{
-		Store: st, Channel: channel, Audit: audit,
+		Store: domain, Channel: channel, Audit: audit,
 	})
 	if err != nil {
 		return nil, err
@@ -226,8 +227,8 @@ func newSuperagentRuntime(ctx context.Context, tenantID uuid.UUID, st *store.Sto
 	host, err := collab.NewHost(collab.HostOptions{
 		TenantID:    tenantID,
 		Modes:       registry,
-		Work:        st,
-		Sessions:    st,
+		Work:        domain,
+		Sessions:    domain,
 		Permissions: superagentPermissions{bridge: bridge, principal: principal},
 		Audit:       audit,
 		Launcher:    harnessext.CollabSubagentLauncher{Runner: func() *harnessext.SubagentRunner { return subagents }, ModeID: superagentModeID},
@@ -249,13 +250,13 @@ func newSuperagentRuntime(ctx context.Context, tenantID uuid.UUID, st *store.Sto
 		Actors: cfg.AllowedActors, WorkerBot: cfg.WorkerBot, PolicyVersion: "env-allowlist-v1",
 	}
 	orchestrator, err := superagent.NewOrchestrator(superagent.Config{
-		TenantID: tenantID, ModeID: superagentModeID, Store: st, Host: host,
+		TenantID: tenantID, ModeID: superagentModeID, Store: domain, Host: host,
 		Source: source, Channel: channel, Policy: policy, Inputs: inputs,
-		Sessions: st, Audit: audit, Outbox: outbox,
-		WorkerWatcher:       superagentWorkerWatcher{ctx: ctx, store: st, runner: subagents, log: log},
+		Sessions: domain, Audit: audit, Outbox: outbox,
+		WorkerWatcher:       superagentWorkerWatcher{ctx: ctx, store: domain, runner: subagents, log: log},
 		WorkerInspector:     superagentWorkerInspector{runs: storeSessions{Store: st}, runner: subagents},
 		WorkerTreeCanceller: superagentTreeCanceller{runner: subagents},
-		Slots:               superagent.NewSlots(st, superagent.SlotPolicy{Max: cfg.Slots, HumanReserved: cfg.HumanSlots}),
+		Slots:               superagent.NewSlots(domain, superagent.SlotPolicy{Max: cfg.Slots, HumanReserved: cfg.HumanSlots}),
 		// The console answer/resume/stop loop has its own authorization seam. It
 		// is the caller's authenticated task.write grant at tenant scope; the
 		// answer body never names the acting identity. Without this the product
@@ -289,7 +290,7 @@ func newSuperagentRuntime(ctx context.Context, tenantID uuid.UUID, st *store.Sto
 // counter and never creates or authorizes work.
 type superagentWorkerWatcher struct {
 	ctx    context.Context
-	store  *store.Store
+	store  *superagentstore.Store
 	runner *harnessext.SubagentRunner
 	log    *slog.Logger
 }

@@ -1,4 +1,4 @@
-package superagentboard
+package boardplugin
 
 import (
 	"context"
@@ -13,8 +13,6 @@ import (
 	"unicode/utf8"
 
 	"github.com/google/uuid"
-	"github.com/jixoai/keel/internal/collab"
-	"github.com/jixoai/keel/internal/superagent"
 
 	boarddomain "github.com/jixoai/keel-board/board"
 	boardlog "github.com/jixoai/keel-board/log"
@@ -57,12 +55,12 @@ const (
 // Mirror errors. They are stable so the bridge can map them to a status
 // without inspecting text.
 var (
-	ErrTaskNotFound       = errors.New("superagentboard: the mirrored board task does not exist")
-	ErrClaimConflict      = errors.New("superagentboard: the board task is claimed by another actor")
-	ErrNotClaimable       = errors.New("superagentboard: the board task cannot be claimed in its current state")
-	ErrTaskClosed         = errors.New("superagentboard: the board task is finished")
-	ErrNoActiveAssignment = errors.New("superagentboard: the ticket has no active assignment")
-	ErrNoOpenAttention    = errors.New("superagentboard: the ticket has no open attention")
+	ErrTaskNotFound       = errors.New("boardplugin: the mirrored board task does not exist")
+	ErrClaimConflict      = errors.New("boardplugin: the board task is claimed by another actor")
+	ErrNotClaimable       = errors.New("boardplugin: the board task cannot be claimed in its current state")
+	ErrTaskClosed         = errors.New("boardplugin: the board task is finished")
+	ErrNoActiveAssignment = errors.New("boardplugin: the ticket has no active assignment")
+	ErrNoOpenAttention    = errors.New("boardplugin: the ticket has no open attention")
 )
 
 // ActorInfo is the board identity a mirrored write carries. It is display
@@ -235,11 +233,13 @@ type ReplyRequest struct {
 	Digest     string
 }
 
-// BoardPort is the board write/read seam the adapter needs. Its production
-// implementation is LogBoard, which appends through log.Board; a fake is a
-// plain map. Keeping this interface small is what lets the bridge and mirror
-// be tested without PostgreSQL.
-type BoardPort interface {
+// Service is the board plugin's public service interface. It is the only way a
+// dependent plugin (superagent) reads or writes the task/channel/thread
+// substrate; no caller reaches board tables or imports a board store type.
+// Its production implementation is LogBoard, which appends through log.Board;
+// a fake is a plain map, which is what lets dependents be tested without
+// PostgreSQL.
+type Service interface {
 	EnsureTicketThread(ctx context.Context, tenantID uuid.UUID, request TicketThread) (TaskInfo, error)
 	Claim(ctx context.Context, tenantID uuid.UUID, request ClaimRequest) (TaskInfo, bool, error)
 	Renew(ctx context.Context, tenantID uuid.UUID, request RenewRequest) (bool, error)
@@ -255,9 +255,30 @@ type BoardPort interface {
 	Task(ctx context.Context, tenantID uuid.UUID, taskID uint64) (TaskInfo, error)
 	MessageRoot(ctx context.Context, tenantID uuid.UUID, messageID uint64) (uint64, string, bool, error)
 	TaskView(ctx context.Context, tenantID uuid.UUID, taskID uint64) (protocol.MessageView, error)
+
+	// Query surface (task/channel/thread). A dependent reads the substrate
+	// through these; a direct board table read is not part of the contract.
+	Tasks(ctx context.Context, tenantID uuid.UUID, query TaskQuery) ([]TaskInfo, error)
+	Channels(ctx context.Context, tenantID uuid.UUID) ([]ChannelInfo, error)
+	Thread(ctx context.Context, tenantID uuid.UUID, taskID, after uint64, limit int) ([]protocol.MessageView, error)
 }
 
-// LogBoard implements BoardPort over the board's own log API. Every mutation is
+// TaskQuery narrows Tasks. Empty fields do not filter; Limit<=0 uses 200.
+type TaskQuery struct {
+	Channel string
+	State   string
+	Limit   int
+}
+
+// ChannelInfo is the channel read model a dependent may display.
+type ChannelInfo struct {
+	Path      string
+	Messages  int
+	Threads   int
+	LastIndex uint64
+}
+
+// LogBoard implements Service over the board's own log API. Every mutation is
 // one conditional append; nothing here writes board_events with SQL, so the
 // board's projection, SSE and idempotency rules apply unchanged.
 type LogBoard struct {
@@ -265,7 +286,7 @@ type LogBoard struct {
 	Now   func() time.Time
 }
 
-var _ BoardPort = (*LogBoard)(nil)
+var _ Service = (*LogBoard)(nil)
 
 func (b *LogBoard) now() time.Time {
 	if b != nil && b.Now != nil {
@@ -276,7 +297,7 @@ func (b *LogBoard) now() time.Time {
 
 func (b *LogBoard) tenantName(tenantID uuid.UUID) (string, error) {
 	if tenantID == uuid.Nil {
-		return "", errors.New("superagentboard: a tenant is required for a board write")
+		return "", errors.New("boardplugin: a tenant is required for a board write")
 	}
 	return tenantID.String(), nil
 }
@@ -286,17 +307,17 @@ func (b *LogBoard) tenantName(tenantID uuid.UUID) (string, error) {
 // instead of appending a second root.
 func (b *LogBoard) EnsureTicketThread(ctx context.Context, tenantID uuid.UUID, request TicketThread) (TaskInfo, error) {
 	if b == nil || b.Board == nil {
-		return TaskInfo{}, errors.New("superagentboard: the board log is not wired")
+		return TaskInfo{}, errors.New("boardplugin: the board log is not wired")
 	}
 	tenant, err := b.tenantName(tenantID)
 	if err != nil {
 		return TaskInfo{}, err
 	}
 	if strings.TrimSpace(request.TicketID) == "" {
-		return TaskInfo{}, errors.New("superagentboard: a ticket id is required")
+		return TaskInfo{}, errors.New("boardplugin: a ticket id is required")
 	}
 	if err := protocol.ValidateChannel(request.Channel); err != nil {
-		return TaskInfo{}, fmt.Errorf("superagentboard: channel: %w", err)
+		return TaskInfo{}, fmt.Errorf("boardplugin: channel: %w", err)
 	}
 	text := BoardText(request.Title, request.Request)
 	labels := cleanLabels(request.Labels)
@@ -320,7 +341,7 @@ func (b *LogBoard) EnsureTicketThread(ctx context.Context, tenantID uuid.UUID, r
 	}}, func(tx *boardlog.Tx) error {
 		if replay, ok := tx.Replay(); ok {
 			if len(replay.MessageIDs) == 0 {
-				return fmt.Errorf("superagentboard: ticket %s replayed without a message id", request.TicketID)
+				return fmt.Errorf("boardplugin: ticket %s replayed without a message id", request.TicketID)
 			}
 			taskID = replay.MessageIDs[0]
 			return nil
@@ -351,10 +372,10 @@ func (b *LogBoard) Claim(ctx context.Context, tenantID uuid.UUID, request ClaimR
 		return TaskInfo{}, false, err
 	}
 	if request.TaskID == 0 || !validActorID(request.Actor.ID) {
-		return TaskInfo{}, false, errors.New("superagentboard: claim needs a task and an actor")
+		return TaskInfo{}, false, errors.New("boardplugin: claim needs a task and an actor")
 	}
 	if protocol.ValidateClaimToken(request.Token) != nil {
-		return TaskInfo{}, false, errors.New("superagentboard: claim token is not 32 base64url bytes")
+		return TaskInfo{}, false, errors.New("boardplugin: claim token is not 32 base64url bytes")
 	}
 	lease := request.Lease
 	if lease == 0 {
@@ -698,7 +719,7 @@ func (b *LogBoard) Assign(ctx context.Context, tenantID uuid.UUID, request Assig
 		var assigned *string
 		if forValue != "" {
 			if !strings.HasPrefix(forValue, task.Owner+"+") {
-				return fmt.Errorf("superagentboard: %q is not one of %s's profiles", forValue, task.Owner)
+				return fmt.Errorf("boardplugin: %q is not one of %s's profiles", forValue, task.Owner)
 			}
 			assigned = &forValue
 		}
@@ -743,7 +764,7 @@ func (b *LogBoard) Reply(ctx context.Context, tenantID uuid.UUID, request ReplyR
 	}}, func(tx *boardlog.Tx) error {
 		if replay, ok := tx.Replay(); ok {
 			if len(replay.MessageIDs) == 0 {
-				return errors.New("superagentboard: reply replayed without a message id")
+				return errors.New("boardplugin: reply replayed without a message id")
 			}
 			messageID = replay.MessageIDs[0]
 			return nil
@@ -844,6 +865,101 @@ func (b *LogBoard) TaskView(ctx context.Context, tenantID uuid.UUID, taskID uint
 		return protocol.MessageView{}, ErrTaskNotFound
 	}
 	return view, nil
+}
+
+// Tasks lists one tenant's task roots, filtered by channel/state. It is the
+// read half of the task service: a dependent imports work through this instead
+// of opening the board's tables.
+func (b *LogBoard) Tasks(ctx context.Context, tenantID uuid.UUID, query TaskQuery) ([]TaskInfo, error) {
+	tenant, err := b.tenantName(tenantID)
+	if err != nil {
+		return nil, err
+	}
+	limit := query.Limit
+	if limit <= 0 {
+		limit = 200
+	}
+	out := make([]TaskInfo, 0)
+	err = b.Board.ReadContext(ctx, tenant, func(snapshot *boardlog.Snapshot) error {
+		for _, message := range snapshot.Tasks() {
+			if query.Channel != "" && message.Channel != query.Channel {
+				continue
+			}
+			info := taskInfoOf(message, snapshot)
+			if query.State != "" && info.State != query.State {
+				continue
+			}
+			out = append(out, info)
+			if len(out) >= limit {
+				break
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// Channels lists the tenant's channels, sorted by path.
+func (b *LogBoard) Channels(ctx context.Context, tenantID uuid.UUID) ([]ChannelInfo, error) {
+	tenant, err := b.tenantName(tenantID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]ChannelInfo, 0)
+	err = b.Board.ReadContext(ctx, tenant, func(snapshot *boardlog.Snapshot) error {
+		for _, channel := range snapshot.Channels() {
+			out = append(out, ChannelInfo{
+				Path: channel.Path, Messages: channel.Messages,
+				Threads: channel.Threads, LastIndex: channel.LastIndex,
+			})
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// Thread returns a task's root message and its replies, oldest first. after
+// filters by message id (exclusive) for a cursor read; limit<=0 is unbounded.
+func (b *LogBoard) Thread(ctx context.Context, tenantID uuid.UUID, taskID, after uint64, limit int) ([]protocol.MessageView, error) {
+	tenant, err := b.tenantName(tenantID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]protocol.MessageView, 0)
+	found := false
+	err = b.Board.ReadContext(ctx, tenant, func(snapshot *boardlog.Snapshot) error {
+		root := snapshot.Message(taskID)
+		if root == nil {
+			return nil
+		}
+		found = true
+		if root.ID > after {
+			out = append(out, messageViewOf(snapshot, root))
+		}
+		for _, reply := range snapshot.Replies(taskID) {
+			if reply.ID <= after {
+				continue
+			}
+			out = append(out, messageViewOf(snapshot, reply))
+			if limit > 0 && len(out) >= limit {
+				break
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if !found {
+		return nil, ErrTaskNotFound
+	}
+	return out, nil
 }
 
 func taskInfoOf(message *boardlog.Message, snapshot *boardlog.Snapshot) TaskInfo {
@@ -1088,35 +1204,3 @@ func digestOf(value any) string {
 func hashToken(token string) string { return boarddomain.HashToken(token) }
 
 func validActorID(id string) bool { return boarddomain.ValidActorID(id) }
-
-// TicketLabels is the label set of one mirrored Ticket root. board.* keys are
-// the board's own and are never written by a caller; source/ticket/mandate/
-// policy are ordinary labels.
-func TicketLabels(ticket superagent.Ticket) map[string]string {
-	labels := map[string]string{
-		"source": BoardSource,
-		"ticket": ticket.ID.String(),
-	}
-	if strength := strings.TrimSpace(string(ticket.Mandate.Strength)); strength != "" {
-		labels["mandate"] = strength
-	}
-	if policy := strings.TrimSpace(ticket.Mandate.PolicyVersion); policy != "" {
-		labels["policy"] = policy
-	}
-	return labels
-}
-
-// ReplyLabels labels a mirrored report/attention reply.
-func ReplyLabels(ticketID uuid.UUID) map[string]string {
-	return map[string]string{"source": BoardSource, "ticket": ticketID.String()}
-}
-
-// attentionHoldKind maps a superagent Attention kind to the board hold kind.
-func attentionHoldKind(kind string) string {
-	switch strings.TrimSpace(kind) {
-	case collab.AttentionApproval, collab.AttentionDecision:
-		return HoldAwaitingApproval
-	default:
-		return HoldNeedsInput
-	}
-}

@@ -11,104 +11,96 @@ import (
 
 	"github.com/jixoai/keel/internal/access"
 	"github.com/jixoai/keel/internal/boardintegration"
-	"github.com/jixoai/keel/internal/harnessapi"
+	"github.com/jixoai/keel/internal/boardplugin"
 	"github.com/jixoai/keel/internal/store"
-	"github.com/jixoai/keel/internal/superagentboard"
+	"github.com/jixoai/keel/internal/superagent"
+	"github.com/jixoai/keel/internal/superagentplugin"
+	"github.com/jixoai/keel/internal/superagentstore"
 )
 
-// newSuperagentBoardBridge builds the bridge the board handler is mounted
-// behind. links/config/board are attached immediately: mirrored threads must
-// stay read-only even when no supervisor exists (attachSuperagentBoard returns
-// early), while mirror/commands are added later by the real Attach once the
-// agent runtime exists.
-func newSuperagentBoardBridge(surface *boardintegration.Surface, st *store.Store, log *slog.Logger) *superagentboard.Bridge {
+// boardService is the board plugin's public task/channel/thread service. The
+// superagent plugin reaches the board only through this interface; no board
+// table or board store type enters the dependent's code path.
+func boardService(surface *boardintegration.Surface) boardplugin.Service {
 	if surface == nil {
 		return nil
 	}
-	bridge := &superagentboard.Bridge{
-		Next:       surface,
-		Identity:   surface.Identity(),
-		Authorizer: surface.Authorizer(),
-		Operator:   superagentOperator{bridge: surface.Authorizer().Bridge},
-		Logger:     log,
-	}
-	if st != nil {
-		bridge.AttachGuard(st, superagentboard.StoreConfigReader{Store: st},
-			&superagentboard.LogBoard{Board: surface.Board()})
-	}
-	return bridge
+	return &boardplugin.LogBoard{Board: surface.Board()}
 }
 
-// attachSuperagentBoard wires the mirror and command bridge. A deployment
-// without a supervisor keeps a pass-through bridge; a missing KEEL_SECRET_KEY
-// keeps both directions fail-closed (no mirror writes, no mirrored claim) while
-// the board itself keeps serving.
-func attachSuperagentBoard(
+// newSuperagentBoardWriter builds the superagent plugin's board projection.
+// It is append-only on the board side: the ticket is the supervisor truth and
+// the board thread is a projection. A deployment without KEEL_SECRET_KEY keeps
+// the projection fail-closed while both plugins still load.
+func newSuperagentBoardWriter(
 	ctx context.Context,
 	tenantID uuid.UUID,
 	st *store.Store,
+	domain *superagentstore.Store,
 	surface *boardintegration.Surface,
-	bridge *superagentboard.Bridge,
-	service harnessapi.SuperagentService,
+	service boardplugin.Service,
 	log *slog.Logger,
-) *superagentboard.Mirror {
-	if bridge == nil || surface == nil || st == nil || service == nil || tenantID == uuid.Nil {
+) *superagentplugin.Writer {
+	if st == nil || domain == nil || surface == nil || service == nil || tenantID == uuid.Nil {
 		return nil
 	}
 	if log == nil {
 		log = slog.Default()
 	}
-	secret := strings.TrimSpace(os.Getenv(superagentboard.SecretEnv))
-	tokens, tokenErr := superagentboard.NewTokenSource(secret)
-	configReader := superagentboard.StoreConfigReader{Store: st}
+	configReader := superagentplugin.StoreConfigReader{Store: st}
+	secret := strings.TrimSpace(os.Getenv(superagentplugin.SecretEnv))
+	tokens, tokenErr := superagentplugin.NewTokenSource(secret)
 	if tokenErr != nil {
-		// Only a tenant that asked for the mirror needs the warning: every other
-		// deployment runs without KEEL_SECRET_KEY and must stay quiet.
+		// Only a tenant that asked for the projection needs the warning.
 		if config, configErr := configReader.SuperagentConfig(ctx, tenantID); configErr == nil && config.Mirror {
-			log.Warn("super-agent board mirror is fail-closed: set KEEL_SECRET_KEY to enable it",
-				"reason", superagentboard.ErrSecretMissing.Error())
+			log.Warn("super-agent board projection is fail-closed: set KEEL_SECRET_KEY to enable it",
+				"reason", superagentplugin.ErrSecretMissing.Error())
 		}
 		tokens = nil
 	}
-	board := &superagentboard.LogBoard{Board: surface.Board()}
-	mirror, err := superagentboard.NewMirror(&superagentboard.Mirror{
+	importOptions := superagentplugin.ImportOptions{
+		Store: domain, Links: domain, TenantID: tenantID,
+		Requester: superagent.Actor{ID: "board:" + tenantID.String(), Display: "Board"},
+	}
+	writer, err := superagentplugin.NewWriter(&superagentplugin.Writer{
 		TenantID: tenantID,
-		Store:    st,
-		Board:    board,
-		Links:    st,
+		Store:    domain,
+		Board:    service,
+		Links:    domain,
 		Config:   configReader,
 		Secret:   tokens,
 		ACL:      boardChannelACL{store: st},
 		Enabled:  surface.BoardEnabled,
-		Logger:   log,
-		Now:      func() time.Time { return time.Now().UTC() },
+		Import: func(ctx context.Context) error {
+			config, err := configReader.SuperagentConfig(ctx, tenantID)
+			if err != nil {
+				return err
+			}
+			_, err = superagentplugin.ImportChannel(ctx, service, importOptions, config.Channel, 200)
+			return err
+		},
+		Logger: log,
+		Now:    func() time.Time { return time.Now().UTC() },
 	})
 	if err != nil {
-		log.Warn("super-agent board mirror is not wired", "err", err)
+		log.Warn("super-agent board projection is not wired", "err", err)
 		return nil
 	}
-	commands, err := superagentboard.NewSupervisorCommands(tenantID, st, service)
-	if err != nil {
-		log.Warn("super-agent board command bridge is not wired", "err", err)
-		return nil
-	}
-	bridge.Attach(st, configReader, mirror, commands, board)
-	go mirror.Run(ctx)
-	return mirror
+	return writer
 }
 
-// boardChannelACL grants the mirrored channel's operator relation. The mirror
-// writes through the board log, not as a request principal, so the channel has
+// boardChannelACL grants the projected channel's operator relation. The writer
+// appends through the board log, not as a request principal, so the channel has
 // no creator relation; without this tuple even an operator cannot see the
 // queue. tenant-admin and bot-operator are the builtin groups that operate the
-// super-agent queue; owner includes editor (claim/complete/block) and viewer
-// (reads), and is what the bridge's channel-level check requires. A deployment
-// with its own groups can replace this seam.
+// super-agent queue; owner includes editor and viewer, and is what the UI's
+// channel-level check requires. A deployment with its own groups can replace
+// this seam.
 type boardChannelACL struct {
 	store *store.Store
 }
 
-// EnsureOperator implements superagentboard.ChannelACL.
+// EnsureOperator implements superagentplugin.ChannelACL.
 func (a boardChannelACL) EnsureOperator(ctx context.Context, tenantID uuid.UUID, channel string) error {
 	if a.store == nil || tenantID == uuid.Nil || strings.TrimSpace(channel) == "" {
 		return nil

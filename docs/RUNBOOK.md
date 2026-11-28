@@ -118,20 +118,13 @@ export KEEL_BOARD_FILE_TIMEOUT=10s   # 可选；单个入站文件下载超时
     `reopen`/`cancel`；`waiting`：owner/manage 有 `assign`/`needs`/`cancel`。
   - 任何非归档、可写频道都有 `reply`（需频道 editor）。租约过期的 claim 按 `ready` 处理，
     不再提供 token 动作。
-  - `archived=true`、`mirror.readOnly=true`：`moves=[]`。镜像任务在命令桥开启时只保留
-    bridge 真正支持的 `claim`/`complete`/`fail`/`block`/`unblock`/`assign`/`cancel`。
-    镜像动作还要求调用者自己的 `task.write` 覆盖 tenant scope（bridge 的 `AuthorizeTaskWrite`）；
-    只有 team scope（如默认 `bot-operator`）或 supervisor 未接线时 `mirror.readOnly=true`、
-    `bridge=false`、`moves=[]`，不会出现点击后才 403 的动作。
+  - `archived=true`：`moves=[]`。命令桥已随 `superagentboard` 包删除（change
+    keel-plugin-split），board 不再把动作回呼 supervisor；superagent 的 ticket 是唯一真值，
+    board 任务由 `keel.superagent` 插件的只写投影维护。
   - `takeover`、`release.force`、`answer` 在当前 board v0.1.1/keel 没有后端端点，**不**谎报。
-- `archived` 来自镜像写入的 `board.archived=true` 标签（客户端不能写 `board.*`）；归档 Ticket
-  导入为只读历史任务。`mirror{source,readOnly,bridge}` 来自 `source=superagent` +
-  `ticket` + `noSync` 标签与 `board_links`；命令桥未开启/未装配或调用者缺 tenant
-  `task.write` 时 `readOnly=true`。supervisor 完全未装配时 bridge 仍会 attach
-  links/config/board 的只读半边：linked 线程的 reply/edit/delete 与任务动作返回 409
-  `mirror_read_only`，普通线程不受影响。
-  `origin{platform,ref}` 对镜像任务指向 superagent ticket。`copies` 暂不提供：board v0.1.1
-  的 message view 只有 `undelivered`，没有 task-level 成功副本列表，mount 层不伪造空数组。
+- `archived` 来自 `board.archived=true` 标签（客户端不能写 `board.*`）；归档 Ticket
+  导入为只读历史任务。`copies` 暂不提供：board v0.1.1 的 message view 只有
+  `undelivered`，没有 task-level 成功副本列表，mount 层不伪造空数组。
 - `/v1/board/sync/entries|status` 保留 board 形状，合并 keel 的凭据状态
   （`configured`→`valid`，`missing`/`invalid`→`invalid`，keel 无该 entry→`unknown`）；
   board v0.1.1 没有可测量的 lag 时间戳，因此 `lag: null`（明确未知），不伪造 `targets`
@@ -242,30 +235,31 @@ export KEEL_BOARD_FILE_TIMEOUT=10s   # 可选；单个入站文件下载超时
 ```
 
 ```bash
-export KEEL_SECRET_KEY='…'     # 必填；缺失时 mirror/bridge 均 fail closed（不镜像、不 claim）
+export KEEL_SECRET_KEY='…'     # 必填；缺失时 board 投影 fail closed（不写、不 claim）
 ```
 
-- 方向：superagent → board 单向。Ticket→任务线程、Assignment→claim（lease 900s，按
-  assignment 心跳续期）、Attention→blocked（`needs_input`/`awaiting_approval`）、
-  report→回复；`collab_*` 始终是真值，适配器只追加 board 事件。
-- 幂等：`board_links` 的 `(tenant, source, source_id, kind)` 唯一；重复同步/重启复用同一
-  task/回复；report_id / attention_id 是回复幂等键；claim token 由
+- 插件边界：`keel.board` 拥有 task/channel/thread 与 board 存储，暴露
+  `boardplugin.Service`；`keel.superagent` 声明 `requires: [board]`，自有 `superagent_*`
+  表与 `superagent_board_links`，board 缺失/禁用时 `PENDING`。旧 `internal/superagentboard`
+  镜像/命令桥已删除（破坏性变更），互不 import 由 `internal/architecture` 门禁守住。
+- 方向：superagent → board 只写投影 + board task → ticket 导入。Ticket→任务线程、
+  Assignment→claim（lease 900s，按 assignment 心跳续期）、Attention→blocked
+  （`needs_input`/`awaiting_approval`）、report→回复；board 任务经 board 服务导入为
+  ticket + open assignment。superagent 的 `superagent_*` 始终是真值，适配器只追加 board 事件。
+- 幂等：`superagent_board_links` 的 `(tenant, source, source_id, kind)` 唯一；重复同步/重启
+  复用同一 task/回复；report_id / attention_id 是回复幂等键；claim token 由
   `HMAC-SHA256(KEEL_SECRET_KEY, "board-claim:v1:<tenant>:<assignment>:<session>")` 派生，服务端只存 hash。
-- 只读：镜像线程/消息写 `noSync`，统一 GitHub sync 不会二次回写；旧 `/superagent` 看板与
+- 只读：投影线程/消息写 `noSync`，统一 GitHub sync 不会二次回写；旧 `/superagent` 看板与
   `/v1/superagent` 只读/运营 API 已删除（破坏性变更，旧脚本归档在
   `scripts/archive/retired-superagent/`），board 队列/线程是唯一任务面。
-- 命令桥：board 的 claim/complete/fail/block/unblock/assign/cancel 先做 **频道级** 授权
-  （mirrored task 所在 channel 的 editor 关系 + board.write/manage；仅“别的频道有写权限”
-  不够），再调 supervisor 既有 API（ResumeTicket/Report/Ask/AnswerAttention/StopTicket），
-  成功后才由 mirror 追加 board 事件；supervisor 拒绝/超时不会改变 board 状态（返回 4xx/5xx，
-  board 头不变）。assign 的 board 落盘单独失败时返回 202 `{supervisorAccepted:true,
-  boardSynced:false}`，不伪装 200。
-- 运营组：mirror 对 `tenant-admin` 与 `bot-operator` 写 mirrored channel 的 `owner` 关系；
+- 命令桥已删除：board 上的 claim/complete/fail/block/unblock/assign/cancel 只改 board，
+  不再回呼 supervisor；superagent 运营 API（resume/stop/answer）仍走 `task.write` 授权。
+- 运营组：投影对 `tenant-admin` 与 `bot-operator` 写 channel 的 `owner` 关系；
   `bot-operator` 预设同时带 `board.read`/`board.write`（team scope），因此默认运营组成员
   可以 claim/complete/block；没有该频道关系的 board.write 用户仍 404。`board.manage`
   （sync entries 等）不在 `bot-operator` 预设内。
-- 验收：`KEEL_TEST_DSN='postgres://…' go test ./internal/superagentboard/ -v` 与
-  `go test -race ./internal/superagentboard/ ./internal/store/`。
+- 验收：`KEEL_TEST_DSN='postgres://…' go test ./internal/superagentplugin/ ./internal/superagentstore/ ./internal/boardplugin/ -v` 与
+  `go test ./internal/pluginruntime/ ./internal/pluginstore/...`。
 
 **验收 / 排障**
 
@@ -276,16 +270,16 @@ KEEL_TEST_DSN='postgres://…' go test -race ./internal/boardintegration/
 KEEL_TEST_DSN='postgres://…' go test ./internal/boardintegration/ -run TestBoardStoreRLSUsesTenantSetting -v
 # Phase 2 契约：/me、moves 矩阵、归档导入、sync 凭据合并
 KEEL_TEST_DSN='postgres://…' go test ./internal/boardintegration/ -run 'TestBoardMe|TestTaskMoves|TestBoardJSON|TestSyncEntriesMerge' -v
-KEEL_TEST_DSN='postgres://…' go test ./internal/superagentboard/ -run 'TestMirrorImportsArchived|TestPGBoardMirrorImportsArchived' -v
+KEEL_TEST_DSN='postgres://…' go test ./internal/superagentplugin/ -run TestBoardTaskToTicketToBoardWriteback -v
 go test ./internal/access/ ./internal/accessgate/ ./cmd/keel/
 scripts/binary-size.sh --budget-kb 4096 --base 6ee7fe3
 
 # 全量 + E2E（fake Slack/GitHub/Linear/Chat SDK bridge + superagent 命令桥；
 # 生成 HTML 报告；含 fresh-channel 400/201/导入、board_disabled、supervisor
 # timeout/5xx/retry、频道级授权拒绝等步骤）
-KEEL_TEST_DSN='postgres://…' scripts/keel-board-phase1-sync-gate.sh
-KEEL_TEST_DSN='postgres://…' go run ./cmd/board-sync-e2e \
-  -dsn 'postgres://…' -out /tmp/phase-1-sync-e2e.html
+# 旧 board-sync-e2e 命令与 gate 脚本随 superagentboard 删除；
+# 新的插件 E2E 是 internal/superagentplugin 的 PG 测试。
+KEEL_TEST_DSN='postgres://…' go test ./internal/superagentplugin/ -run TestBoardTaskToTicketToBoardWriteback -v
 
 # Phase 2 最终门禁：独占全量 TUI、全量 Go、UI 截图/五态 HTML、文件覆盖表；
 # 需要干净 tracked worktree，输出 evidence/phase-2-gates.md + phase-2-pin.txt。

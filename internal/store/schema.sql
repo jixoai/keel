@@ -728,6 +728,42 @@ CREATE TABLE IF NOT EXISTS plugin_audit (
 CREATE INDEX IF NOT EXISTS plugin_audit_tenant ON plugin_audit (tenant_id, audit_id);
 CREATE INDEX IF NOT EXISTS plugin_audit_plugin ON plugin_audit (plugin_id, audit_id);
 
+-- Plugin platform storage (change keel-plugin-split). The platform owns one
+-- tenant-scoped surface for every plugin: opaque state keys, one opaque JSON
+-- configuration document and the dependency status the host computed at the
+-- last assembly. The inventory row remains `plugins` above; only board and
+-- superagent get independent domain stores (see the superagent_* and board_*
+-- tables), and no other plugin adds a schema of its own. There is no SQLite
+-- adapter: the pluginstore.Store interface is the adapter boundary.
+CREATE TABLE IF NOT EXISTS plugin_state (
+    tenant_id  uuid NOT NULL,
+    plugin_id  text NOT NULL,
+    key        text NOT NULL,
+    value      text NOT NULL DEFAULT '',
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (tenant_id, plugin_id, key)
+);
+
+CREATE TABLE IF NOT EXISTS plugin_config (
+    tenant_id  uuid NOT NULL,
+    plugin_id  text NOT NULL,
+    document   jsonb NOT NULL DEFAULT '{}'::jsonb,
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (tenant_id, plugin_id)
+);
+
+CREATE TABLE IF NOT EXISTS plugin_dependency (
+    tenant_id  uuid NOT NULL,
+    plugin_id  text NOT NULL,
+    requires   jsonb NOT NULL DEFAULT '[]'::jsonb,
+    state      text NOT NULL,
+    reason     text NOT NULL DEFAULT '',
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (tenant_id, plugin_id)
+);
+
+CREATE INDEX IF NOT EXISTS plugin_dependency_state ON plugin_dependency (tenant_id, state);
+
 -- Compatibility for the pre-keel-creation shape. The schema only makes the new
 -- columns addressable: it must not assign a tenant to an old deployment-level
 -- row (only the serving process knows that tenant) and it must not retire audit
@@ -1521,18 +1557,38 @@ CREATE INDEX IF NOT EXISTS sessions_by_created_by
 CREATE INDEX IF NOT EXISTS sessions_by_team_bot
     ON sessions (tenant_id, team_bot_id) WHERE team_bot_id IS NOT NULL;
 
--- --- collab-superagent (change keel-collab-superagent) ----------------------
+-- --- superagent plugin domain tables (change keel-plugin-split) --------------
 --
--- Durable work-queue records for the superagent collaboration mode. The core
+-- Breaking ownership move: these tables belong to the superagent plugin's own
+-- adapter (internal/superagentstore), not to the core keel store. The previous
+-- collab_* names and the superagent->board mirror's board_links name are dropped
+-- outright; there is no compatibility view, dual write or data migration. An
+-- alpha deployment that needs its old rows exports/reset explicitly.
+--
+-- Only board and superagent own domain tables. Attachment/telemetry use their
+-- platform services; commands/UI/MCP/skills keep platform/core state.
+DROP TABLE IF EXISTS collab_worker_reports CASCADE;
+DROP TABLE IF EXISTS collab_assignments CASCADE;
+DROP TABLE IF EXISTS collab_attentions CASCADE;
+DROP TABLE IF EXISTS collab_subscriptions CASCADE;
+DROP TABLE IF EXISTS collab_outbox CASCADE;
+DROP TABLE IF EXISTS collab_source_events CASCADE;
+DROP TABLE IF EXISTS collab_source_cursors CASCADE;
+DROP TABLE IF EXISTS collab_links CASCADE;
+DROP TABLE IF EXISTS collab_session_index CASCADE;
+DROP TABLE IF EXISTS collab_work_items CASCADE;
+DROP TABLE IF EXISTS board_links CASCADE;
+
+-- Durable work-queue records for the superagent plugin. The core
 -- collab.WorkStore contract (WorkItem/Assignment/Attention/Link) is backed by
 -- the first five tables; subscriptions, source cursors, the seen-event inbox,
--- the outbox and the Host's session index are the mode's own records. Every
+-- the outbox and the Host's session index are the plugin's own records. Every
 -- table is tenant-scoped and listed in rlsTenantTables.
 --
--- A Ticket is a collab_work_items row with mode_id='superagent'; its Mandate and
+-- A Ticket is a superagent_work_items row with mode_id='superagent'; its Mandate and
 -- Thread live in the input JSON document, so no superagent-only column leaks
 -- into the generic work-item shape.
-CREATE TABLE IF NOT EXISTS collab_work_items (
+CREATE TABLE IF NOT EXISTS superagent_work_items (
     tenant_id        uuid NOT NULL,
     work_item_id     uuid NOT NULL,
     mode_id          text NOT NULL,
@@ -1548,21 +1604,21 @@ CREATE TABLE IF NOT EXISTS collab_work_items (
     updated_at       timestamptz NOT NULL DEFAULT now(),
     PRIMARY KEY (tenant_id, work_item_id)
 );
--- Alpha schema evolution: a pre-existing collab_work_items table keeps its rows
+-- Alpha schema evolution: a pre-existing superagent_work_items table keeps its rows
 -- and gains the owner membership column. A work item without an owner has no
 -- session that can create its first assignment.
-ALTER TABLE collab_work_items ADD COLUMN IF NOT EXISTS owner_session_id uuid;
-CREATE INDEX IF NOT EXISTS collab_work_items_by_owner
-    ON collab_work_items (tenant_id, owner_session_id)
+ALTER TABLE superagent_work_items ADD COLUMN IF NOT EXISTS owner_session_id uuid;
+CREATE INDEX IF NOT EXISTS superagent_work_items_by_owner
+    ON superagent_work_items (tenant_id, owner_session_id)
     WHERE owner_session_id IS NOT NULL;
 
-CREATE UNIQUE INDEX IF NOT EXISTS collab_work_items_idempotent
-    ON collab_work_items (tenant_id, mode_id, idempotency_key)
+CREATE UNIQUE INDEX IF NOT EXISTS superagent_work_items_idempotent
+    ON superagent_work_items (tenant_id, mode_id, idempotency_key)
     WHERE idempotency_key <> '';
-CREATE INDEX IF NOT EXISTS collab_work_items_by_status
-    ON collab_work_items (tenant_id, mode_id, status, created_at DESC);
+CREATE INDEX IF NOT EXISTS superagent_work_items_by_status
+    ON superagent_work_items (tenant_id, mode_id, status, created_at DESC);
 
-CREATE TABLE IF NOT EXISTS collab_assignments (
+CREATE TABLE IF NOT EXISTS superagent_assignments (
     tenant_id          uuid NOT NULL,
     assignment_id      uuid NOT NULL,
     work_item_id       uuid NOT NULL,
@@ -1579,15 +1635,15 @@ CREATE TABLE IF NOT EXISTS collab_assignments (
     created_at         timestamptz NOT NULL DEFAULT now(),
     updated_at         timestamptz NOT NULL DEFAULT now(),
     PRIMARY KEY (tenant_id, assignment_id),
-    CONSTRAINT collab_assignments_work_item_fk FOREIGN KEY (tenant_id, work_item_id)
-        REFERENCES collab_work_items (tenant_id, work_item_id) ON DELETE CASCADE
+    CONSTRAINT superagent_assignments_work_item_fk FOREIGN KEY (tenant_id, work_item_id)
+        REFERENCES superagent_work_items (tenant_id, work_item_id) ON DELETE CASCADE
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS collab_assignments_idempotent
-    ON collab_assignments (tenant_id, work_item_id, idempotency_key)
+CREATE UNIQUE INDEX IF NOT EXISTS superagent_assignments_idempotent
+    ON superagent_assignments (tenant_id, work_item_id, idempotency_key)
     WHERE idempotency_key <> '';
-CREATE INDEX IF NOT EXISTS collab_assignments_by_status
-    ON collab_assignments (tenant_id, status, created_at);
+CREATE INDEX IF NOT EXISTS superagent_assignments_by_status
+    ON superagent_assignments (tenant_id, status, created_at);
 
 -- Worker reports are the ticket timeline facts and the durable idempotency
 -- ledger of the model-facing `report` tool. request_id is scoped by
@@ -1596,7 +1652,7 @@ CREATE INDEX IF NOT EXISTS collab_assignments_by_status
 -- a second one. audited_at is the two-phase claim marker: a claim is inserted
 -- before its auth_events row, and an unaudited claim is completed by the retry.
 -- The summary is ticket data, never an audit body (auth_events carry no text).
-CREATE TABLE IF NOT EXISTS collab_worker_reports (
+CREATE TABLE IF NOT EXISTS superagent_worker_reports (
     tenant_id      uuid NOT NULL,
     report_id      uuid NOT NULL,
     work_item_id   uuid NOT NULL,
@@ -1611,21 +1667,21 @@ CREATE TABLE IF NOT EXISTS collab_worker_reports (
     applied_at     timestamptz,
     created_at     timestamptz NOT NULL DEFAULT now(),
     PRIMARY KEY (tenant_id, report_id),
-    CONSTRAINT collab_worker_reports_work_item_fk FOREIGN KEY (tenant_id, work_item_id)
-        REFERENCES collab_work_items (tenant_id, work_item_id) ON DELETE CASCADE
+    CONSTRAINT superagent_worker_reports_work_item_fk FOREIGN KEY (tenant_id, work_item_id)
+        REFERENCES superagent_work_items (tenant_id, work_item_id) ON DELETE CASCADE
 );
 -- Alpha schema evolution for the pre-existing table (this change is unmerged):
 -- add the audit/apply markers and replace the request-id key with the scoped one.
-ALTER TABLE collab_worker_reports ADD COLUMN IF NOT EXISTS audited_at timestamptz;
-ALTER TABLE collab_worker_reports ADD COLUMN IF NOT EXISTS applied_at timestamptz;
-DROP INDEX IF EXISTS collab_worker_reports_request;
-CREATE UNIQUE INDEX IF NOT EXISTS collab_worker_reports_request_scope
-    ON collab_worker_reports (tenant_id, work_item_id, assignment_id, session_id, request_id)
+ALTER TABLE superagent_worker_reports ADD COLUMN IF NOT EXISTS audited_at timestamptz;
+ALTER TABLE superagent_worker_reports ADD COLUMN IF NOT EXISTS applied_at timestamptz;
+DROP INDEX IF EXISTS superagent_worker_reports_request;
+CREATE UNIQUE INDEX IF NOT EXISTS superagent_worker_reports_request_scope
+    ON superagent_worker_reports (tenant_id, work_item_id, assignment_id, session_id, request_id)
     WHERE request_id <> '';
-CREATE INDEX IF NOT EXISTS collab_worker_reports_by_ticket
-    ON collab_worker_reports (tenant_id, work_item_id, created_at, report_id);
+CREATE INDEX IF NOT EXISTS superagent_worker_reports_by_ticket
+    ON superagent_worker_reports (tenant_id, work_item_id, created_at, report_id);
 
-CREATE TABLE IF NOT EXISTS collab_attentions (
+CREATE TABLE IF NOT EXISTS superagent_attentions (
     tenant_id       uuid NOT NULL,
     attention_id    uuid NOT NULL,
     work_item_id    uuid NOT NULL,
@@ -1644,21 +1700,21 @@ CREATE TABLE IF NOT EXISTS collab_attentions (
     created_at      timestamptz NOT NULL DEFAULT now(),
     deadline        timestamptz NOT NULL DEFAULT now(),
     PRIMARY KEY (tenant_id, attention_id),
-    CONSTRAINT collab_attentions_work_item_fk FOREIGN KEY (tenant_id, work_item_id)
-        REFERENCES collab_work_items (tenant_id, work_item_id) ON DELETE CASCADE
+    CONSTRAINT superagent_attentions_work_item_fk FOREIGN KEY (tenant_id, work_item_id)
+        REFERENCES superagent_work_items (tenant_id, work_item_id) ON DELETE CASCADE
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS collab_attentions_request
-    ON collab_attentions (tenant_id, work_item_id, request_id)
+CREATE UNIQUE INDEX IF NOT EXISTS superagent_attentions_request
+    ON superagent_attentions (tenant_id, work_item_id, request_id)
     WHERE request_id <> '';
-CREATE INDEX IF NOT EXISTS collab_attentions_open
-    ON collab_attentions (tenant_id, created_at)
+CREATE INDEX IF NOT EXISTS superagent_attentions_open
+    ON superagent_attentions (tenant_id, created_at)
     WHERE status = 'open';
 -- The answer-recovery scan: newest answered attentions of one mode, bounded.
-CREATE INDEX IF NOT EXISTS collab_attentions_status_recovery
-    ON collab_attentions (tenant_id, mode_id, status, created_at DESC);
+CREATE INDEX IF NOT EXISTS superagent_attentions_status_recovery
+    ON superagent_attentions (tenant_id, mode_id, status, created_at DESC);
 
-CREATE TABLE IF NOT EXISTS collab_links (
+CREATE TABLE IF NOT EXISTS superagent_links (
     tenant_id     uuid NOT NULL,
     link_id       uuid NOT NULL,
     work_item_id  uuid,
@@ -1671,30 +1727,18 @@ CREATE TABLE IF NOT EXISTS collab_links (
     PRIMARY KEY (tenant_id, link_id)
 );
 
-CREATE INDEX IF NOT EXISTS collab_links_by_work_item
-    ON collab_links (tenant_id, work_item_id);
+CREATE INDEX IF NOT EXISTS superagent_links_by_work_item
+    ON superagent_links (tenant_id, work_item_id);
 
 -- One row per natural relation: the same (tenant, host WorkItem scope, kind,
 -- directed endpoints) relation is idempotent even when a caller supplies an
--- explicit id. Older rows predate the natural key; keep the smallest link_id
--- for each relation before the unique index is created so an upgrade with
--- historic duplicates does not fail.
-DELETE FROM collab_links a
- USING collab_links b
- WHERE a.tenant_id = b.tenant_id
-   AND COALESCE(a.work_item_id, '00000000-0000-0000-0000-000000000000'::uuid)
-       = COALESCE(b.work_item_id, '00000000-0000-0000-0000-000000000000'::uuid)
-   AND a.kind = b.kind
-   AND a.from_type = b.from_type AND a.from_id = b.from_id
-   AND a.to_type = b.to_type AND a.to_id = b.to_id
-   AND a.link_id > b.link_id;
-
-CREATE UNIQUE INDEX IF NOT EXISTS collab_links_natural
-    ON collab_links (tenant_id,
+-- explicit id.
+CREATE UNIQUE INDEX IF NOT EXISTS superagent_links_natural
+    ON superagent_links (tenant_id,
                      COALESCE(work_item_id, '00000000-0000-0000-0000-000000000000'::uuid),
                      kind, from_type, from_id, to_type, to_id);
 
-CREATE TABLE IF NOT EXISTS collab_subscriptions (
+CREATE TABLE IF NOT EXISTS superagent_subscriptions (
     tenant_id       uuid NOT NULL,
     subscription_id uuid NOT NULL,
     work_item_id    uuid NOT NULL,
@@ -1705,17 +1749,17 @@ CREATE TABLE IF NOT EXISTS collab_subscriptions (
     created_at      timestamptz NOT NULL DEFAULT now(),
     updated_at      timestamptz NOT NULL DEFAULT now(),
     PRIMARY KEY (tenant_id, subscription_id),
-    CONSTRAINT collab_subscriptions_work_item_fk FOREIGN KEY (tenant_id, work_item_id)
-        REFERENCES collab_work_items (tenant_id, work_item_id) ON DELETE CASCADE
+    CONSTRAINT superagent_subscriptions_work_item_fk FOREIGN KEY (tenant_id, work_item_id)
+        REFERENCES superagent_work_items (tenant_id, work_item_id) ON DELETE CASCADE
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS collab_subscriptions_thread
-    ON collab_subscriptions (tenant_id, work_item_id, source_id, thread_id);
-CREATE INDEX IF NOT EXISTS collab_subscriptions_by_thread
-    ON collab_subscriptions (tenant_id, source_id, thread_id)
+CREATE UNIQUE INDEX IF NOT EXISTS superagent_subscriptions_thread
+    ON superagent_subscriptions (tenant_id, work_item_id, source_id, thread_id);
+CREATE INDEX IF NOT EXISTS superagent_subscriptions_by_thread
+    ON superagent_subscriptions (tenant_id, source_id, thread_id)
     WHERE active;
 
-CREATE TABLE IF NOT EXISTS collab_source_cursors (
+CREATE TABLE IF NOT EXISTS superagent_source_cursors (
     tenant_id  uuid NOT NULL,
     source_id  text NOT NULL,
     cursor     text NOT NULL,
@@ -1723,7 +1767,7 @@ CREATE TABLE IF NOT EXISTS collab_source_cursors (
     PRIMARY KEY (tenant_id, source_id)
 );
 
-CREATE TABLE IF NOT EXISTS collab_source_events (
+CREATE TABLE IF NOT EXISTS superagent_source_events (
     tenant_id    uuid NOT NULL,
     source_id    text NOT NULL,
     event_id     text NOT NULL,
@@ -1738,10 +1782,10 @@ CREATE TABLE IF NOT EXISTS collab_source_events (
     PRIMARY KEY (tenant_id, source_id, event_id)
 );
 
-CREATE INDEX IF NOT EXISTS collab_source_events_by_decision
-    ON collab_source_events (tenant_id, decision, created_at DESC);
+CREATE INDEX IF NOT EXISTS superagent_source_events_by_decision
+    ON superagent_source_events (tenant_id, decision, created_at DESC);
 
-CREATE TABLE IF NOT EXISTS collab_outbox (
+CREATE TABLE IF NOT EXISTS superagent_outbox (
     tenant_id       uuid NOT NULL,
     message_id      uuid NOT NULL,
     work_item_id    uuid,
@@ -1761,17 +1805,17 @@ CREATE TABLE IF NOT EXISTS collab_outbox (
     PRIMARY KEY (tenant_id, message_id)
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS collab_outbox_idempotent
-    ON collab_outbox (tenant_id, idempotency_key)
+CREATE UNIQUE INDEX IF NOT EXISTS superagent_outbox_idempotent
+    ON superagent_outbox (tenant_id, idempotency_key)
     WHERE idempotency_key <> '';
-CREATE INDEX IF NOT EXISTS collab_outbox_due
-    ON collab_outbox (tenant_id, created_at)
+CREATE INDEX IF NOT EXISTS superagent_outbox_due
+    ON superagent_outbox (tenant_id, created_at)
     WHERE status = 'pending';
-CREATE INDEX IF NOT EXISTS collab_outbox_sending
-    ON collab_outbox (tenant_id, updated_at)
+CREATE INDEX IF NOT EXISTS superagent_outbox_sending
+    ON superagent_outbox (tenant_id, updated_at)
     WHERE status = 'sending';
 
-CREATE TABLE IF NOT EXISTS collab_session_index (
+CREATE TABLE IF NOT EXISTS superagent_session_index (
     tenant_id         uuid NOT NULL,
     session_id        uuid NOT NULL,
     parent_session_id uuid,
@@ -1785,14 +1829,14 @@ CREATE TABLE IF NOT EXISTS collab_session_index (
     PRIMARY KEY (tenant_id, session_id)
 );
 
-CREATE INDEX IF NOT EXISTS collab_session_index_children
-    ON collab_session_index (tenant_id, parent_session_id)
+CREATE INDEX IF NOT EXISTS superagent_session_index_children
+    ON superagent_session_index (tenant_id, parent_session_id)
     WHERE state = 'active';
-CREATE INDEX IF NOT EXISTS collab_session_index_mode
-    ON collab_session_index (tenant_id, mode_id)
+CREATE INDEX IF NOT EXISTS superagent_session_index_mode
+    ON superagent_session_index (tenant_id, mode_id)
     WHERE state = 'active';
 
--- board_links is the superagent -> board mirror's identity map (change
+-- superagent_board_links is the superagent -> board mirror's identity map (change
 -- keel-board-v1, 11.1). It is keel-owned, not board-owned: the board log keeps
 -- the projection, while this table remembers which board task a Ticket, an
 -- Assignment claim, an Attention, or a worker report became. The unique key is
@@ -1801,7 +1845,7 @@ CREATE INDEX IF NOT EXISTS collab_session_index_mode
 -- board epoch the adapter last mirrored for a claim; it never fences a
 -- supervisor write (the supervisor stays the truth) and exists so a lapsed or
 -- taken-over board claim is detected instead of overwritten.
-CREATE TABLE IF NOT EXISTS board_links (
+CREATE TABLE IF NOT EXISTS superagent_board_links (
     tenant_id     uuid NOT NULL,
     source        text NOT NULL,
     source_id     text NOT NULL,
@@ -1820,10 +1864,10 @@ CREATE TABLE IF NOT EXISTS board_links (
 DROP INDEX IF EXISTS board_links_by_task;
 DROP INDEX IF EXISTS board_links_by_task_any;
 CREATE UNIQUE INDEX IF NOT EXISTS board_links_ticket_by_task
-    ON board_links (tenant_id, source, board_task_id)
+    ON superagent_board_links (tenant_id, source, board_task_id)
     WHERE kind = 'ticket';
 CREATE INDEX IF NOT EXISTS board_links_by_task_any
-    ON board_links (tenant_id, source, kind, board_task_id);
+    ON superagent_board_links (tenant_id, source, kind, board_task_id);
 
 -- Command invocations (change keel-plugin-commands): the durable idempotency
 -- and audit row of one chat command call. (tenant, session, requestId) is the

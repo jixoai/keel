@@ -1,4 +1,4 @@
-package superagentboard
+package superagentplugin
 
 import (
 	"crypto/hmac"
@@ -20,7 +20,7 @@ const SecretEnv = "KEEL_SECRET_KEY"
 // ErrSecretMissing is the fail-closed answer when mirroring is requested
 // without KEEL_SECRET_KEY. The adapter neither mirrors nor claims in that
 // deployment: a predictable token would let any board reader forge the claim.
-var ErrSecretMissing = errors.New("superagentboard: KEEL_SECRET_KEY is required to derive mirrored claim tokens")
+var ErrSecretMissing = errors.New("superagentplugin: KEEL_SECRET_KEY is required to derive mirrored claim tokens")
 
 // TokenSource derives the deterministic claim token of one mirrored assignment.
 // The derivation is stable across restarts by design: the process can rebuild
@@ -49,7 +49,7 @@ func (t *TokenSource) ClaimToken(tenantID, assignmentID, sessionID uuid.UUID) (s
 		return "", ErrSecretMissing
 	}
 	if tenantID == uuid.Nil || assignmentID == uuid.Nil || sessionID == uuid.Nil {
-		return "", fmt.Errorf("superagentboard: tenant, assignment and session ids are required for a claim token")
+		return "", fmt.Errorf("superagentplugin: tenant, assignment and session ids are required for a claim token")
 	}
 	return t.derive("board-claim:v1", tenantID, assignmentID, sessionID)
 }
@@ -64,7 +64,7 @@ func (t *TokenSource) SettlementToken(tenantID, ticketID uuid.UUID) (string, err
 		return "", ErrSecretMissing
 	}
 	if tenantID == uuid.Nil || ticketID == uuid.Nil {
-		return "", fmt.Errorf("superagentboard: tenant and ticket ids are required for a settlement token")
+		return "", fmt.Errorf("superagentplugin: tenant and ticket ids are required for a settlement token")
 	}
 	return t.derive("board-settle:v1", tenantID, ticketID, ticketID)
 }
@@ -73,7 +73,7 @@ func (t *TokenSource) derive(purpose string, tenantID, left, right uuid.UUID) (s
 	mac := hmac.New(sha256.New, t.secret)
 	message := purpose + ":" + tenantID.String() + ":" + left.String() + ":" + right.String()
 	if _, err := mac.Write([]byte(message)); err != nil {
-		return "", fmt.Errorf("superagentboard: derive claim token: %w", err)
+		return "", fmt.Errorf("superagentplugin: derive claim token: %w", err)
 	}
 	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil)), nil
 }
