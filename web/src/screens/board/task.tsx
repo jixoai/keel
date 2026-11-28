@@ -81,7 +81,6 @@ import {
 } from "../books/common";
 import {
   assignTarget,
-  answerText,
   blockKind,
   blockReason,
   boardDialog,
@@ -320,7 +319,7 @@ function TaskActions(props: { taskId: string; task: BoardTaskView; onOpenTask: (
     });
   const actionMoves = (): BoardMove[] => moves().filter((move) => move !== "reply");
   const primary = () =>
-    (["complete", "claim", "unblock", "reopen", "answer"] as BoardMove[]).find((move) => actionMoves().includes(move));
+    (["complete", "claim", "unblock", "reopen"] as BoardMove[]).find((move) => actionMoves().includes(move));
   const secondary = () =>
     (["renew", "release", "block", "assign", "needs"] as BoardMove[]).filter((move) => actionMoves().includes(move));
   const dangerous = () => (["fail", "cancel"] as BoardMove[]).filter((move) => actionMoves().includes(move));
@@ -348,7 +347,6 @@ function TaskActions(props: { taskId: string; task: BoardTaskView; onOpenTask: (
       case "assign":
       case "needs":
       case "cancel":
-      case "answer":
         openDialog(move, props.taskId);
         break;
       default:
@@ -371,9 +369,6 @@ function TaskActions(props: { taskId: string; task: BoardTaskView; onOpenTask: (
       <If when={props.task.archived === true}>
         <StateNote tone="info" icon="lock" text="只读归档：保留旧工单的记录，不提供状态变更。" />
       </If>
-      <If when={props.task.archived !== true && props.task.mirror?.readOnly === true}>
-        <StateNote tone="info" icon="lock" text="镜像任务只读：由超级助理管理；命令桥未开启时不能在这里改状态。" />
-      </If>
       <If when={props.task.moves === undefined}>
         <StateNote
           testID="board-moves-missing"
@@ -386,7 +381,6 @@ function TaskActions(props: { taskId: string; task: BoardTaskView; onOpenTask: (
         when={
           props.task.moves !== undefined &&
           props.task.archived !== true &&
-          props.task.mirror?.readOnly !== true &&
           actionMoves().length === 0 &&
           !claimLost() &&
           effectiveTaskState(props.task, now()) !== "completed" &&
@@ -416,7 +410,6 @@ function TaskActions(props: { taskId: string; task: BoardTaskView; onOpenTask: (
           !stale() &&
           canWrite() &&
           props.task.archived !== true &&
-          props.task.mirror?.readOnly !== true &&
           actionMoves().length > 0
         }
       >
@@ -572,7 +565,7 @@ function ReplyBlock(props: { message: BoardMessageView; pending?: boolean }) {
 }
 
 const replyAllowed = (task: BoardTaskView): boolean =>
-  task.archived !== true && task.mirror?.readOnly !== true && hasMove(task, "reply");
+  task.archived !== true && hasMove(task, "reply");
 
 function Composer(props: { taskId: string; task: BoardTaskView }) {
   const canReply = () => replyAllowed(props.task) && !boardStore.threadStale();
@@ -861,7 +854,6 @@ export function TaskDialogs(props: { taskId: string }) {
     blockReason.set("");
     blockKind.set("needs_input");
     unblockNote.set("");
-    answerText.set("");
     cancelReason.set("");
     assignTarget.set(task()?.for ?? null);
     needsQuery.set("");
@@ -1123,41 +1115,6 @@ export function TaskDialogs(props: { taskId: string }) {
             onChange={(value) => cancelReason.set(value)}
           />
         </View>
-      </Dialog>
-
-      <Dialog
-        testID="board-dialog-answer"
-        open={dialog()?.kind === "answer"}
-        title="回答并解除阻塞"
-        description={`提问：${task()?.blocked?.reason ?? ""}`}
-        onOpenChange={(event) => !event.open && close()}
-        footer={
-          <>
-            <Button variant="ghost" label="取消" accessibilityLabel="取消回答" onPress={close} style={touchStyle()} />
-            <Button
-              testID="board-dialog-answer-submit"
-              label="回答"
-              accessibilityLabel="提交回答"
-              disabled={!answerText().trim() || boardStore.actionInFlight() !== null}
-              onPress={() =>
-                requireMove("answer", () => {
-                  void boardStore.answer(number(), answerText().trim()).then((ok) => ok && close());
-                })
-              }
-              style={touchStyle()}
-            />
-          </>
-        }
-      >
-        <Textarea
-          testID="board-dialog-answer-input"
-          value={answerText()}
-          placeholder="回答会作为回复写入线程，并把问题交回超级助理。"
-          maxLength={10000}
-          rows={4}
-          accessibilityLabel="回答内容"
-          onChange={(value) => answerText.set(value)}
-        />
       </Dialog>
 
       <AlertDialog

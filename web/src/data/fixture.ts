@@ -1913,7 +1913,6 @@ export class FixtureClient implements SettingsApi, BoardApi {
   boardAssign = (id: string, input: { for: string | null }) => this.boardFixture.boardAssign(id, input);
   boardNeeds = (id: string, needs: string[]) => this.boardFixture.boardNeeds(id, needs);
   boardCancel = (id: string, input: { reason: string }) => this.boardFixture.boardCancel(id, input);
-  boardAnswer = (id: string, input: { text: string }) => this.boardFixture.boardAnswer(id, input);
   boardSyncEntries = () => this.boardFixture.boardSyncEntries();
   boardSyncCredentials = () => this.boardFixture.boardSyncCredentials();
   boardSyncStatus = () => this.boardFixture.boardSyncStatus();

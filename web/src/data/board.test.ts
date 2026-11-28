@@ -25,6 +25,7 @@ import {
   defaultBoardQuery,
   effectiveTaskState,
   insertQueueId,
+  interimMovesForState,
   matchesBoardQuery,
   queryToTaskQuery,
   queueRowOf,
@@ -38,6 +39,7 @@ import {
   mergeMessage,
   mergeTask,
   parseStreamFrame,
+  parseTask,
   taskQueryParams,
 } from "./board-wire";
 import { FixtureBoard } from "./fixture-board";
@@ -237,6 +239,26 @@ test("board：moves 是唯一动作来源；缺失时只读，未知动作被忽
   expect(taskMoves(task({ moves: ["claim", "fly", "complete"] }))).toEqual(["claim", "complete"]);
   expect(taskMoves(task({ moves: undefined }))).toEqual([]);
   expect(taskMoves(undefined)).toEqual([]);
+});
+
+test("board：已删除的命令桥动作与镜像只读语义不再可执行", () => {
+  // `answer` was the superagent command bridge's action; the bridge is gone,
+  // so a stale/unknown token must never render as a button.
+  expect(taskMoves(task({ moves: ["answer", "claim", "reply"] }))).toEqual(["claim", "reply"]);
+  const cached = task({ state: "blocked", moves: ["answer", "claim", "reply"] });
+  const incoming = task({ state: "ready", moves: undefined });
+  expect(interimMovesForState(cached, incoming)).toEqual(["claim", "reply"]);
+  // The old mirror/readOnly/bridge payload is not part of the task view.
+  const parsed = parseTask({
+    state: "ready",
+    owner: "acct",
+    by: "acct",
+    needs: [],
+    epoch: 1,
+    mirror: { source: "superagent", readOnly: true, bridge: true },
+  });
+  expect(parsed === undefined).toBe(false);
+  expect(Object.prototype.hasOwnProperty.call(parsed, "mirror")).toBe(false);
 });
 
 test("board：缓存按 id 合并，线程根更新不把自己塞进回复，回复追加一次", () => {

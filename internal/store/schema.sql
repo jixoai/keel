@@ -1561,23 +1561,36 @@ CREATE INDEX IF NOT EXISTS sessions_by_team_bot
 --
 -- Breaking ownership move: these tables belong to the superagent plugin's own
 -- adapter (internal/superagentstore), not to the core keel store. The previous
--- collab_* names and the superagent->board mirror's board_links name are dropped
+-- collab_* names and the superagent->board mirror's board_links name are retired
 -- outright; there is no compatibility view, dual write or data migration. An
--- alpha deployment that needs its old rows exports/reset explicitly.
+-- alpha deployment that needs its old rows exports them first.
 --
--- Only board and superagent own domain tables. Attachment/telemetry use their
--- platform services; commands/UI/MCP/skills keep platform/core state.
-DROP TABLE IF EXISTS collab_worker_reports CASCADE;
-DROP TABLE IF EXISTS collab_assignments CASCADE;
-DROP TABLE IF EXISTS collab_attentions CASCADE;
-DROP TABLE IF EXISTS collab_subscriptions CASCADE;
-DROP TABLE IF EXISTS collab_outbox CASCADE;
-DROP TABLE IF EXISTS collab_source_events CASCADE;
-DROP TABLE IF EXISTS collab_source_cursors CASCADE;
-DROP TABLE IF EXISTS collab_links CASCADE;
-DROP TABLE IF EXISTS collab_session_index CASCADE;
-DROP TABLE IF EXISTS collab_work_items CASCADE;
-DROP TABLE IF EXISTS board_links CASCADE;
+-- Policy (the same as the retired agents tables above): an empty leftover is
+-- dropped; a table that still holds rows refuses the migration with an explicit
+-- export/rebuild instruction, so a process can never start half-migrated and
+-- silently discard the operator's data.
+DO $$
+DECLARE
+    legacy      text;
+    row_count   bigint;
+BEGIN
+    FOREACH legacy IN ARRAY ARRAY[
+        'board_links',
+        'collab_worker_reports', 'collab_assignments', 'collab_attentions',
+        'collab_subscriptions', 'collab_outbox', 'collab_source_events',
+        'collab_source_cursors', 'collab_links', 'collab_session_index',
+        'collab_work_items'
+    ] LOOP
+        IF to_regclass('public.' || legacy) IS NOT NULL THEN
+            EXECUTE format('SELECT count(*) FROM public.%I', legacy) INTO row_count;
+            IF row_count > 0 THEN
+                RAISE EXCEPTION '%: the legacy table still holds % rows; this build has no migration path. Export or back up these rows, drop the legacy collab_*/board_links tables (or recreate the database), and import the data through the board/superagent APIs', legacy, row_count;
+            END IF;
+            EXECUTE format('DROP TABLE public.%I CASCADE', legacy);
+        END IF;
+    END LOOP;
+END
+$$;
 
 -- Durable work-queue records for the superagent plugin. The core
 -- collab.WorkStore contract (WorkItem/Assignment/Attention/Link) is backed by

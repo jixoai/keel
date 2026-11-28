@@ -857,7 +857,6 @@ export type BoardMove =
   | "fail"
   | "block"
   | "unblock"
-  | "answer"
   | "reopen"
   | "assign"
   | "needs"
@@ -874,7 +873,6 @@ const KNOWN_MOVES = new Set<string>([
   "fail",
   "block",
   "unblock",
-  "answer",
   "reopen",
   "assign",
   "needs",
@@ -895,12 +893,12 @@ export function hasMove(task: BoardTaskView | undefined, move: BoardMove): boole
  * keep only actions whose state still could allow them. This is deliberately
  * conservative; the augmented GET response replaces it. */
 export function interimMovesForState(cached: BoardTaskView, incoming: BoardTaskView): BoardMove[] {
-  if (incoming.archived === true || cached.mirror?.readOnly === true) return [];
+  if (incoming.archived === true) return [];
   const allowed: Record<string, BoardMove[]> = {
     waiting: ["assign", "needs", "cancel", "reply"],
     ready: ["claim", "block", "assign", "needs", "cancel", "reply"],
     claimed: ["renew", "release", "release.force", "takeover", "complete", "fail", "block", "reply"],
-    blocked: ["unblock", "assign", "needs", "cancel", "reply", "answer"],
+    blocked: ["unblock", "assign", "needs", "cancel", "reply"],
     completed: ["reply"],
     failed: ["reopen", "cancel", "reply"],
     canceled: ["reply"],
@@ -959,7 +957,6 @@ export const BOARD_MOVE_LABEL: Record<BoardMove, string> = {
   fail: "标记失败",
   block: "阻塞",
   unblock: "解除阻塞",
-  answer: "回答",
   reopen: "重新打开",
   assign: "指派",
   needs: "前置依赖",
@@ -968,7 +965,7 @@ export const BOARD_MOVE_LABEL: Record<BoardMove, string> = {
 };
 
 /** The primary action: at most one, in product order. */
-export const BOARD_PRIMARY_ORDER: BoardMove[] = ["complete", "claim", "unblock", "reopen", "answer"];
+export const BOARD_PRIMARY_ORDER: BoardMove[] = ["complete", "claim", "unblock", "reopen"];
 
 export function boardPrimaryMove(task: BoardTaskView | undefined): BoardMove | undefined {
   const moves = taskMoves(task);
@@ -1937,25 +1934,9 @@ class BoardStoreImpl {
     );
   }
 
-  async answer(taskId: string, text: string): Promise<boolean> {
-    const api = this.api();
-    if (!api?.boardAnswer) {
-      this.actionError.set({
-        taskId,
-        move: "answer",
-        failure: { kind: "unavailable", message: "这个部署没有开启超级助理命令桥；请在超级助理中回答。" },
-      });
-      return false;
-    }
-    return await this.act(
-      taskId,
-      "answer",
-      null,
-      () => api.boardAnswer!(taskId, { text }),
-      (value) => this.mutationMessage(value),
-      "回答已提交",
-    );
-  }
+  /** The board no longer exposes the deleted superagent command bridge, so
+   * there is no `answer` action to send from this client. A blocked task is
+   * answered in the super-agent surface; the board sees the resulting reply. */
 
   /** A new task (the NewTask sheet). Returns the new root id. */
   async createTask(input: {
@@ -2102,7 +2083,7 @@ class BoardStoreImpl {
       let needsAugment = false;
       const cachedTask = cache.tasks[incoming.id];
       if (incoming.task && cachedTask && cachedTask.moves !== undefined && incoming.task.moves === undefined) {
-        // The SSE feed carries the board's raw projection; `moves`/`mirror`/
+        // The SSE feed carries the board's raw projection; `moves` and
         // `archived` exist only on the augmented GET response. Treat such an
         // event as an invalidation: keep viewer-dependent facts, prune the
         // old moves to the new state (never show an illegal claim), and
@@ -2110,7 +2091,6 @@ class BoardStoreImpl {
         const interim: BoardTaskView = {
           ...incoming.task,
           moves: interimMovesForState(cachedTask, incoming.task),
-          ...(cachedTask.mirror ? { mirror: cachedTask.mirror } : {}),
           ...(cachedTask.archived !== undefined ? { archived: cachedTask.archived } : {}),
           ...(cachedTask.origin ? { origin: cachedTask.origin } : {}),
           ...(cachedTask.copies ? { copies: cachedTask.copies } : {}),

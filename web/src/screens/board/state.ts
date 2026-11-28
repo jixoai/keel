@@ -15,7 +15,6 @@ export type BoardDialogKind =
   | "needs"
   | "cancel"
   | "release"
-  | "answer"
   | "access"
   | "shortcuts";
 
@@ -43,7 +42,6 @@ export const failReason = signal("");
 export const blockKind = signal("needs_input");
 export const blockReason = signal("");
 export const unblockNote = signal("");
-export const answerText = signal("");
 export const cancelReason = signal("");
 export const assignTarget = signal<string | null>(null);
 export const needsQuery = signal("");
@@ -76,7 +74,6 @@ export function resetBoardUi(): void {
   blockKind.set("needs_input");
   blockReason.set("");
   unblockNote.set("");
-  answerText.set("");
   cancelReason.set("");
   assignTarget.set(null);
   needsQuery.set("");

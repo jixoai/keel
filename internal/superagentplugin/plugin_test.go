@@ -108,3 +108,53 @@ func TestSuperagentStartsAfterBoardAndStopsFirst(t *testing.T) {
 		t.Fatalf("stop order = %v", stopped)
 	}
 }
+
+// TestPluginReloadStartsAFreshSupervisor pins the stop/re-arm contract: the
+// plugin's Stop must release the first generation and a later Load must start
+// and later stop a second one. The old sync.Once stopped the first generation
+// and silently leaked every later one (services stayed published and the run
+// context was never cancelled).
+func TestPluginReloadStartsAFreshSupervisor(t *testing.T) {
+	services := pluginruntime.NewServices()
+	stopped := 0
+	superagentPlugin := superagentplugin.NewPlugin(superagentplugin.Options{
+		Service: struct{ Name string }{Name: "supervisor"},
+		Domain:  memoryDomain{},
+		Stop: func(context.Context) error {
+			stopped++
+			return nil
+		},
+	})
+	runtime, err := pluginruntime.New(pluginruntime.Options{
+		Plugins:  []*pluginruntime.Plugin{boardPluginForTest(), superagentPlugin},
+		Services: services,
+	})
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+	load := func() {
+		t.Helper()
+		if err := runtime.Load(context.Background()); err != nil {
+			t.Fatalf("load: %v", err)
+		}
+		if _, ok := services.Get(superagentplugin.Capability); !ok {
+			t.Fatal("superagent service is missing after load")
+		}
+	}
+	unload := func() {
+		t.Helper()
+		if err := runtime.Unload(context.Background()); err != nil {
+			t.Fatalf("unload: %v", err)
+		}
+		if _, ok := services.Get(superagentplugin.Capability); ok {
+			t.Fatal("superagent service survived unload")
+		}
+	}
+	load()
+	unload()
+	load()
+	unload()
+	if stopped != 2 {
+		t.Fatalf("Stop callback ran %d times, want 2", stopped)
+	}
+}

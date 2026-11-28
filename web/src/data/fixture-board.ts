@@ -1,14 +1,14 @@
 // The development transport's board surface — keel-board-v1, Phase 2.
 //
-// A scripted tenant with tasks in every state, one mirrored thread, a
+// A scripted tenant with tasks in every state, an archived thread, a
 // downloaded-claim recovery case, sync failures and automation. It is only
 // used when a launch asks for the fixture (`?fixture=1` /
 // `host.params.fixture`); the product never selects it.
 //
-// The fixture is the *contract stand-in* for the Phase 2 additions board
-// v0.1.1 does not emit yet: `moves`, `mirror`, `origin`, `archived` and the
-// sync health facts. A real deployment without them is read-only (taskMoves
-// returns []); this file is never evidence that the server provides them.
+// The fixture is the *contract stand-in* for the Phase 2 additions a board
+// version may not emit yet: `moves`, `origin`, `archived` and the sync health
+// facts. A real deployment without them is read-only (taskMoves returns []);
+// this file is never evidence that the server provides them.
 import type {
   BoardActorsPage,
   BoardApi,
@@ -82,7 +82,6 @@ interface FixtureTask {
   reason?: string | null;
   replies: BoardMessageView[];
   archived?: boolean;
-  mirror?: BoardTaskView["mirror"];
   origin?: BoardTaskView["origin"];
   copies?: BoardTaskView["copies"];
   createdAt: string;
@@ -204,7 +203,6 @@ export class FixtureBoard implements BoardApi {
       labels: ROOT_LABELS["814"],
       blocked: { kind: "needs_input", reason: "移动端通知文案由谁定稿？是产品还是客服？" },
       replies: [reply("8141", "814", "work/production", fixtureAccountId("linlan"), "文案先由产品出草稿，客服只做术语校对。", -1800)],
-      mirror: { source: "superagent", readOnly: false, bridge: true },
       origin: { platform: "slack", ref: "C08:172.018" },
       copies: [{ target: "slack:#work-production", platform: "slack", root: "814", status: "synced" }],
       createdAt: iso(-140 * 60),
@@ -290,7 +288,6 @@ export class FixtureBoard implements BoardApi {
       result: "归档；不再恢复旧看板。",
       replies: [reply("8261", "826", "ops", fixtureCurrentAccountId, "归档记录只读保留。", -200000)],
       archived: true,
-      mirror: { source: "superagent", readOnly: true, bridge: false },
       origin: { platform: "superagent", ref: "ticket-77" },
       createdAt: iso(-300000),
     },
@@ -508,7 +505,6 @@ export class FixtureBoard implements BoardApi {
       reason: task.reason ?? null,
       moves: task.archived ? [] : [...(MOVES_BY_STATE[task.state] ?? ["reply"])],
       ...(task.archived ? { archived: true } : {}),
-      ...(task.mirror ? { mirror: { ...task.mirror } } : {}),
       ...(task.origin ? { origin: { ...task.origin } } : {}),
       ...(task.copies ? { copies: task.copies.map((copy) => ({ ...copy })) } : {}),
     };
@@ -932,15 +928,6 @@ export class FixtureBoard implements BoardApi {
     if (index < 0) throw new Error(`not found: ${id}`);
     this.schedules.splice(index, 1);
     return null;
-  }
-
-  async boardAnswer(id: string, input: { text: string }): Promise<BoardTaskMutation> {
-    const task = this.find(id);
-    if (!task) throw new Error(`not found: ${id}`);
-    this.appendReply(task, input.text);
-    task.state = "ready";
-    task.blocked = undefined;
-    return this.mutation(task);
   }
 
   boardStream(opts: BoardStreamOptions): () => void {

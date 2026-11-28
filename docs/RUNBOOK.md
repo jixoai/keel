@@ -118,9 +118,9 @@ export KEEL_BOARD_FILE_TIMEOUT=10s   # 可选；单个入站文件下载超时
     `reopen`/`cancel`；`waiting`：owner/manage 有 `assign`/`needs`/`cancel`。
   - 任何非归档、可写频道都有 `reply`（需频道 editor）。租约过期的 claim 按 `ready` 处理，
     不再提供 token 动作。
-  - `archived=true`：`moves=[]`。命令桥已随 `superagentboard` 包删除（change
-    keel-plugin-split），board 不再把动作回呼 supervisor；superagent 的 ticket 是唯一真值，
-    board 任务由 `keel.superagent` 插件的只写投影维护。
+  - `archived=true`：`moves=[]`。命令桥已在 change keel-plugin-split 删除，board 不再把
+    动作回呼 supervisor；superagent 的 ticket 是唯一真值，board 任务由 `keel.superagent`
+    插件的只写投影维护。
   - `takeover`、`release.force`、`answer` 在当前 board v0.1.1/keel 没有后端端点，**不**谎报。
 - `archived` 来自 `board.archived=true` 标签（客户端不能写 `board.*`）；归档 Ticket
   导入为只读历史任务。`copies` 暂不提供：board v0.1.1 的 message view 只有
@@ -240,12 +240,13 @@ export KEEL_SECRET_KEY='…'     # 必填；缺失时 board 投影 fail closed�
 
 - 插件边界：`keel.board` 拥有 task/channel/thread 与 board 存储，暴露
   `boardplugin.Service`；`keel.superagent` 声明 `requires: [board]`，自有 `superagent_*`
-  表与 `superagent_board_links`，board 缺失/禁用时 `PENDING`。旧 `internal/superagentboard`
-  镜像/命令桥已删除（破坏性变更），互不 import 由 `internal/architecture` 门禁守住。
+  表与 `superagent_board_links`，board 缺失/禁用时 `PENDING`。旧镜像/命令桥已删除
+  （破坏性变更），互不 import 由 `internal/architecture` 门禁守住。
 - 方向：superagent → board 只写投影 + board task → ticket 导入。Ticket→任务线程、
   Assignment→claim（lease 900s，按 assignment 心跳续期）、Attention→blocked
-  （`needs_input`/`awaiting_approval`）、report→回复；board 任务经 board 服务导入为
-  ticket + open assignment。superagent 的 `superagent_*` 始终是真值，适配器只追加 board 事件。
+  （`needs_input`/`awaiting_approval`）、report→回复；可执行的 board 任务经 board 服务导入为
+  ticket，再由常规 dispatch 创建带 worker session 的 assignment（不写无 session 的 open
+  assignment）。superagent 的 `superagent_*` 始终是真值，适配器只追加 board 事件。
 - 幂等：`superagent_board_links` 的 `(tenant, source, source_id, kind)` 唯一；重复同步/重启
   复用同一 task/回复；report_id / attention_id 是回复幂等键；claim token 由
   `HMAC-SHA256(KEEL_SECRET_KEY, "board-claim:v1:<tenant>:<assignment>:<session>")` 派生，服务端只存 hash。
@@ -277,8 +278,7 @@ scripts/binary-size.sh --budget-kb 4096 --base 6ee7fe3
 # 全量 + E2E（fake Slack/GitHub/Linear/Chat SDK bridge + superagent 命令桥；
 # 生成 HTML 报告；含 fresh-channel 400/201/导入、board_disabled、supervisor
 # timeout/5xx/retry、频道级授权拒绝等步骤）
-# 旧 board-sync-e2e 命令与 gate 脚本随 superagentboard 删除；
-# 新的插件 E2E 是 internal/superagentplugin 的 PG 测试。
+# 插件 E2E 是 internal/superagentplugin 的 PG 测试（两轮 Writer SyncOnce + Import）。
 KEEL_TEST_DSN='postgres://…' go test ./internal/superagentplugin/ -run TestBoardTaskToTicketToBoardWriteback -v
 
 # Phase 2 最终门禁：独占全量 TUI、全量 Go、UI 截图/五态 HTML、文件覆盖表；
