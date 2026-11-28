@@ -44,7 +44,7 @@
 - [x] keel `go test -p 1 ./internal/boardintegration ./cmd/keel`（DSN 集成）
 - [x] 独立子代理复审 P0/P1=0（PASS；P2 closed in evidence/p2-closeout.md；最终门禁 GATE PASS）
 - [ ] 更新 DISPOSITION/README/RUNBOOK；`openspec archive keel-board-sync-v2 --yes`（等独立复审）
-- [ ] 发 v0.6.0（与 release closure 协调）
+- [x] 发 v0.6.0（https://github.com/jixoai/keel/releases/tag/v0.6.0，release workflow success）
 
 ## 残余 / BLOCKED
 

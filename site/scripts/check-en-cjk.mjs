@@ -78,7 +78,10 @@ let pages = 0
 const report = []
 for (const file of walk(distRoot).filter((f) => f.endsWith('.html'))) {
   const rel = relative(distRoot, file).split(sep).join('/')
-  if (rel.startsWith('zh/') || rel === '404.html') continue
+  // Generated evidence bundles under /reports/ are bilingual artifacts copied
+  // verbatim from the run (Chinese task labels included); they are not English
+  // documentation pages and must not be rewritten for this gate.
+  if (rel.startsWith('zh/') || rel.startsWith('reports/') || rel === '404.html') continue
   pages += 1
   const html = readFileSync(file, 'utf8')
   const prose = countCjk(pageText(html, { keepCode: false }))

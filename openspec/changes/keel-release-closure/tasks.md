@@ -17,5 +17,6 @@
 ## Evidence
 
 - `evidence/release-v0.5.0.md` — v0.5.0 tag/Release/SHA/download page.
+- `evidence/release-v0.6.0.md` — v0.6.0 tag/Release/SHA/CI/download page.
 - `evidence/verification.txt` — actionlint, OpenSpec strict, site build, go build/vet.
 - `evidence/lane-tasks.md` — original lane task detail.

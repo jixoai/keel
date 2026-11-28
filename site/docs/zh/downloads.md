@@ -7,20 +7,20 @@ title: 下载
 keel 每个平台只交付**一个自包含二进制**：PostgreSQL 18、网页客户端与 README 都在里面。
 下载后一条命令就能在本机启动产品：不需要 Docker、不需要 `KEEL_DSN`、不需要手动 `initdb`。
 
-**当前版本：`v0.5.0`**（1.0 之前；小版本之间可能有不兼容变更。）
+**当前版本：`v0.6.0`**（1.0 之前；小版本之间可能有不兼容变更。）
 
 ## 下载
 
 | 平台 | 下载 |
 |---|---|
-| macOS · Apple 芯片 | [keel-0.5.0-darwin-arm64.tar.gz](https://github.com/jixoai/keel/releases/download/v0.5.0/keel-0.5.0-darwin-arm64.tar.gz) |
-| macOS · Intel | [keel-0.5.0-darwin-amd64.tar.gz](https://github.com/jixoai/keel/releases/download/v0.5.0/keel-0.5.0-darwin-amd64.tar.gz) |
-| Linux · x86-64 | [keel-0.5.0-linux-amd64.tar.gz](https://github.com/jixoai/keel/releases/download/v0.5.0/keel-0.5.0-linux-amd64.tar.gz) |
-| Linux · arm64 | [keel-0.5.0-linux-arm64.tar.gz](https://github.com/jixoai/keel/releases/download/v0.5.0/keel-0.5.0-linux-arm64.tar.gz) |
-| Windows · x86-64 | [keel-0.5.0-windows-amd64.zip](https://github.com/jixoai/keel/releases/download/v0.5.0/keel-0.5.0-windows-amd64.zip) |
+| macOS · Apple 芯片 | [keel-0.6.0-darwin-arm64.tar.gz](https://github.com/jixoai/keel/releases/download/v0.6.0/keel-0.6.0-darwin-arm64.tar.gz) |
+| macOS · Intel | [keel-0.6.0-darwin-amd64.tar.gz](https://github.com/jixoai/keel/releases/download/v0.6.0/keel-0.6.0-darwin-amd64.tar.gz) |
+| Linux · x86-64 | [keel-0.6.0-linux-amd64.tar.gz](https://github.com/jixoai/keel/releases/download/v0.6.0/keel-0.6.0-linux-amd64.tar.gz) |
+| Linux · arm64 | [keel-0.6.0-linux-arm64.tar.gz](https://github.com/jixoai/keel/releases/download/v0.6.0/keel-0.6.0-linux-arm64.tar.gz) |
+| Windows · x86-64 | [keel-0.6.0-windows-amd64.zip](https://github.com/jixoai/keel/releases/download/v0.6.0/keel-0.6.0-windows-amd64.zip) |
 
-全部产物：[v0.5.0 发布页](https://github.com/jixoai/keel/releases/tag/v0.5.0) ·
-[`SHA256SUMS.txt`](https://github.com/jixoai/keel/releases/download/v0.5.0/SHA256SUMS.txt)
+全部产物：[v0.6.0 发布页](https://github.com/jixoai/keel/releases/tag/v0.6.0) ·
+[`SHA256SUMS.txt`](https://github.com/jixoai/keel/releases/download/v0.6.0/SHA256SUMS.txt)
 
 ## 启动
 
@@ -70,7 +70,7 @@ docker compose up -d --build
 ## 校验你下到的东西
 
 ```bash
-curl -LO https://github.com/jixoai/keel/releases/download/v0.5.0/SHA256SUMS.txt
+curl -LO https://github.com/jixoai/keel/releases/download/v0.6.0/SHA256SUMS.txt
 shasum -a 256 -c SHA256SUMS.txt --ignore-missing
 ```
 
