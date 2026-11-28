@@ -32,17 +32,6 @@ import (
 // missing row are indistinguishable on purpose.
 var ErrNotFound = errors.New("pluginstore: not found")
 
-// Install states are the platform's persisted lifecycle vocabulary. The plugin
-// manager owns the transitions; the store only records them.
-const (
-	StateInstalled   = "installed"
-	StateEnabled     = "enabled"
-	StateDisabled    = "disabled"
-	StateFailed      = "failed"
-	StateInvalid     = "invalid"
-	StateUninstalled = "uninstalled"
-)
-
 // Dependency states are the host's assembly answer for one plugin.
 const (
 	DependencyReady   = "ready"
@@ -51,21 +40,10 @@ const (
 	DependencyStopped = "stopped"
 )
 
-// Install is one tenant's plugin inventory row.
-type Install struct {
-	TenantID uuid.UUID
-	PluginID string
-	Version  string
-	Kind     string
-	State    string
-	Bundled  bool
-	// Manifest is the raw manifest document (opaque to this package).
-	Manifest json.RawMessage
-	// Diagnostics are the operator-facing reasons attached to the row.
-	Diagnostics []string
-	InstalledAt time.Time
-	UpdatedAt   time.Time
-}
+// The install inventory row (`plugins`) is owned by the core store and the
+// harnessext plugin manager (store.UpsertPlugin). pluginstore deliberately has
+// no install write path: two writers would overwrite each other's version,
+// state and timestamps.
 
 // StateEntry is one opaque plugin state key. Values are strings; a plugin that
 // needs structure owns its encoding.
@@ -99,12 +77,6 @@ type Dependency struct {
 // Store is the platform storage port. Every method is tenant-scoped and takes
 // the tenant explicitly; there is no deployment-level branch.
 type Store interface {
-	// Install inventory.
-	PutInstall(ctx context.Context, install Install) (Install, error)
-	GetInstall(ctx context.Context, tenantID uuid.UUID, pluginID string) (Install, error)
-	ListInstalls(ctx context.Context, tenantID uuid.UUID) ([]Install, error)
-	DeleteInstall(ctx context.Context, tenantID uuid.UUID, pluginID string) (bool, error)
-
 	// Opaque plugin state.
 	GetState(ctx context.Context, tenantID uuid.UUID, pluginID, key string) (string, bool, error)
 	PutState(ctx context.Context, tenantID uuid.UUID, pluginID, key, value string) error
@@ -131,26 +103,6 @@ type DomainStore interface {
 	Migrate(ctx context.Context) error
 	// Ready proves the adapter can serve reads and writes.
 	Ready(ctx context.Context) error
-}
-
-// ValidateInstall checks the fields every adapter requires. It is shared so the
-// memory and PostgreSQL adapters refuse the same malformed rows.
-func ValidateInstall(install Install) error {
-	if install.TenantID == uuid.Nil {
-		return errors.New("pluginstore: install tenant id is required")
-	}
-	if install.PluginID == "" {
-		return errors.New("pluginstore: install plugin id is required")
-	}
-	if install.State == "" {
-		install.State = StateInstalled
-	}
-	switch install.State {
-	case StateInstalled, StateEnabled, StateDisabled, StateFailed, StateInvalid, StateUninstalled:
-	default:
-		return errors.New("pluginstore: install state " + install.State + " is not in the lifecycle vocabulary")
-	}
-	return nil
 }
 
 // ValidateDependency checks one dependency row and normalizes its state.

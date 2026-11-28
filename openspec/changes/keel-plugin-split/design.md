@@ -30,8 +30,10 @@
   The agent plugin runtime (`harnessext`) is unchanged: board/superagent are host
   services, not model extensions.
 - Platform storage: `internal/pluginstore` (contract + memory + conformance) and
-  `internal/pluginstore/pg` (PostgreSQL adapter over `plugins`, `plugin_state`,
-  `plugin_config`, `plugin_dependency`). No SQLite adapter.
+  `internal/pluginstore/pg` (PostgreSQL adapter over `plugin_state`,
+  `plugin_config`, `plugin_dependency`). The `plugins` inventory row stays
+  core-owned (`store.UpsertPlugin`), so there is one install writer. No SQLite
+  adapter.
 - Board plugin: `internal/boardplugin` owns `LogBoard` (moved out of the deleted
   `superagentboard`) and publishes `Service`. The interface gained only the
   `Tasks`/`Channels`/`Thread` query methods the import path needs.
