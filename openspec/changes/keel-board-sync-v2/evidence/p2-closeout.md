@@ -1,7 +1,7 @@
 # P2 closeout — board lane review
 
 Board review: PASS, P0/P1=0. Six P2s plus the deferred `depth.dead` are fixed in
-this worktree. Board `v0.1.2`/`v0.1.3` tags are unchanged; the board-side
+this worktree. Tested keel commit: `d8d74497`. Board `v0.1.2`/`v0.1.3` tags are unchanged; the board-side
 production gate and boundary test ship as `v0.1.4`.
 
 | # | P2 | Fix | Evidence |
