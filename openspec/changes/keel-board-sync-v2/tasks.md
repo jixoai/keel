@@ -49,5 +49,5 @@
 ## 残余 / BLOCKED
 
 - 独立安全/功能/视觉红队 A/B/C 未由本实现代理执行；状态仍 BLOCKED，交由主 Agent 的独立子代理。
-- 全量 TUI（538）与 E2E HTML 报告不在本 lane 运行；本 lane 只跑定向用例，最终集成批次补全。
+- 全量 TUI（540）与 E2E HTML 报告由最终集成批次执行/补全。
 - 无 SQLite 生产实现；本轮只保留 adapter 边界与 capability 声明。
