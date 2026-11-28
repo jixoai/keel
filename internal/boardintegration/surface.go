@@ -25,6 +25,7 @@ import (
 	"github.com/jixoai/keel-board/pgadapter"
 	"github.com/jixoai/keel-board/pgadapter/logstore"
 	boardserver "github.com/jixoai/keel-board/server"
+	"github.com/jixoai/keel-board/storage"
 	boardsync "github.com/jixoai/keel-board/sync"
 	boardsyncstore "github.com/jixoai/keel-board/syncstore"
 )
@@ -113,6 +114,20 @@ type TextExporter interface {
 	WriteText(ctx context.Context, w io.Writer) error
 }
 
+// requireAdapterCapabilities is the deployment's production gate: the board
+// surface needs durable, cross-process adapters with their own schema. An
+// adapter that does not declare them is refused before serving, rather than
+// silently running weaker than the deployment expects.
+func requireAdapterCapabilities(adapter storage.Reporter) error {
+	capabilities := adapter.Capabilities()
+	for _, capability := range []storage.Capability{storage.Durable, storage.CrossProcessLeases, storage.Migrations} {
+		if err := capabilities.Require(capability); err != nil {
+			return fmt.Errorf("boardintegration: %w", err)
+		}
+	}
+	return nil
+}
+
 // Surface owns the board's PostgreSQL pools, log, HTTP handlers and background
 // repair loop. Close releases them in dependency order.
 type Surface struct {
@@ -176,6 +191,10 @@ func New(ctx context.Context, opts Options) (*Surface, error) {
 	if err != nil {
 		return nil, openError("open board store", err, opts.DSN)
 	}
+	if err := requireAdapterCapabilities(store); err != nil {
+		store.Close()
+		return nil, err
+	}
 	board := boardlog.New(boardlog.Options{Store: store})
 
 	syncdb, err := pgadapter.OpenSync(ctx, pgadapter.SyncOptions{
@@ -185,11 +204,22 @@ func New(ctx context.Context, opts Options) (*Surface, error) {
 		store.Close()
 		return nil, openError("open sync store", err, opts.DSN)
 	}
+	if err := requireAdapterCapabilities(syncdb); err != nil {
+		syncdb.Close()
+		store.Close()
+		return nil, err
+	}
 	auditStore, err := pgadapter.OpenAudit(ctx, pgadapter.AuditOptions{DSN: opts.DSN, SearchPath: opts.Schema})
 	if err != nil {
 		syncdb.Close()
 		store.Close()
 		return nil, openError("open board audit", err, opts.DSN)
+	}
+	if err := requireAdapterCapabilities(auditStore); err != nil {
+		auditStore.Close()
+		syncdb.Close()
+		store.Close()
+		return nil, err
 	}
 	var automationStore *pgadapter.Automation
 	if !opts.DisableAutomation {
@@ -199,6 +229,13 @@ func New(ctx context.Context, opts Options) (*Surface, error) {
 			syncdb.Close()
 			store.Close()
 			return nil, openError("open automation store", err, opts.DSN)
+		}
+		if err := requireAdapterCapabilities(automationStore); err != nil {
+			automationStore.Close()
+			auditStore.Close()
+			syncdb.Close()
+			store.Close()
+			return nil, err
 		}
 	}
 

@@ -32,6 +32,7 @@ import type {
   BoardThreadSummary,
   BoardThreadView,
   BoardWatcherDelivery,
+  BoardWatcherDeliveryDepth,
   BoardWatcherView,
 } from "./board-wire";
 import { fixtureAccountId, fixtureCurrentAccountId, fixtureTenantId } from "./fixture-identity";
@@ -316,7 +317,6 @@ export class FixtureBoard implements BoardApi {
         inbox: { outstanding: 2, oldestAt: iso(-640), ageSeconds: 640 },
         outbox: { outstanding: 1, oldestAt: iso(-120), ageSeconds: 120 },
       },
-      lastDeliveryAt: iso(-300),
       failures24h: 1,
     },
     {
@@ -330,7 +330,6 @@ export class FixtureBoard implements BoardApi {
       outbox: { pending: 0, leased: 0, done: 42, dead: 0 },
       targets: [{ target: "github:acme/www:pulls:123", root: "816", status: "synced", undelivered: 0 }],
       lag: { inbox: null, outbox: null },
-      lastDeliveryAt: iso(-7200),
       failures24h: 0,
     },
     {
@@ -398,8 +397,6 @@ export class FixtureBoard implements BoardApi {
       dead: 1,
       lastError: "rate limited",
       lastDeliveryAt: iso(-300),
-      successes24h: 42,
-      failures24h: 1,
       createdAt: iso(-40 * 86400),
       updatedAt: iso(-300),
     },
@@ -413,8 +410,6 @@ export class FixtureBoard implements BoardApi {
       cursor: "814",
       dead: 0,
       lastDeliveryAt: iso(-900),
-      successes24h: 0,
-      failures24h: 0,
       createdAt: iso(-30 * 86400),
       updatedAt: iso(-900),
     },
@@ -887,10 +882,11 @@ export class FixtureBoard implements BoardApi {
     return { ...watcher };
   }
 
-  async boardWatcherDeliveries(id: string): Promise<{ deliveries: BoardWatcherDelivery[] }> {
+  async boardWatcherDeliveries(id: string): Promise<{ deliveries: BoardWatcherDelivery[]; depth?: BoardWatcherDeliveryDepth }> {
     const watcher = this.watchers.find((row) => row.id === id);
-    if (!watcher) return { deliveries: [] };
+    if (!watcher) return { deliveries: [], depth: { pending: 0, leased: 0, done: 0, dead: 0 } };
     return {
+      depth: { pending: watcher.enabled ? 0 : 1, leased: 0, done: 40, dead: watcher.dead ?? 0 },
       deliveries: [
         {
           watcherId: id,

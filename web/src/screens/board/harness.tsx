@@ -21,7 +21,7 @@
 // supplies the failing/permission states.
 import { effect, host, mount, View } from "nsh";
 import { KeelApiError, KeelHttp } from "../../data/http";
-import type { BoardApi } from "../../data/board-wire";
+import type { BoardApi, BoardSyncEntryView } from "../../data/board-wire";
 import { FixtureBoard } from "../../data/fixture-board";
 import { boardStore } from "../../data/board";
 import { setEffectivePermissions } from "../../data/permissions";
@@ -149,6 +149,27 @@ function transport(): BoardApi {
     base.boardSyncInbox = async () => ({ dead: [] });
     base.boardSyncFailures = async () => ({ failures: [] });
     base.boardSyncCredentials = async () => ({ entries: [] });
+    return base;
+  }
+  if (name === "sync-missing") {
+    const strip = (row: unknown): BoardSyncEntryView => {
+      const entry = { ...(row as BoardSyncEntryView) };
+      delete entry.targets;
+      delete entry.lag;
+      delete entry.failures24h;
+      delete entry.oldestPendingAgeSeconds;
+      return entry;
+    };
+    const entries = base.boardSyncEntries.bind(base);
+    base.boardSyncEntries = async () => {
+      const page = await entries();
+      return { ...page, entries: page.entries.map(strip) };
+    };
+    const status = base.boardSyncStatus.bind(base);
+    base.boardSyncStatus = async () => {
+      const page = await status();
+      return { ...page, keys: page.keys.map(strip), failures24h: undefined, lag: undefined };
+    };
     return base;
   }
   if (name === "sync-loading") {

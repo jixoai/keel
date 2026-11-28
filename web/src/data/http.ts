@@ -96,6 +96,7 @@ import type {
   BoardTaskView,
   BoardThreadView,
   BoardWatcherDelivery,
+  BoardWatcherDeliveryDepth,
   BoardWatcherView,
 } from "./board-wire";
 import {
@@ -826,7 +827,6 @@ function parseSyncEntry(value: unknown): BoardSyncEntryView {
     if (row?.oldestPendingAgeSeconds === null) entry.oldestPendingAgeSeconds = null;
     else if (typeof row?.oldestPendingAgeSeconds === "number") entry.oldestPendingAgeSeconds = row.oldestPendingAgeSeconds;
   }
-  if (typeof row?.lastDeliveryAt === "string") entry.lastDeliveryAt = row.lastDeliveryAt;
   if (typeof row?.failures24h === "number") entry.failures24h = row.failures24h;
   if (typeof row?.bridgeHost === "string") entry.bridgeHost = row.bridgeHost;
   if (typeof row?.bridgeErrors === "number") entry.bridgeErrors = row.bridgeErrors;
@@ -859,8 +859,6 @@ function parseWatcher(value: unknown): BoardWatcherView {
     }
   }
   if (typeof row.lastDeliveryAt === "string") watcher.lastDeliveryAt = row.lastDeliveryAt;
-  if (typeof row.successes24h === "number") watcher.successes24h = row.successes24h;
-  if (typeof row.failures24h === "number") watcher.failures24h = row.failures24h;
   if (typeof row.dead === "number") watcher.dead = row.dead;
   if (typeof row.lastError === "string") watcher.lastError = row.lastError;
   return watcher;
@@ -2500,10 +2498,21 @@ export class KeelHttp implements SettingsApi, BoardApi {
     return parseWatcher(body.watcher ?? body);
   }
 
-  async boardWatcherDeliveries(id: string): Promise<{ deliveries: BoardWatcherDelivery[] }> {
+  async boardWatcherDeliveries(id: string): Promise<{ deliveries: BoardWatcherDelivery[]; depth?: BoardWatcherDeliveryDepth }> {
     const response = await this.request(`/v1/board/watchers/${encodeURIComponent(id)}/deliveries`);
     const body = asRecord(await response.json());
+    const depth = asRecord(body.depth);
     return {
+      ...(depth
+        ? {
+            depth: {
+              pending: numberOr(depth.pending),
+              leased: numberOr(depth.leased),
+              done: numberOr(depth.done),
+              dead: numberOr(depth.dead),
+            },
+          }
+        : {}),
       deliveries: listOf(body.deliveries).map((value) => {
         const row = asRecord(value);
         return {

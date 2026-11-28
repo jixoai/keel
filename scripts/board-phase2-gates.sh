@@ -26,7 +26,7 @@
 #   KEEL_BOARD_BASE            default 4cbc3e50
 #   KEEL_BOARD_CONTRACT        default f00097e7
 #   EXPECTED_TUI_TESTS         default 538
-#   EXPECTED_UI_SCREENSHOTS    default 53
+#   EXPECTED_UI_SCREENSHOTS    default 55
 #   EXPECTED_UI_MATRIX_CELLS   default 26
 #
 # Exit 0 only when every gate passes, file coverage has UNCOVERED=0, the full
@@ -87,7 +87,7 @@ cd "$repo_root"
 base_ref=${KEEL_BOARD_BASE:-4cbc3e50}
 contract_ref=${KEEL_BOARD_CONTRACT:-f00097e7}
 expected_tui_tests=${EXPECTED_TUI_TESTS:-538}
-expected_ui_screenshots=${EXPECTED_UI_SCREENSHOTS:-53}
+expected_ui_screenshots=${EXPECTED_UI_SCREENSHOTS:-55}
 expected_ui_matrix=${EXPECTED_UI_MATRIX_CELLS:-26}
 
 for tool in git go node nsh openspec; do
@@ -288,11 +288,11 @@ const rules = [
   { re: /^scripts\/archive\/retired-superagent\/.*\.go$/, cov: "`go test -p 1 ./...` (archive package compile) + retired-surface check" },
   { re: /^scripts\/archive\/retired-superagent\/.*\.html$/, cov: "retired-surface check + board gone screenshot 36" },
   { re: /^scripts\/board-fake-sse-server\.mjs$/, cov: "SSE live fake-server test" },
-  { re: /^scripts\/board-phase2-ui-evidence\.mjs$/, cov: "UI evidence (HTML / 53 shots / 26 matrix)" },
+  { re: /^scripts\/board-phase2-ui-evidence\.mjs$/, cov: "UI evidence (HTML / 55 shots / 26 matrix)" },
   { re: /^scripts\/board-phase2-gates\.sh$/, cov: "this gate (`bash -n` + executed in this run)" },
   { re: /^scripts\/.*\.sh$/, cov: "`bash -n` + phase-1 evidence" },
   { re: /^scripts\/.*\.mjs$/, cov: "`node --check`" },
-  { re: /^web\/evidence\/board-capture\.template\.tsx$/, cov: "UI screenshots (53)" },
+  { re: /^web\/evidence\/board-capture\.template\.tsx$/, cov: "UI screenshots (55)" },
   { re: /^web\/evidence\/board-sse-live\.template\.tsx$/, cov: "SSE live fake-server test" },
   { re: /^web\/App\.tsx$/, cov: "board TUI + screenshots + full TUI" },
   { re: /^web\/theme\.json$/, cov: "UI screenshots (theme tokens) + `nsh check`" },
@@ -314,8 +314,8 @@ const rules = [
   { re: /^web\/src\/data\/superagent\.ts$/, cov: "deleted old client; route tests + board TUI gone + screenshot 36" },
   { re: /^web\/src\/data\/superagent\.test\.ts$/, cov: "deleted old suite; route tests + full TUI" },
   { re: /^web\/src\/screens\/board\/automation\.tsx$/, cov: "board TUI automation + screenshots 34-37" },
-  { re: /^web\/src\/screens\/board\/board\.tui\.test\.tsx$/, cov: "board TUI (12)" },
-  { re: /^web\/src\/screens\/board\/harness\.tsx$/, cov: "UI screenshots (53, all scenarios)" },
+  { re: /^web\/src\/screens\/board\/board\.tui\.test\.tsx$/, cov: "board TUI (13)" },
+  { re: /^web\/src\/screens\/board\/harness\.tsx$/, cov: "UI screenshots (55, all scenarios)" },
   { re: /^web\/src\/screens\/board\/page\.tsx$/, cov: "board TUI + five-state screenshots" },
   { re: /^web\/src\/screens\/board\/queue\.tsx$/, cov: "board TUI queue + screenshots 01-14" },
   { re: /^web\/src\/screens\/board\/state\.ts$/, cov: "board TUI actions/dialogs" },
@@ -750,7 +750,7 @@ else
     printf 'gates line: %s\n' "$ui_gates_line"
     printf 'directory: %s\n' "$ui_rel"
   } >>"$ui_log"
-  record_gate "ui-evidence-check" "53 screenshots / 26 matrix / PASS" 1 "0s" "ui-evidence.log"
+  record_gate "ui-evidence-check" "55 screenshots / 26 matrix / PASS" 1 "0s" "ui-evidence.log"
 fi
 
 # 4. The full TUI runs only after the UI suite has completely exited.

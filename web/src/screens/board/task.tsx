@@ -71,6 +71,7 @@ import {
   Hairline,
   PageError,
   PageLoading,
+  PressRow,
   SectionLabel,
   StateNote,
   copyText,
@@ -529,20 +530,14 @@ export function BoardTaskCard(props: { taskId: string; task: BoardTaskView; mess
       <CopiesList task={props.task} />
       <Hairline />
       <TaskActions taskId={props.taskId} task={props.task} onOpenTask={props.onOpenTask} />
-      <If when={!isMobile()}>
-        <View style={{ flexDirection: "row", gap: space.sm }}>
-          <Button
-            testID="board-task-copy-link"
-            variant="ghost"
-            size="sm"
-            icon="copy"
-            label="复制链接"
-            accessibilityLabel={`复制任务 #${props.taskId} 的链接`}
-            onPress={() => void copyText(`#${props.taskId} ${props.message.channel}`)}
-            style={touchStyle()}
-          />
-        </View>
-      </If>
+      <PressRow
+        testID="board-task-copy-link"
+        accessibilityLabel={`复制任务 #${props.taskId} 的链接`}
+        onPress={() => void copyText(`#${props.taskId} ${props.message.channel}`)}
+        style={{ gap: space.sm }}
+      >
+        <Text style={{ fontSize: typeScale.sm, color: color.mutedForeground }}>复制链接</Text>
+      </PressRow>
     </Card>
   );
 }
