@@ -63,6 +63,65 @@ func TestComputeValidatedAndEscape(t *testing.T) {
 	}
 }
 
+func TestAnswerMergesOpenContext(t *testing.T) {
+	ctx := context.Background()
+	service, _ := testService(t)
+	open := testRecord()
+	open.Context = map[string]string{
+		"arguments":         `{"path":"/tmp/x"}`,
+		"argumentsDigest":   "sha256:abc",
+		"argumentsRedacted": "true",
+		"attemptId":         "attempt-1",
+		"toolCallId":        "call-1",
+		"server":            "filesystem",
+		"tool":              "delete_file",
+	}
+	if _, _, err := service.Open(ctx, open); err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	answer := testRecord()
+	answer.OptionID = "allow"
+	answer.Actor = "owner@example.test"
+	answer.Channel = ChannelHTTP
+	answer.Context = map[string]string{
+		"remoteAddr": "127.0.0.1:1234",
+		"userAgent":  "test-agent",
+		"requestId":  "req-1",
+		"tool":       "delete_file", // answer may repeat an open fact
+	}
+	stored, _, err := service.RecordAnswer(ctx, answer)
+	if err != nil {
+		t.Fatalf("answer: %v", err)
+	}
+	want := map[string]string{
+		"arguments":         `{"path":"/tmp/x"}`,
+		"argumentsDigest":   "sha256:abc",
+		"argumentsRedacted": "true",
+		"attemptId":         "attempt-1",
+		"toolCallId":        "call-1",
+		"server":            "filesystem",
+		"tool":              "delete_file",
+		"remoteAddr":        "127.0.0.1:1234",
+		"userAgent":         "test-agent",
+		"requestId":         "req-1",
+	}
+	for key, value := range want {
+		if stored.Context[key] != value {
+			t.Fatalf("context[%s] = %q, want %q (context=%v)", key, stored.Context[key], value, stored.Context)
+		}
+	}
+	// A same-answer replay must not drop the merged facts either.
+	again, duplicate, err := service.RecordAnswer(ctx, answer)
+	if err != nil || !duplicate {
+		t.Fatalf("replay: duplicate=%v err=%v", duplicate, err)
+	}
+	for key := range want {
+		if again.Context[key] == "" {
+			t.Fatalf("replay lost context[%s]: %v", key, again.Context)
+		}
+	}
+}
+
 func TestOpenAndAnswerAreIdempotent(t *testing.T) {
 	ctx := context.Background()
 	service, _ := testService(t)

@@ -99,6 +99,10 @@ func (r *Runner) CompactNow(ctx context.Context, lease kernel.Lease, requestID s
 	if !policy.ManualCompact {
 		return ManualCompactResult{}, ErrManualCompactDisabled
 	}
+	// Manual-only sessions (a --no-worker deployment) never execute the normal
+	// run read path, so the bounded ledgers must also be pruned here. The call is
+	// best-effort and detached from the request context.
+	defer r.pruneCheckpointRequests(ctx, lease.Scope)
 
 	// Idempotent replay: the requestId is the manual surface's key. An earlier
 	// successful call is returned as-is; a failed/cancelled call left no row and
@@ -337,7 +341,7 @@ func (r *Runner) CompactNow(ctx context.Context, lease kernel.Lease, requestID s
 		// pinned range, moves to the retry phase, and records the attempt and a
 		// durable retry deadline so a caller does not hammer the provider.
 		retryUntil := time.Now().Add(manualCompactRetryDelay)
-		if saveErr := r.saveCompactionTask(ctx, lease.Scope, kernel.CompactionTaskCheckpoint{
+		if saveErr := r.saveManualCompactRetry(ctx, lease.Scope, kernel.CompactionTaskCheckpoint{
 			RequestID:     requestID,
 			Phase:         kernel.CompactionPhaseRetry,
 			FirstKeptSeq:  anchor,

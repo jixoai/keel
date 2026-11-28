@@ -21,6 +21,8 @@ type toggleCheckpoints struct {
 	inner kernel.CheckpointStore
 	mu    sync.Mutex
 	fail  bool
+	// requestPrunes counts the independent request-ledger prunes.
+	requestPrunes int
 }
 
 func (t *toggleCheckpoints) SaveCheckpoint(ctx context.Context, scope kernel.Scope, rec kernel.CheckpointRecord) error {
@@ -41,6 +43,24 @@ func (t *toggleCheckpoints) setFail(fail bool) {
 	t.mu.Lock()
 	t.fail = fail
 	t.mu.Unlock()
+}
+
+// PruneCheckpointRequests lets the runner's maintenance call reach the real
+// store and records that the manual path invoked it.
+func (t *toggleCheckpoints) PruneCheckpointRequests(ctx context.Context, scope kernel.Scope, req kernel.CheckpointRequestPruneRequest) (int64, error) {
+	t.mu.Lock()
+	t.requestPrunes++
+	t.mu.Unlock()
+	if pruner, ok := t.inner.(kernel.CheckpointRequestPruner); ok {
+		return pruner.PruneCheckpointRequests(ctx, scope, req)
+	}
+	return 0, nil
+}
+
+func (t *toggleCheckpoints) requestPruneCount() int {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.requestPrunes
 }
 
 // countedSummaryStream fails the first N summary calls (the deterministic
@@ -393,6 +413,61 @@ func TestManualCompactRetryBackoffAndAttempts(t *testing.T) {
 	}
 	if _, found, err := k.LoadCompactionTask(ctx, scope, "manual-retry"); err != nil || found {
 		t.Fatalf("task after success = (found=%v, err=%v), want deleted", found, err)
+	}
+}
+
+// TestManualCompactPrunesRequestLedgerOnManualPaths pins P2-1: a manual-only
+// session (no worker/run read path) still bounds the request ledger on both the
+// failure and success exits.
+func TestManualCompactPrunesRequestLedgerOnManualPaths(t *testing.T) {
+	noManualCompactRetryDelay(t)
+	st := testStore(t)
+	ctx := context.Background()
+	tenant, session, k, _ := seedManualHistory(t, st)
+	runner := manualRunner(t, st)
+	summary := &countedSummaryStream{failFirst: 1}
+	runner.Stream = summary.stream
+	checkpoints := &toggleCheckpoints{inner: k}
+	runner.Checkpoints = checkpoints
+	lease := claimScope(t, k, tenant, session)
+
+	if _, err := runner.CompactNow(ctx, lease, "manual-prune"); err == nil {
+		t.Fatal("first CompactNow succeeded, want the injected summary failure")
+	}
+	if got := checkpoints.requestPruneCount(); got != 1 {
+		t.Fatalf("request prunes after failure = %d, want 1", got)
+	}
+	if _, err := runner.CompactNow(ctx, lease, "manual-prune"); err != nil {
+		t.Fatalf("resumed CompactNow: %v", err)
+	}
+	if got := checkpoints.requestPruneCount(); got != 2 {
+		t.Fatalf("request prunes after success = %d, want 2", got)
+	}
+}
+
+// TestManualCompactCancellationPersistsRetryTask pins P2-2: the summary call
+// cancels the request context, but the retry row is written on a detached
+// bounded context, so the attempt/retry fact is not lost.
+func TestManualCompactCancellationPersistsRetryTask(t *testing.T) {
+	st := testStore(t)
+	tenant, session, k, scope := seedManualHistory(t, st)
+	runner := manualRunner(t, st)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	runner.Stream = func(streamCtx context.Context, model string, llm provider.LlmContext, cfg provider.StreamConfig) (*provider.AssistantMessageEventStream, error) {
+		cancel()
+		return failingSummaryStream()(streamCtx, model, llm, cfg)
+	}
+	lease := claimScope(t, k, tenant, session)
+	if _, err := runner.CompactNow(ctx, lease, "manual-cancel-retry"); err == nil {
+		t.Fatal("cancelled CompactNow succeeded")
+	}
+	task, found, err := k.LoadCompactionTask(context.Background(), scope, "manual-cancel-retry")
+	if err != nil || !found {
+		t.Fatalf("retry task after cancellation = (found=%v, err=%v), want persisted", found, err)
+	}
+	if task.Phase != kernel.CompactionPhaseRetry || task.Attempt != 1 || task.RetryUntil.IsZero() {
+		t.Fatalf("retry task = %+v, want retry/attempt 1/deadline", task)
 	}
 }
 

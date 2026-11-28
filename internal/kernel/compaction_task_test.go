@@ -2,7 +2,11 @@ package kernel
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"testing"
+
+	"github.com/google/uuid"
 )
 
 // TestCompactionTaskCheckpoints pins the in-flight recovery contract on both
@@ -123,6 +127,48 @@ func TestCompactionTaskValidation(t *testing.T) {
 			}
 			if _, found, err := h.k.LoadCompactionTask(ctx, scope, "foreign"); err != nil || found {
 				t.Fatalf("foreign task = (found=%v, err=%v), want (false,nil)", found, err)
+			}
+		})
+	}
+}
+
+// TestPruneCompactionTasksCapsRows pins the bounded task ledger: the newest N
+// rows survive, older abandoned rows are deleted, projections/events are not
+// touched, and the missing-session/negative-bound contracts hold.
+func TestPruneCompactionTasksCapsRows(t *testing.T) {
+	for _, impl := range implementations(t) {
+		t.Run(impl.name, func(t *testing.T) {
+			h := impl.build(t)
+			ctx := context.Background()
+			scope := h.newSession()
+			for index := 1; index <= 5; index++ {
+				if err := h.k.SaveCompactionTask(ctx, scope, CompactionTaskCheckpoint{
+					RequestID: fmt.Sprintf("task-%d", index), Phase: CompactionPhaseSelect,
+				}); err != nil {
+					t.Fatalf("save task %d: %v", index, err)
+				}
+			}
+			pruned, err := h.k.PruneCompactionTasks(ctx, scope, CompactionTaskPruneRequest{MaxTasks: 2})
+			if err != nil || pruned != 3 {
+				t.Fatalf("prune = (%d, %v), want 3", pruned, err)
+			}
+			tasks, err := h.k.ListCompactionTasks(ctx, scope)
+			if err != nil || len(tasks) != 2 {
+				t.Fatalf("tasks after prune = (%+v, %v), want 2", tasks, err)
+			}
+			kept := map[string]bool{}
+			for _, task := range tasks {
+				kept[task.RequestID] = true
+			}
+			if !kept["task-4"] || !kept["task-5"] {
+				t.Fatalf("kept = %v, want the newest task-4/task-5", kept)
+			}
+			missing := Scope{TenantID: h.tenant, SessionID: uuid.New()}
+			if _, err := h.k.PruneCompactionTasks(ctx, missing, CompactionTaskPruneRequest{MaxTasks: 1}); !errors.Is(err, ErrNotFound) {
+				t.Fatalf("missing session prune = %v, want ErrNotFound", err)
+			}
+			if _, err := h.k.PruneCompactionTasks(ctx, scope, CompactionTaskPruneRequest{MaxTasks: -1}); !errors.Is(err, ErrInvalidRequest) {
+				t.Fatalf("negative bound = %v, want ErrInvalidRequest", err)
 			}
 		})
 	}

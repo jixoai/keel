@@ -310,18 +310,22 @@ func (m *MemStore) SaveCheckpoint(ctx context.Context, tenantID, sessionID uuid.
 		s.checkpoints = append(s.checkpoints, stored)
 	}
 	if rec.RequestID != "" {
-		// The request ledger's age is the request's age, not the (possibly
-		// much older) projection's: a replay of a pruned/old seq starts a new
-		// retention window.
+		// created_at is the request's FIRST-seen time (the PG ledger preserves it
+		// on conflict). A replay/refinement must not reset the retention window;
+		// otherwise mem and PG disagree on when the row ages out.
 		ledger := stored
-		ledger.CreatedAt = m.now()
+		if existing, ok := s.checkpointRequests[rec.RequestID]; ok {
+			ledger.CreatedAt = existing.CreatedAt
+		} else {
+			ledger.CreatedAt = m.now()
+		}
 		s.checkpointRequests[rec.RequestID] = ledger
 	} else if stored.RequestID != "" {
 		// A later refinement of the same compaction seq updates the replay
-		// result without changing the request's identity.
-		if _, ok := s.checkpointRequests[stored.RequestID]; ok {
+		// result without changing the request's identity or age.
+		if existing, ok := s.checkpointRequests[stored.RequestID]; ok {
 			ledger := stored
-			ledger.CreatedAt = m.now()
+			ledger.CreatedAt = existing.CreatedAt
 			s.checkpointRequests[stored.RequestID] = ledger
 		}
 	}
@@ -480,6 +484,7 @@ func (m *MemStore) SaveCompactionTask(ctx context.Context, tenantID, sessionID u
 	if s.compactionTasks == nil {
 		s.compactionTasks = map[string]CompactionTaskCheckpoint{}
 	}
+	checkpoint.UpdatedAt = m.now()
 	s.compactionTasks[checkpoint.RequestID] = checkpoint
 	return nil
 }
@@ -531,6 +536,43 @@ func (m *MemStore) DeleteCompactionTask(ctx context.Context, tenantID, sessionID
 	}
 	delete(s.compactionTasks, requestID)
 	return nil
+}
+
+// PruneCompactionTasks keeps the newest MaxTasks task rows. Ordering is
+// (UpdatedAt desc, requestId desc) so identical timestamps stay deterministic.
+func (m *MemStore) PruneCompactionTasks(ctx context.Context, tenantID, sessionID uuid.UUID, req CompactionTaskPruneRequest) (int64, error) {
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	s, ok := m.sessions[Scope{TenantID: tenantID, SessionID: sessionID}]
+	if !ok {
+		return 0, fmt.Errorf("memstore: session: %w", ErrNotFound)
+	}
+	if req.MaxTasks == 0 {
+		return 0, nil
+	}
+	ordered := make([]string, 0, len(s.compactionTasks))
+	for requestID := range s.compactionTasks {
+		ordered = append(ordered, requestID)
+	}
+	sort.Slice(ordered, func(i, j int) bool {
+		a, b := s.compactionTasks[ordered[i]], s.compactionTasks[ordered[j]]
+		if !a.UpdatedAt.Equal(b.UpdatedAt) {
+			return a.UpdatedAt.After(b.UpdatedAt)
+		}
+		return ordered[i] > ordered[j]
+	})
+	pruned := int64(0)
+	for index, requestID := range ordered {
+		if index < req.MaxTasks {
+			continue
+		}
+		delete(s.compactionTasks, requestID)
+		pruned++
+	}
+	return pruned, nil
 }
 
 // ClaimLease claims the first runnable run.

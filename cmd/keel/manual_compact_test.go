@@ -201,6 +201,21 @@ func TestManualCompactionAdapter(t *testing.T) {
 	}
 }
 
+// TestMapManualCompactErrorRetryIsTransient pins P2-4: an unelapsed retry
+// deadline is the API's busy state (HTTP 409 / command busy), never a 500.
+func TestMapManualCompactErrorRetryIsTransient(t *testing.T) {
+	if got := mapManualCompactError(agent.ErrManualCompactRetry); !errors.Is(got, harnessapi.ErrCompactBusy) {
+		t.Fatalf("retry mapping = %v, want ErrCompactBusy", got)
+	}
+	if got := mapManualCompactError(kernel.ErrNotFound); !errors.Is(got, harnessapi.ErrSessionNotFound) {
+		t.Fatalf("not-found mapping = %v, want ErrSessionNotFound", got)
+	}
+	other := errors.New("boom")
+	if got := mapManualCompactError(other); !errors.Is(got, other) {
+		t.Fatalf("unrelated error changed: %v", got)
+	}
+}
+
 func TestManualCompactionAdapterMissingSession(t *testing.T) {
 	dsn := os.Getenv("KEEL_TEST_DSN")
 	if dsn == "" {

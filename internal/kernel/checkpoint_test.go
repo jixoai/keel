@@ -263,6 +263,41 @@ func TestPruneCheckpointRequestsBoundsLedger(t *testing.T) {
 	}
 }
 
+// TestCheckpointRequestCreatedAtIsFirstSeen pins the unified retention-age
+// semantics (P2-8): re-saving the same requestId/seq must keep the first-seen
+// created_at in both stores, so mem and PG age the row identically.
+func TestCheckpointRequestCreatedAtIsFirstSeen(t *testing.T) {
+	for _, impl := range implementations(t) {
+		t.Run(impl.name, func(t *testing.T) {
+			h := impl.build(t)
+			ctx := context.Background()
+			scope := h.newSession()
+			record := CheckpointRecord{UptoSeq: 5, KeptFromSeq: 3, Summary: "s", RequestID: "req-age"}
+			if err := h.k.SaveCheckpoint(ctx, scope, record); err != nil {
+				t.Fatalf("save: %v", err)
+			}
+			first, found, err := h.k.CheckpointByRequest(ctx, scope, "req-age")
+			if err != nil || !found {
+				t.Fatalf("first read = (found=%v, err=%v)", found, err)
+			}
+			if h.mem != nil {
+				h.clock.advanceTo(h.clock.Now().Add(48 * time.Hour))
+			}
+			record.Summary = "s-refined"
+			if err := h.k.SaveCheckpoint(ctx, scope, record); err != nil {
+				t.Fatalf("re-save: %v", err)
+			}
+			again, found, err := h.k.CheckpointByRequest(ctx, scope, "req-age")
+			if err != nil || !found {
+				t.Fatalf("second read = (found=%v, err=%v)", found, err)
+			}
+			if !again.CreatedAt.Equal(first.CreatedAt) {
+				t.Fatalf("created_at changed on re-save: %s -> %s (want first-seen)", first.CreatedAt, again.CreatedAt)
+			}
+		})
+	}
+}
+
 // TestMissingSessionParity pins the shared missing-session contract across the
 // memory and PostgreSQL stores: every checkpoint/task read and write answers
 // ErrNotFound instead of a silent empty result (which a caller could mistake

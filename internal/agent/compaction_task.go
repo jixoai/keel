@@ -26,6 +26,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/jixoai/keel/internal/kernel"
 	"github.com/jixoai/keel/internal/store"
@@ -65,6 +66,15 @@ func (r *Runner) saveCompactionTask(ctx context.Context, scope kernel.Scope, che
 		return nil
 	}
 	return r.CompactionTasks.SaveCompactionTask(ctx, scope, checkpoint)
+}
+
+// saveManualCompactRetry persists the retry state on a detached, bounded
+// context. The summary failure is often a cancellation; writing with the
+// cancelled parent would always fail and lose the retry/attempt fact.
+func (r *Runner) saveManualCompactRetry(parent context.Context, scope kernel.Scope, checkpoint kernel.CompactionTaskCheckpoint) error {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), 5*time.Second)
+	defer cancel()
+	return r.saveCompactionTask(ctx, scope, checkpoint)
 }
 
 // loadCompactionTask reads one task checkpoint; a nil seam answers not found.

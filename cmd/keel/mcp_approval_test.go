@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"strings"
@@ -203,6 +204,68 @@ func TestMCPApprovalDoesNotReplayAcrossAttempts(t *testing.T) {
 	decisions, err := broker.List(context.Background(), mustUUID(t, scope.TenantID), mustUUID(t, scope.SessionID))
 	if err != nil || len(decisions) != 2 {
 		t.Fatalf("decisions = (%d, %v), want one per attempt", len(decisions), err)
+	}
+}
+
+// TestMCPArgumentSummaryDeterministicLargeMap pins P2-5: a map larger than the
+// 32-field summary bound keeps the same fields on every render, so a retry uses
+// the same decision prompt instead of tripping ErrDecisionConflict.
+func TestMCPArgumentSummaryDeterministicLargeMap(t *testing.T) {
+	payload := map[string]any{}
+	for index := 0; index < 40; index++ {
+		payload[fmt.Sprintf("k%02d", index)] = index
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, redacted := mcpArgumentSummary(raw)
+	if !redacted || !strings.Contains(first, "[more fields]") {
+		t.Fatalf("summary = %q redacted=%v, want bounded map marker", first, redacted)
+	}
+	for index := 0; index < 20; index++ {
+		next, _ := mcpArgumentSummary(raw)
+		if next != first {
+			t.Fatalf("summary changed between renders:\n%s\n%s", first, next)
+		}
+	}
+}
+
+// TestMCPApprovalSameAttemptLargeArgsDoesNotConflict is the end-to-end half:
+// the same attempt/call/arguments replay must reuse the answered decision, not
+// open a conflicting prompt.
+func TestMCPApprovalSameAttemptLargeArgsDoesNotConflict(t *testing.T) {
+	gate, broker, _, scope := newMCPApprovalTestGate(t)
+	payload := map[string]any{}
+	for index := 0; index < 40; index++ {
+		payload[fmt.Sprintf("k%02d", index)] = index
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := toolsurface.MCPApprovalRequest{
+		Server: "filesystem", Tool: "write_file", Destructive: true, Arguments: raw,
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	ctx = agentcore.WithToolRunScope(ctx, scope)
+	ctx = agentcore.WithToolCallID(agentcore.WithMCPAttempt(ctx, "attempt-large"), "call-large")
+	answered := make(chan struct{})
+	go func() {
+		defer close(answered)
+		answerMCPApproval(t, broker, scope, mcpApprovalAllowOption)
+	}()
+	if err := gate.Approve(ctx, request); err != nil {
+		t.Fatalf("first approval: %v", err)
+	}
+	<-answered
+	if err := gate.Approve(ctx, request); err != nil {
+		t.Fatalf("same-attempt replay = %v, want the answered decision", err)
+	}
+	decisions, err := broker.List(context.Background(), mustUUID(t, scope.TenantID), mustUUID(t, scope.SessionID))
+	if err != nil || len(decisions) != 1 {
+		t.Fatalf("decisions = (%d, %v), want one", len(decisions), err)
 	}
 }
 
