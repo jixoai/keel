@@ -22,25 +22,32 @@
   - terminal assignment reuse → `assignment_terminal`
     (`ErrAssignmentTerminal`, also on `CreateSession`);
   - idempotency key with changed Bot/session → `assignment_conflict`.
+  - the whole idempotency-key operation is serialised by a key lock acquired
+    before the per-session guard, so two concurrent retries of one key with
+    different worker sessions cannot both complete the open row (the last-write
+    race found in review).
 - Tests: `TestAssignRejectsBoundSessionAcrossWorkItems`,
   `TestAssignSameSessionTwiceInWorkItemRejected`,
   `TestAssignIdempotentParameterConflicts`,
-  `TestAssignConcurrentCrossWorkItemBindsOnce` (added here: two concurrent
-  Assign calls, exactly one winner, one row),
+  `TestAssignConcurrentCrossWorkItemBindsOnce`,
+  `TestAssignConcurrentSameKeyBindsOnce`,
   `TestCreateSessionRejectsBoundAndTerminalAssignment`,
   `TestCollabAssignmentBySessionAcrossWorkItems` (PG, tenant isolation).
 
 ### P2-5 Link endpoints, natural-key dedupe, cross-WorkItem read
 
-- `Coordinator.AddLink` normalises endpoints, validates the closed endpoint
-  vocabulary, rejects self-links, and proves session/work_item/assignment
-  endpoints exist in the request tenant before insert.
+- `Coordinator.AddLink` canonicalises session/work_item/assignment UUIDs before
+  building the natural key, so casing/hyphenation cannot bypass dedupe;
+  validates the closed endpoint vocabulary, rejects self-links, and proves
+  session/work_item/assignment endpoints exist in the request tenant before
+  insert.
 - Deterministic id `linkID(tenant, scope, kind, from, to)`; memory and PG stores
   dedupe by the natural relation. PG adds the `collab_links_natural` unique
   index; an explicit id naming a different relation returns `link_conflict`.
 - `ListLinks` returns the relations hosted by the WorkItem plus relations whose
   either endpoint is that WorkItem (readable from both sides, one row).
 - Tests: `TestAddLinkIdempotentAcrossWorkItems`,
+  `TestAddLinkCanonicalizesUUIDEndpoints`,
   `TestAddLinkRejectsUnknownEndpoints`, `TestCollabLinkNaturalDedupe` (PG).
 
 ### P2-6 Per-request tenant registry
@@ -72,8 +79,10 @@
 - `checkpoint_requests` is an independent idempotency ledger. `SaveCheckpoint`
   writes it in the same PG transaction for manual requests; `CheckpointByRequest`
   reads the ledger, not the prunable projection. `PruneCheckpoints` never
-  touches it. Same requestId + different `upto_seq` is refused; two different
-  requests may legitimately select the same cut (mem/PG parity asserted).
+  touches it; `PruneCheckpointRequests` bounds it independently (1000 rows /
+  30-day TTL on the run read path). Same requestId + different `upto_seq` is
+  refused; two different requests may legitimately select the same cut
+  (mem/PG parity asserted).
 - TTL/Max cleanup is lazy on the run read path (`Runner.pruneCheckpoints`
   before building the model view), best-effort, newest-anchored row protected;
   events and the idempotency ledger are untouched.
@@ -82,7 +91,8 @@
   `TestCheckpointSkipsUnanchoredRows`, `TestCheckpointTenantIsolation`,
   `TestCorruptCheckpointSummaryHash`, `TestCompactionCarriesSummaryHash`,
   `TestManualCompactionCarriesSummaryHash`,
-  `TestRunLazilyPrunesExpiredCheckpoints`.
+  `TestRunLazilyPrunesExpiredCheckpoints`,
+  `TestPruneCheckpointRequestsBoundsLedger`, `TestMissingSessionParity`.
 
 ## 3. Commands and results
 

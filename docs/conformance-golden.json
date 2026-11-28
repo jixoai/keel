@@ -4,13 +4,13 @@
   "piPinDate": "2026-11-05",
   "generatedAt": "2026-11-28",
   "total": {
-    "pass": 1314,
+    "pass": 1318,
     "fail": 0,
     "skip": 3
   },
   "packages": {
     "github.com/jixoai/keel/internal/agent": {
-      "pass": 253,
+      "pass": 257,
       "fail": 0,
       "skip": 1
     },

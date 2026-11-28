@@ -1,0 +1,14 @@
+{
+  "mode": "perf-1000-sessions-64-runs",
+  "sourceCommit": "3c7bd7897237d790a25fbbfe136c9f08bc0f5d7b",
+  "sourceBranch": "task/keel-collab-pi-unified",
+  "sourceTree": "clean worktree at sourceCommit",
+  "command": "custom wrapper around scripts/acceptance-perf.sh build/container steps with KEEL_PERF_PREFILL_RUNS=1000 and KEEL_PERF_MIN_ACTIVE_RUNS=64",
+  "build": "CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build ./cmd/runtime ./cmd/loadtest ./cmd/mcpappload",
+  "runtimeContainer": "alpine:3.20, --memory=2g --memory-swap=2g --cpus=4, GOMEMLIMIT=1610612736, -streams 2000 -runs 64",
+  "postgres": "postgres:18 at 127.0.0.1:13741 (keel-pg), dedicated keel_perf64 database",
+  "provider": "cmd/mcpappload provider stub, model perf-slow (20s dwell), loopback in the runtime netns",
+  "load": "cmd/loadtest 1000 sessions / 60s, prefill-runs 1000, wait-drain 60s",
+  "recordedAt": "2026-11-28T22:47:00+08:00",
+  "gate": "runsActiveMax >= 64, peak <= 1536MB, sessions == 1000, texts > 0, hard SSE errors == 0"
+}

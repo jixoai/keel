@@ -1,0 +1,13 @@
+{
+  "mode": "g5-chaos-kill-600s",
+  "sourceCommit": "3c7bd7897237d790a25fbbfe136c9f08bc0f5d7b",
+  "sourceBranch": "task/keel-collab-pi-unified",
+  "sourceTree": "clean worktree at sourceCommit (capacity/chaos binaries built there)",
+  "command": "KEEL_TEST_DSN=postgres://postgres:runtime@127.0.0.1:13741/runtime?sslmode=disable KEEL_PG_CTR=keel-pg KEEL_G5_CHAOS_PORT=13794 scripts/acceptance-g5-chaos.sh evidence/chaos-2026-11-28",
+  "build": "go build ./cmd/runtime ./cmd/chaos (host darwin/arm64)",
+  "profile": "mode=kill, duration=600s, kill-every=30s, 16 sessions, settle=20s",
+  "postgres": "postgres:18 at 127.0.0.1:13741 (keel-pg), dedicated runtime_chaos database",
+  "ports": "13794/13795",
+  "recordedAt": "2026-11-28T23:01:00+08:00",
+  "result": "result.json: PASS, 20 SIGKILLs, 0 lost events, 0 duplicate final replies"
+}
