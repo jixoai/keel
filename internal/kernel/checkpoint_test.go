@@ -272,3 +272,91 @@ func TestCheckpointSkipsUnanchoredRows(t *testing.T) {
 		})
 	}
 }
+
+// TestCheckpointSummaryHash pins the integrity fact: every save records
+// sha256(summary), a mismatched caller-supplied hash is refused, and the load
+// path returns the recorded hash.
+func TestCheckpointSummaryHash(t *testing.T) {
+	for _, impl := range implementations(t) {
+		t.Run(impl.name, func(t *testing.T) {
+			h := impl.build(t)
+			ctx := context.Background()
+			scope := h.newSession()
+
+			summary := "the durable summary"
+			if err := h.k.SaveCheckpoint(ctx, scope, CheckpointRecord{
+				UptoSeq: 5, KeptFromSeq: 3, Summary: summary,
+			}); err != nil {
+				t.Fatalf("save checkpoint: %v", err)
+			}
+			cp, found, err := h.k.LoadCheckpoint(ctx, scope)
+			if err != nil || !found {
+				t.Fatalf("load checkpoint = (found=%v, err=%v)", found, err)
+			}
+			want := CheckpointSummaryHash(summary)
+			if cp.SummaryHash != want {
+				t.Fatalf("summary hash = %q, want %q", cp.SummaryHash, want)
+			}
+			// A caller-supplied hash that does not describe the summary is
+			// refused before anything is written.
+			if err := h.k.SaveCheckpoint(ctx, scope, CheckpointRecord{
+				UptoSeq: 6, KeptFromSeq: 4, Summary: "different", SummaryHash: want,
+			}); !errors.Is(err, ErrInvalidRequest) {
+				t.Fatalf("mismatched hash err = %v, want ErrInvalidRequest", err)
+			}
+			if err := h.k.SaveCheckpoint(ctx, scope, CheckpointRecord{
+				UptoSeq: 6, KeptFromSeq: 4, Summary: summary, SummaryHash: want,
+			}); err != nil {
+				t.Fatalf("matching supplied hash: %v", err)
+			}
+		})
+	}
+}
+
+// TestCheckpointRequestSurvivesPrune pins the manual idempotency contract:
+// pruning the projection must not forget the requestId or its result.
+func TestCheckpointRequestSurvivesPrune(t *testing.T) {
+	for _, impl := range implementations(t) {
+		t.Run(impl.name, func(t *testing.T) {
+			h := impl.build(t)
+			ctx := context.Background()
+			scope := h.newSession()
+
+			manual := CheckpointRecord{
+				UptoSeq: 5, KeptFromSeq: 3, Summary: "manual summary",
+				TokensBefore: 9000, TokensAfter: 1500, PolicyVersion: "cp1-manual", RequestID: "req-pruned",
+			}
+			if err := h.k.SaveCheckpoint(ctx, scope, manual); err != nil {
+				t.Fatalf("save manual checkpoint: %v", err)
+			}
+			if err := h.k.SaveCheckpoint(ctx, scope, CheckpointRecord{
+				UptoSeq: 9, KeptFromSeq: 7, Summary: "newest",
+				TokensBefore: 8000, TokensAfter: 1200, PolicyVersion: "cp1-newest",
+			}); err != nil {
+				t.Fatalf("save newest checkpoint: %v", err)
+			}
+			pruned, err := h.k.PruneCheckpoints(ctx, scope, PruneRequest{MaxCheckpoints: 1})
+			if err != nil || pruned != 1 {
+				t.Fatalf("prune = (%d, %v), want the manual projection removed", pruned, err)
+			}
+			cp, found, err := h.k.LoadCheckpoint(ctx, scope)
+			if err != nil || !found || cp.UptoSeq != 9 {
+				t.Fatalf("newest after prune = (%+v, found=%v, err=%v), want 9", cp, found, err)
+			}
+			replay, found, err := h.k.CheckpointByRequest(ctx, scope, "req-pruned")
+			if err != nil || !found {
+				t.Fatalf("request after prune = (found=%v, err=%v), want the ledger row", found, err)
+			}
+			if replay.UptoSeq != 5 || replay.TokensBefore != 9000 || replay.TokensAfter != 1500 ||
+				replay.PolicyVersion != "cp1-manual" || replay.SummaryHash != CheckpointSummaryHash("manual summary") {
+				t.Fatalf("replayed checkpoint = %+v, want the original manual result", replay)
+			}
+			// The same requestId still cannot point at a second seq.
+			if err := h.k.SaveCheckpoint(ctx, scope, CheckpointRecord{
+				UptoSeq: 11, KeptFromSeq: 10, Summary: "third", RequestID: "req-pruned",
+			}); err == nil {
+				t.Fatal("a reused requestId for a different seq must fail after pruning")
+			}
+		})
+	}
+}

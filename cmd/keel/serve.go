@@ -1560,16 +1560,21 @@ func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, 
 		InheritOwnership: newSessionOwnershipInheritor(st),
 		OwnSpawnedChild:  st.CreateSpawnedSession,
 	})
-	// The collaboration mode registry is completed before the product API is
-	// constructed: duplicate ids and unknown disable targets must fail startup,
-	// and the read-only catalogue is served from this same object. The guarded
+	// The collaboration mode source resolves (and caches) each request tenant's
+	// catalogue. Duplicate ids and unknown disable targets must fail startup, so
+	// the deployment tenant's registry is built eagerly here and shared with the
+	// super-agent queue and the read-only capability projection. The guarded
 	// collab.Host is then built over the same runner, so the `agent` tool and
 	// the HTTP sub-agent routes share one enforced creation gate.
-	collabModes, err := newCollabModes(opts.TenantID, subagentMaxDepth, subagentMaxChildren)
+	collabRegistries, err := newCollabRegistries(subagentMaxDepth, subagentMaxChildren)
 	if err != nil {
 		return nil, fmt.Errorf("collaboration modes: %w", err)
 	}
-	if _, err := newCollabHost(opts.TenantID, collabModes, st, kern, accessBridge, subagents, log); err != nil {
+	collabModes, err := collabRegistries.Registry(ctx, opts.TenantID)
+	if err != nil {
+		return nil, fmt.Errorf("collaboration modes: %w", err)
+	}
+	if _, err := newCollabHost(opts.TenantID, collabRegistries, st, kern, accessBridge, subagents, log); err != nil {
 		return nil, err
 	}
 	// Triggers fire as a Bot: the store-backed resolver validates the Bot

@@ -28,6 +28,13 @@ var (
 	ErrWorkItemNotFound      = errors.New("collab: work item not found")
 	ErrWorkItemClosed        = errors.New("collab: work item is closed")
 	ErrAssignmentNotFound    = errors.New("collab: assignment not found")
+	ErrAssignmentBound       = errors.New("collab: assignment is already bound")
+	ErrAssignmentTerminal    = errors.New("collab: assignment is already terminal")
+	ErrAssignmentConflict    = errors.New("collab: assignment parameters conflict")
+	ErrSessionAssigned       = errors.New("collab: session is already assigned")
+	ErrLinkNotFound          = errors.New("collab: link not found")
+	ErrLinkConflict          = errors.New("collab: link conflicts with an existing relation")
+	ErrUnknownTenant         = errors.New("collab: tenant has no mode registry")
 	ErrAttentionNotFound     = errors.New("collab: attention not found")
 	ErrAttentionClosed       = errors.New("collab: attention is already terminal")
 	ErrAttentionExpired      = errors.New("collab: attention deadline passed")
@@ -63,6 +70,13 @@ const (
 	CodeWorkItemNotFound    ErrorCode = "work_item_not_found"
 	CodeWorkItemClosed      ErrorCode = "work_item_closed"
 	CodeAssignmentNotFound  ErrorCode = "assignment_not_found"
+	CodeAssignmentBound     ErrorCode = "assignment_already_bound"
+	CodeAssignmentTerminal  ErrorCode = "assignment_terminal"
+	CodeAssignmentConflict  ErrorCode = "assignment_conflict"
+	CodeSessionAssigned     ErrorCode = "session_already_assigned"
+	CodeLinkNotFound        ErrorCode = "link_not_found"
+	CodeLinkConflict        ErrorCode = "link_conflict"
+	CodeTenantUnknown       ErrorCode = "tenant_unknown"
 	CodeAttentionNotFound   ErrorCode = "attention_not_found"
 	CodeAttentionClosed     ErrorCode = "attention_closed"
 	CodeAttentionExpired    ErrorCode = "attention_expired"

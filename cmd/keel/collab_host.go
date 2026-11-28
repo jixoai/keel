@@ -33,13 +33,14 @@ import (
 	"github.com/jixoai/keel/internal/store"
 )
 
-// newCollabHost builds the deployment's single guarded Host and installs it on
-// the sub-agent runner. It must be called after the mode registry and the
+// newCollabHost builds the deployment's guarded Host and installs it on the
+// sub-agent runner. It must be called after the mode registry source and the
 // runner exist; the launcher resolves the runner lazily, so the cycle is closed
-// here.
+// here. The Host resolves the mode catalogue of each request's tenant, so the
+// same Host can serve more than the assembly-time tenant.
 func newCollabHost(
 	tenantID uuid.UUID,
-	modes *collab.ModeRegistry,
+	registries *collab.TenantRegistries,
 	st *store.Store,
 	events kernel.Reader,
 	accessBridge *accesswire.Bridge,
@@ -51,7 +52,9 @@ func newCollabHost(
 	}
 	host, err := collab.NewHost(collab.HostOptions{
 		TenantID: tenantID,
-		Modes:    modes,
+		// Registries resolves the catalogue per request tenant; TenantID stays
+		// the process tenant used by the audit fallback and the read projection.
+		Registries: registries,
 		// The sub-agent mode creates bare delegations, not WorkItems. The
 		// in-memory store keeps Host creation correct without inventing a
 		// persistence decision the super-agent change owns.

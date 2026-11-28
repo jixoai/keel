@@ -158,6 +158,7 @@ CREATE TABLE IF NOT EXISTS checkpoints (
     tokens_before  bigint NOT NULL DEFAULT 0,
     tokens_after   bigint NOT NULL DEFAULT 0,
     policy_version text NOT NULL DEFAULT '',
+    summary_hash   text NOT NULL DEFAULT '',
     request_id     text,
     created_at     timestamptz NOT NULL DEFAULT now(),
     PRIMARY KEY (tenant_id, session_id, upto_seq)
@@ -167,10 +168,31 @@ ALTER TABLE checkpoints ADD COLUMN IF NOT EXISTS kept_from_seq bigint;
 ALTER TABLE checkpoints ADD COLUMN IF NOT EXISTS tokens_before bigint NOT NULL DEFAULT 0;
 ALTER TABLE checkpoints ADD COLUMN IF NOT EXISTS tokens_after bigint NOT NULL DEFAULT 0;
 ALTER TABLE checkpoints ADD COLUMN IF NOT EXISTS policy_version text NOT NULL DEFAULT '';
+ALTER TABLE checkpoints ADD COLUMN IF NOT EXISTS summary_hash text NOT NULL DEFAULT '';
 ALTER TABLE checkpoints ADD COLUMN IF NOT EXISTS request_id text;
 CREATE UNIQUE INDEX IF NOT EXISTS checkpoints_request_id
     ON checkpoints (tenant_id, session_id, request_id)
     WHERE request_id IS NOT NULL;
+
+-- checkpoint_requests is the manual-compaction idempotency ledger. It is
+-- deliberately independent of the checkpoints projection: pruning or expiring a
+-- projection must not turn the same requestId into a second compaction. The row
+-- carries the result a replay returns (seq, accounting, summary identity), so
+-- CheckpointByRequest does not depend on the projection still existing.
+CREATE TABLE IF NOT EXISTS checkpoint_requests (
+    tenant_id      uuid NOT NULL,
+    session_id     uuid NOT NULL,
+    request_id     text NOT NULL,
+    upto_seq       bigint NOT NULL,
+    kept_from_seq  bigint NOT NULL DEFAULT 0,
+    summary        text NOT NULL DEFAULT '',
+    summary_hash   text NOT NULL DEFAULT '',
+    tokens_before  bigint NOT NULL DEFAULT 0,
+    tokens_after   bigint NOT NULL DEFAULT 0,
+    policy_version text NOT NULL DEFAULT '',
+    created_at     timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (tenant_id, session_id, request_id)
+);
 
 -- session_checkpoint_policies is the per-session narrowing override of the
 -- tenant checkpoint policy. The document is opaque JSON (internal/compaction
@@ -1617,6 +1639,14 @@ CREATE TABLE IF NOT EXISTS collab_links (
 
 CREATE INDEX IF NOT EXISTS collab_links_by_work_item
     ON collab_links (tenant_id, work_item_id);
+
+-- One row per natural relation: the same (tenant, host WorkItem scope, kind,
+-- directed endpoints) relation is idempotent even when a caller supplies an
+-- explicit id.
+CREATE UNIQUE INDEX IF NOT EXISTS collab_links_natural
+    ON collab_links (tenant_id,
+                     COALESCE(work_item_id, '00000000-0000-0000-0000-000000000000'::uuid),
+                     kind, from_type, from_id, to_type, to_id);
 
 CREATE TABLE IF NOT EXISTS collab_subscriptions (
     tenant_id       uuid NOT NULL,

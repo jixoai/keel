@@ -46,6 +46,10 @@ type memSession struct {
 	// checkpoints is the compaction projection, newest last (the PG PK is
 	// (tenant, session, upto_seq); the slice mirrors it with upsert semantics).
 	checkpoints []Checkpoint
+	// checkpointRequests is the manual-compaction idempotency ledger. It is
+	// independent of checkpoints so pruning a projection never forgets the
+	// request that produced it (PG parity: checkpoint_requests).
+	checkpointRequests map[string]Checkpoint
 	// external, when set, marks the session as owned by an external backend.
 	// Such a session never gets a run row, so it is never claimable.
 	external *memExternal
@@ -240,25 +244,38 @@ func (m *MemStore) SaveCheckpoint(ctx context.Context, tenantID, sessionID uuid.
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	summaryHash := CheckpointSummaryHash(rec.Summary)
+	if rec.SummaryHash == "" {
+		rec.SummaryHash = summaryHash
+	} else if rec.SummaryHash != summaryHash {
+		return errors.New("memstore: checkpoint summary hash does not match the summary")
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	s, ok := m.sessions[Scope{TenantID: tenantID, SessionID: sessionID}]
 	if !ok {
 		return fmt.Errorf("memstore: session: %w", ErrNotFound)
 	}
+	if s.checkpointRequests == nil {
+		s.checkpointRequests = make(map[string]Checkpoint)
+	}
 	if rec.RequestID != "" {
-		for _, cp := range s.checkpoints {
-			if cp.RequestID == rec.RequestID && cp.UptoSeq != rec.UptoSeq {
-				return errors.New("memstore: checkpoint requestId already produced a different checkpoint")
-			}
+		if existing, ok := s.checkpointRequests[rec.RequestID]; ok && existing.UptoSeq != rec.UptoSeq {
+			return errors.New("memstore: checkpoint requestId already produced a different checkpoint")
 		}
 	}
+	var stored Checkpoint
+	updated := false
 	for i := range s.checkpoints {
 		if s.checkpoints[i].UptoSeq != rec.UptoSeq {
 			continue
 		}
 		cp := &s.checkpoints[i]
+		if cp.RequestID != "" && rec.RequestID != "" && cp.RequestID != rec.RequestID {
+			return errors.New("memstore: checkpoint seq already belongs to another requestId")
+		}
 		cp.Summary = rec.Summary
+		cp.SummaryHash = rec.SummaryHash
 		if rec.KeptFromSeq > 0 {
 			cp.KeptFromSeq = rec.KeptFromSeq
 		}
@@ -274,18 +291,33 @@ func (m *MemStore) SaveCheckpoint(ctx context.Context, tenantID, sessionID uuid.
 		if rec.RequestID != "" {
 			cp.RequestID = rec.RequestID
 		}
-		return nil
+		stored = *cp
+		updated = true
+		break
 	}
-	s.checkpoints = append(s.checkpoints, Checkpoint{
-		UptoSeq:       rec.UptoSeq,
-		KeptFromSeq:   rec.KeptFromSeq,
-		Summary:       rec.Summary,
-		TokensBefore:  rec.TokensBefore,
-		TokensAfter:   rec.TokensAfter,
-		PolicyVersion: rec.PolicyVersion,
-		RequestID:     rec.RequestID,
-		CreatedAt:     m.now(),
-	})
+	if !updated {
+		stored = Checkpoint{
+			UptoSeq:       rec.UptoSeq,
+			KeptFromSeq:   rec.KeptFromSeq,
+			Summary:       rec.Summary,
+			SummaryHash:   rec.SummaryHash,
+			TokensBefore:  rec.TokensBefore,
+			TokensAfter:   rec.TokensAfter,
+			PolicyVersion: rec.PolicyVersion,
+			RequestID:     rec.RequestID,
+			CreatedAt:     m.now(),
+		}
+		s.checkpoints = append(s.checkpoints, stored)
+	}
+	if rec.RequestID != "" {
+		s.checkpointRequests[rec.RequestID] = stored
+	} else if stored.RequestID != "" {
+		// A later refinement of the same compaction seq updates the replay
+		// result without changing the request's identity.
+		if _, ok := s.checkpointRequests[stored.RequestID]; ok {
+			s.checkpointRequests[stored.RequestID] = stored
+		}
+	}
 	return nil
 }
 
@@ -315,7 +347,8 @@ func (m *MemStore) LoadCheckpoint(ctx context.Context, tenantID, sessionID uuid.
 	return newest, found, nil
 }
 
-// CheckpointByRequest resolves a manual-compaction requestId.
+// CheckpointByRequest resolves a manual-compaction requestId from the
+// idempotency ledger, not the prunable projection.
 func (m *MemStore) CheckpointByRequest(ctx context.Context, tenantID, sessionID uuid.UUID, requestID string) (Checkpoint, bool, error) {
 	if err := ctx.Err(); err != nil {
 		return Checkpoint{}, false, err
@@ -329,12 +362,8 @@ func (m *MemStore) CheckpointByRequest(ctx context.Context, tenantID, sessionID 
 	if !ok {
 		return Checkpoint{}, false, fmt.Errorf("memstore: session: %w", ErrNotFound)
 	}
-	for _, cp := range s.checkpoints {
-		if cp.RequestID == requestID {
-			return cp, true, nil
-		}
-	}
-	return Checkpoint{}, false, nil
+	cp, found := s.checkpointRequests[requestID]
+	return cp, found, nil
 }
 
 // PruneCheckpoints deletes old projections. The newest projection survives

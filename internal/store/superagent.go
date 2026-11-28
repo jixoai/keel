@@ -289,6 +289,34 @@ func (s *Store) ListAssignments(ctx context.Context, tenantID, workItemID uuid.U
 	return out, rows.Err()
 }
 
+// ListAssignmentsBySession lists one session's assignments across the tenant's
+// WorkItems. The binding guard reads it so an index that never recorded a
+// WorkItem cannot hide an existing binding.
+func (s *Store) ListAssignmentsBySession(ctx context.Context, tenantID, sessionID uuid.UUID) ([]collab.Assignment, error) {
+	if sessionID == uuid.Nil {
+		return []collab.Assignment{}, nil
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT tenant_id, assignment_id, work_item_id, mode_id, bot_id, session_id, caller_session_id,
+		       status, title, input, result, error, idempotency_key, created_at, updated_at
+		  FROM collab_assignments
+		 WHERE tenant_id = $1 AND session_id = $2
+		 ORDER BY created_at ASC, assignment_id ASC`, tenantID, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("store: list assignments by session: %w", err)
+	}
+	defer rows.Close()
+	out := make([]collab.Assignment, 0)
+	for rows.Next() {
+		assignment, err := scanAssignment(rows)
+		if err != nil {
+			return nil, fmt.Errorf("store: scan assignment: %w", err)
+		}
+		out = append(out, assignment)
+	}
+	return out, rows.Err()
+}
+
 // UpdateAssignment replaces the mutable fields of an assignment.
 func (s *Store) UpdateAssignment(ctx context.Context, assignment collab.Assignment) (collab.Assignment, error) {
 	row, err := scanAssignment(s.pool.QueryRow(ctx, `
@@ -723,48 +751,114 @@ func (s *Store) ListAssignmentsByStatus(ctx context.Context, tenantID uuid.UUID,
 
 // --- Links ----------------------------------------------------------------
 
-// AddLink inserts one semantic link.
+const linkColumns = `tenant_id, link_id, work_item_id, kind, from_type, from_id, to_type, to_id, created_at`
+
+// AddLink inserts one semantic relation at most once. The natural key is the
+// relation itself (tenant, host WorkItem scope, kind, both directed endpoints);
+// a repeated relation returns the original row. An explicit id that names a
+// different relation is a conflict rather than a silent overwrite.
 func (s *Store) AddLink(ctx context.Context, link collab.Link) (collab.Link, error) {
 	if link.TenantID == uuid.Nil || link.ID == uuid.Nil {
 		return collab.Link{}, collabError(collab.ErrTenantRequired, collab.CodeTenantRequired, "add_link", "tenant and link ids are required")
 	}
-	if _, err := s.pool.Exec(ctx, `
+	tag, err := s.pool.Exec(ctx, `
 		INSERT INTO collab_links
 		    (tenant_id, link_id, work_item_id, kind, from_type, from_id, to_type, to_id, created_at)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
-		ON CONFLICT (tenant_id, link_id) DO NOTHING`,
+		ON CONFLICT DO NOTHING`,
 		link.TenantID, link.ID, nullableUUID(link.WorkItemID), string(link.Kind),
-		string(link.From.Type), link.From.ID, string(link.To.Type), link.To.ID, link.CreatedAt); err != nil {
+		string(link.From.Type), link.From.ID, string(link.To.Type), link.To.ID, link.CreatedAt)
+	if err != nil {
 		return collab.Link{}, fmt.Errorf("store: add link: %w", err)
 	}
-	return link, nil
+	if tag.RowsAffected() == 1 {
+		return link, nil
+	}
+	existing, found, err := s.linkByNaturalKey(ctx, link)
+	if err != nil {
+		return collab.Link{}, err
+	}
+	if found {
+		return existing, nil
+	}
+	// The only remaining conflict is an explicit id that already names a
+	// different relation.
+	return collab.Link{}, collabError(collab.ErrLinkConflict, collab.CodeLinkConflict, "add_link",
+		"link id names a different relation")
 }
 
-// ListLinks lists one work item's links.
+// linkByNaturalKey resolves the relation's natural identity.
+func (s *Store) linkByNaturalKey(ctx context.Context, link collab.Link) (collab.Link, bool, error) {
+	row, err := scanLink(s.pool.QueryRow(ctx, `
+		SELECT `+linkColumns+`
+		  FROM collab_links
+		 WHERE tenant_id = $1
+		   AND COALESCE(work_item_id, '00000000-0000-0000-0000-000000000000'::uuid)
+		       = COALESCE($2, '00000000-0000-0000-0000-000000000000'::uuid)
+		   AND kind = $3 AND from_type = $4 AND from_id = $5 AND to_type = $6 AND to_id = $7`,
+		link.TenantID, nullableUUID(link.WorkItemID), string(link.Kind),
+		string(link.From.Type), link.From.ID, string(link.To.Type), link.To.ID))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return collab.Link{}, false, nil
+	}
+	if err != nil {
+		return collab.Link{}, false, fmt.Errorf("store: read link by relation: %w", err)
+	}
+	return row, true, nil
+}
+
+// GetLink reads one link under the tenant boundary.
+func (s *Store) GetLink(ctx context.Context, tenantID, linkID uuid.UUID) (collab.Link, error) {
+	row, err := scanLink(s.pool.QueryRow(ctx,
+		`SELECT `+linkColumns+` FROM collab_links WHERE tenant_id = $1 AND link_id = $2`,
+		tenantID, linkID))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return collab.Link{}, collabError(collab.ErrLinkNotFound, collab.CodeLinkNotFound, "get_link", "link not found")
+	}
+	if err != nil {
+		return collab.Link{}, fmt.Errorf("store: get link: %w", err)
+	}
+	return row, nil
+}
+
+// ListLinks returns the relations hosted by one WorkItem plus the relations
+// whose either endpoint is that WorkItem. A cross-WorkItem relation is
+// therefore readable from both sides without duplicating the row.
 func (s *Store) ListLinks(ctx context.Context, tenantID, workItemID uuid.UUID) ([]collab.Link, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT tenant_id, link_id, work_item_id, kind, from_type, from_id, to_type, to_id, created_at
+		SELECT `+linkColumns+`
 		  FROM collab_links
-		 WHERE tenant_id = $1 AND work_item_id = $2
-		 ORDER BY created_at ASC, link_id ASC`, tenantID, workItemID)
+		 WHERE tenant_id = $1
+		   AND (work_item_id = $2
+		        OR (from_type = 'work_item' AND from_id = $3)
+		        OR (to_type = 'work_item' AND to_id = $3))
+		 ORDER BY created_at ASC, link_id ASC`, tenantID, workItemID, workItemID.String())
 	if err != nil {
 		return nil, fmt.Errorf("store: list links: %w", err)
 	}
 	defer rows.Close()
 	out := make([]collab.Link, 0)
 	for rows.Next() {
-		var link collab.Link
-		var itemID uuid.NullUUID
-		if err := rows.Scan(&link.TenantID, &link.ID, &itemID, &link.Kind,
-			&link.From.Type, &link.From.ID, &link.To.Type, &link.To.ID, &link.CreatedAt); err != nil {
+		link, err := scanLink(rows)
+		if err != nil {
 			return nil, fmt.Errorf("store: scan link: %w", err)
-		}
-		if itemID.Valid {
-			link.WorkItemID = itemID.UUID
 		}
 		out = append(out, link)
 	}
 	return out, rows.Err()
+}
+
+func scanLink(row workItemScanner) (collab.Link, error) {
+	var link collab.Link
+	var itemID uuid.NullUUID
+	if err := row.Scan(&link.TenantID, &link.ID, &itemID, &link.Kind,
+		&link.From.Type, &link.From.ID, &link.To.Type, &link.To.ID, &link.CreatedAt); err != nil {
+		return collab.Link{}, err
+	}
+	if itemID.Valid {
+		link.WorkItemID = itemID.UUID
+	}
+	return link, nil
 }
 
 // --- Source inbox and cursor ---------------------------------------------

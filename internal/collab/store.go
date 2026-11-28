@@ -25,6 +25,11 @@ type WorkStore interface {
 	CreateAssignment(ctx context.Context, assignment Assignment) (Assignment, error)
 	GetAssignment(ctx context.Context, tenantID, assignmentID uuid.UUID) (Assignment, error)
 	ListAssignments(ctx context.Context, tenantID, workItemID uuid.UUID) ([]Assignment, error)
+	// ListAssignmentsBySession returns every assignment of one session across
+	// the tenant's WorkItems. The binding guards use it so a session cannot be
+	// rebound to a second WorkItem through an index that never recorded its
+	// first binding (manual takeover, restart, or a foreign writer).
+	ListAssignmentsBySession(ctx context.Context, tenantID, sessionID uuid.UUID) ([]Assignment, error)
 	UpdateAssignment(ctx context.Context, assignment Assignment) (Assignment, error)
 
 	CreateAttention(ctx context.Context, attention Attention) (Attention, error)
@@ -32,7 +37,14 @@ type WorkStore interface {
 	UpdateAttention(ctx context.Context, attention Attention) (Attention, error)
 	ListAttentions(ctx context.Context, tenantID, workItemID uuid.UUID) ([]Attention, error)
 
+	// AddLink records one natural relation at most once. A repeated relation
+	// returns the existing row (idempotent); an explicit id that names a
+	// different relation is a conflict.
 	AddLink(ctx context.Context, link Link) (Link, error)
+	GetLink(ctx context.Context, tenantID, linkID uuid.UUID) (Link, error)
+	// ListLinks returns the relations hosted by the WorkItem and the relations
+	// whose either endpoint is that WorkItem, so a cross-WorkItem relation is
+	// readable from both sides without duplicating the row.
 	ListLinks(ctx context.Context, tenantID, workItemID uuid.UUID) ([]Link, error)
 }
 
@@ -293,6 +305,28 @@ func (m *MemoryWorkStore) ListAssignments(_ context.Context, tenantID, workItemI
 	return m.listAssignmentsLocked(tenantID, workItemID), nil
 }
 
+// ListAssignmentsBySession lists one session's assignments across every
+// WorkItem of the tenant. The binding guard uses it so a session index that
+// never recorded a WorkItem cannot hide an existing binding.
+func (m *MemoryWorkStore) ListAssignmentsBySession(_ context.Context, tenantID, sessionID uuid.UUID) ([]Assignment, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]Assignment, 0)
+	for _, assignment := range m.assignments {
+		if assignment.TenantID != tenantID || assignment.SessionID != sessionID {
+			continue
+		}
+		out = append(out, cloneAssignment(assignment))
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if !out[i].CreatedAt.Equal(out[j].CreatedAt) {
+			return out[i].CreatedAt.Before(out[j].CreatedAt)
+		}
+		return out[i].ID.String() < out[j].ID.String()
+	})
+	return out, nil
+}
+
 func (m *MemoryWorkStore) listAssignmentsLocked(tenantID, workItemID uuid.UUID) []Assignment {
 	out := make([]Assignment, 0)
 	for _, assignment := range m.assignments {
@@ -386,11 +420,35 @@ func (m *MemoryWorkStore) ListAttentions(_ context.Context, tenantID, workItemID
 func (m *MemoryWorkStore) AddLink(_ context.Context, link Link) (Link, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if link.TenantID == uuid.Nil {
-		return Link{}, newError(ErrTenantRequired, CodeTenantRequired, "add_link", "tenant is required")
+	if link.TenantID == uuid.Nil || link.ID == uuid.Nil {
+		return Link{}, newError(ErrTenantRequired, CodeTenantRequired, "add_link", "tenant and link ids are required")
+	}
+	for _, existing := range m.links {
+		if existing.TenantID != link.TenantID {
+			continue
+		}
+		if sameLinkRelation(existing, link) {
+			// The relation already exists (possibly under another explicit id):
+			// AddLink is idempotent and never creates a second row.
+			return existing, nil
+		}
+		if existing.ID == link.ID {
+			return Link{}, newError(ErrLinkConflict, CodeLinkConflict, "add_link",
+				"link id names a different relation")
+		}
 	}
 	link.CreatedAt = m.now()
 	m.links[link.ID] = link
+	return link, nil
+}
+
+func (m *MemoryWorkStore) GetLink(_ context.Context, tenantID, linkID uuid.UUID) (Link, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	link, ok := m.links[linkID]
+	if !ok || link.TenantID != tenantID {
+		return Link{}, newError(ErrLinkNotFound, CodeLinkNotFound, "get_link", "link not found")
+	}
 	return link, nil
 }
 
@@ -399,7 +457,10 @@ func (m *MemoryWorkStore) ListLinks(_ context.Context, tenantID, workItemID uuid
 	defer m.mu.Unlock()
 	out := make([]Link, 0)
 	for _, link := range m.links {
-		if link.TenantID != tenantID || link.WorkItemID != workItemID {
+		if link.TenantID != tenantID {
+			continue
+		}
+		if link.WorkItemID != workItemID && !linkHasWorkItemEndpoint(link, workItemID) {
 			continue
 		}
 		out = append(out, link)
@@ -411,6 +472,24 @@ func (m *MemoryWorkStore) ListLinks(_ context.Context, tenantID, workItemID uuid
 		return out[i].ID.String() < out[j].ID.String()
 	})
 	return out, nil
+}
+
+// sameLinkRelation compares the natural identity of two links: tenant, host
+// WorkItem scope, kind and both directed endpoints. CreatedAt and an explicit
+// id are not part of the relation.
+func sameLinkRelation(a, b Link) bool {
+	return a.TenantID == b.TenantID &&
+		a.WorkItemID == b.WorkItemID &&
+		a.Kind == b.Kind &&
+		a.From == b.From &&
+		a.To == b.To
+}
+
+// linkHasWorkItemEndpoint reports whether one endpoint names the WorkItem.
+func linkHasWorkItemEndpoint(link Link, workItemID uuid.UUID) bool {
+	id := workItemID.String()
+	return link.From.Type == LinkEndpointWorkItem && link.From.ID == id ||
+		link.To.Type == LinkEndpointWorkItem && link.To.ID == id
 }
 
 // MemorySessionIndex is the in-process SessionIndex used by tests and by the

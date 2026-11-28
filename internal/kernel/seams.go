@@ -55,6 +55,11 @@ type Checkpoint struct {
 	// time. It explains differences between checkpoints; it never enables a
 	// replay on its own.
 	PolicyVersion string
+	// SummaryHash is sha256(summary), hex encoded. It is the projection's
+	// integrity fact: recovery refuses a row whose summary no longer matches it.
+	// Rows written before the column existed carry "" and are not treated as
+	// verified.
+	SummaryHash string
 	// RequestID is the manual-compaction requestId, empty for automatic
 	// compactions. It is the idempotency key of the manual surface.
 	RequestID string
@@ -72,7 +77,11 @@ type CheckpointRecord struct {
 	TokensBefore  int
 	TokensAfter   int
 	PolicyVersion string
-	RequestID     string
+	// SummaryHash may be supplied by the caller; an empty value is computed
+	// from Summary by the kernel before the write. A supplied value that does
+	// not match Summary is refused.
+	SummaryHash string
+	RequestID   string
 }
 
 // PruneRequest bounds the checkpoint projections one session keeps. Both

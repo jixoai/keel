@@ -1468,7 +1468,7 @@ func TestAddLinkValidatesVocabulary(t *testing.T) {
 	link, err := env.host.AddLink(context.Background(), env.tenant, collab.Link{
 		WorkItemID: item.ID,
 		Kind:       collab.LinkReview,
-		From:       collab.LinkEndpoint{Type: collab.LinkEndpointSession, ID: uuid.NewString()},
+		From:       collab.LinkEndpoint{Type: collab.LinkEndpointSession, ID: env.parent.SessionID.String()},
 		To:         collab.LinkEndpoint{Type: collab.LinkEndpointWorkItem, ID: item.ID.String()},
 	})
 	if err != nil {

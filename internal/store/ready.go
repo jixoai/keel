@@ -35,7 +35,7 @@ func (s *Store) notifyEvent(kind string) {
 // table the HTTP/worker paths touch, including the migration-added columns and
 // the handoff audit tables (internal/handoff schema 0001).
 var requiredTables = []string{
-	"tenants", "sessions", "events", "checkpoints", "session_checkpoint_policies", "submissions",
+	"tenants", "sessions", "events", "checkpoints", "checkpoint_requests", "session_checkpoint_policies", "submissions",
 	"tasks", "blobs", "blob_chunks", "blob_refs", "runs",
 	"usage_ledger", "mcp_oauth_pending", "mcp_oauth_credentials",
 	"runtime_instances", "handoffs",
@@ -129,6 +129,8 @@ func (s *Store) CheckReady(ctx context.Context) error {
 		               WHERE table_schema = current_schema() AND table_name = 'checkpoints' AND column_name = 'tokens_after')
 		   AND EXISTS (SELECT 1 FROM information_schema.columns
 		               WHERE table_schema = current_schema() AND table_name = 'checkpoints' AND column_name = 'policy_version')
+		   AND EXISTS (SELECT 1 FROM information_schema.columns
+		               WHERE table_schema = current_schema() AND table_name = 'checkpoints' AND column_name = 'summary_hash')
 		   AND EXISTS (SELECT 1 FROM information_schema.columns
 		               WHERE table_schema = current_schema() AND table_name = 'checkpoints' AND column_name = 'request_id')`).
 		Scan(&migrated); err != nil {

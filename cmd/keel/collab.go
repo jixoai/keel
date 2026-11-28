@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/google/uuid"
@@ -66,6 +67,16 @@ func newCollabModes(tenantID uuid.UUID, subagentMaxDepth int, subagentMaxChildre
 		return nil, fmt.Errorf("disable %q mode: %w", collab.ModeSuperagent, err)
 	}
 	return registry, nil
+}
+
+// newCollabRegistries builds the per-tenant registry source. A request for a
+// tenant resolves (and caches) that tenant's catalogue instead of reusing the
+// assembly-time single-tenant object; the deployment's own tenant is simply the
+// first one the Host asks for.
+func newCollabRegistries(subagentMaxDepth int, subagentMaxChildren int) (*collab.TenantRegistries, error) {
+	return collab.NewTenantRegistries(func(_ context.Context, tenantID uuid.UUID) (*collab.ModeRegistry, error) {
+		return newCollabModes(tenantID, subagentMaxDepth, subagentMaxChildren)
+	})
 }
 
 // resolveSubagentMaxDepth resolves the serve option. nil keeps the mode's

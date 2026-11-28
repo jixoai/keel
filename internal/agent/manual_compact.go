@@ -263,6 +263,7 @@ func (r *Runner) CompactNow(ctx context.Context, lease kernel.Lease, requestID s
 	summarized := len(msgs) - (len(rebuilt) - 1)
 	raw, err := marshalPayload(map[string]any{
 		"summary":             res.Summary,
+		"summaryHash":         kernel.CheckpointSummaryHash(res.Summary),
 		"tokensBefore":        res.TokensBefore,
 		"tokensAfter":         tokensAfter,
 		"firstKept":           res.FirstKeptIndex,

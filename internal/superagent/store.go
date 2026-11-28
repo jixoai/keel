@@ -165,6 +165,10 @@ func (m *MemoryStore) ListAssignments(ctx context.Context, tenantID, workItemID 
 	return m.works.ListAssignments(ctx, tenantID, workItemID)
 }
 
+func (m *MemoryStore) ListAssignmentsBySession(ctx context.Context, tenantID, sessionID uuid.UUID) ([]collab.Assignment, error) {
+	return m.works.ListAssignmentsBySession(ctx, tenantID, sessionID)
+}
+
 func (m *MemoryStore) UpdateAssignment(ctx context.Context, assignment collab.Assignment) (collab.Assignment, error) {
 	stored, err := m.works.UpdateAssignment(ctx, assignment)
 	if err != nil {
@@ -336,6 +340,10 @@ func (m *MemoryStore) ListAssignmentsByStatus(_ context.Context, tenantID uuid.U
 
 func (m *MemoryStore) AddLink(ctx context.Context, link collab.Link) (collab.Link, error) {
 	return m.works.AddLink(ctx, link)
+}
+
+func (m *MemoryStore) GetLink(ctx context.Context, tenantID, linkID uuid.UUID) (collab.Link, error) {
+	return m.works.GetLink(ctx, tenantID, linkID)
 }
 
 func (m *MemoryStore) ListLinks(ctx context.Context, tenantID, workItemID uuid.UUID) ([]collab.Link, error) {

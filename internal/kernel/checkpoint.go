@@ -2,9 +2,19 @@ package kernel
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"strings"
 )
+
+// CheckpointSummaryHash returns the stable identity of a checkpoint summary.
+// The projection stores it so a later read can prove the summary it serves is
+// the one that was recorded, and a compaction event can carry the same fact.
+func CheckpointSummaryHash(summary string) string {
+	sum := sha256.Sum256([]byte(summary))
+	return hex.EncodeToString(sum[:])
+}
 
 // SaveCheckpoint stores the compaction projection described by rec. It is not
 // an append: the event log is already committed and remains the only truth. The
@@ -30,6 +40,13 @@ func (k *Kernel) SaveCheckpoint(ctx context.Context, scope Scope, rec Checkpoint
 	}
 	if rec.TokensBefore < 0 || rec.TokensAfter < 0 {
 		return k.reject(ReasonInvalidRequest, OpCommit, scope, KindCompaction, OwnerToken{}, "checkpoint tokens must be >= 0", ErrInvalidRequest)
+	}
+	summaryHash := CheckpointSummaryHash(rec.Summary)
+	if rec.SummaryHash == "" {
+		rec.SummaryHash = summaryHash
+	} else if rec.SummaryHash != summaryHash {
+		return k.reject(ReasonInvalidRequest, OpCommit, scope, KindCompaction, OwnerToken{},
+			"checkpoint summary hash does not match the summary", ErrInvalidRequest)
 	}
 	if err := k.log.SaveCheckpoint(ctx, scope.TenantID, scope.SessionID, rec); err != nil {
 		return k.classifyStoreError(OpCommit, CommitRequest{Scope: scope, Kind: KindCompaction}, err)

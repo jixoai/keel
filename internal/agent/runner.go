@@ -694,6 +694,12 @@ func (r *Runner) run(ctx context.Context, lease kernel.Lease, span telemetry.Spa
 	// retained tail is decoded. The full log still drives every fact decision
 	// (owedTurn, generation identity, unread inputs) and remains readable by
 	// seq; the checkpoint is a projection, never a replacement for the log.
+	// Lazy retention: a session that stopped producing checkpoints still ages
+	// old projections. Applying the current policy's TTL/Max on the read path
+	// cleans them at the next activity instead of waiting for a new checkpoint
+	// save. The newest anchored projection stays protected and events are never
+	// touched (pruneCheckpoints is best-effort).
+	r.pruneCheckpoints(ctx, lease.Scope)
 	view, checkpoint, checkpointSeq := r.modelViewForAttempt(ctx, lease, events)
 	msgs, seqs := DecodeMessages(view, func(seq int64, kind string, err error) {
 		r.Logger.Warn("skipping unreadable event", "session_id", lease.Scope.SessionID,
@@ -1178,6 +1184,7 @@ func (r *Runner) run(ctx context.Context, lease kernel.Lease, span telemetry.Spa
 			}
 			raw, err := marshalPayload(map[string]any{
 				"summary":             e.Summary,
+				"summaryHash":         kernel.CheckpointSummaryHash(e.Summary),
 				"reason":              "threshold",
 				"tokensBefore":        e.TokensBefore,
 				"firstKept":           e.FirstKeptIndex,
@@ -1904,14 +1911,19 @@ func unreadBelowCheckpoint(events []store.Event, readWatermark, keptFromSeq int6
 
 // corruptCheckpointReason validates a projection against the committed event
 // log. An empty result means the checkpoint can stand in for its summarized
-// prefix. The checks are structural only: they prove the row names committed
-// facts, never that the summary is semantically good.
+// prefix. The checks prove the row names committed facts and that its summary
+// hash (and, when present, the compaction event's hash) agree; they never claim
+// the summary is semantically good.
 func corruptCheckpointReason(cp kernel.Checkpoint, events []store.Event) string {
 	if cp.UptoSeq <= 0 {
 		return "missing compaction seq"
 	}
 	if strings.TrimSpace(cp.Summary) == "" {
 		return "empty summary"
+	}
+	wantHash := kernel.CheckpointSummaryHash(cp.Summary)
+	if cp.SummaryHash != "" && cp.SummaryHash != wantHash {
+		return "summary hash does not match the summary"
 	}
 	if cp.KeptFromSeq <= 0 {
 		return "missing tail anchor"
@@ -1920,11 +1932,18 @@ func corruptCheckpointReason(cp kernel.Checkpoint, events []store.Event) string 
 		return "tail anchor is not before the compaction event"
 	}
 	compactionFound := false
+	eventSummaryHash := ""
 	tailFound := false
 	tailKind := ""
 	for _, ev := range events {
 		if ev.Seq == cp.UptoSeq && ev.Kind == store.EventCompaction {
 			compactionFound = true
+			var payload struct {
+				SummaryHash string `json:"summaryHash"`
+			}
+			if err := json.Unmarshal(ev.Payload, &payload); err == nil {
+				eventSummaryHash = payload.SummaryHash
+			}
 		}
 		if ev.Seq == cp.KeptFromSeq {
 			tailFound = true
@@ -1933,6 +1952,9 @@ func corruptCheckpointReason(cp kernel.Checkpoint, events []store.Event) string 
 	}
 	if !compactionFound {
 		return "compaction event is missing"
+	}
+	if eventSummaryHash != "" && eventSummaryHash != wantHash {
+		return "summary does not match the compaction event"
 	}
 	if !tailFound {
 		return "retained tail anchor is missing"

@@ -206,8 +206,12 @@ type Host interface {
 // HostOptions configures the guarded Coordinator. Every seam except Operators
 // and Attention is required: a half-armed Host must fail at construction.
 type HostOptions struct {
-	TenantID    uuid.UUID
+	TenantID uuid.UUID
+	// Modes is the static single-tenant catalogue. Registries is the per-request
+	// tenant source. Exactly one is required; Modes may be empty when Registries
+	// resolves the tenant on every call.
 	Modes       *ModeRegistry
+	Registries  ModeRegistrySource
 	Work        WorkStore
 	Sessions    SessionIndex
 	Permissions PermissionChecker
@@ -228,6 +232,7 @@ type HostOptions struct {
 type Coordinator struct {
 	tenantID    uuid.UUID
 	modes       *ModeRegistry
+	registries  ModeRegistrySource
 	work        WorkStore
 	sessions    SessionIndex
 	permissions PermissionChecker
@@ -264,14 +269,17 @@ type reservation struct {
 
 var _ Host = (*Coordinator)(nil)
 
-// NewHost builds the guarded Host. Missing seams are construction errors. The
-// mode registry must belong to the same tenant as the Host.
+// NewHost builds the guarded Host. Missing seams are construction errors. A
+// static mode registry must belong to the same tenant as the Host; a
+// RegistrySource is resolved per request instead.
 func NewHost(opts HostOptions) (*Coordinator, error) {
 	switch {
-	case opts.TenantID == uuid.Nil:
+	case opts.TenantID == uuid.Nil && opts.Registries == nil:
 		return nil, newError(ErrTenantRequired, CodeTenantRequired, "new_host", "tenant is required")
-	case opts.Modes == nil:
-		return nil, newError(ErrInvalidRequest, CodeInvalidRequest, "new_host", "mode registry is required")
+	case opts.Modes == nil && opts.Registries == nil:
+		return nil, newError(ErrInvalidRequest, CodeInvalidRequest, "new_host", "a mode registry or registry source is required")
+	case opts.Modes != nil && opts.Registries != nil:
+		return nil, newError(ErrInvalidRequest, CodeInvalidRequest, "new_host", "set either Modes or Registries, not both")
 	case opts.Work == nil:
 		return nil, newError(ErrInvalidRequest, CodeInvalidRequest, "new_host", "work store is required")
 	case opts.Sessions == nil:
@@ -283,9 +291,11 @@ func NewHost(opts HostOptions) (*Coordinator, error) {
 	case opts.Launcher == nil:
 		return nil, newError(ErrInvalidRequest, CodeInvalidRequest, "new_host", "session launcher is required")
 	}
-	if registryTenant := opts.Modes.TenantID(); registryTenant != opts.TenantID {
-		return nil, &Error{Kind: ErrTenantMismatch, Code: CodeTenantMismatch, Operation: "new_host",
-			TenantID: opts.TenantID, Detail: "the mode registry belongs to a different tenant"}
+	if opts.Modes != nil {
+		if registryTenant := opts.Modes.TenantID(); registryTenant != opts.TenantID {
+			return nil, &Error{Kind: ErrTenantMismatch, Code: CodeTenantMismatch, Operation: "new_host",
+				TenantID: opts.TenantID, Detail: "the mode registry belongs to a different tenant"}
+		}
 	}
 	if opts.Now == nil {
 		opts.Now = func() time.Time { return time.Now().UTC() }
@@ -293,6 +303,7 @@ func NewHost(opts HostOptions) (*Coordinator, error) {
 	return &Coordinator{
 		tenantID:        opts.TenantID,
 		modes:           opts.Modes,
+		registries:      opts.Registries,
 		work:            opts.Work,
 		sessions:        opts.Sessions,
 		permissions:     opts.Permissions,
@@ -312,10 +323,11 @@ func NewHost(opts HostOptions) (*Coordinator, error) {
 func (c *Coordinator) OpenWorkItem(ctx context.Context, tenantID uuid.UUID, modeID string, req WorkItemRequest) (WorkItem, error) {
 	const operation = "open_work_item"
 	modeID = strings.TrimSpace(modeID)
-	if err := c.checkTenant(tenantID); err != nil {
+	ctx, modes, err := c.begin(ctx, tenantID)
+	if err != nil {
 		return WorkItem{}, c.reject(ctx, operation, err, modeID)
 	}
-	descriptor, err := c.modes.RequireEnabled(modeID)
+	descriptor, err := modes.RequireEnabled(modeID)
 	if err != nil {
 		return WorkItem{}, c.reject(ctx, operation, err, modeID)
 	}
@@ -380,7 +392,8 @@ func (c *Coordinator) OpenWorkItem(ctx context.Context, tenantID uuid.UUID, mode
 
 // WorkItem reads one WorkItem. Reads stay available after a mode is disabled.
 func (c *Coordinator) WorkItem(ctx context.Context, tenantID, workItemID uuid.UUID) (WorkItem, error) {
-	if err := c.checkTenant(tenantID); err != nil {
+	ctx, _, err := c.begin(ctx, tenantID)
+	if err != nil {
 		return WorkItem{}, err
 	}
 	if workItemID == uuid.Nil {
@@ -392,7 +405,8 @@ func (c *Coordinator) WorkItem(ctx context.Context, tenantID, workItemID uuid.UU
 // WorkItems lists the tenant's WorkItems. A disabled mode's items remain
 // visible: disabling stops new work, it does not erase facts.
 func (c *Coordinator) WorkItems(ctx context.Context, tenantID uuid.UUID, filter WorkFilter) ([]WorkItem, error) {
-	if err := c.checkTenant(tenantID); err != nil {
+	ctx, _, err := c.begin(ctx, tenantID)
+	if err != nil {
 		return nil, err
 	}
 	return c.work.ListWorkItems(ctx, tenantID, filter)
@@ -425,20 +439,34 @@ func (c *Coordinator) Links(ctx context.Context, tenantID, workItemID uuid.UUID)
 }
 
 // AddLink records one semantic relation. The endpoints are records, not a
-// parent/child assumption.
+// parent/child assumption. A relation is idempotent: the same natural relation
+// always resolves to one row, whether the caller supplied an id or not.
 func (c *Coordinator) AddLink(ctx context.Context, tenantID uuid.UUID, link Link) (Link, error) {
 	const operation = "add_link"
-	if err := c.checkTenant(tenantID); err != nil {
+	ctx, _, err := c.begin(ctx, tenantID)
+	if err != nil {
 		return Link{}, c.reject(ctx, operation, err, "")
 	}
 	if !link.Kind.Valid() {
 		return Link{}, c.reject(ctx, operation, newError(ErrInvalidRequest, CodeInvalidRequest, operation,
 			"link kind "+string(link.Kind)+" is not in the closed vocabulary"), "")
 	}
+	link.From = normalizeLinkEndpoint(link.From)
+	link.To = normalizeLinkEndpoint(link.To)
 	if err := validateLinkEndpoint(link.From); err != nil {
 		return Link{}, c.reject(ctx, operation, err, "")
 	}
 	if err := validateLinkEndpoint(link.To); err != nil {
+		return Link{}, c.reject(ctx, operation, err, "")
+	}
+	if link.From == link.To {
+		return Link{}, c.reject(ctx, operation, newError(ErrInvalidRequest, CodeInvalidRequest, operation,
+			"a link must relate two different endpoints"), "")
+	}
+	if err := c.validateLinkEndpointTarget(ctx, tenantID, link.From); err != nil {
+		return Link{}, c.reject(ctx, operation, err, "")
+	}
+	if err := c.validateLinkEndpointTarget(ctx, tenantID, link.To); err != nil {
 		return Link{}, c.reject(ctx, operation, err, "")
 	}
 	if link.WorkItemID != uuid.Nil {
@@ -448,10 +476,17 @@ func (c *Coordinator) AddLink(ctx context.Context, tenantID uuid.UUID, link Link
 	}
 	link.TenantID = tenantID
 	if link.ID == uuid.Nil {
-		link.ID = uuid.New()
+		link.ID = linkID(tenantID, link.WorkItemID, link.Kind, link.From, link.To)
 	}
 	link.CreatedAt = c.now()
-	return c.work.AddLink(ctx, link)
+	stored, err := c.work.AddLink(ctx, link)
+	if err != nil {
+		if errors.Is(err, ErrLinkConflict) {
+			return Link{}, c.reject(ctx, operation, err, "")
+		}
+		return Link{}, err
+	}
+	return stored, nil
 }
 
 // CreateSession is the single controlled creation gate. A repeated
@@ -460,7 +495,8 @@ func (c *Coordinator) AddLink(ctx context.Context, tenantID uuid.UUID, link Link
 func (c *Coordinator) CreateSession(ctx context.Context, tenantID uuid.UUID, modeID string, req SessionRequest) (SessionRef, error) {
 	const operation = "create_session"
 	modeID = strings.TrimSpace(modeID)
-	if err := c.checkTenant(tenantID); err != nil {
+	ctx, modes, err := c.begin(ctx, tenantID)
+	if err != nil {
 		return SessionRef{}, c.reject(ctx, operation, err, modeID)
 	}
 	key := sessionIdempotencyKey(tenantID, modeID, req)
@@ -472,7 +508,7 @@ func (c *Coordinator) CreateSession(ctx context.Context, tenantID uuid.UUID, mod
 		}
 	}
 
-	descriptor, err := c.modes.RequireEnabled(modeID)
+	descriptor, err := modes.RequireEnabled(modeID)
 	if err != nil {
 		return SessionRef{}, c.reject(ctx, operation, err, modeID)
 	}
@@ -626,8 +662,16 @@ func (c *Coordinator) CreateSession(ctx context.Context, tenantID uuid.UUID, mod
 			refusal.BotID = botID
 			return SessionRef{}, c.rejectWith(ctx, refusal)
 		}
+		if stored.Status.Terminal() {
+			refusal := newError(ErrAssignmentTerminal, CodeAssignmentTerminal, operation,
+				"assignment is already terminal")
+			refusal.ModeID = modeID
+			refusal.WorkItemID = req.WorkItemID
+			refusal.AssignmentID = stored.ID
+			return SessionRef{}, c.rejectWith(ctx, refusal)
+		}
 		if stored.SessionID != uuid.Nil {
-			refusal := newError(ErrInvalidCreation, CodeInvalidCreation, operation,
+			refusal := newError(ErrAssignmentBound, CodeAssignmentBound, operation,
 				"assignment is already bound to a session")
 			refusal.ModeID = modeID
 			refusal.WorkItemID = req.WorkItemID
@@ -766,8 +810,12 @@ func (c *Coordinator) finishCreation(ctx context.Context, tenantID uuid.UUID, en
 		if err != nil {
 			return err
 		}
+		if assignment.Status.Terminal() {
+			return newError(ErrAssignmentTerminal, CodeAssignmentTerminal, "create_session",
+				"assignment is already terminal")
+		}
 		if assignment.SessionID != uuid.Nil && assignment.SessionID != entry.ref.SessionID {
-			return newError(ErrInvalidCreation, CodeInvalidCreation, "create_session",
+			return newError(ErrAssignmentBound, CodeAssignmentBound, "create_session",
 				"assignment is already bound to another session")
 		}
 		assignment.SessionID = entry.ref.SessionID
@@ -806,14 +854,15 @@ func (c *Coordinator) finishCreation(ctx context.Context, tenantID uuid.UUID, en
 // requires the independent operator seam; there is no caller-supplied flag.
 func (c *Coordinator) Assign(ctx context.Context, tenantID, workItemID uuid.UUID, botID string, req AssignmentRequest) (Assignment, error) {
 	const operation = "assign"
-	if err := c.checkTenant(tenantID); err != nil {
+	ctx, modes, err := c.begin(ctx, tenantID)
+	if err != nil {
 		return Assignment{}, c.reject(ctx, operation, err, "")
 	}
 	item, err := c.work.GetWorkItem(ctx, tenantID, workItemID)
 	if err != nil {
 		return Assignment{}, c.reject(ctx, operation, err, "")
 	}
-	if _, known := c.modes.Descriptor(item.ModeID); !known {
+	if _, known := modes.Descriptor(item.ModeID); !known {
 		refusal := newError(ErrUnknownMode, CodeUnknownMode, operation, "the work item's mode is not registered")
 		refusal.ModeID = item.ModeID
 		refusal.WorkItemID = item.ID
@@ -850,7 +899,7 @@ func (c *Coordinator) Assign(ctx context.Context, tenantID, workItemID uuid.UUID
 	if err != nil {
 		return Assignment{}, err
 	}
-	if c.modes.Enabled(item.ModeID) {
+	if modes.Enabled(item.ModeID) {
 		// Normal dispatch is restricted to the work item's sessions.
 		if !member {
 			refusal := newError(ErrPermissionDenied, CodePermissionDenied, operation,
@@ -904,8 +953,57 @@ func (c *Coordinator) Assign(ctx context.Context, tenantID, workItemID uuid.UUID
 		refusal.BotID = botID
 		return Assignment{}, c.rejectWith(ctx, refusal)
 	}
+	now := c.now()
+	key := strings.TrimSpace(req.IdempotencyKey)
+	candidateID := assignmentID(tenantID, item.ID, key)
+	// An idempotent replay returns the earlier assignment without a second
+	// audit/create. Changed Bot/session parameters are a conflict, not a silent
+	// overwrite. A retry that supplies the worker for an earlier open assignment
+	// falls through to the binding guard and completes that same row.
+	var pending *Assignment
+	if key != "" {
+		existing, err := c.work.GetAssignment(ctx, tenantID, candidateID)
+		switch {
+		case err == nil:
+			if existing.BotID != botID {
+				refusal := newError(ErrAssignmentConflict, CodeAssignmentConflict, operation,
+					"the idempotency key belongs to an assignment for a different Bot")
+				refusal.ModeID = item.ModeID
+				refusal.WorkItemID = item.ID
+				refusal.AssignmentID = existing.ID
+				refusal.BotID = botID
+				return Assignment{}, c.rejectWith(ctx, refusal)
+			}
+			if existing.SessionID != uuid.Nil {
+				if req.SessionID != uuid.Nil && existing.SessionID != req.SessionID {
+					refusal := newError(ErrAssignmentConflict, CodeAssignmentConflict, operation,
+						"the idempotency key belongs to an assignment bound to another session")
+					refusal.ModeID = item.ModeID
+					refusal.WorkItemID = item.ID
+					refusal.AssignmentID = existing.ID
+					refusal.SessionID = existing.SessionID
+					return Assignment{}, c.rejectWith(ctx, refusal)
+				}
+				return existing, nil
+			}
+			if req.SessionID == uuid.Nil {
+				return existing, nil
+			}
+			pending = &existing
+		case errors.Is(err, ErrAssignmentNotFound):
+			// A new assignment.
+		default:
+			return Assignment{}, err
+		}
+	}
 	status := AssignmentOpen
 	if req.SessionID != uuid.Nil {
+		// Serialise the binding guard per session: two concurrent Assign calls
+		// must not both observe "unbound" and then bind the same session to two
+		// different WorkItems.
+		unlock := c.keyLocks.lock("assign|" + tenantID.String() + "|" + req.SessionID.String())
+		defer unlock()
+
 		worker, err := c.sessions.Session(ctx, tenantID, req.SessionID)
 		if err != nil {
 			refusal := newError(ErrSessionNotFound, CodeSessionNotFound, operation, "worker session not found")
@@ -922,7 +1020,7 @@ func (c *Coordinator) Assign(ctx context.Context, tenantID, workItemID uuid.UUID
 			return Assignment{}, c.rejectWith(ctx, refusal)
 		}
 		if worker.WorkItemID != uuid.Nil && worker.WorkItemID != item.ID {
-			refusal := newError(ErrInvalidRequest, CodeInvalidRequest, operation,
+			refusal := newError(ErrSessionAssigned, CodeSessionAssigned, operation,
 				"worker session belongs to a different work item")
 			refusal.ModeID = item.ModeID
 			refusal.WorkItemID = item.ID
@@ -938,12 +1036,39 @@ func (c *Coordinator) Assign(ctx context.Context, tenantID, workItemID uuid.UUID
 			refusal.BotID = botID
 			return Assignment{}, c.rejectWith(ctx, refusal)
 		}
+		// The index is a projection: a session may already be bound through an
+		// assignment written by another entry point (manual takeover, restart,
+		// or an earlier writer) while its WorkItemID was never recorded. Scan the
+		// durable assignments so a cross-WorkItem rebind cannot slip through.
+		bound, err := c.work.ListAssignmentsBySession(ctx, tenantID, req.SessionID)
+		if err != nil {
+			return Assignment{}, err
+		}
+		for _, existing := range bound {
+			if existing.Status.Terminal() {
+				continue
+			}
+			if existing.WorkItemID == item.ID {
+				refusal := newError(ErrAssignmentBound, CodeAssignmentBound, operation,
+					"worker session already has an open assignment on this work item")
+				refusal.ModeID = item.ModeID
+				refusal.WorkItemID = item.ID
+				refusal.AssignmentID = existing.ID
+				refusal.SessionID = req.SessionID
+				return Assignment{}, c.rejectWith(ctx, refusal)
+			}
+			refusal := newError(ErrSessionAssigned, CodeSessionAssigned, operation,
+				"worker session is already assigned to another work item")
+			refusal.ModeID = item.ModeID
+			refusal.WorkItemID = item.ID
+			refusal.AssignmentID = existing.ID
+			refusal.SessionID = req.SessionID
+			return Assignment{}, c.rejectWith(ctx, refusal)
+		}
 		status = AssignmentActive
 	}
-	now := c.now()
-	key := strings.TrimSpace(req.IdempotencyKey)
 	assignment := Assignment{
-		ID:              assignmentID(tenantID, item.ID, key),
+		ID:              candidateID,
 		TenantID:        tenantID,
 		WorkItemID:      item.ID,
 		ModeID:          item.ModeID,
@@ -956,6 +1081,21 @@ func (c *Coordinator) Assign(ctx context.Context, tenantID, workItemID uuid.UUID
 		IdempotencyKey:  key,
 		CreatedAt:       now,
 		UpdatedAt:       now,
+	}
+	if pending != nil {
+		// The first call opened this assignment; this retry supplies the worker.
+		// Complete the same row instead of creating a second one.
+		pending.SessionID = req.SessionID
+		pending.Status = AssignmentActive
+		pending.UpdatedAt = c.now()
+		updated, err := c.work.UpdateAssignment(ctx, *pending)
+		if err != nil {
+			return Assignment{}, err
+		}
+		if err := c.sessions.SetWorkItem(ctx, tenantID, updated.SessionID, item.ID); err != nil {
+			return Assignment{}, err
+		}
+		return updated, nil
 	}
 	if err := c.record(ctx, AuditEvent{
 		Kind: AuditAssignmentMade, Result: "accepted", Operation: operation,
@@ -975,6 +1115,25 @@ func (c *Coordinator) Assign(ctx context.Context, tenantID, workItemID uuid.UUID
 		})
 		return Assignment{}, err
 	}
+	if stored.BotID != botID {
+		refusal := newError(ErrAssignmentConflict, CodeAssignmentConflict, operation,
+			"the idempotency key was concurrently bound to another Bot")
+		refusal.ModeID = item.ModeID
+		refusal.WorkItemID = item.ID
+		refusal.AssignmentID = stored.ID
+		refusal.BotID = botID
+		return Assignment{}, c.rejectWith(ctx, refusal)
+	}
+	if stored.SessionID != uuid.Nil && req.SessionID != uuid.Nil && stored.SessionID != req.SessionID {
+		// A concurrent writer won the idempotency key with a different worker.
+		refusal := newError(ErrAssignmentConflict, CodeAssignmentConflict, operation,
+			"the idempotency key was concurrently bound to another session")
+		refusal.ModeID = item.ModeID
+		refusal.WorkItemID = item.ID
+		refusal.AssignmentID = stored.ID
+		refusal.SessionID = stored.SessionID
+		return Assignment{}, c.rejectWith(ctx, refusal)
+	}
 	if stored.SessionID != uuid.Nil {
 		if err := c.sessions.SetWorkItem(ctx, tenantID, stored.SessionID, item.ID); err != nil {
 			return Assignment{}, err
@@ -988,7 +1147,8 @@ func (c *Coordinator) Assign(ctx context.Context, tenantID, workItemID uuid.UUID
 // a question from free text.
 func (c *Coordinator) Ask(ctx context.Context, tenantID, workItemID uuid.UUID, req AttentionRequest) (Attention, error) {
 	const operation = "ask"
-	if err := c.checkTenant(tenantID); err != nil {
+	ctx, _, err := c.begin(ctx, tenantID)
+	if err != nil {
 		return Attention{}, c.reject(ctx, operation, err, "")
 	}
 	item, err := c.work.GetWorkItem(ctx, tenantID, workItemID)
@@ -1201,7 +1361,8 @@ func (c *Coordinator) Ask(ctx context.Context, tenantID, workItemID uuid.UUID, r
 // same answer, conflicting answers refused, and an overdue question expires.
 func (c *Coordinator) AnswerAttention(ctx context.Context, tenantID, workItemID, attentionID uuid.UUID, req AttentionAnswerRequest) (Attention, error) {
 	const operation = "answer_attention"
-	if err := c.checkTenant(tenantID); err != nil {
+	ctx, _, err := c.begin(ctx, tenantID)
+	if err != nil {
 		return Attention{}, c.reject(ctx, operation, err, "")
 	}
 	item, err := c.work.GetWorkItem(ctx, tenantID, workItemID)
@@ -1294,7 +1455,8 @@ func (c *Coordinator) AnswerAttention(ctx context.Context, tenantID, workItemID,
 // timed_out and returns the count.
 func (c *Coordinator) ExpireAttentions(ctx context.Context, tenantID, workItemID uuid.UUID) (int, error) {
 	const operation = "expire_attentions"
-	if err := c.checkTenant(tenantID); err != nil {
+	ctx, _, err := c.begin(ctx, tenantID)
+	if err != nil {
 		return 0, c.reject(ctx, operation, err, "")
 	}
 	item, err := c.work.GetWorkItem(ctx, tenantID, workItemID)
@@ -1329,7 +1491,8 @@ func (c *Coordinator) ExpireAttentions(ctx context.Context, tenantID, workItemID
 // idempotent. A failed propagation leaves the item in "cancelling".
 func (c *Coordinator) Cancel(ctx context.Context, tenantID, workItemID uuid.UUID, reason string) error {
 	const operation = "cancel"
-	if err := c.checkTenant(tenantID); err != nil {
+	ctx, _, err := c.begin(ctx, tenantID)
+	if err != nil {
 		return c.reject(ctx, operation, err, "")
 	}
 	item, err := c.work.GetWorkItem(ctx, tenantID, workItemID)
@@ -1412,7 +1575,8 @@ func (c *Coordinator) Cancel(ctx context.Context, tenantID, workItemID uuid.UUID
 // terminator the runner calls when the child settles.
 func (c *Coordinator) CompleteSession(ctx context.Context, tenantID, sessionID uuid.UUID, outcome SessionOutcome, result json.RawMessage, failure string) error {
 	const operation = "complete_session"
-	if err := c.checkTenant(tenantID); err != nil {
+	ctx, _, err := c.begin(ctx, tenantID)
+	if err != nil {
 		return c.reject(ctx, operation, err, "")
 	}
 	state, ok := outcome.State()
@@ -1559,14 +1723,62 @@ func (c *Coordinator) storeCreation(key string, entry *sessionCreation) {
 	c.idem[key] = entry
 }
 
-func (c *Coordinator) checkTenant(tenantID uuid.UUID) error {
+// begin resolves the request tenant's mode registry and stamps the tenant on
+// the context so every refusal/write audit row carries the request tenant even
+// when the Host serves several tenants.
+func (c *Coordinator) begin(ctx context.Context, tenantID uuid.UUID) (context.Context, *ModeRegistry, error) {
+	ctx = withRequestTenant(ctx, tenantID)
+	registry, err := c.registryFor(ctx, tenantID)
+	if err != nil {
+		return ctx, nil, err
+	}
+	return ctx, registry, nil
+}
+
+// registryFor resolves the tenant's catalogue. A static Host keeps its original
+// exact-tenant boundary; a per-request Host delegates the decision to the
+// source and only checks that the returned registry belongs to the tenant.
+func (c *Coordinator) registryFor(ctx context.Context, tenantID uuid.UUID) (*ModeRegistry, error) {
 	if tenantID == uuid.Nil {
-		return newError(ErrTenantRequired, CodeTenantRequired, "", "tenant is required")
+		return nil, newError(ErrTenantRequired, CodeTenantRequired, "", "tenant is required")
+	}
+	if c.registries != nil {
+		registry, err := c.registries.Registry(ctx, tenantID)
+		if err != nil {
+			return nil, err
+		}
+		if registry == nil {
+			return nil, &Error{Kind: ErrUnknownTenant, Code: CodeTenantUnknown, Operation: "",
+				TenantID: tenantID, Detail: "the tenant has no mode registry"}
+		}
+		if registry.TenantID() != tenantID {
+			return nil, &Error{Kind: ErrTenantMismatch, Code: CodeTenantMismatch, Operation: "",
+				TenantID: tenantID, Detail: "the mode registry belongs to another tenant"}
+		}
+		return registry, nil
 	}
 	if tenantID != c.tenantID {
-		return newError(ErrTenantMismatch, CodeTenantMismatch, "", "the tenant does not own this host")
+		return nil, newError(ErrTenantMismatch, CodeTenantMismatch, "", "the tenant does not own this host")
 	}
-	return nil
+	return c.modes, nil
+}
+
+// requestTenantKey carries the tenant of one Host call for the audit fallback.
+type requestTenantKey struct{}
+
+func withRequestTenant(ctx context.Context, tenantID uuid.UUID) context.Context {
+	if ctx == nil || tenantID == uuid.Nil {
+		return ctx
+	}
+	return context.WithValue(ctx, requestTenantKey{}, tenantID)
+}
+
+func requestTenant(ctx context.Context) uuid.UUID {
+	if ctx == nil {
+		return uuid.Nil
+	}
+	tenantID, _ := ctx.Value(requestTenantKey{}).(uuid.UUID)
+	return tenantID
 }
 
 func (c *Coordinator) activeSession(ctx context.Context, tenantID, sessionID uuid.UUID, operation string) (SessionRef, error) {
@@ -1603,6 +1815,9 @@ func (c *Coordinator) isWorkMember(ctx context.Context, tenantID uuid.UUID, item
 }
 
 func (c *Coordinator) record(ctx context.Context, event AuditEvent) error {
+	if event.TenantID == uuid.Nil {
+		event.TenantID = requestTenant(ctx)
+	}
 	if event.TenantID == uuid.Nil {
 		event.TenantID = c.tenantID
 	}
@@ -1678,6 +1893,15 @@ func attentionID(tenantID, workItemID uuid.UUID, requestID string) uuid.UUID {
 	return uuid.NewSHA1(uuid.NameSpaceOID, []byte("keel.collab.attention.v1|"+tenantID.String()+"|"+workItemID.String()+"|"+requestID))
 }
 
+// linkID derives a stable identity from the relation's natural key. Two calls
+// that describe the same (tenant, work item scope, kind, from, to) relation
+// therefore target the same row, which is what makes AddLink idempotent.
+func linkID(tenantID, workItemID uuid.UUID, kind LinkKind, from, to LinkEndpoint) uuid.UUID {
+	key := "keel.collab.link.v1|" + tenantID.String() + "|" + workItemID.String() + "|" +
+		string(kind) + "|" + string(from.Type) + "|" + from.ID + "|" + string(to.Type) + "|" + to.ID
+	return uuid.NewSHA1(uuid.NameSpaceOID, []byte(key))
+}
+
 func scopeAllowsBot(scope Scope, botID string) bool {
 	if len(scope.BotIDs) == 0 {
 		return true
@@ -1693,18 +1917,54 @@ func scopeAllowsBot(scope Scope, botID string) bool {
 func validateLinkEndpoint(endpoint LinkEndpoint) error {
 	switch endpoint.Type {
 	case LinkEndpointSession, LinkEndpointWorkItem, LinkEndpointAssignment:
-		if _, err := uuid.Parse(strings.TrimSpace(endpoint.ID)); err != nil {
+		if _, err := uuid.Parse(endpoint.ID); err != nil {
 			return newError(ErrInvalidRequest, CodeInvalidRequest, "add_link",
 				"link endpoint "+string(endpoint.Type)+" needs a uuid id")
 		}
 	case LinkEndpointBot, LinkEndpointChannel:
-		if strings.TrimSpace(endpoint.ID) == "" {
+		if endpoint.ID == "" {
 			return newError(ErrInvalidRequest, CodeInvalidRequest, "add_link",
 				"link endpoint "+string(endpoint.Type)+" needs an id")
 		}
 	default:
 		return newError(ErrInvalidRequest, CodeInvalidRequest, "add_link",
 			"link endpoint type "+string(endpoint.Type)+" is not in the closed vocabulary")
+	}
+	return nil
+}
+
+// normalizeLinkEndpoint trims the caller's spelling so the natural key (and
+// therefore the derived id) cannot differ only by whitespace.
+func normalizeLinkEndpoint(endpoint LinkEndpoint) LinkEndpoint {
+	endpoint.ID = strings.TrimSpace(endpoint.ID)
+	return endpoint
+}
+
+// validateLinkEndpointTarget proves a uuid endpoint names a record of this
+// tenant. bot/channel ids have no existence port; a non-empty id is all the
+// Link contract can honestly require.
+func (c *Coordinator) validateLinkEndpointTarget(ctx context.Context, tenantID uuid.UUID, endpoint LinkEndpoint) error {
+	switch endpoint.Type {
+	case LinkEndpointSession:
+		id, _ := uuid.Parse(endpoint.ID)
+		if _, err := c.sessions.Session(ctx, tenantID, id); err != nil {
+			return newError(ErrInvalidRequest, CodeInvalidRequest, "add_link",
+				"link endpoint session "+endpoint.ID+" does not exist in this tenant")
+		}
+	case LinkEndpointWorkItem:
+		id, _ := uuid.Parse(endpoint.ID)
+		if _, err := c.work.GetWorkItem(ctx, tenantID, id); err != nil {
+			return newError(ErrInvalidRequest, CodeInvalidRequest, "add_link",
+				"link endpoint work item "+endpoint.ID+" does not exist in this tenant")
+		}
+	case LinkEndpointAssignment:
+		id, _ := uuid.Parse(endpoint.ID)
+		if _, err := c.work.GetAssignment(ctx, tenantID, id); err != nil {
+			return newError(ErrInvalidRequest, CodeInvalidRequest, "add_link",
+				"link endpoint assignment "+endpoint.ID+" does not exist in this tenant")
+		}
+	case LinkEndpointBot, LinkEndpointChannel:
+		// No existence port: non-empty was validated above.
 	}
 	return nil
 }

@@ -8,7 +8,9 @@ package store
 
 import (
 	"context"
+	"crypto/sha256"
 	"embed"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -611,6 +613,7 @@ type Checkpoint struct {
 	TokensBefore  int
 	TokensAfter   int
 	PolicyVersion string
+	SummaryHash   string
 	RequestID     string
 	CreatedAt     time.Time
 }
@@ -623,7 +626,15 @@ type CheckpointRecord struct {
 	TokensBefore  int
 	TokensAfter   int
 	PolicyVersion string
+	SummaryHash   string
 	RequestID     string
+}
+
+// checkpointSummaryHash is the durable identity of a checkpoint summary. It is
+// duplicated from kernel (store is below kernel and cannot import it).
+func checkpointSummaryHash(summary string) string {
+	sum := sha256.Sum256([]byte(summary))
+	return hex.EncodeToString(sum[:])
 }
 
 // SaveCheckpoint stores a compaction projection. Events are never deleted.
@@ -633,12 +644,24 @@ type CheckpointRecord struct {
 // requestId is unique per session: a replayed manual compaction for a different
 // seq fails instead of creating a second projection.
 func (s *Store) SaveCheckpoint(ctx context.Context, tenantID, sessionID uuid.UUID, rec CheckpointRecord) error {
-	_, err := s.pool.Exec(ctx,
+	summaryHash := checkpointSummaryHash(rec.Summary)
+	if rec.SummaryHash == "" {
+		rec.SummaryHash = summaryHash
+	} else if rec.SummaryHash != summaryHash {
+		return fmt.Errorf("store: checkpoint summary hash does not match the summary")
+	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("store: save checkpoint: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx,
 		`INSERT INTO checkpoints (tenant_id, session_id, upto_seq, kept_from_seq, summary,
-		                          tokens_before, tokens_after, policy_version, request_id)
-		 VALUES ($1, $2, $3, NULLIF($4, 0), $5, $6, $7, $8, NULLIF($9, ''))
+		                          tokens_before, tokens_after, policy_version, summary_hash, request_id)
+		 VALUES ($1, $2, $3, NULLIF($4, 0), $5, $6, $7, $8, $9, NULLIF($10, ''))
 		 ON CONFLICT (tenant_id, session_id, upto_seq) DO UPDATE
 		 SET summary = EXCLUDED.summary,
+		     summary_hash = EXCLUDED.summary_hash,
 		     kept_from_seq = COALESCE(EXCLUDED.kept_from_seq, checkpoints.kept_from_seq),
 		     tokens_before = CASE WHEN EXCLUDED.tokens_before <> 0 OR checkpoints.tokens_before = 0
 		                          THEN EXCLUDED.tokens_before ELSE checkpoints.tokens_before END,
@@ -648,8 +671,37 @@ func (s *Store) SaveCheckpoint(ctx context.Context, tenantID, sessionID uuid.UUI
 		                           ELSE checkpoints.policy_version END,
 		     request_id = COALESCE(EXCLUDED.request_id, checkpoints.request_id)`,
 		tenantID, sessionID, rec.UptoSeq, rec.KeptFromSeq, rec.Summary,
-		rec.TokensBefore, rec.TokensAfter, rec.PolicyVersion, rec.RequestID)
-	if err != nil {
+		rec.TokensBefore, rec.TokensAfter, rec.PolicyVersion, rec.SummaryHash, rec.RequestID); err != nil {
+		return fmt.Errorf("store: save checkpoint: %w", err)
+	}
+	if rec.RequestID != "" {
+		tag, err := tx.Exec(ctx,
+			`INSERT INTO checkpoint_requests
+			     (tenant_id, session_id, request_id, upto_seq, kept_from_seq, summary, summary_hash,
+			      tokens_before, tokens_after, policy_version, created_at)
+			 SELECT tenant_id, session_id, $3,
+			        upto_seq, COALESCE(kept_from_seq, 0), summary, summary_hash,
+			        tokens_before, tokens_after, policy_version, created_at
+			   FROM checkpoints
+			  WHERE tenant_id = $1 AND session_id = $2 AND upto_seq = $4
+			 ON CONFLICT (tenant_id, session_id, request_id) DO UPDATE
+			 SET upto_seq = EXCLUDED.upto_seq,
+			     kept_from_seq = EXCLUDED.kept_from_seq,
+			     summary = EXCLUDED.summary,
+			     summary_hash = EXCLUDED.summary_hash,
+			     tokens_before = EXCLUDED.tokens_before,
+			     tokens_after = EXCLUDED.tokens_after,
+			     policy_version = EXCLUDED.policy_version
+			 WHERE checkpoint_requests.upto_seq = EXCLUDED.upto_seq`,
+			tenantID, sessionID, rec.RequestID, rec.UptoSeq)
+		if err != nil {
+			return fmt.Errorf("store: save checkpoint request: %w", err)
+		}
+		if tag.RowsAffected() == 0 {
+			return fmt.Errorf("store: checkpoint requestId already produced a different checkpoint")
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("store: save checkpoint: %w", err)
 	}
 	return nil
@@ -662,12 +714,12 @@ func (s *Store) LoadCheckpoint(ctx context.Context, tenantID, sessionID uuid.UUI
 	var cp Checkpoint
 	err := s.pool.QueryRow(ctx,
 		`SELECT upto_seq, COALESCE(kept_from_seq, 0), summary,
-		        tokens_before, tokens_after, policy_version, COALESCE(request_id, ''), created_at
+		        tokens_before, tokens_after, policy_version, summary_hash, COALESCE(request_id, ''), created_at
 		 FROM checkpoints
 		 WHERE tenant_id = $1 AND session_id = $2 AND kept_from_seq IS NOT NULL
 		 ORDER BY upto_seq DESC LIMIT 1`, tenantID, sessionID).
 		Scan(&cp.UptoSeq, &cp.KeptFromSeq, &cp.Summary, &cp.TokensBefore, &cp.TokensAfter,
-			&cp.PolicyVersion, &cp.RequestID, &cp.CreatedAt)
+			&cp.PolicyVersion, &cp.SummaryHash, &cp.RequestID, &cp.CreatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Checkpoint{}, false, nil
 	}
@@ -677,17 +729,18 @@ func (s *Store) LoadCheckpoint(ctx context.Context, tenantID, sessionID uuid.UUI
 	return cp, true, nil
 }
 
-// CheckpointByRequest resolves a manual-compaction requestId to its projection.
+// CheckpointByRequest resolves a manual-compaction requestId from the
+// idempotency ledger, not the prunable projection.
 func (s *Store) CheckpointByRequest(ctx context.Context, tenantID, sessionID uuid.UUID, requestID string) (Checkpoint, bool, error) {
 	var cp Checkpoint
 	err := s.pool.QueryRow(ctx,
-		`SELECT upto_seq, COALESCE(kept_from_seq, 0), summary,
-		        tokens_before, tokens_after, policy_version, request_id, created_at
-		 FROM checkpoints
+		`SELECT upto_seq, kept_from_seq, summary,
+		        tokens_before, tokens_after, policy_version, summary_hash, request_id, created_at
+		 FROM checkpoint_requests
 		 WHERE tenant_id = $1 AND session_id = $2 AND request_id = $3`,
 		tenantID, sessionID, requestID).
 		Scan(&cp.UptoSeq, &cp.KeptFromSeq, &cp.Summary, &cp.TokensBefore, &cp.TokensAfter,
-			&cp.PolicyVersion, &cp.RequestID, &cp.CreatedAt)
+			&cp.PolicyVersion, &cp.SummaryHash, &cp.RequestID, &cp.CreatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Checkpoint{}, false, nil
 	}
