@@ -310,12 +310,19 @@ func (m *MemStore) SaveCheckpoint(ctx context.Context, tenantID, sessionID uuid.
 		s.checkpoints = append(s.checkpoints, stored)
 	}
 	if rec.RequestID != "" {
-		s.checkpointRequests[rec.RequestID] = stored
+		// The request ledger's age is the request's age, not the (possibly
+		// much older) projection's: a replay of a pruned/old seq starts a new
+		// retention window.
+		ledger := stored
+		ledger.CreatedAt = m.now()
+		s.checkpointRequests[rec.RequestID] = ledger
 	} else if stored.RequestID != "" {
 		// A later refinement of the same compaction seq updates the replay
 		// result without changing the request's identity.
 		if _, ok := s.checkpointRequests[stored.RequestID]; ok {
-			s.checkpointRequests[stored.RequestID] = stored
+			ledger := stored
+			ledger.CreatedAt = m.now()
+			s.checkpointRequests[stored.RequestID] = ledger
 		}
 	}
 	return nil
