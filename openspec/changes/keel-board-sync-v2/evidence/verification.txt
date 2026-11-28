@@ -9,7 +9,7 @@ board repo: github.com/jixoai/keel-board
 keel worktree: .worktrees/keel-board-unified
   branch: task/keel-board-unified
   dependency: github.com/jixoai/keel-board v0.1.4
-  tested keel commit: recorded in the evidence follow-up commit (see git log)
+  tested keel commit: d8d74497 (P2 fix commit; this evidence note is the follow-up commit)
 
 BOARD
   go build ./...                                      exit 0
