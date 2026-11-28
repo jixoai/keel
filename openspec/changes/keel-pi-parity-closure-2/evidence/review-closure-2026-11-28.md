@@ -116,6 +116,56 @@
 | 600s chaos (20 SIGKILLs) | PASS — 24699 events, 0 lost events, 0 duplicate final replies; kill interval 29.990–30.030s |
 | `openspec validate --strict` both changes | PASS |
 
+## Second re-review batch (P1-A, P1-B, key P2)
+
+> Code commit: `f00b36f275e63eefc66418528f5ad25833d84175`
+> (on top of the evidence commit `7e8d663e`; the earlier capacity/chaos
+> artifacts remain bound to `3c7bd789` and were not rerun for this batch).
+
+### P1-A — answer path replaced the open provenance Context
+
+- `internal/approval/approval.go`: `RecordAnswer` now merges
+  `existing.Context` with the answer context (non-empty answer keys override,
+  open keys survive); `RecordOutcome` does the same for timeout/cancel.
+  Repeated same-answer calls persist newly added answer context without
+  changing the answer identity.
+- Tests: `TestAnswerMergesOpenContext` (unit),
+  `TestApprovalAnswerKeepsOpenContext` (real harnessapi HTTP answer path),
+  `TestPostgresProvenanceRoundTrip` (PG: open args/digest/redacted/attempt/call
+  survive the answer alongside `remoteAddr`).
+- Verify: `KEEL_TEST_DSN=... go test -race ./internal/approval/ ./internal/harnessapi/`
+  → PASS.
+
+### P1-B — `mcp__*__<tool>` widened to every MCP call
+
+- `internal/agent/skill_tools.go`: `parseMCPAllowedTool` keeps
+  `mcp__*__read_file` as `{server:"*", tool:"read_file"}`; `allowsCall` matches
+  any server for that exact/glob tool. `mcp__server__` / `mcp__` / `mcp__*__`
+  are malformed and grant nothing. Only bare `mcp`/`mcp*` is `mcpAll`.
+- Tests: `TestSkillToolPolicyMCPCallScope` — read_file passes on multiple
+  servers; delete_file is refused on every server; malformed spellings leave
+  the aggregate tool hidden.
+- Verify: `go test -race ./internal/agent/ -run TestSkillTool` → PASS.
+
+### Key P2
+
+| Item | Fix | Test |
+|---|---|---|
+| P2-1 | `CompactNow` defers the detached request/task ledger prune on every exit (success, failure, replay) | `TestManualCompactPrunesRequestLedgerOnManualPaths` |
+| P2-2 | retry row written via `saveManualCompactRetry` on `WithoutCancel` + 5s | `TestManualCompactCancellationPersistsRetryTask` |
+| P2-4 | `mapManualCompactError` maps `ErrManualCompactRetry` → `ErrCompactBusy` (HTTP 409/command busy); `compaction_tasks` 100-row cap via `PruneCompactionTasks` (mem+PG) | `TestMapManualCompactErrorRetryIsTransient`, `TestPruneCompactionTasksCapsRows` |
+| P2-5 | map keys sorted before the 32-field bound; same prompt on retry | `TestMCPArgumentSummaryDeterministicLargeMap`, `TestMCPApprovalSameAttemptLargeArgsDoesNotConflict` |
+| P2-8 | request `created_at` is first-seen in mem and PG; replay does not reset | `TestCheckpointRequestCreatedAtIsFirstSeen` |
+| P2-9 | comment/RUNBOOK state summary and ledger read the same provider values | `TestUsageStreamRecordsRequestLifecycle` |
+
+### Verification for this batch
+
+| Command | Result |
+|---|---|
+| `go build ./...`, `go vet` on touched packages | PASS |
+| `KEEL_TEST_DSN=... go test -race -p 1 ./internal/approval/... ./internal/harnessapi/... ./internal/kernel/... ./internal/agent/... ./cmd/keel/...` | PASS |
+| `openspec validate --strict` both changes | PASS |
+
 ## Not claimed
 
 - Independent re-review / P0/P1=0 and archive are **not** done here.
