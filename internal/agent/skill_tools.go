@@ -26,6 +26,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"path"
 	"sort"
@@ -38,10 +39,23 @@ import (
 // SkillToolDeniedCode is the structured tool-result code of a refusal.
 const SkillToolDeniedCode = "skill_tool_not_allowed"
 
+// mcpToolScope is one per-server/per-tool MCP grant from `allowed-tools`. Keel
+// exposes the single aggregate `mcp` tool, so the scope is enforced against the
+// call's (server, tool) arguments; it must never widen to every MCP tool.
+type mcpToolScope struct {
+	server string
+	tool   string // "*" grants any tool of that server
+}
+
 // skillToolPolicy is the effective allowed-tool set of one attempt.
 type skillToolPolicy struct {
 	restricted bool
 	allowed    []string
+	// mcpAll is a bare `mcp` / `mcp*` grant: every MCP tool is allowed.
+	mcpAll bool
+	// mcpScopes are the per-server/tool grants. A non-empty list makes the
+	// aggregate `mcp` tool visible, but only the named calls pass the gate.
+	mcpScopes []mcpToolScope
 	// skills names the active skills that contributed the restriction. It is
 	// diagnostic only (the refusal names them).
 	skills []string
@@ -51,6 +65,7 @@ type skillToolPolicy struct {
 func newSkillToolPolicy(loaded []loadedSkill) skillToolPolicy {
 	var policy skillToolPolicy
 	seen := map[string]struct{}{}
+	seenMCP := map[mcpToolScope]struct{}{}
 	for _, skill := range loaded {
 		name := strings.TrimSpace(skill.Name)
 		if name == "" || len(skill.AllowedTools) == 0 {
@@ -62,6 +77,21 @@ func newSkillToolPolicy(loaded []loadedSkill) skillToolPolicy {
 		policy.restricted = true
 		policy.skills = append(policy.skills, name)
 		for _, entry := range skill.AllowedTools {
+			if scope, all, isMCP := parseMCPAllowedTool(entry); isMCP {
+				if all {
+					policy.mcpAll = true
+					continue
+				}
+				if scope.server == "" {
+					continue
+				}
+				if _, duplicate := seenMCP[scope]; duplicate {
+					continue
+				}
+				seenMCP[scope] = struct{}{}
+				policy.mcpScopes = append(policy.mcpScopes, scope)
+				continue
+			}
 			normalized := normalizeAllowedTool(entry)
 			if normalized == "" {
 				continue
@@ -75,7 +105,13 @@ func newSkillToolPolicy(loaded []loadedSkill) skillToolPolicy {
 	}
 	sort.Strings(policy.skills)
 	sort.Strings(policy.allowed)
-	if policy.restricted && len(policy.allowed) == 0 {
+	sort.Slice(policy.mcpScopes, func(i, j int) bool {
+		if policy.mcpScopes[i].server != policy.mcpScopes[j].server {
+			return policy.mcpScopes[i].server < policy.mcpScopes[j].server
+		}
+		return policy.mcpScopes[i].tool < policy.mcpScopes[j].tool
+	})
+	if policy.restricted && len(policy.allowed) == 0 && !policy.mcpAll && len(policy.mcpScopes) == 0 {
 		// A declaration that names no usable tool is a restriction to nothing:
 		// the skill gets no tools rather than silently all of them.
 		policy.allowed = nil
@@ -83,7 +119,9 @@ func newSkillToolPolicy(loaded []loadedSkill) skillToolPolicy {
 	return policy
 }
 
-// allows reports whether tool satisfies the policy.
+// allows reports whether the tool may appear on the model-visible surface. For
+// `mcp` this is true when any MCP grant exists; the execution gate below still
+// narrows the actual (server, tool) call.
 func (p skillToolPolicy) allows(tool string) bool {
 	if !p.restricted {
 		return true
@@ -92,6 +130,13 @@ func (p skillToolPolicy) allows(tool string) bool {
 	if name == "" {
 		return false
 	}
+	if name == "mcp" {
+		return p.mcpAll || len(p.mcpScopes) > 0 || p.baseAllows(name)
+	}
+	return p.baseAllows(name)
+}
+
+func (p skillToolPolicy) baseAllows(name string) bool {
 	for _, pattern := range p.allowed {
 		if pattern == name || pattern == "*" {
 			return true
@@ -103,6 +148,90 @@ func (p skillToolPolicy) allows(tool string) bool {
 		}
 	}
 	return false
+}
+
+// allowsCall is the execution-time gate. A non-MCP tool is judged by name; the
+// aggregate `mcp` tool is judged by its action call's server/tool, so a grant
+// for `mcp__filesystem__read_file` cannot be used to delete a file or to call
+// another server. Metadata actions (list/desc) are not granted by a per-tool
+// entry.
+func (p skillToolPolicy) allowsCall(tool string, arguments json.RawMessage) bool {
+	if !p.restricted {
+		return true
+	}
+	name := strings.ToLower(strings.TrimSpace(tool))
+	if name != "mcp" {
+		return p.baseAllows(name)
+	}
+	if p.mcpAll || p.baseAllows(name) {
+		return true
+	}
+	if len(p.mcpScopes) == 0 {
+		return false
+	}
+	var call struct {
+		Action string `json:"action"`
+		Server string `json:"server"`
+		Tool   string `json:"tool"`
+	}
+	if err := json.Unmarshal(arguments, &call); err != nil {
+		return false
+	}
+	if !strings.EqualFold(strings.TrimSpace(call.Action), "call") {
+		return false
+	}
+	server := strings.ToLower(strings.TrimSpace(call.Server))
+	toolName := strings.ToLower(strings.TrimSpace(call.Tool))
+	if server == "" || toolName == "" {
+		return false
+	}
+	for _, scope := range p.mcpScopes {
+		if scope.server != server {
+			continue
+		}
+		if scope.tool == "*" || scope.tool == toolName {
+			return true
+		}
+		if strings.ContainsAny(scope.tool, "?*[") {
+			if matched, err := path.Match(scope.tool, toolName); err == nil && matched {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// parseMCPAllowedTool recognises the PI MCP spellings. It reports (scope, all,
+// isMCP): a bare `mcp`/`mcp*` grants every MCP tool; `mcp__server__tool` and
+// `mcp__server__*` grant one server/tool; `mcp__server` grants that server.
+func parseMCPAllowedTool(entry string) (mcpToolScope, bool, bool) {
+	value := strings.ToLower(strings.TrimSpace(entry))
+	if index := strings.IndexByte(value, '('); index >= 0 {
+		value = strings.TrimSpace(value[:index])
+	}
+	switch value {
+	case "mcp", "mcp*":
+		return mcpToolScope{}, true, true
+	}
+	if !strings.HasPrefix(value, "mcp__") {
+		return mcpToolScope{}, false, false
+	}
+	parts := strings.Split(strings.TrimPrefix(value, "mcp__"), "__")
+	server := strings.TrimSpace(parts[0])
+	if server == "*" {
+		return mcpToolScope{}, true, true
+	}
+	if server == "" {
+		return mcpToolScope{}, false, true
+	}
+	toolName := "*"
+	if len(parts) > 1 {
+		toolName = strings.TrimSpace(strings.Join(parts[1:], "__"))
+		if toolName == "" {
+			toolName = "*"
+		}
+	}
+	return mcpToolScope{server: server, tool: toolName}, false, true
 }
 
 // normalizeAllowedTool maps one allowed-tools entry onto a Keel tool name.
@@ -121,16 +250,9 @@ func normalizeAllowedTool(entry string) string {
 	if value == "" {
 		return ""
 	}
-	// PI exposes one tool per MCP tool; Keel deliberately exposes the single
-	// aggregate `mcp` tool. Any per-server declaration therefore names `mcp`.
-	if strings.HasPrefix(value, "mcp__") || strings.HasPrefix(value, "mcp:") {
-		return "mcp"
-	}
-	// A wildcard that only covers MCP names has no Keel equivalent beyond the
-	// aggregate tool.
-	if strings.HasPrefix(value, "mcp*") {
-		return "mcp"
-	}
+	// MCP spellings are parsed by parseMCPAllowedTool before this function; a
+	// leftover `mcp:`-shaped name is not the aggregate tool and stays a name
+	// that matches nothing (safe deny).
 	return value
 }
 
@@ -162,7 +284,7 @@ func (r *Runner) skillToolGuard(policy skillToolPolicy) agentcore.BeforeToolCall
 		return nil
 	}
 	return func(_ context.Context, call agentcore.AgentToolCall) *agentcore.BeforeToolCallDecision {
-		if policy.allows(call.Name) {
+		if policy.allowsCall(call.Name, call.Arguments) {
 			return nil
 		}
 		skills := strings.Join(policy.skills, ", ")

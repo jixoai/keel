@@ -3,6 +3,7 @@ package kernel
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -182,6 +183,124 @@ func TestCheckpointRecordRoundTrip(t *testing.T) {
 			}
 			if err := h.k.SaveCheckpoint(ctx, scope, CheckpointRecord{UptoSeq: 10, Summary: "s", TokensBefore: -1}); !errors.Is(err, ErrInvalidRequest) {
 				t.Fatalf("negative tokens err = %v, want ErrInvalidRequest", err)
+			}
+		})
+	}
+}
+
+// TestPruneCheckpointRequestsBoundsLedger pins the independent retention of the
+// manual-compaction idempotency ledger: a row cap keeps the newest requestIds,
+// a TTL expires older ones, projections are never touched, and a missing
+// session answers ErrNotFound like every other kernel call.
+func TestPruneCheckpointRequestsBoundsLedger(t *testing.T) {
+	for _, impl := range implementations(t) {
+		t.Run(impl.name, func(t *testing.T) {
+			h := impl.build(t)
+			ctx := context.Background()
+			scope := h.newSession()
+			for seq := int64(1); seq <= 5; seq++ {
+				if err := h.k.SaveCheckpoint(ctx, scope, CheckpointRecord{
+					UptoSeq: seq, KeptFromSeq: seq - 1, Summary: "summary",
+					RequestID: fmt.Sprintf("req-%d", seq),
+				}); err != nil {
+					t.Fatalf("save request %d: %v", seq, err)
+				}
+			}
+			pruned, err := h.k.PruneCheckpointRequests(ctx, scope, CheckpointRequestPruneRequest{MaxRequests: 2})
+			if err != nil || pruned != 3 {
+				t.Fatalf("row-cap prune = (%d, %v), want 3", pruned, err)
+			}
+			for seq := int64(1); seq <= 3; seq++ {
+				if _, found, err := h.k.CheckpointByRequest(ctx, scope, fmt.Sprintf("req-%d", seq)); err != nil || found {
+					t.Fatalf("req-%d after cap = (found=%v, err=%v), want pruned", seq, found, err)
+				}
+			}
+			for seq := int64(4); seq <= 5; seq++ {
+				if cp, found, err := h.k.CheckpointByRequest(ctx, scope, fmt.Sprintf("req-%d", seq)); err != nil || !found || cp.UptoSeq != seq {
+					t.Fatalf("req-%d after cap = (%+v, found=%v, err=%v)", seq, cp, found, err)
+				}
+			}
+			// The projection is a separate fact and was not pruned.
+			if cp, found, err := h.k.LoadCheckpoint(ctx, scope); err != nil || !found || cp.UptoSeq != 5 {
+				t.Fatalf("projection after request prune = (%+v, found=%v, err=%v)", cp, found, err)
+			}
+
+			// Add two more requests, then age all rows past the TTL.
+			for seq := int64(6); seq <= 7; seq++ {
+				if err := h.k.SaveCheckpoint(ctx, scope, CheckpointRecord{
+					UptoSeq: seq, KeptFromSeq: seq - 1, Summary: "summary",
+					RequestID: fmt.Sprintf("req-%d", seq),
+				}); err != nil {
+					t.Fatalf("save request %d: %v", seq, err)
+				}
+			}
+			if h.mem != nil {
+				h.clock.advanceTo(h.clock.Now().Add(48 * time.Hour))
+			} else if _, err := h.st.Pool().Exec(ctx,
+				`UPDATE checkpoint_requests SET created_at = now() - interval '10 days'
+				  WHERE tenant_id = $1 AND session_id = $2`, scope.TenantID, scope.SessionID); err != nil {
+				t.Fatalf("age request rows: %v", err)
+			}
+			pruned, err = h.k.PruneCheckpointRequests(ctx, scope, CheckpointRequestPruneRequest{TTL: 24 * time.Hour})
+			if err != nil || pruned != 4 {
+				t.Fatalf("TTL prune = (%d, %v), want the 4 remaining rows", pruned, err)
+			}
+			if _, found, err := h.k.CheckpointByRequest(ctx, scope, "req-7"); err != nil || found {
+				t.Fatalf("expired request = (found=%v, err=%v), want pruned", found, err)
+			}
+			if cp, found, err := h.k.LoadCheckpoint(ctx, scope); err != nil || !found || cp.UptoSeq != 7 {
+				t.Fatalf("projection after TTL = (%+v, found=%v, err=%v), want seq 7 intact", cp, found, err)
+			}
+
+			missing := Scope{TenantID: h.tenant, SessionID: uuid.New()}
+			if _, err := h.k.PruneCheckpointRequests(ctx, missing, CheckpointRequestPruneRequest{MaxRequests: 1}); !errors.Is(err, ErrNotFound) {
+				t.Fatalf("missing session prune = %v, want ErrNotFound", err)
+			}
+			if _, err := h.k.PruneCheckpointRequests(ctx, scope, CheckpointRequestPruneRequest{MaxRequests: -1}); !errors.Is(err, ErrInvalidRequest) {
+				t.Fatalf("negative bound = %v, want ErrInvalidRequest", err)
+			}
+		})
+	}
+}
+
+// TestMissingSessionParity pins the shared missing-session contract across the
+// memory and PostgreSQL stores: every checkpoint/task read and write answers
+// ErrNotFound instead of a silent empty result (which a caller could mistake
+// for "no row yet").
+func TestMissingSessionParity(t *testing.T) {
+	for _, impl := range implementations(t) {
+		t.Run(impl.name, func(t *testing.T) {
+			h := impl.build(t)
+			ctx := context.Background()
+			missing := Scope{TenantID: h.tenant, SessionID: uuid.New()}
+
+			if err := h.k.SaveCheckpoint(ctx, missing, CheckpointRecord{
+				UptoSeq: 2, KeptFromSeq: 1, Summary: "s",
+			}); !errors.Is(err, ErrNotFound) {
+				t.Fatalf("SaveCheckpoint missing session = %v, want ErrNotFound", err)
+			}
+			if _, _, err := h.k.LoadCheckpoint(ctx, missing); !errors.Is(err, ErrNotFound) {
+				t.Fatalf("LoadCheckpoint missing session = %v, want ErrNotFound", err)
+			}
+			if _, _, err := h.k.CheckpointByRequest(ctx, missing, "req"); !errors.Is(err, ErrNotFound) {
+				t.Fatalf("CheckpointByRequest missing session = %v, want ErrNotFound", err)
+			}
+			if _, err := h.k.PruneCheckpoints(ctx, missing, PruneRequest{MaxCheckpoints: 1}); !errors.Is(err, ErrNotFound) {
+				t.Fatalf("PruneCheckpoints missing session = %v, want ErrNotFound", err)
+			}
+			if err := h.k.SaveCompactionTask(ctx, missing, CompactionTaskCheckpoint{
+				RequestID: "task", Phase: CompactionPhaseSelect,
+			}); !errors.Is(err, ErrNotFound) {
+				t.Fatalf("SaveCompactionTask missing session = %v, want ErrNotFound", err)
+			}
+			if _, _, err := h.k.LoadCompactionTask(ctx, missing, "task"); !errors.Is(err, ErrNotFound) {
+				t.Fatalf("LoadCompactionTask missing session = %v, want ErrNotFound", err)
+			}
+			if _, err := h.k.ListCompactionTasks(ctx, missing); !errors.Is(err, ErrNotFound) {
+				t.Fatalf("ListCompactionTasks missing session = %v, want ErrNotFound", err)
+			}
+			if err := h.k.DeleteCompactionTask(ctx, missing, "task"); !errors.Is(err, ErrNotFound) {
+				t.Fatalf("DeleteCompactionTask missing session = %v, want ErrNotFound", err)
 			}
 		})
 	}

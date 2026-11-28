@@ -57,12 +57,21 @@ func newManualCompactor(binding agent.RunBinding, st *store.Store, kern *kernel.
 	return compactor.compact
 }
 
+// mapManualCompactError keeps the HTTP contract: a missing kernel session is
+// the API's session-not-found, not an opaque store failure.
+func mapManualCompactError(err error) error {
+	if errors.Is(err, kernel.ErrNotFound) {
+		return harnessapi.ErrSessionNotFound
+	}
+	return err
+}
+
 func (m *manualCompactor) compact(ctx context.Context, tenantID, sessionID uuid.UUID, requestID string) (harnessapi.CompactResult, error) {
 	scope := kernel.Scope{TenantID: tenantID, SessionID: sessionID}
 	// A completed requestId replays without touching the lease: the projection
 	// row is the durable idempotency fact.
 	if checkpoint, found, err := m.kernel.CheckpointByRequest(ctx, scope, requestID); err != nil {
-		return harnessapi.CompactResult{}, err
+		return harnessapi.CompactResult{}, mapManualCompactError(err)
 	} else if found {
 		return harnessapi.CompactResult{
 			CheckpointID:  checkpoint.UptoSeq,
@@ -112,7 +121,7 @@ func (m *manualCompactor) compact(ctx context.Context, tenantID, sessionID uuid.
 			errors.Is(compactErr, agent.ErrManualCompactUnsafe):
 			return harnessapi.CompactResult{}, harnessapi.ErrCompactConflict
 		default:
-			return harnessapi.CompactResult{}, compactErr
+			return harnessapi.CompactResult{}, mapManualCompactError(compactErr)
 		}
 	}
 	m.logger.Info("manual compaction completed",

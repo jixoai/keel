@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -202,6 +203,65 @@ func TestAssignConcurrentCrossWorkItemBindsOnce(t *testing.T) {
 	}
 }
 
+// TestAssignConcurrentSameKeyBindsOnce pins the idempotency-key lock: two
+// concurrent retries of one key with different worker sessions cannot both
+// complete the same open assignment. Exactly one succeeds; the other is an
+// assignment_conflict, and the stored row belongs to the winner.
+func TestAssignConcurrentSameKeyBindsOnce(t *testing.T) {
+	env := newTestEnv(t, defaultCeiling(), defaultModeLimits())
+	item := env.openWork(t, "ticket")
+	workerA := env.addWorker(t)
+	workerB := env.addWorker(t)
+	ctx := context.Background()
+
+	open, err := env.host.Assign(ctx, env.tenant, item.ID, "worker", collab.AssignmentRequest{
+		CallerSessionID: env.parent.SessionID, IdempotencyKey: "same-key",
+	})
+	if err != nil || open.SessionID != uuid.Nil {
+		t.Fatalf("open assignment = (%+v, %v), want unbound", open, err)
+	}
+
+	start := make(chan struct{})
+	results := make([]collab.Assignment, 2)
+	errs := make([]error, 2)
+	var wg sync.WaitGroup
+	for index, worker := range []collab.SessionRef{workerA, workerB} {
+		index, worker := index, worker
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			results[index], errs[index] = env.host.Assign(ctx, env.tenant, item.ID, "worker", collab.AssignmentRequest{
+				CallerSessionID: env.parent.SessionID, SessionID: worker.SessionID,
+				IdempotencyKey: "same-key",
+			})
+		}()
+	}
+	close(start)
+	wg.Wait()
+
+	accepted, conflicted := 0, 0
+	var winner collab.SessionRef
+	for index, err := range errs {
+		switch {
+		case err == nil:
+			accepted++
+			winner = []collab.SessionRef{workerA, workerB}[index]
+		case collab.IsCode(err, collab.CodeAssignmentConflict):
+			conflicted++
+		default:
+			t.Fatalf("concurrent same-key Assign error = %v, want nil or assignment_conflict", err)
+		}
+	}
+	if accepted != 1 || conflicted != 1 {
+		t.Fatalf("outcomes = accepted %d / conflicted %d (%v), want 1/1", accepted, conflicted, errs)
+	}
+	assignments, err := env.host.Assignments(ctx, env.tenant, item.ID)
+	if err != nil || len(assignments) != 1 || assignments[0].SessionID != winner.SessionID {
+		t.Fatalf("assignments = %+v (%v), want only winner %s", assignments, err, winner.SessionID)
+	}
+}
+
 func TestCreateSessionRejectsBoundAndTerminalAssignment(t *testing.T) {
 	env := newTestEnv(t, defaultCeiling(), defaultModeLimits())
 	item := env.openWork(t, "ticket")
@@ -278,6 +338,37 @@ func TestAddLinkIdempotentAcrossWorkItems(t *testing.T) {
 		To:   workItemEndpoint(second.ID),
 	}); !collab.IsCode(err, collab.CodeLinkConflict) {
 		t.Fatalf("explicit-id conflict = %v, want link_conflict", err)
+	}
+}
+
+// TestAddLinkCanonicalizesUUIDEndpoints pins that UUID casing/hyphenation is
+// not part of the relation identity: the same endpoints spelled differently
+// resolve to one row instead of bypassing the natural-key dedupe.
+func TestAddLinkCanonicalizesUUIDEndpoints(t *testing.T) {
+	env := newTestEnv(t, defaultCeiling(), defaultModeLimits())
+	first := env.openWork(t, "first")
+	second := env.openWork(t, "second")
+	ctx := context.Background()
+
+	link, err := env.host.AddLink(ctx, env.tenant, collab.Link{
+		Kind: collab.LinkReview,
+		From: collab.LinkEndpoint{Type: collab.LinkEndpointWorkItem, ID: strings.ToUpper(first.ID.String())},
+		To:   collab.LinkEndpoint{Type: collab.LinkEndpointWorkItem, ID: strings.ToUpper(second.ID.String())},
+	})
+	if err != nil {
+		t.Fatalf("AddLink: %v", err)
+	}
+	again, err := env.host.AddLink(ctx, env.tenant, collab.Link{
+		Kind: collab.LinkReview,
+		From: workItemEndpoint(first.ID),
+		To:   workItemEndpoint(second.ID),
+	})
+	if err != nil || again.ID != link.ID {
+		t.Fatalf("lowercase replay = (%+v, %v), want the row %s", again, err, link.ID)
+	}
+	links, err := env.host.Links(ctx, env.tenant, first.ID)
+	if err != nil || len(links) != 1 {
+		t.Fatalf("links = %+v (%v), want one canonical row", links, err)
 	}
 }
 

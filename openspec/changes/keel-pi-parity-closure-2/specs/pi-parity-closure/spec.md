@@ -4,7 +4,7 @@
 
 ### Requirement: Durable compaction tasks
 
-Compaction work MUST be represented as durable tasks with kind/state/attempts/lease and MUST resume after a crash without duplicate final replies.
+Compaction work MUST be represented as durable tasks with kind/state/attempts/retry, fenced by the session/run lease (the architecture has no independent task-lease row), and MUST resume after a crash without duplicate final replies.
 
 #### Scenario: crash during compaction
 - **WHEN** the process is killed during a compaction task and restarted

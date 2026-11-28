@@ -9,8 +9,11 @@ package agent
 //
 //	unaccounted  before the provider call (a kill after this row is visible)
 //	settled      on the terminal stream event (provider-reported usage)
-//	settled(0)   when the provider reports no usage: "not measurable" rather
-//	             than a false billing alert
+//
+// A cancelled/aborted stream or a provider error WITHOUT a usage report leaves
+// the row unaccounted: a possibly-billed request with unknown usage is not
+// "zero tokens". Only an explicit provider usage report (including an explicit
+// zero) settles the row.
 //
 // A ledger write failure never fails the model request: accounting is
 // best-effort, logged, and the stream continues.
@@ -99,9 +102,9 @@ func (o *usageObserver) stream(ctx context.Context, model string, llm provider.L
 	out := provider.NewAssistantMessageEventStream(16)
 	base, err := o.base(ctx, model, llm, cfg)
 	if err != nil || base == nil {
-		// No request reached the provider: close the marker so it is not
-		// reported as a possibly-billed request.
-		o.settle(ctx, requestID, modelName, o.provider, nil)
+		// The provider request did not produce a usage-bearing stream. Leave the
+		// marker unaccounted: the request may have reached the provider, so a
+		// settled zero would be a false claim.
 		return base, err
 	}
 	go o.consume(ctx, requestID, modelName, base, out)
@@ -193,15 +196,19 @@ func (o *usageObserver) record(ctx context.Context, record UsageRecord) {
 }
 
 func (o *usageObserver) settle(ctx context.Context, requestID, modelName, providerName string, usage *agentcore.Usage) {
+	// No usage report is not the same as zero usage: an aborted/errored request
+	// with unknown tokens stays unaccounted (the marker written before the call
+	// is the honest row). Only a provider-reported usage settles.
+	if usage == nil {
+		return
+	}
 	record := UsageRecord{
 		RequestID: requestID, Seq: o.seq, Provider: providerName, Model: modelName, Settled: true,
-	}
-	if usage != nil {
-		record.InputTokens = usage.InputTokens
-		record.OutputTokens = usage.OutputTokens
-		record.CacheReadTokens = usage.CacheReadTokens
-		record.CacheWriteTokens = usage.CacheWriteTokens
-		record.ReasoningTokens = usage.ReasoningTokens
+		InputTokens:      usage.InputTokens,
+		OutputTokens:     usage.OutputTokens,
+		CacheReadTokens:  usage.CacheReadTokens,
+		CacheWriteTokens: usage.CacheWriteTokens,
+		ReasoningTokens:  usage.ReasoningTokens,
 	}
 	o.record(ctx, record)
 }

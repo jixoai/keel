@@ -67,6 +67,7 @@ var rlsTenantTables = []string{
 	"events",
 	"checkpoints",
 	"checkpoint_requests",
+	"compaction_tasks",
 	"session_checkpoint_policies",
 	"submissions",
 	"tasks",

@@ -58,6 +58,11 @@ type LogStore interface {
 	// reports how many rows it removed. The newest projection is always kept.
 	PruneCheckpoints(ctx context.Context, tenantID, sessionID uuid.UUID, req PruneRequest) (int64, error)
 
+	// PruneCheckpointRequests bounds the manual-compaction idempotency ledger
+	// independently of projection rows. It reports how many rows it removed;
+	// `events` and `checkpoints` are untouched.
+	PruneCheckpointRequests(ctx context.Context, tenantID, sessionID uuid.UUID, req CheckpointRequestPruneRequest) (int64, error)
+
 	// SaveCompactionTask upserts one compaction task's recovery checkpoint
 	// keyed by its request ID. It is not a transcript and never replaces the
 	// event log or the checkpoint projection.
