@@ -42,6 +42,57 @@ GOMEMLIMIT=1610612736 /tmp/keel-runtime \
 - `-bandwidth` 是全局出站字节/秒（0=不限）；生产按链路 85–90% 设。
 - `-cas` 必须与上传目录一致，否则 >1MiB 的图读不出来。
 
+## Windows 实机验收（0.6.1 起）
+
+发布资产是自包含 `keel.exe`（内嵌 PostgreSQL 18 + web）。Windows 11 x64 实机按以下顺序验收，
+证据保存命令输出与截图；`0.6.1` 修复了两个首启缺陷（见末尾排障）。
+
+```powershell
+# 1) 资产与版本
+Get-FileHash .\keel-0.6.1-windows-amd64.zip -Algorithm SHA256
+Get-Content .\SHA256SUMS.txt | Select-String 'windows-amd64'
+Expand-Archive .\keel-0.6.1-windows-amd64.zip -DestinationPath .\keel-0.6.1 -Force
+.\keel-0.6.1\keel.exe version   # keel 0.6.1, go ... windows/amd64
+
+# 2) 无参首启（等价双击）：首次会自动安装到 %LOCALAPPDATA%\Keel
+$env:KEEL_DSN = $null; $env:KEEL_HOME = $null; $env:KEEL_BOARD_ENABLED = $null
+Start-Process .\keel-0.6.1\keel.exe
+# 等 ready 200；serving 127.0.0.1:13750，PG 127.0.0.1:13741
+Invoke-WebRequest http://127.0.0.1:13750/v1/health -UseBasicParsing
+Invoke-WebRequest http://127.0.0.1:13750/v1/ready -UseBasicParsing
+Invoke-WebRequest http://127.0.0.1:13750/v1/capabilities -UseBasicParsing
+
+# 3) 隔离数据目录（不污染默认安装）
+$env:KEEL_HOME = 'D:\Keel 验收 测试\home'
+Start-Process .\keel-0.6.1\keel.exe
+
+# 4) 重启持久化：停进程 + keel db stop 后再启动，确认会话/看板任务仍在
+# 5) 看板：部署级 KEEL_BOARD_ENABLED=1 + tenant 级 board.enabled=true（operator 路由）
+$tenant = (Invoke-RestMethod http://127.0.0.1:13750/v1/auth/session).tenantId
+Invoke-RestMethod -Method Put -Headers @{Authorization="Bearer $env:KEEL_ADMIN_KEY"} `
+  -ContentType application/json `
+  -Body '{"board":{"enabled":true,"sync":{"enabled":true}}}' `
+  "http://127.0.0.1:13750/v1/tenants/$tenant/config"
+# 6) 自更新：keel.exe update --check（不要覆盖唯一验收产物）
+```
+
+- Windows 无 code signing：浏览器下载的 zip 可能带 Mark-of-the-Web，SmartScreen 可能提示；
+  `gh`/`curl` 下载通常不带 MOTW。记录实际提示，不要声称已签名。
+- `keel start` 是前台控制台进程；本版本没有托盘。关闭控制台会停止服务，浏览器标签失去连接。
+- `keel install` 只写 HKCU `Software\Classes\keel`、开始菜单快捷方式与 `%LOCALAPPDATA%\Keel`，
+  不触发 UAC；`keel uninstall --purge` 才删数据。
+
+### 首启排障（0.6.1 已修）
+
+- **PG ready 但 13750 永不监听 / `keel db start` 超时**：v0.6.0 在 Windows 用
+  `CombinedOutput` 启动 `pg_ctl`，postmaster 继承管道写端，父进程等 EOF 永久阻塞。
+  0.6.1 起 `pg_ctl` 输出写 `<KEEL_HOME>\dev-pg.log.ctl` 并用 `Run()` 只等 `pg_ctl` 退出。
+  检查 `<KEEL_HOME>\dev-pg.log` 是否 `ready to accept connections`，以及 `.ctl` 日志。
+- **`/v1/ready` 503 `missing tables: runtime_instances, handoffs`**：v0.6.0 的
+  `keel serve` 没有应用 handoff schema；0.6.1 起在 kernel migrate 后调用
+  `handoff.NewPGRegistry`（幂等，与 store/kernel 同 advisory lock）。健康 200 不等于
+  ready 200，验收必须两者都查。
+
 ## Harness 产品进程（`keel serve`）
 
 `cmd/runtime` 是多租户运行时（每请求 `X-Tenant-ID` + `KEEL_ADMIN_KEY`）；`keel serve` 是产品壳，

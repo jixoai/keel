@@ -1,0 +1,8 @@
+# Board create — KEEL_BOARD_ENABLED=1
+date: 2026-11-29T02:15:35+08:00
+
+POST /v1/board/channels -> 404 {"error":"the board is disabled in this deployment","code":"board_disabled"}
+POST /v1/board/tasks -> 404 {"error":"the board is disabled in this deployment","code":"board_disabled"}
+taskId=
+GET /v1/board/tasks?state=all -> 404 (76 bytes)
+exit=1

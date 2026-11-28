@@ -1,0 +1,21 @@
+# Asset verification — keel v0.6.0 Windows amd64
+date: 2026-11-29T01:43:16+08:00
+
+## Downloaded files
+-rw-r--r-- 1 gaube 197609      566 Nov 29 01:37 SHA256SUMS.txt
+-rw-r--r-- 1 gaube 197609 59275550 Nov 29 01:43 keel-0.6.0-windows-amd64.zip
+
+## Release asset digests (GitHub API via gh)
+keel-0.6.0-windows-amd64.zip	59275550	sha256:44d3777847491459f18af30c219951ba4f0af1dde6ced8f96ba5ac43e5576274
+SHA256SUMS.txt	566	sha256:c40a3d8ddbe60171ecf04156ba4330273dda819f01d77996f9dee69458dc990b
+
+## SHA256SUMS.txt digest
+c40a3d8ddbe60171ecf04156ba4330273dda819f01d77996f9dee69458dc990b *SHA256SUMS.txt
+expected: c40a3d8ddbe60171ecf04156ba4330273dda819f01d77996f9dee69458dc990b  SHA256SUMS.txt
+
+## Zip SHA-256 vs SHA256SUMS.txt
+44d3777847491459f18af30c219951ba4f0af1dde6ced8f96ba5ac43e5576274 *keel-0.6.0-windows-amd64.zip
+44d3777847491459f18af30c219951ba4f0af1dde6ced8f96ba5ac43e5576274  keel-0.6.0-windows-amd64.zip
+
+## sha256sum -c
+keel-0.6.0-windows-amd64.zip: OK

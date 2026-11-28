@@ -1,0 +1,63 @@
+﻿# Windows acceptance environment
+date: 2026-11-29T01:39:06.5166184+08:00
+user: gaube
+computer: GAUBEEHONOR
+home: C:\Users\gaube
+localappdata: C:\Users\gaube\AppData\Local
+temp: C:\Users\gaube\AppData\Local\Temp
+
+## OS
+
+
+Caption        : Microsoft Windows 11 家庭版 中文版
+Version        : 10.0.26300
+BuildNumber    : 26300
+OSArchitecture : 64 位
+
+
+
+
+## CPU
+
+
+Name                      : AMD Ryzen 7 8845HS w/ Radeon 780M Graphics     
+NumberOfCores             : 8
+NumberOfLogicalProcessors : 16
+
+
+
+
+## PowerShell
+
+Name                           Value                                                                                   
+----                           -----                                                                                   
+PSVersion                      5.1.26100.9818                                                                          
+PSEdition                      Desktop                                                                                 
+PSCompatibleVersions           {1.0, 2.0, 3.0, 4.0...}                                                                 
+BuildVersion                   10.0.26100.9818                                                                         
+CLRVersion                     4.0.30319.42000                                                                         
+WSManStackVersion              3.0                                                                                     
+PSRemotingProtocolVersion      2.3                                                                                     
+SerializationVersion           1.1.0.1                                                                                 
+
+
+
+## Existing Keel data
+C:\Users\gaube\.keel => True
+C:\Users\gaube\AppData\Local\Keel => False
+C:\Users\gaube\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Keel.lnk => False
+
+## Existing keel processes
+
+## Port 13750
+
+## Drives
+
+Name Root        Free         Used
+---- ----        ----         ----
+C    C:\  38915600384 282083917824
+D    D:\   4770885632 332870582272
+E    E:\   5647134720 332799639552
+
+
+

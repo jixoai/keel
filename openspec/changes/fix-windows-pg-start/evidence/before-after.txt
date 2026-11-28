@@ -1,0 +1,48 @@
+# Before/after — Windows first start
+
+## v0.6.0 published asset (before)
+
+- **No-argument first start**: runtime extracted, PostgreSQL 18 initialized and
+  `ready to accept connections`, but `127.0.0.1:13750` never listened; the keel
+  process stayed alive with no CPU growth. 180s timeout.
+  Raw: `04a-start-hang-diagnosis.txt`.
+- **`keel db start` on the existing cluster**: exit 124 after a 20s timeout,
+  while PostgreSQL was already listening on `127.0.0.1:13741`.
+  Raw: `04c-db-start-repro.txt`.
+- **Root cause**: `startDevDBCluster` ran `pg_ctl -w start` through
+  `CombinedOutput()`. Windows `pg_ctl` daemonizes the postmaster, which inherits
+  the stdout/stderr pipe write end; `CombinedOutput` waits for EOF forever.
+- **Also found after the PG fix**: fresh `keel serve` reported `/v1/ready` 503
+  `missing tables: runtime_instances, handoffs` (separate change
+  `fix-serve-ready-schema`).
+
+## 0.6.1 fixed build (after)
+
+- **`keel db start` on a fresh `KEEL_HOME`**: exit 0 in 3s, database created,
+  PostgreSQL listening on `127.0.0.1:13741`.
+- **No-argument start on a fresh `KEEL_HOME`**: `/v1/health` 200 after 1.6s,
+  `/v1/ready` 200 after 0.1s, both `127.0.0.1:13750` and `127.0.0.1:13741`
+  listening. See `../../fix-serve-ready-schema/evidence/fixed-ready.txt`.
+- **Windows regression test**: `TestStartPGDaemonDoesNotWaitForInheritedStdio`
+  and `TestStartPGDaemonErrorNamesLogs` PASS on the Windows test binary
+  (`regression-test-windows.txt`).
+
+## Raw fixed `db start` output
+
+```text
+date: 2026-11-29T02:00:38+08:00
+KEEL_HOME=E:\dev\github\keel-win-acceptance\home-fixed-db
+KEEL_PG_DIR=C:\Users\gaube\.keel\runtime\0.6.0\pg
+
+initializing a PostgreSQL cluster in E:\dev\github\keel-win-acceptance\home-fixed-db\dev-pg (superuser keel, loopback only)
+ready: postgres://keel:***@127.0.0.1:13741/keel?sslmode=disable
+exit=0 elapsed=3s
+
+## db status
+running on 127.0.0.1:13741 (data: E:\dev\github\keel-win-acceptance\home-fixed-db\dev-pg)
+dsn: postgres://keel:***@127.0.0.1:13741/keel?sslmode=disable
+status_exit=0
+
+## listener
+127.0.0.1        13741 Listen         82284
+```

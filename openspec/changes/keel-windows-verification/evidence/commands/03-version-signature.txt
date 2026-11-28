@@ -1,0 +1,30 @@
+# keel version + Windows signature/MOTW
+date: 2026-11-29T01:43:51+08:00
+cwd: /e/dev/github/keel-win-acceptance/run-normal/keel-0.6.0-windows-amd64
+
+## keel.exe version
+keel 0.6.0
+  commit:   01862dab39337fde91fcdd591074a97e4218a717 (dirty)
+  go:       go1.27.3 windows/amd64
+  harness-api: v1 (keel-agent/0.1.0)
+exit=0
+
+## Authenticode signature
+
+
+Status                 : NotSigned
+StatusMessage          : 未对文件 E:\dev\github\keel-win-acceptance\run-normal\keel-0.6.0-windows-amd64\keel.exe 进行数
+                         字签名。无法在当前系统上运行该脚本。有关运行脚本和设置执行策略的详细信息，请参阅 https:/go.mic
+                         rosoft.com/fwlink/?LinkID=135170 中的 about_Execution_Policies
+SignerCertificate      : 
+TimeStamperCertificate : 
+
+
+
+## Zone.Identifier (Mark-of-the-Web)
+
+Stream   Length
+------   ------
+:$DATA 95475200
+
+

@@ -1,0 +1,53 @@
+# Reproduce pg_ctl start hang via keel db stop/start
+date: 2026-11-29T01:51:32+08:00
+
+## keel db stop (graceful)
+stopped (data kept in C:\Users\gaube\.keel\dev-pg)
+exit=0
+
+## keel db start (20s timeout)
+exit=124
+
+## PG state after start attempt
+
+LocalAddress LocalPort  State OwningProcess
+------------ ---------  ----- -------------
+127.0.0.1        13741 Listen         75936
+
+
+
+   Id ProcessName StartTime         
+   -- ----------- ---------         
+18236 postgres    2026/11/29 1:51:33
+35080 postgres    2026/11/29 1:51:33
+40640 postgres    2026/11/29 1:51:33
+75936 postgres    2026/11/29 1:51:32
+77620 postgres    2026/11/29 1:51:33
+81308 postgres    2026/11/29 1:51:33
+85572 postgres    2026/11/29 1:51:33
+91740 postgres    2026/11/29 1:51:33
+94056 postgres    2026/11/29 1:51:33
+
+
+
+## dev-pg.log tail
+2026-11-29 01:51:04.605 CST [86476] LOG:  could not receive data from client: An established connection was aborted by the software in your host machine.
+	
+2026-11-29 01:51:04.622 CST [57340] LOG:  could not receive data from client: An established connection was aborted by the software in your host machine.
+	
+2026-11-29 01:51:04.626 CST [93024] LOG:  could not receive data from client: An established connection was aborted by the software in your host machine.
+	
+2026-11-29 01:51:04.634 CST [10832] LOG:  could not receive data from client: An established connection was aborted by the software in your host machine.
+	
+2026-11-29 01:51:04.642 CST [15256] FATAL:  database "keel" does not exist
+2026-11-29 01:51:32.596 CST [49132] LOG:  received fast shutdown request
+2026-11-29 01:51:32.597 CST [49132] LOG:  aborting any active transactions
+2026-11-29 01:51:32.608 CST [49132] LOG:  background worker "logical replication launcher" (PID 85488) exited with exit code 1
+2026-11-29 01:51:32.610 CST [40864] LOG:  shutting down
+2026-11-29 01:51:32.611 CST [40864] LOG:  checkpoint starting: shutdown immediate
+2026-11-29 01:51:32.615 CST [40864] LOG:  checkpoint complete: wrote 0 buffers (0.0%), wrote 0 SLRU buffers; 0 WAL file(s) added, 0 removed, 0 recycled; write=0.001 s, sync=0.001 s, total=0.005 s; sync files=0, longest=0.000 s, average=0.000 s; distance=0 kB, estimate=298 kB; lsn=0/1858980, redo lsn=0/1858980
+2026-11-29 01:51:32.637 CST [49132] LOG:  database system is shut down
+2026-11-29 01:51:33.057 CST [75936] LOG:  starting PostgreSQL 18.7 on x86_64-windows, compiled by msvc-19.44.35229, 64-bit
+2026-11-29 01:51:33.058 CST [75936] LOG:  listening on IPv4 address "127.0.0.1", port 13741
+2026-11-29 01:51:33.143 CST [81268] LOG:  database system was shut down at 2026-11-29 01:51:32 CST
+2026-11-29 01:51:33.153 CST [75936] LOG:  database system is ready to accept connections

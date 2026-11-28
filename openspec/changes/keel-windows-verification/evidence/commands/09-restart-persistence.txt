@@ -1,0 +1,10 @@
+# Restart persistence — fixed 0.6.1 test binary
+date: 2026-11-29T02:08:31+08:00
+
+sessionId=036d3021-71d9-4101-8bba-e9d957492b21
+GET /v1/sessions -> 200 (456 bytes)
+session_present_after_restart=true
+GET /v1/sessions/{id}/events -> 200 (9106 bytes)
+event_count_after_restart=18
+user_message_count=1
+exit=0

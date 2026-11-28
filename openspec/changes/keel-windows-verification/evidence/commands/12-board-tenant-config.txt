@@ -1,0 +1,23 @@
+# Enable tenant-level board switch (operator route)
+date: 2026-11-29T02:16:37+08:00
+tenant=9125fb2d-75ad-4b56-aae1-0722da1477fa
+
+## PUT /v1/tenants/{id}/config
+HTTP/1.1 200 OK
+Cache-Control: no-store
+Content-Type: application/json; charset=utf-8
+X-Request-Id: cabdcdf4-6b59-47f0-80ac-b220e4d36843
+Date: Sat, 28 Nov 2026 18:16:37 GMT
+Content-Length: 64
+
+{"revision":2,"tenantId":"9125fb2d-75ad-4b56-aae1-0722da1477fa"}
+
+## GET /v1/tenants/{id}/config
+HTTP/1.1 200 OK
+Cache-Control: no-store
+Content-Type: application/json; charset=utf-8
+X-Request-Id: d3e9238c-b79b-49ce-a10a-9a73f5bb0c07
+Date: Sat, 28 Nov 2026 18:16:37 GMT
+Content-Length: 326
+
+{"config":{"mcp":{},"agent":{"sections":null},"board":{"sync":{"enabled":true},"enabled":true},"hooks":{"commands":null},"quota":{},"tools":{"allow":null},"skills":{"roots":null},"external":{"quota":{}},"telemetry":{},"compaction":{},"filesystem":{"capture":{}}},"revision":2,"tenantId":"9125fb2d-75ad-4b56-aae1-0722da1477fa"}

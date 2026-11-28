@@ -1,0 +1,18 @@
+﻿# No-argument start 鈥?normal path
+date: 2026-11-29T01:44:10.7564659+08:00
+exe: E:\dev\github\keel-win-acceptance\run-normal\keel-0.6.0-windows-amd64\keel.exe
+cwd: E:\dev\github\keel-win-acceptance\run-normal\keel-0.6.0-windows-amd64
+
+## Environment (must be empty for the one-command path)
+KEEL_DSN=<unset>
+KEEL_HOME=<unset>
+KEEL_SERVE_ADDR=<unset>
+KEEL_BOARD_ENABLED=<unset>
+KEEL_NO_AUTO_DB=<unset>
+
+started pid=95884
+FAIL: /v1/health not 200 within 180s
+--- stderr ---
+keel: runtime extracted to C:\Users\gaube\.keel\runtime\0.6.0
+initializing a PostgreSQL cluster in C:\Users\gaube\.keel\dev-pg (superuser keel, loopback only)
+keel start: server did not become ready; open http://127.0.0.1:13750 manually

@@ -1,0 +1,7 @@
+# Board persistence after full stop/restart
+date: 2026-11-29T02:17:25+08:00
+
+GET /v1/board/tasks?state=all -> 200 (994 bytes)
+task_text_present_after_restart=true
+task_id_present_after_restart=true
+exit=0

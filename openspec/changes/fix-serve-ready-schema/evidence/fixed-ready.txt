@@ -1,0 +1,60 @@
+﻿# Fixed build 鈥?no-argument start on a fresh isolated KEEL_HOME
+date: 2026-11-29T02:06:55.6440681+08:00
+exe: E:\dev\github\keel-win-acceptance\artifacts\keel-0.6.1-fixed.exe
+KEEL_HOME: E:\dev\github\keel-win-acceptance\home-fixed-ready
+KEEL_PG_DIR: C:\Users\gaube\.keel\runtime\0.6.0\pg
+KEEL_SERVE_WEB_DIR: C:\Users\gaube\.keel\runtime\0.6.0\web
+
+started pid=6372
+PASS: health 200 after 1.6s
+PASS: ready 200 after 0.1s
+GET /v1/health: HTTP 200, 119 bytes, content-type=application/json; charset=utf-8
+GET /v1/ready: HTTP 200, 31 bytes, content-type=application/json; charset=utf-8
+GET /v1/capabilities: HTTP 200, 3161 bytes, content-type=application/json; charset=utf-8
+GET /: HTTP 200, 3084 bytes, content-type=text/html; charset=utf-8
+GET /v1/auth/session: HTTP 200, 368 bytes, content-type=application/json; charset=utf-8
+GET /icons/32.939f2df4dd.png: HTTP 200, 1676 bytes, content-type=image/png
+GET /icons/180.2edc3700b5.png: HTTP 200, 26224 bytes, content-type=image/png
+GET /nsh-bindgen.6e053710e8.js: HTTP 200, 7597 bytes, content-type=text/javascript; charset=utf-8
+GET /nsh.f7bcf3ed35.js: HTTP 200, 216407 bytes, content-type=text/javascript; charset=utf-8
+
+## Listeners
+
+LocalAddress LocalPort       State OwningProcess
+------------ ---------       ----- -------------
+127.0.0.1        13750 Established          6372
+127.0.0.1        13750 Established          6372
+127.0.0.1        13750      Listen          6372
+127.0.0.1        13741 Established         79036
+127.0.0.1        13741 Established         79036
+127.0.0.1        13741 Established         79036
+127.0.0.1        13741 Established         79036
+127.0.0.1        13741 Established         79036
+127.0.0.1        13741 Established         79036
+127.0.0.1        13741 Established         79036
+127.0.0.1        13741 Established         79036
+127.0.0.1        13741 Established         79036
+127.0.0.1        13741      Listen         79036
+
+
+
+## KEEL_HOME
+
+Mode   LastWriteTime      Length Name          
+----   -------------      ------ ----          
+d----- 2026/11/29 2:06:57        dev-pg        
+-a---- 2026/11/29 2:06:57 0      dev-pg.log    
+-a---- 2026/11/29 2:06:57 0      dev-pg.log.ctl
+-a---- 2026/11/29 2:06:57 60     dev-pg.meta   
+-a---- 2026/11/29 2:06:55 33     dev-pg.pass   
+-a---- 2026/11/29 2:06:55 37     tenant        
+
+
+
+## stderr
+keel start: this build has no bundled PostgreSQL; using the local PostgreSQL on PATH
+initializing a PostgreSQL cluster in E:\dev\github\keel-win-acceptance\home-fixed-ready\dev-pg (superuser keel, loopback only)
+keel serve: no KEEL_DSN, using the local development database at E:\dev\github\keel-win-acceptance\home-fixed-ready\dev-pg
+2026/11/29 02:06:58 INFO creation plugin started tools=5 template=webview-react-solidglass
+2026/11/29 02:06:58 INFO example plugin started plugin=keel.example tools=2 hooks=3 triggers=0
+2026/11/29 02:06:58 INFO plugin assembly generation=1 plugins=11 active=11 pending=0

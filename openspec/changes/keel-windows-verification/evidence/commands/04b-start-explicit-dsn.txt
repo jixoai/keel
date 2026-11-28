@@ -1,0 +1,7 @@
+﻿# No-argument start 鈥?explicit local PostgreSQL DSN (control)
+date: 2026-11-29T01:51:04.3339759+08:00
+exe: E:\dev\github\keel-win-acceptance\run-normal\keel-0.6.0-windows-amd64\keel.exe
+dsn: postgres://keel:***@127.0.0.1:13741/keel?sslmode=disable
+
+started pid=64016
+FAIL: process exited early code=

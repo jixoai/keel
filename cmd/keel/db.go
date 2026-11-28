@@ -545,14 +545,13 @@ func ensurePasswordFile(path string) (string, error) {
 }
 
 func startDevDBCluster(d devDB, pgCtl string) error {
-	if err := os.MkdirAll(filepath.Dir(d.logFile()), 0o700); err != nil {
-		return err
-	}
 	opts := fmt.Sprintf("-p %d -h 127.0.0.1", d.port)
-	if err := runPGCommand(pgCtl, "-D", d.dir, "-l", d.logFile(), "-o", opts, "-w", "start"); err != nil {
-		return fmt.Errorf("%v (see %s)", err, d.logFile())
-	}
-	return nil
+	return startPGDaemon(pgCtl, []string{
+		"-D", d.dir,
+		"-l", d.logFile(),
+		"-o", opts,
+		"-w", "start",
+	}, d.logFile())
 }
 
 func waitDevDBReady(d devDB) error {
@@ -703,6 +702,63 @@ func runPGCommand(bin string, args ...string) error {
 		return fmt.Errorf("%s %s failed: %v\n%s", filepath.Base(bin), strings.Join(args, " "), err, strings.TrimSpace(string(out)))
 	}
 	return nil
+}
+
+// startPGDaemon runs a PostgreSQL server-start command without capturing its
+// stdout/stderr through an os.Pipe. The postmaster started by pg_ctl inherits
+// the child's stdio handles; on Windows the inherited pipe write end stays open
+// in the daemon, so CombinedOutput waits for EOF forever even after pg_ctl has
+// exited. A regular file gives pg_ctl a sink the daemon may also inherit while
+// Run waits only for pg_ctl itself.
+func startPGDaemon(bin string, args []string, logPath string) error {
+	ctlLogPath := logPath + ".ctl"
+	if err := os.MkdirAll(filepath.Dir(ctlLogPath), 0o700); err != nil {
+		return err
+	}
+	ctlLog, err := os.OpenFile(ctlLogPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		return fmt.Errorf("%s: open ctl log: %w", filepath.Base(bin), err)
+	}
+	defer ctlLog.Close()
+	cmd := exec.Command(bin, args...)
+	cmd.Stdout = ctlLog
+	cmd.Stderr = ctlLog
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("%s start failed: %v (ctl log: %s; pg log: %s)\n%s%s",
+			filepath.Base(bin), err, ctlLogPath, logPath,
+			readLogTail(ctlLogPath, 20), readLogTail(logPath, 20))
+	}
+	return nil
+}
+
+// readLogTail returns the last maxLines lines of a log file, bounded to the
+// last 64 KiB so a large PostgreSQL log cannot be read into memory on an error
+// path. It is diagnostics-only: a missing or unreadable file yields "".
+func readLogTail(path string, maxLines int) string {
+	const maxBytes = 64 << 10
+	f, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	if info, err := f.Stat(); err == nil && info.Size() > maxBytes {
+		if _, err := f.Seek(info.Size()-maxBytes, io.SeekStart); err != nil {
+			return ""
+		}
+	}
+	data, err := io.ReadAll(io.LimitReader(f, maxBytes))
+	if err != nil {
+		return ""
+	}
+	text := strings.TrimRight(string(data), "\r\n")
+	if text == "" {
+		return ""
+	}
+	lines := strings.Split(text, "\n")
+	if len(lines) > maxLines {
+		lines = lines[len(lines)-maxLines:]
+	}
+	return strings.Join(lines, "\n") + "\n"
 }
 
 func shellQuote(s string) string {

@@ -1,0 +1,42 @@
+# Extract and version — normal path
+date: 2026-11-29T01:43:47+08:00
+
+## zip listing
+
+7-Zip 26.03 (x64) : Copyright (c) 1999-2026 Igor Pavlov : 2026-09-03
+
+Scanning the drive for archives:
+1 file, 59275550 bytes (57 MiB)
+
+Listing archive: downloads\keel-0.6.0-windows-amd64.zip
+
+--
+Path = downloads\keel-0.6.0-windows-amd64.zip
+Type = zip
+Physical Size = 59275550
+
+   Date      Time    Attr         Size   Compressed  Name
+------------------- ----- ------------ ------------  ------------------------
+2026-11-29 00:25:09 .....     95475200     59265755  keel.exe
+2026-11-29 00:25:09 .....        18167         9483  README.md
+------------------- ----- ------------ ------------  ------------------------
+2026-11-29 00:25:09           95493367     59275238  2 files
+
+## extract
+
+Extracting archive: downloads\keel-0.6.0-windows-amd64.zip
+--
+Path = downloads\keel-0.6.0-windows-amd64.zip
+Type = zip
+Physical Size = 59275550
+
+Everything is Ok
+
+Files: 2
+Size:       95493367
+Compressed: 59275550
+
+## extracted files
+total 93260
+-rw-r--r-- 1 gaube 197609    18167 Nov 29 00:25 README.md
+-rwxr-xr-x 1 gaube 197609 95475200 Nov 29 00:25 keel.exe

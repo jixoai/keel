@@ -34,6 +34,7 @@ import (
 	"github.com/jixoai/keel/internal/compaction"
 	"github.com/jixoai/keel/internal/configfile"
 	"github.com/jixoai/keel/internal/fileplugin"
+	"github.com/jixoai/keel/internal/handoff"
 	"github.com/jixoai/keel/internal/harnessapi"
 	"github.com/jixoai/keel/internal/harnessext"
 	"github.com/jixoai/keel/internal/host"
@@ -444,6 +445,14 @@ func runServe(parent context.Context, opts serveOptions) error {
 	kernelLog, err := kernel.NewPG(ctx, st.Pool(), kernel.WithBlobRefs(st))
 	if err != nil {
 		return fmt.Errorf("kernel migrate: %w", err)
+	}
+	// The readiness contract (store.CheckReady) includes the handoff audit
+	// tables. cmd/runtime applies them through its coordinator; the product
+	// shell does not run the handoff coordinator, but it still owns the same
+	// schema so a fresh `keel serve` can report ready. NewPGRegistry is
+	// idempotent and takes the same advisory lock as store/kernel migrations.
+	if _, err := handoff.NewPGRegistry(ctx, st.Pool()); err != nil {
+		return fmt.Errorf("handoff migrate: %w", err)
 	}
 	limits := quota.New(host.QuotaConfig{
 		RunConcurrency:  envInt("KEEL_QUOTA_RUNS", 0),

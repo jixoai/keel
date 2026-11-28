@@ -200,11 +200,34 @@ func startServer(t *testing.T, bin, dsn, work string, tenant uuid.UUID) *serverP
 		}
 	})
 	deadline := time.Now().Add(40 * time.Second)
+	healthy := false
 	for time.Now().Before(deadline) {
 		if err := cmd.Process.Signal(syscall.Signal(0)); err != nil {
 			t.Fatalf("keel serve exited before health; log:\n%s", tailFile(logPath, 40))
 		}
 		res, err := http.Get(base + "/v1/health")
+		if err == nil {
+			res.Body.Close()
+			if res.StatusCode == 200 {
+				healthy = true
+				break
+			}
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if !healthy {
+		server.stop(t)
+		t.Fatalf("keel serve did not become healthy; log:\n%s", tailFile(logPath, 40))
+	}
+	// Readiness is the boot schema contract, not just liveness: a fresh product
+	// database must have the handoff/plugin tables before the test speaks to the
+	// API.
+	readyDeadline := time.Now().Add(40 * time.Second)
+	for time.Now().Before(readyDeadline) {
+		if err := cmd.Process.Signal(syscall.Signal(0)); err != nil {
+			t.Fatalf("keel serve exited before ready; log:\n%s", tailFile(logPath, 40))
+		}
+		res, err := http.Get(base + "/v1/ready")
 		if err == nil {
 			res.Body.Close()
 			if res.StatusCode == 200 {
@@ -214,7 +237,7 @@ func startServer(t *testing.T, bin, dsn, work string, tenant uuid.UUID) *serverP
 		time.Sleep(100 * time.Millisecond)
 	}
 	server.stop(t)
-	t.Fatalf("keel serve did not become healthy; log:\n%s", tailFile(logPath, 40))
+	t.Fatalf("keel serve did not become ready; log:\n%s", tailFile(logPath, 40))
 	return nil
 }
 

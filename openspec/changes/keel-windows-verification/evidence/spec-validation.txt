@@ -1,0 +1,21 @@
+# OpenSpec validation baseline
+date: 2026-11-29T02:23:05+08:00
+openspec: 2.2.0
+
+## The three changes (strict)
+Change 'keel-windows-verification' is valid
+Change 'fix-windows-pg-start' is valid
+Change 'fix-serve-ready-schema' is valid
+
+## All specs (strict)
+✓ spec/ui-kit
+Totals: 42 passed, 7 failed (49 items)
+Details: openspec validate agent-board --type spec
+
+## Pre-existing warnings (not introduced by this change)
+The 7 failing specs are >500-character Requirement warnings in files unchanged from
+3697b1dc: agent-board, agent-execution, collaboration-superagent, distribution,
+plugin-commands, plugin-system, plugin-telemetry. The three changes above are valid;
+our new requirements are short. No unrelated spec was edited. This environment uses
+openspec 2.2.0, which treats the long-requirement warning as a strict failure; the
+macOS handoff recorded 49/49 with an earlier CLI. Do not rewrite frozen specs for this.

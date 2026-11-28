@@ -1,0 +1,50 @@
+# First no-arg start hang — diagnosis
+date: 2026-11-29T01:50:43+08:00
+
+## Observed
+- keel PID 95884 alive, CPU ~4.92s, no listener on 127.0.0.1:13750
+- PostgreSQL 18.7 on 127.0.0.1:13741 ready
+- runtime extracted to C:\Users\gaube\.keel\runtime\0.6.0
+- dev-pg.meta and dev-pg.pass exist
+- stderr: runtime extracted; initializing cluster; server did not become ready
+- missing line: 'keel serve: no KEEL_DSN, using the local development database at ...'
+
+## Process
+
+
+Id           : 95884
+CPU          : 4.921875
+Threads      : {82540, 79716, 61640, 21720...}
+Handles      : 184
+WorkingSet64 : 78778368
+StartTime    : 2026/11/29 1:44:10
+
+
+
+## Listeners
+
+LocalAddress LocalPort  State OwningProcess
+------------ ---------  ----- -------------
+127.0.0.1        13741 Listen         49132
+
+
+## stderr
+keel: runtime extracted to C:\Users\gaube\.keel\runtime\0.6.0
+initializing a PostgreSQL cluster in C:\Users\gaube\.keel\dev-pg (superuser keel, loopback only)
+keel start: server did not become ready; open http://127.0.0.1:13750 manually
+
+## stdout
+installed: C:\Users\gaube\AppData\Local\Keel
+
+## dev-pg.log
+2026-11-29 01:44:19.195 CST [49132] LOG:  starting PostgreSQL 18.7 on x86_64-windows, compiled by msvc-19.44.35229, 64-bit
+2026-11-29 01:44:19.196 CST [49132] LOG:  listening on IPv4 address "127.0.0.1", port 13741
+2026-11-29 01:44:19.254 CST [54572] LOG:  database system was shut down at 2026-11-29 01:44:18 CST
+2026-11-29 01:44:19.262 CST [49132] LOG:  database system is ready to accept connections
+2026-11-29 01:49:19.249 CST [40864] LOG:  checkpoint starting: time
+2026-11-29 01:49:23.978 CST [40864] LOG:  checkpoint complete: wrote 43 buffers (0.3%), wrote 3 SLRU buffers; 0 WAL file(s) added, 0 removed, 0 recycled; write=4.675 s, sync=0.009 s, total=4.729 s; sync files=11, longest=0.004 s, average=0.001 s; distance=331 kB, estimate=331 kB; lsn=0/18588D0, redo lsn=0/1858878
+
+## keel db dsn/status (separate process)
+postgres://keel:***@127.0.0.1:13741/keel?sslmode=disable
+running on 127.0.0.1:13741 (data: C:\Users\gaube\.keel\dev-pg)
+dsn: postgres://keel:***@127.0.0.1:13741/keel?sslmode=disable

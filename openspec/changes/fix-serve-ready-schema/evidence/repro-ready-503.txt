@@ -1,0 +1,54 @@
+# Fixed build — wait for /v1/ready after first boot
+date: 2026-11-29T02:01:47+08:00
+
+TIMEOUT waiting for ready
+
+## service stdout tail
+{"time":"2026-11-29T02:02:39.2455788+08:00","level":"WARN","msg":"readiness probe failed","err":"store: ready: missing tables: runtime_instances, handoffs"}
+{"time":"2026-11-29T02:02:39.2461508+08:00","level":"INFO","msg":"http request","request_id":"208d56a8-d477-4549-b837-fe2d3e89ffc9","method":"GET","route":"GET /v1/ready","status":503,"bytes":32,"duration_ms":1}
+{"time":"2026-11-29T02:02:39.7570549+08:00","level":"WARN","msg":"readiness probe failed","err":"store: ready: missing tables: runtime_instances, handoffs"}
+{"time":"2026-11-29T02:02:39.7577896+08:00","level":"INFO","msg":"http request","request_id":"ca3a24b4-84ed-4859-b6e8-4d96b06b6ff9","method":"GET","route":"GET /v1/ready","status":503,"bytes":32,"duration_ms":1}
+{"time":"2026-11-29T02:02:40.2663994+08:00","level":"WARN","msg":"readiness probe failed","err":"store: ready: missing tables: runtime_instances, handoffs"}
+{"time":"2026-11-29T02:02:40.2674342+08:00","level":"INFO","msg":"http request","request_id":"3f51c25b-6ed1-420a-9916-bd11af6dfc8e","method":"GET","route":"GET /v1/ready","status":503,"bytes":32,"duration_ms":1}
+{"time":"2026-11-29T02:02:40.7827583+08:00","level":"WARN","msg":"readiness probe failed","err":"store: ready: missing tables: runtime_instances, handoffs"}
+{"time":"2026-11-29T02:02:40.7838019+08:00","level":"INFO","msg":"http request","request_id":"705a0938-add6-4e88-9e5c-7502b616689b","method":"GET","route":"GET /v1/ready","status":503,"bytes":32,"duration_ms":1}
+{"time":"2026-11-29T02:02:41.2921501+08:00","level":"WARN","msg":"readiness probe failed","err":"store: ready: missing tables: runtime_instances, handoffs"}
+{"time":"2026-11-29T02:02:41.2931737+08:00","level":"INFO","msg":"http request","request_id":"5ce4c506-a6f5-4767-a4ef-232a14081381","method":"GET","route":"GET /v1/ready","status":503,"bytes":32,"duration_ms":1}
+{"time":"2026-11-29T02:02:41.8074965+08:00","level":"WARN","msg":"readiness probe failed","err":"store: ready: missing tables: runtime_instances, handoffs"}
+{"time":"2026-11-29T02:02:41.8090045+08:00","level":"INFO","msg":"http request","request_id":"7013f2ec-1d06-4977-8923-28cfd36649c4","method":"GET","route":"GET /v1/ready","status":503,"bytes":32,"duration_ms":2}
+{"time":"2026-11-29T02:02:42.31687+08:00","level":"WARN","msg":"readiness probe failed","err":"store: ready: missing tables: runtime_instances, handoffs"}
+{"time":"2026-11-29T02:02:42.31687+08:00","level":"INFO","msg":"http request","request_id":"d4a137b5-b65d-4df2-92c2-34517edb8c78","method":"GET","route":"GET /v1/ready","status":503,"bytes":32,"duration_ms":0}
+{"time":"2026-11-29T02:02:42.8290808+08:00","level":"WARN","msg":"readiness probe failed","err":"store: ready: missing tables: runtime_instances, handoffs"}
+{"time":"2026-11-29T02:02:42.8290808+08:00","level":"INFO","msg":"http request","request_id":"b96930b8-321f-40e8-bd53-acac8e77efba","method":"GET","route":"GET /v1/ready","status":503,"bytes":32,"duration_ms":0}
+{"time":"2026-11-29T02:02:43.3476027+08:00","level":"WARN","msg":"readiness probe failed","err":"store: ready: missing tables: runtime_instances, handoffs"}
+{"time":"2026-11-29T02:02:43.3561385+08:00","level":"INFO","msg":"http request","request_id":"3c761712-8a3d-4a33-8ef2-43e7fefc0a83","method":"GET","route":"GET /v1/ready","status":503,"bytes":32,"duration_ms":9}
+{"time":"2026-11-29T02:02:43.8699645+08:00","level":"WARN","msg":"readiness probe failed","err":"store: ready: missing tables: runtime_instances, handoffs"}
+{"time":"2026-11-29T02:02:43.8714806+08:00","level":"INFO","msg":"http request","request_id":"b7d8b589-c8bf-497f-96ed-0195743a8127","method":"GET","route":"GET /v1/ready","status":503,"bytes":32,"duration_ms":1}
+{"time":"2026-11-29T02:02:44.3826982+08:00","level":"WARN","msg":"readiness probe failed","err":"store: ready: missing tables: runtime_instances, handoffs"}
+{"time":"2026-11-29T02:02:44.383373+08:00","level":"INFO","msg":"http request","request_id":"137d756e-8180-4637-a5d7-4ac3cb835ffa","method":"GET","route":"GET /v1/ready","status":503,"bytes":32,"duration_ms":0}
+{"time":"2026-11-29T02:02:44.897392+08:00","level":"WARN","msg":"readiness probe failed","err":"store: ready: missing tables: runtime_instances, handoffs"}
+{"time":"2026-11-29T02:02:44.8984356+08:00","level":"INFO","msg":"http request","request_id":"3cf75d4a-e565-4eff-a430-e7c064b7d285","method":"GET","route":"GET /v1/ready","status":503,"bytes":32,"duration_ms":1}
+{"time":"2026-11-29T02:02:45.4062179+08:00","level":"WARN","msg":"readiness probe failed","err":"store: ready: missing tables: runtime_instances, handoffs"}
+{"time":"2026-11-29T02:02:45.4067238+08:00","level":"INFO","msg":"http request","request_id":"aabecdb6-f7db-4a12-856a-8363bee46c5d","method":"GET","route":"GET /v1/ready","status":503,"bytes":32,"duration_ms":0}
+{"time":"2026-11-29T02:02:45.9163087+08:00","level":"WARN","msg":"readiness probe failed","err":"store: ready: missing tables: runtime_instances, handoffs"}
+{"time":"2026-11-29T02:02:45.9168299+08:00","level":"INFO","msg":"http request","request_id":"cbb60f18-ce8f-4582-b65b-c93c358ef69d","method":"GET","route":"GET /v1/ready","status":503,"bytes":32,"duration_ms":1}
+{"time":"2026-11-29T02:02:46.426169+08:00","level":"WARN","msg":"readiness probe failed","err":"store: ready: missing tables: runtime_instances, handoffs"}
+{"time":"2026-11-29T02:02:46.4271806+08:00","level":"INFO","msg":"http request","request_id":"30701ccb-9d69-4c4f-847d-b3b81f5e02c9","method":"GET","route":"GET /v1/ready","status":503,"bytes":32,"duration_ms":1}
+{"time":"2026-11-29T02:02:46.9326342+08:00","level":"WARN","msg":"readiness probe failed","err":"store: ready: missing tables: runtime_instances, handoffs"}
+{"time":"2026-11-29T02:02:46.9346825+08:00","level":"INFO","msg":"http request","request_id":"b1c17fe2-1971-4d10-b983-1ffbafaf63ac","method":"GET","route":"GET /v1/ready","status":503,"bytes":32,"duration_ms":2}
+{"time":"2026-11-29T02:02:47.4388438+08:00","level":"WARN","msg":"readiness probe failed","err":"store: ready: missing tables: runtime_instances, handoffs"}
+{"time":"2026-11-29T02:02:47.4393502+08:00","level":"INFO","msg":"http request","request_id":"0f1d2847-3b93-4087-b082-5edcd8045181","method":"GET","route":"GET /v1/ready","status":503,"bytes":32,"duration_ms":0}
+{"time":"2026-11-29T02:02:47.9520534+08:00","level":"WARN","msg":"readiness probe failed","err":"store: ready: missing tables: runtime_instances, handoffs"}
+{"time":"2026-11-29T02:02:47.952559+08:00","level":"INFO","msg":"http request","request_id":"5198a723-8e09-42cf-b61a-46ec4f2e24e1","method":"GET","route":"GET /v1/ready","status":503,"bytes":32,"duration_ms":0}
+{"time":"2026-11-29T02:02:48.461761+08:00","level":"WARN","msg":"readiness probe failed","err":"store: ready: missing tables: runtime_instances, handoffs"}
+{"time":"2026-11-29T02:02:48.4628026+08:00","level":"INFO","msg":"http request","request_id":"93cc3169-c440-4f1e-a090-e5237ece451f","method":"GET","route":"GET /v1/ready","status":503,"bytes":32,"duration_ms":1}
+{"time":"2026-11-29T02:02:48.9786781+08:00","level":"WARN","msg":"readiness probe failed","err":"store: ready: missing tables: runtime_instances, handoffs"}
+{"time":"2026-11-29T02:02:48.9786781+08:00","level":"INFO","msg":"http request","request_id":"98c25cb8-6861-4a5d-9106-893601d0d23c","method":"GET","route":"GET /v1/ready","status":503,"bytes":32,"duration_ms":0}
+
+## service stderr tail
+keel start: this build has no bundled PostgreSQL; using the local PostgreSQL on PATH
+initializing a PostgreSQL cluster in E:\dev\github\keel-win-acceptance\home-fixed-start\dev-pg (superuser keel, loopback only)
+keel serve: no KEEL_DSN, using the local development database at E:\dev\github\keel-win-acceptance\home-fixed-start\dev-pg
+2026/11/29 02:01:27 INFO creation plugin started tools=5 template=webview-react-solidglass
+2026/11/29 02:01:27 INFO example plugin started plugin=keel.example tools=2 hooks=3 triggers=0
+2026/11/29 02:01:27 INFO plugin assembly generation=1 plugins=11 active=11 pending=0
