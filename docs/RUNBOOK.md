@@ -121,14 +121,14 @@ export KEEL_BOARD_FILE_TIMEOUT=10s   # 可选；单个入站文件下载超时
   - `archived=true`：`moves=[]`。命令桥已在 change keel-plugin-split 删除，board 不再把
     动作回呼 supervisor；superagent 的 ticket 是唯一真值，board 任务由 `keel.superagent`
     插件的只写投影维护。
-  - `takeover`、`release.force`、`answer` 在当前 board v0.1.1/keel 没有后端端点，**不**谎报。
+  - `takeover`、`release.force`、`answer` 在当前 board v0.1.4/keel 没有后端端点，**不**谎报。
 - `archived` 来自 `board.archived=true` 标签（客户端不能写 `board.*`）；归档 Ticket
-  导入为只读历史任务。`copies` 暂不提供：board v0.1.1 的 message view 只有
+  导入为只读历史任务。`copies` 暂不提供：board v0.1.4 的 message view 只有
   `undelivered`，没有 task-level 成功副本列表，mount 层不伪造空数组。
 - `/v1/board/sync/entries|status` 保留 board 形状，合并 keel 的凭据状态
   （`configured`→`valid`，`missing`/`invalid`→`invalid`，keel 无该 entry→`unknown`）；
-  board v0.1.1 没有可测量的 lag 时间戳，因此 `lag: null`（明确未知），不伪造 `targets`
-  或 0 值。
+  board v0.1.4 的 sync status 提供 `targets[].lag`/`oldestPendingAgeSeconds`/`failures24h`，
+  缺失字段保留 `null`（明确未知），不伪造 0 或空数组。
 - 改写只作用于上述路由的 2xx JSON 响应；SSE、错误状态/错误体、内容类型保持不变。
   SSE 帧按 board 事件契约**不带** `moves`；客户端合并任务事件时需保留已有 `moves` 或重新读取
   任务，否则事件后的卡片会退回只读。
@@ -288,8 +288,8 @@ KEEL_TEST_DSN='postgres://…' scripts/board-phase2-gates.sh
 
 - **Phase 2 任务面 UI**：nsh `/board`（web/TUI 同源）是唯一任务面；旧 `/superagent` 页面、
   只读数据源与 `/v1/superagent` 只读/运营 API 已删除，旧脚本在
-  `scripts/archive/retired-superagent/`。`targets`/可测量 lag/24h 失败计数在 board v0.1.1
-  没有后端字段，UI 明确显示“未知”（见 change 的 `DISPOSITION.md`），不伪造成功。
+  `scripts/archive/retired-superagent/`。`targets`/可测量 lag/24h 失败计数由 board v0.1.4
+  提供；字段缺失时 UI 显示“未知”（见 change 的 `DISPOSITION.md`），不伪造成功。
 
 - `GET /metrics` 同时输出 `board_*`（事件数、append 延迟、live claims、SSE 连接/滞后、
   sync 深度/失败、`board_sync_credential_status`）；标签只有 kind/key/platform/status，
@@ -297,9 +297,9 @@ KEEL_TEST_DSN='postgres://…' scripts/board-phase2-gates.sh
 - `GET /v1/board/admin/audit?limit=`（`board.manage`）读最近运维审计；领域审计在
   `board_events`，两者都不含 secret/正文。entry 生命周期另写
   `sync.entry.created|updated`（仅 key/platform/status/revision）。
-- v0.1.1 SSE 对不可见事件写 `id:` 空帧（游标前进、不泄露内容），`Last-Event-ID` 优先于
+- v0.1.4 SSE 对不可见事件写 `id:` 空帧（游标前进、不泄露内容），`Last-Event-ID` 优先于
   `after`；`last` 只重放可见事件。
-- 已知接口缺口（v0.1.1）：board 无 `GET /me`（用 `/actors` 或消息 author 投影）；
+- 已知接口缺口（v0.1.4）：board 无 `GET /me`（用 `/actors` 或消息 author 投影）；
   board 模块没有 entry POST/PATCH（keel 在挂载层补齐，未改 board 仓库）。
 - 轮换/创建/路由变更的运行期语义是“持久化 + 停用 + 重启装载”，不是热替换：本进程的
   provider 仍持有旧凭据，keel 主动停用 board sync row 使 webhook 无副作用；重启后按新

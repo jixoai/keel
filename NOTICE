@@ -14,8 +14,8 @@ third_party/gbash-shell-UPSTREAM_LICENSE.
 Keel does not vendor or modify gbash; it is a normal Go module dependency (see
 docs/GBASH-CONTRACT.md §2).
 
-This product includes github.com/jixoai/keel-board v0.1.1
-(commit 70b503f0cdbd8f860ac1a373a6d1576175018ff0, tag v0.1.1), licensed under the
+This product includes github.com/jixoai/keel-board v0.1.4
+(commit 3d6115b68a1cc0ef1de73364e03787ceb610785f, tag v0.1.4), licensed under the
 Apache License 2.0. keel-board is an independent implementation: its concepts and
 observable contract reference vercel/board @ 26428ed4e0661ff362c59abdf1215997c59891b0
 (Apache-2.0), without copying its source, tests or documentation. The upstream

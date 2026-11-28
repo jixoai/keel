@@ -113,7 +113,8 @@ func (o *usageObserver) stream(ctx context.Context, model string, llm provider.L
 
 // consume forwards events and settles the row on the terminal event, an
 // abnormal close, or consumer cancellation. Usage observed on any partial is
-// the best available fact; a nil usage is settled as zero ("not measurable").
+// the best available fact; with no observed usage at all the row stays
+// unaccounted (possibly billed, unknown amount) rather than settling a fake 0.
 func (o *usageObserver) consume(ctx context.Context, requestID, modelName string, base, out *provider.AssistantMessageEventStream) {
 	var (
 		usage      *agentcore.Usage

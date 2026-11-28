@@ -108,7 +108,7 @@ board_line=$(go list -m -f '{{.Path}} {{.Version}}' "$board_module" 2>/dev/null)
 board_path=${board_line%% *}
 board_version=${board_line#* }
 [ "$board_path" = "$board_module" ] || die "unexpected board module path: $board_path"
-[ "$board_version" = "v0.1.1" ] || die "board module is $board_version, want v0.1.1"
+[ "$board_version" = "v0.1.4" ] || die "board module is $board_version, want v0.1.4"
 board_commit=$(awk 'match($0, /commit [0-9a-f]{40}/) { print substr($0, RSTART + 7, 40); exit }' NOTICE)
 [ "${#board_commit}" -eq 40 ] || die "cannot read the board commit from NOTICE"
 grep -Eq '^[[:space:]]*github[.]com/jixoai/keel-board[[:space:]]+v0[.]1[.]1([[:space:]]|$)' go.mod \
@@ -534,10 +534,10 @@ run_docs_pin() {
   (
     set -e
     for f in README.md docs/RUNBOOK.md NOTICE; do
-      grep -Fq 'keel-board v0.1.1' "$f"
+      grep -Fq 'keel-board v0.1.4' "$f"
       grep -Fq "$board_commit" "$f"
     done
-    grep -Eq '^[[:space:]]*github[.]com/jixoai/keel-board[[:space:]]+v0[.]1[.]1([[:space:]]|$)' go.mod
+    grep -Eq '^[[:space:]]*github[.]com/jixoai/keel-board[[:space:]]+v0[.]1[.]4([[:space:]]|$)' go.mod
     grep -Fq '/v1/superagent/tickets/{id}/report' docs/HARNESS.md
     grep -Fq '旧看板' docs/HARNESS.md
     grep -Fq 'board' web/README.md
