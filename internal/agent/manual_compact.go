@@ -155,6 +155,17 @@ func (r *Runner) CompactNow(ctx context.Context, lease kernel.Lease, requestID s
 	if active.Stream == nil {
 		return ManualCompactResult{}, fmt.Errorf("agent: manual compaction has no provider stream for %s/%s", active.ProviderID, active.Model)
 	}
+	// The summary request is a billable provider call: account it in the same
+	// ledger as a normal turn. The request identity includes the caller's
+	// requestId, so two different manual compactions at the same generation do
+	// not share a ledger row; the same requestId retried after a crash reuses
+	// its row instead of double-billing.
+	summaryStream := active.Stream
+	if r.UsageRecorder != nil {
+		summaryStream = NewUsageStream(summaryStream, r.UsageRecorder, lease.Scope,
+			attemptUsageBaseID(generationBase(events))+"-compact-"+requestID, lastEventSeq(events),
+			active.ProviderID, active.Model)
+	}
 
 	// The projection is read with the attempt's unread-input guard: a checkpoint
 	// whose retained tail starts after an unread input is corrupt and falls back
@@ -292,9 +303,9 @@ func (r *Runner) CompactNow(ctx context.Context, lease kernel.Lease, requestID s
 	}
 	var res *compaction.CompactionResult
 	if resumed {
-		res, err = compaction.CompactAt(ctx, active.Stream, providerModel, msgs, settings, cutIndex, -1, nil, "", streamConfig)
+		res, err = compaction.CompactAt(ctx, summaryStream, providerModel, msgs, settings, cutIndex, -1, nil, "", streamConfig)
 	} else {
-		res, err = compaction.Compact(ctx, active.Stream, providerModel, msgs, settings, -1, nil, "", streamConfig)
+		res, err = compaction.Compact(ctx, summaryStream, providerModel, msgs, settings, -1, nil, "", streamConfig)
 	}
 	if err != nil {
 		// The summary request failed or was cancelled: the original context (the

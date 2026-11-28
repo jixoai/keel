@@ -274,9 +274,6 @@ func (m *MemStore) SaveCheckpoint(ctx context.Context, tenantID, sessionID uuid.
 			continue
 		}
 		cp := &s.checkpoints[i]
-		if cp.RequestID != "" && rec.RequestID != "" && cp.RequestID != rec.RequestID {
-			return errors.New("memstore: checkpoint seq already belongs to another requestId")
-		}
 		cp.Summary = rec.Summary
 		cp.SummaryHash = rec.SummaryHash
 		if rec.KeptFromSeq > 0 {

@@ -67,6 +67,7 @@ import (
 	"github.com/jixoai/keel/internal/testkit"
 	"github.com/jixoai/keel/internal/toolauth"
 	"github.com/jixoai/keel/internal/toolsurface"
+	usagewiring "github.com/jixoai/keel/internal/usage"
 )
 
 // serveOptions is the resolved `keel serve` configuration (flags + environment).
@@ -717,6 +718,10 @@ func runServe(parent context.Context, opts serveOptions) error {
 	// at tool-call time; no run executes before newProductLayer returns.
 	var toolSubagents *harnessext.SubagentRunner
 	var toolPluginManager *harnessext.Manager
+	// Destructive MCP tools need a human decision. The gate refuses until the
+	// product layer installs the decision broker and approval provenance after
+	// Boot, so a run that starts during assembly can never execute one silently.
+	mcpApproval := &mcpApprovalGate{}
 
 	// MRTR / legacy server-request executor (P5). It is constructed before the
 	// MCP connections so initialize declares exactly what this host can answer:
@@ -781,6 +786,10 @@ func runServe(parent context.Context, opts serveOptions) error {
 	})
 	rt, err := servicehost.Boot(ctx, servicehost.Config{
 		Metrics: runMetrics,
+		// Every provider request is accounted in the existing usage ledger. The
+		// recorder is the ledger's production caller; there is no second
+		// accounting path.
+		Usage: usagewiring.NewRecorder(st),
 		// The session checkpoint policy is the tenant ceiling narrowed by the
 		// session's stored override. The closure follows the live generation, so
 		// a tenant reload changes later decisions without a restart.
@@ -982,6 +991,10 @@ func runServe(parent context.Context, opts serveOptions) error {
 					}
 					partials.PublishMCPProgress(tenantID, sessionID, toolCallID, progress)
 				},
+				// Destructive MCP tools open a durable human decision and execute
+				// only after "Allow". The gate is bound to the product decision
+				// broker right after the product layer assembles.
+				MCPApproval: mcpApproval.Approve,
 			},
 		},
 	})
@@ -1053,6 +1066,9 @@ func runServe(parent context.Context, opts serveOptions) error {
 	}
 	toolSubagents = product.subagents
 	toolPluginManager = product.pluginManager
+	// The decision broker and approval provenance now exist: destructive MCP
+	// calls can ask a human instead of refusing for lack of a seam.
+	mcpApproval.bind(product.decisions, product.approvals, log)
 	defer product.close()
 
 	// --- board (keel-board-v1, Phase 1) ---
@@ -1312,6 +1328,10 @@ drainWait:
 type productLayer struct {
 	hooks     *harnessext.HookBus
 	decisions *harnessext.DecisionBroker
+	// approvals is the durable provenance store of human answers. The MCP
+	// destructive-tool gate records its questions here; the HTTP decision route
+	// records the answers.
+	approvals *approval.Service
 	partials  *harnessext.PartialHub
 	runCtrl   *harnessext.RunControl
 	starter   *harnessext.TurnStarter
@@ -1884,6 +1904,7 @@ func newProductLayer(ctx context.Context, st *store.Store, kern *kernel.Kernel, 
 	layer := &productLayer{
 		hooks:         hooks,
 		decisions:     decisions,
+		approvals:     approvals,
 		partials:      partials,
 		runCtrl:       runControl,
 		starter:       starter,

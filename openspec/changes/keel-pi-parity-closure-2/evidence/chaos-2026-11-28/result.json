@@ -1,0 +1,150 @@
+{
+  "mode": "g5-chaos",
+  "faults": 20,
+  "restarts": 20,
+  "sessions": 16,
+  "checks": [
+    "seq contiguous from 1 on every session",
+    "every posted requestId committed exactly once",
+    "newest input answered; no input answered twice",
+    "read watermark covers every committed input",
+    "no unread-input flag left behind",
+    "no orphan tool results",
+    "every run converged (done/pending/failed)",
+    "every SIGKILL was followed by a counted runtime relaunch (restarts == faults)"
+  ],
+  "failures": [],
+  "pass": true,
+  "startedAt": "2026-11-28T13:08:46.021379Z",
+  "durationSec": 655.503685417,
+  "eventCount": 22852,
+  "sessionsChecked": 16,
+  "seqGaps": 0,
+  "duplicateRequestIDs": 0,
+  "duplicateFinalReplies": 0,
+  "unansweredNewest": 0,
+  "orphanToolResults": 0,
+  "unreadAfterSettle": 0,
+  "stuckRuns": 0,
+  "runStatusErrors": 0,
+  "eventLoadErrors": 0,
+  "kills": [
+    {
+      "at": "2026-11-28T13:09:16.878908Z",
+      "runtime": "runtime-a",
+      "pid": 43678
+    },
+    {
+      "at": "2026-11-28T13:09:46.884234Z",
+      "runtime": "runtime-2",
+      "pid": 45408
+    },
+    {
+      "at": "2026-11-28T13:10:16.883685Z",
+      "runtime": "runtime-3",
+      "pid": 47271
+    },
+    {
+      "at": "2026-11-28T13:10:46.887657Z",
+      "runtime": "runtime-4",
+      "pid": 49146
+    },
+    {
+      "at": "2026-11-28T13:11:16.884829Z",
+      "runtime": "runtime-5",
+      "pid": 51083
+    },
+    {
+      "at": "2026-11-28T13:11:46.885405Z",
+      "runtime": "runtime-6",
+      "pid": 52875
+    },
+    {
+      "at": "2026-11-28T13:12:16.884647Z",
+      "runtime": "runtime-7",
+      "pid": 54944
+    },
+    {
+      "at": "2026-11-28T13:12:46.887633Z",
+      "runtime": "runtime-8",
+      "pid": 56716
+    },
+    {
+      "at": "2026-11-28T13:13:16.887342Z",
+      "runtime": "runtime-9",
+      "pid": 58600
+    },
+    {
+      "at": "2026-11-28T13:13:46.888981Z",
+      "runtime": "runtime-10",
+      "pid": 60397
+    },
+    {
+      "at": "2026-11-28T13:14:16.888971Z",
+      "runtime": "runtime-11",
+      "pid": 62265
+    },
+    {
+      "at": "2026-11-28T13:14:46.892411Z",
+      "runtime": "runtime-12",
+      "pid": 64032
+    },
+    {
+      "at": "2026-11-28T13:15:16.891316Z",
+      "runtime": "runtime-13",
+      "pid": 65817
+    },
+    {
+      "at": "2026-11-28T13:15:46.892134Z",
+      "runtime": "runtime-14",
+      "pid": 67543
+    },
+    {
+      "at": "2026-11-28T13:16:16.891718Z",
+      "runtime": "runtime-15",
+      "pid": 69525
+    },
+    {
+      "at": "2026-11-28T13:16:46.896358Z",
+      "runtime": "runtime-16",
+      "pid": 71602
+    },
+    {
+      "at": "2026-11-28T13:17:16.897713Z",
+      "runtime": "runtime-17",
+      "pid": 73980
+    },
+    {
+      "at": "2026-11-28T13:17:46.911075Z",
+      "runtime": "runtime-18",
+      "pid": 75935
+    },
+    {
+      "at": "2026-11-28T13:18:16.910955Z",
+      "runtime": "runtime-19",
+      "pid": 78052
+    },
+    {
+      "at": "2026-11-28T13:18:46.915535Z",
+      "runtime": "runtime-20",
+      "pid": 79982
+    }
+  ],
+  "successions": 0,
+  "expectedKills": 20,
+  "killIntervalMeanSec": 30.002,
+  "killIntervalMinSec": 29.997,
+  "killIntervalMaxSec": 30.013,
+  "invariantCounters": {
+    "seqGaps": 0,
+    "duplicateRequestIDs": 0,
+    "duplicateFinalReplies": 0,
+    "unansweredNewest": 0,
+    "orphanToolResults": 0,
+    "unreadAfterSettle": 0,
+    "stuckRuns": 0,
+    "runStatusErrors": 0,
+    "eventLoadErrors": 0
+  },
+  "verdict": "PASS"
+}

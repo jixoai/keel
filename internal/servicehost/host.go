@@ -256,6 +256,11 @@ type Config struct {
 	Concurrency int
 	// Metrics observes worker runs (optional).
 	Metrics agent.RunObserver
+	// Usage records every provider request in the durable usage ledger. The
+	// hosting process wires it to the store; nil keeps accounting off (a test
+	// deployment without a ledger). It is not a second truth: the run summary
+	// and the ledger read the same provider-reported usage.
+	Usage agent.UsageRecorder
 	// CheckpointPolicies resolves the attempt's effective checkpoint policy:
 	// the tenant ceiling narrowed by the session's stored override. Nil keeps
 	// the generation's tenant policy. The runner consults it per attempt and per

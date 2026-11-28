@@ -1,0 +1,78 @@
+{
+  "note": "PI conformance floor: every package pass count must stay at or above this baseline. Regenerate only with a deliberate coverage change.",
+  "piPin": "55a5c6914570e2ae31ca36297654483bbbf46883",
+  "piPinDate": "2026-11-05",
+  "generatedAt": "2026-11-28",
+  "total": {
+    "pass": 1314,
+    "fail": 0,
+    "skip": 3
+  },
+  "packages": {
+    "github.com/jixoai/keel/internal/agent": {
+      "pass": 253,
+      "fail": 0,
+      "skip": 1
+    },
+    "github.com/jixoai/keel/internal/agenttool": {
+      "pass": 3,
+      "fail": 0,
+      "skip": 0
+    },
+    "github.com/jixoai/keel/internal/blob": {
+      "pass": 32,
+      "fail": 0,
+      "skip": 0
+    },
+    "github.com/jixoai/keel/internal/compaction": {
+      "pass": 74,
+      "fail": 0,
+      "skip": 0
+    },
+    "github.com/jixoai/keel/internal/durable": {
+      "pass": 100,
+      "fail": 0,
+      "skip": 0
+    },
+    "github.com/jixoai/keel/internal/hooks": {
+      "pass": 81,
+      "fail": 0,
+      "skip": 0
+    },
+    "github.com/jixoai/keel/internal/host": {
+      "pass": 73,
+      "fail": 0,
+      "skip": 0
+    },
+    "github.com/jixoai/keel/internal/httpapi": {
+      "pass": 261,
+      "fail": 0,
+      "skip": 0
+    },
+    "github.com/jixoai/keel/internal/loop": {
+      "pass": 74,
+      "fail": 0,
+      "skip": 0
+    },
+    "github.com/jixoai/keel/internal/mcp": {
+      "pass": 207,
+      "fail": 0,
+      "skip": 2
+    },
+    "github.com/jixoai/keel/internal/skills": {
+      "pass": 56,
+      "fail": 0,
+      "skip": 0
+    },
+    "github.com/jixoai/keel/internal/stream": {
+      "pass": 7,
+      "fail": 0,
+      "skip": 0
+    },
+    "github.com/jixoai/keel/internal/telemetry": {
+      "pass": 93,
+      "fail": 0,
+      "skip": 0
+    }
+  }
+}

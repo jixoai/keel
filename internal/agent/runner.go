@@ -115,6 +115,12 @@ type Runner struct {
 	// deleted once the compaction event and its projection are durable. Nil
 	// keeps the pre-feature behavior (a crash before commit simply re-selects).
 	CompactionTasks kernel.CompactionTaskStore
+	// UsageRecorder, when set, mirrors every provider request into the existing
+	// usage ledger (unaccounted before the call, settled on the terminal event).
+	// It is the ledger's only production caller: the same provider usage the
+	// attempt summary reports is what it records. Nil disables accounting and
+	// keeps the stream bytes unchanged.
+	UsageRecorder UsageRecorder
 	// CheckpointPolicies resolves the attempt's effective checkpoint policy
 	// (tenant ceiling narrowed by the session override). Nil uses the
 	// generation's CompactionOptions policy. It is consulted per attempt and per
@@ -971,6 +977,16 @@ func (r *Runner) run(ctx context.Context, lease kernel.Lease, span telemetry.Spa
 	// generationId, and the id must be the same for a retried attempt, so it is
 	// derived from the committed log (see generationBase).
 	generation := generationBase(events)
+	// Provider usage is a durable ledger fact, not a derived number: the wrapper
+	// writes the pre-request marker and settles it with the provider's reported
+	// usage. The per-request identity is the generation base plus the request
+	// ordinal, so a retried attempt replays the same rows instead of billing
+	// twice. The wrapper passes every event through unchanged.
+	if r.UsageRecorder != nil {
+		model.Stream = NewUsageStream(model.Stream, r.UsageRecorder, lease.Scope,
+			attemptUsageBaseID(generation), lastEventSeq(events),
+			model.ProviderID, model.Model)
+	}
 	// The steering feed is the loop's GetSteeringMessages source: guide inputs
 	// committed after this attempt loaded its transcript, handed out one at a
 	// time at PI's drain points (see guideFeed).
@@ -1475,6 +1491,16 @@ func (r *Runner) run(ctx context.Context, lease kernel.Lease, span telemetry.Spa
 type generation struct {
 	promptSeq int64
 	ordinal   int
+}
+
+// lastEventSeq returns the newest committed seq, or 0 for an empty log. The
+// usage ledger stores it as the request's metadata position; an empty session
+// (a manual compaction before any event) must not panic.
+func lastEventSeq(events []store.Event) int64 {
+	if len(events) == 0 {
+		return 0
+	}
+	return events[len(events)-1].Seq
 }
 
 // generationBase reads the generation identity of the next model call out of

@@ -41,6 +41,7 @@ import (
 	"github.com/jixoai/keel/internal/store"
 	"github.com/jixoai/keel/internal/stream"
 	"github.com/jixoai/keel/internal/toolauth"
+	"github.com/jixoai/keel/internal/usage"
 )
 
 func main() {
@@ -470,6 +471,7 @@ func main() {
 		RuntimeID:   runtimeID,
 		Concurrency: *runs,
 		Metrics:     runtimeMetrics,
+		Usage:       usage.NewRecorder(st),
 		Prompt:      servicehost.PromptOptions{Preamble: envOr("KEEL_SYSTEM_PROMPT", defaultSystemPrompt)},
 		MCP:         mcpOptions,
 		LLM: servicehost.LLMOptions{

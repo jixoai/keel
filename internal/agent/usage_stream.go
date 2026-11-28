@@ -19,13 +19,18 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/jixoai/keel/internal/agentcore"
 	"github.com/jixoai/keel/internal/kernel"
 	"github.com/jixoai/keel/internal/provider"
 )
+
+// usageLedgerTimeout bounds one ledger write. The marker is written on the
+// request path, so an unhealthy ledger must not stall the model call; a missed
+// write is visible as a missing row, never as a failed attempt.
+const usageLedgerTimeout = 5 * time.Second
 
 // UsageRecord is one provider request's token accounting.
 type UsageRecord struct {
@@ -176,7 +181,12 @@ func (o *usageObserver) consume(ctx context.Context, requestID, modelName string
 }
 
 func (o *usageObserver) record(ctx context.Context, record UsageRecord) {
-	if err := o.recorder.RecordUsage(ctx, o.scope, record); err != nil && !errors.Is(err, context.Canceled) {
+	// Accounting outlives the attempt: a cancel that stops the model stream must
+	// still settle the row, or the ledger reports a possibly-billed request as
+	// unaccounted. The write is bounded so it can never hold the attempt open.
+	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), usageLedgerTimeout)
+	defer cancel()
+	if err := o.recorder.RecordUsage(writeCtx, o.scope, record); err != nil && !errors.Is(err, context.Canceled) {
 		// Accounting is best-effort; the model request must proceed.
 		_ = err
 	}
@@ -203,5 +213,3 @@ func (o *usageObserver) settle(ctx context.Context, requestID, modelName, provid
 func attemptUsageBaseID(g generation) string {
 	return fmt.Sprintf("u%d-a%d", g.promptSeq, g.ordinal)
 }
-
-var _ = sync.Once{}

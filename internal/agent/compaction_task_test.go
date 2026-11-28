@@ -231,3 +231,89 @@ func TestRecoverAutomaticCompactionProjection(t *testing.T) {
 		t.Fatalf("tasks = %+v, want both markers consumed", tasks)
 	}
 }
+
+// TestCompactionResumeKeepsLogContiguousAndSingleAnswer is the resume half of
+// the crash contract: a compaction interrupted mid-summary leaves no event, the
+// next normal attempt still answers each pending input exactly once, and the
+// retried compaction adds exactly one event. The committed log is checked for
+// contiguous seqs (no lost events) and one terminal reply per user input (no
+// duplicate final answers).
+func TestCompactionResumeKeepsLogContiguousAndSingleAnswer(t *testing.T) {
+	st := testStore(t)
+	ctx := context.Background()
+	tenant, session, k, scope := seedManualHistory(t, st)
+	runner := manualRunner(t, st)
+	runner.Stream = (&countedSummaryStream{failFirst: 1}).stream
+	lease := claimScope(t, k, tenant, session)
+
+	beforeCompactions := countKind(eventsOf(t, st, tenant, session), store.EventCompaction)
+	if _, err := runner.CompactNow(ctx, lease, "manual-crash-resume"); err == nil {
+		t.Fatal("CompactNow succeeded, want the injected summary failure")
+	}
+	if _, found, err := k.LoadCompactionTask(ctx, scope, "manual-crash-resume"); err != nil || !found {
+		t.Fatalf("interrupted task = (found=%v, err=%v), want the pinned checkpoint", found, err)
+	}
+	// The manual call held the session lease; release it before the successor
+	// run claims the same session.
+	if err := k.Release(ctx, lease); err != nil {
+		t.Fatalf("release lease after interrupted compaction: %v", err)
+	}
+
+	// The interrupted compaction committed nothing: a normal attempt must answer
+	// the pending input, not treat the compaction as a lost turn.
+	runner.Stream = FakeStream()
+	requeue(t, st, tenant, session)
+	if _, err := execRun(t, k, runner, tenant, session); err != nil {
+		t.Fatalf("run after interrupted compaction: %v", err)
+	}
+	events := eventsOf(t, st, tenant, session)
+	assertContiguousLog(t, events)
+	if got := countKind(events, store.EventCompaction); got != beforeCompactions {
+		t.Fatalf("compaction events after the normal attempt = %d, want %d", got, beforeCompactions)
+	}
+	// Every user input has exactly one terminal assistant answer.
+	users, finals := 0, 0
+	for _, event := range events {
+		switch event.Kind {
+		case store.EventUserMessage:
+			users++
+		case store.EventAssistantMessage:
+			var payload struct {
+				StopReason string `json:"stopReason"`
+			}
+			if err := json.Unmarshal(event.Payload, &payload); err != nil {
+				t.Fatalf("decode assistant message: %v", err)
+			}
+			if payload.StopReason == "end_turn" {
+				finals++
+			}
+		}
+	}
+	if users == 0 || finals != users {
+		t.Fatalf("users=%d terminal answers=%d, want one final answer per input", users, finals)
+	}
+
+	// The retry resumes the pinned range and adds exactly one compaction event.
+	runner.Stream = shortSummaryStream()
+	requeue(t, st, tenant, session)
+	lease = claimScope(t, k, tenant, session)
+	res, err := runner.CompactNow(ctx, lease, "manual-crash-resume")
+	if err != nil || !res.Performed {
+		t.Fatalf("resumed CompactNow = (%+v, %v), want a performed compaction", res, err)
+	}
+	events = eventsOf(t, st, tenant, session)
+	assertContiguousLog(t, events)
+	if got := countKind(events, store.EventCompaction); got != beforeCompactions+1 {
+		t.Fatalf("compaction events after resume = %d, want %d (exactly one)", got, beforeCompactions+1)
+	}
+}
+
+// assertContiguousLog fails when the committed seqs are not 1..N.
+func assertContiguousLog(t *testing.T, events []store.Event) {
+	t.Helper()
+	for index, event := range events {
+		if want := int64(index + 1); event.Seq != want {
+			t.Fatalf("event %d has seq %d, want %d (lost or duplicated event)", index, event.Seq, want)
+		}
+	}
+}

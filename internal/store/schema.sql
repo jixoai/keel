@@ -1676,7 +1676,19 @@ CREATE INDEX IF NOT EXISTS collab_links_by_work_item
 
 -- One row per natural relation: the same (tenant, host WorkItem scope, kind,
 -- directed endpoints) relation is idempotent even when a caller supplies an
--- explicit id.
+-- explicit id. Older rows predate the natural key; keep the smallest link_id
+-- for each relation before the unique index is created so an upgrade with
+-- historic duplicates does not fail.
+DELETE FROM collab_links a
+ USING collab_links b
+ WHERE a.tenant_id = b.tenant_id
+   AND COALESCE(a.work_item_id, '00000000-0000-0000-0000-000000000000'::uuid)
+       = COALESCE(b.work_item_id, '00000000-0000-0000-0000-000000000000'::uuid)
+   AND a.kind = b.kind
+   AND a.from_type = b.from_type AND a.from_id = b.from_id
+   AND a.to_type = b.to_type AND a.to_id = b.to_id
+   AND a.link_id > b.link_id;
+
 CREATE UNIQUE INDEX IF NOT EXISTS collab_links_natural
     ON collab_links (tenant_id,
                      COALESCE(work_item_id, '00000000-0000-0000-0000-000000000000'::uuid),
