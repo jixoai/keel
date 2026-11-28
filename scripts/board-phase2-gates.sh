@@ -111,7 +111,7 @@ board_version=${board_line#* }
 [ "$board_version" = "v0.1.4" ] || die "board module is $board_version, want v0.1.4"
 board_commit=$(awk 'match($0, /commit [0-9a-f]{40}/) { print substr($0, RSTART + 7, 40); exit }' NOTICE)
 [ "${#board_commit}" -eq 40 ] || die "cannot read the board commit from NOTICE"
-grep -Eq '^[[:space:]]*github[.]com/jixoai/keel-board[[:space:]]+v0[.]1[.]1([[:space:]]|$)' go.mod \
+grep -Eq '^[[:space:]]*github[.]com/jixoai/keel-board[[:space:]]+v0[.]1[.]4([[:space:]]|$)' go.mod \
   || die "go.mod does not pin $board_module $board_version"
 
 node_version=$(node --version)
@@ -257,12 +257,22 @@ for (const file of changed) {
 // the file. The final gate has to show UNCOVERED=0 for this diff.
 const rules = [
   { re: /^\.github\/workflows\/ci\.yml$/, cov: "CI parity: `go test -p 1 ./...` + `nsh check`" },
+  { re: /^\.github\/workflows\/(conformance|release)\.yml$/, cov: "`actionlint` + the matching CI/release gate" },
+  { re: /^docs\/conformance-golden\.json$/, cov: "conformance golden floor (`scripts/conformance.sh`)" },
+  { re: /^docs\//, cov: "docs validation (`openspec validate` / citation scan)" },
+  { re: /^site\//, cov: "`pnpm --dir site build` (dead links, parity, citations)" },
+  { re: /^web\//, cov: "`nsh check` + `nsh test --target tui`" },
   { re: /^README\.md$/, cov: "docs pin scan + `openspec validate --strict`" },
   { re: /^web\/README\.md$/, cov: "docs pin scan + `openspec validate --strict`" },
   { re: /^docs\/HARNESS\.md$/, cov: "docs pin scan + `go test` harnessapi 404/report/ask" },
   { re: /^docs\/RUNBOOK\.md$/, cov: "docs pin scan + `openspec validate --strict`" },
   { re: /^openspec\/changes\/keel-board-sync-v2\/(design|tasks)\.md$/, cov: "`openspec validate --strict`" },
   { re: /^openspec\/changes\/keel-board-sync-v2\/DISPOSITION\.md$/, cov: "documented Phase 2 limitations + `openspec validate --strict`" },
+  { re: /^openspec\/changes\//, cov: "`openspec validate --strict` + the change's own evidence" },
+  { re: /^openspec\/specs\//, cov: "`openspec validate --specs --strict`" },
+  { re: /^(go\.mod|go\.sum)$/, cov: "`go build`/`go test -p 1 ./...` + board module pin scan" },
+  { re: /^NOTICE$/, cov: "docs pin scan (module/version/commit)" },
+  { re: /^web\/nsh\.json$/, cov: "`nsh check` + release version gate" },
   { re: /^cmd\/keel\/board_serve_options_test\.go$/, cov: "`go test -p 1 ./...` (cmd/keel mount options)" },
   { re: /^cmd\/keel\/board_superagent(_test)?\.go$/, cov: "`go test` cmd/keel gate + board 404 TUI" },
   { re: /^cmd\/keel\/(board|serve)\.go$/, cov: "`go test -p 1 ./...` (cmd/keel mount/serve)" },
@@ -288,6 +298,7 @@ const rules = [
   { re: /^scripts\/board-phase2-ui-evidence\.mjs$/, cov: "UI evidence (HTML / 55 shots / 26 matrix)" },
   { re: /^scripts\/board-phase2-gates\.sh$/, cov: "this gate (`bash -n` + executed in this run)" },
   { re: /^scripts\/.*\.sh$/, cov: "`bash -n` + phase-1 evidence" },
+  { re: /^scripts\/summarize-conformance\.py$/, cov: "conformance golden (`scripts/conformance.sh`)" },
   { re: /^scripts\/.*\.mjs$/, cov: "`node --check`" },
   { re: /^web\/evidence\/board-capture\.template\.tsx$/, cov: "UI screenshots (55)" },
   { re: /^web\/evidence\/board-sse-live\.template\.tsx$/, cov: "SSE live fake-server test" },
