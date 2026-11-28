@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # Markdown code spans in printf literals are intentional (shellcheck SC2016).
 # shellcheck disable=SC2016
-# keel-board-v1 Phase 2 final gates (tasks 16.1 and 16.2).
+# keel-board-sync-v2 Phase 2 final gates (tasks 16.1 and 16.2).
 #
 # This script generates, from real command output:
-#   openspec/changes/keel-board-v1/evidence/phase-2-gates.md
-#   openspec/changes/keel-board-v1/evidence/phase-2-pin.txt
+#   openspec/changes/keel-board-sync-v2/evidence/phase-2-gates.md
+#   openspec/changes/keel-board-sync-v2/evidence/phase-2-pin.txt
 #
 # It also writes raw logs, the full-TUI JUnit/JSON, the file-coverage TSV and
 # the excluded-path list under evidence/phase-2-gates-<stamp>/.
@@ -25,7 +25,7 @@
 #   KEEL_TEST_DSN              required for a real run; used by go test -p 1 ./...
 #   KEEL_BOARD_BASE            default 4cbc3e50
 #   KEEL_BOARD_CONTRACT        default f00097e7
-#   EXPECTED_TUI_TESTS         default 538
+#   EXPECTED_TUI_TESTS         default 540
 #   EXPECTED_UI_SCREENSHOTS    default 55
 #   EXPECTED_UI_MATRIX_CELLS   default 26
 #
@@ -35,7 +35,7 @@ set -euo pipefail
 
 usage() {
   cat <<'USAGE'
-keel-board-v1 Phase 2 final gates (16.1/16.2)
+keel-board-sync-v2 Phase 2 final gates (16.1/16.2)
 
 Usage:
   KEEL_TEST_DSN='postgres://…' scripts/board-phase2-gates.sh
@@ -86,7 +86,7 @@ cd "$repo_root"
 
 base_ref=${KEEL_BOARD_BASE:-4cbc3e50}
 contract_ref=${KEEL_BOARD_CONTRACT:-f00097e7}
-expected_tui_tests=${EXPECTED_TUI_TESTS:-538}
+expected_tui_tests=${EXPECTED_TUI_TESTS:-540}
 expected_ui_screenshots=${EXPECTED_UI_SCREENSHOTS:-55}
 expected_ui_matrix=${EXPECTED_UI_MATRIX_CELLS:-26}
 
@@ -188,7 +188,7 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-evidence_dir="$repo_root/openspec/changes/keel-board-v1/evidence"
+evidence_dir="$repo_root/openspec/changes/keel-board-sync-v2/evidence"
 report="$evidence_dir/phase-2-gates.md"
 pin="$evidence_dir/phase-2-pin.txt"
 
@@ -240,7 +240,7 @@ const diff = execFileSync(
   { cwd: repo, encoding: "utf8" },
 );
 const changed = diff.split("\n").map((line) => line.trim()).filter(Boolean);
-const evidencePrefix = "openspec/changes/keel-board-v1/evidence/";
+const evidencePrefix = "openspec/changes/keel-board-sync-v2/evidence/";
 const generated = [
   /(^|\/)board-phase2-capture\.test\.tsx$/,
   /(^|\/)board-sse-live\.test\.tsx$/,
@@ -261,8 +261,8 @@ const rules = [
   { re: /^web\/README\.md$/, cov: "docs pin scan + `openspec validate --strict`" },
   { re: /^docs\/HARNESS\.md$/, cov: "docs pin scan + `go test` harnessapi 404/report/ask" },
   { re: /^docs\/RUNBOOK\.md$/, cov: "docs pin scan + `openspec validate --strict`" },
-  { re: /^openspec\/changes\/keel-board-v1\/(design|tasks)\.md$/, cov: "`openspec validate --strict`" },
-  { re: /^openspec\/changes\/keel-board-v1\/DISPOSITION\.md$/, cov: "documented Phase 2 limitations + `openspec validate --strict`" },
+  { re: /^openspec\/changes\/keel-board-sync-v2\/(design|tasks)\.md$/, cov: "`openspec validate --strict`" },
+  { re: /^openspec\/changes\/keel-board-sync-v2\/DISPOSITION\.md$/, cov: "documented Phase 2 limitations + `openspec validate --strict`" },
   { re: /^cmd\/keel\/board_serve_options_test\.go$/, cov: "`go test -p 1 ./...` (cmd/keel mount options)" },
   { re: /^cmd\/keel\/board_superagent(_test)?\.go$/, cov: "`go test` cmd/keel gate + board 404 TUI" },
   { re: /^cmd\/keel\/(board|serve)\.go$/, cov: "`go test -p 1 ./...` (cmd/keel mount/serve)" },
@@ -321,8 +321,8 @@ const rules = [
   { re: /^web\/src\/screens\/books\/superagent/, cov: "deleted old board; route tests + screenshot 36 + full TUI" },
   { re: /^web\/src\/screens\/books\//, cov: "books TUI + board TUI + full TUI" },
   { re: /^web\/src\/screens\/command-palette\.tsx$/, cov: "board TUI + full TUI" },
-  { re: /^web\/src\/screens\/commands-local-error\.test\.tsx$/, cov: "full TUI (538)" },
-  { re: /^web\/src\/screens\/settings-models\.test\.tsx$/, cov: "full TUI (538)" },
+  { re: /^web\/src\/screens\/commands-local-error\.test\.tsx$/, cov: "full TUI (540)" },
+  { re: /^web\/src\/screens\/settings-models\.test\.tsx$/, cov: "full TUI (540)" },
   { re: /^internal\//, cov: "`go test -p 1 ./...`" },
   { re: /^cmd\//, cov: "`go test -p 1 ./...` (compile)" },
 ];
@@ -512,7 +512,7 @@ run_retired_surface() {
       -e 'scripts/superagent-live-github' \
       -- ':!scripts/archive/**' \
          ':!openspec/changes/archive/**' \
-         ':!openspec/changes/keel-board-v1/evidence/**' \
+         ':!openspec/changes/keel-board-sync-v2/evidence/**' \
          ':!scripts/board-phase2-gates.sh'; then
       printf 'active reference to a retired script\n' >&2
       exit 1
@@ -756,8 +756,8 @@ run_full_tui
 # 5. Go unit/integration with the real PostgreSQL suites, then OpenSpec.
 run_block "go-test" "$repo_root" "$raw_dir/go-tests.log" "KEEL_TEST_DSN=*** go test -p 1 ./... -count=1" \
   env KEEL_TEST_DSN="$KEEL_TEST_DSN" go test -p 1 ./... -count=1
-run_block "openspec-validate" "$repo_root" "$raw_dir/openspec-validate.log" "openspec validate keel-board-v1 --strict" \
-  openspec validate keel-board-v1 --strict
+run_block "openspec-validate" "$repo_root" "$raw_dir/openspec-validate.log" "openspec validate keel-board-sync-v2 --strict" \
+  openspec validate keel-board-sync-v2 --strict
 
 head_after=$(git rev-parse HEAD)
 head_changed=0
@@ -787,7 +787,7 @@ openspec_status=$(awk -F '\t' '$1=="openspec-validate" {print $3}' "$gates_tsv" 
 report_tmp="$raw_dir/phase-2-gates.md"
 pin_tmp="$raw_dir/phase-2-pin.txt"
 {
-  printf '# keel-board-v1 Phase 2 gates (16.1-16.2)\n\n'
+  printf '# keel-board-sync-v2 Phase 2 gates (16.1-16.2)\n\n'
   printf 'Generated by `scripts/board-phase2-gates.sh` at %s.\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
   printf 'This file is script output, not hand-written.\n\n'
   printf '## Pin\n\n'
@@ -838,7 +838,7 @@ pin_tmp="$raw_dir/phase-2-pin.txt"
 
   printf '## Go and OpenSpec\n\n'
   printf -- '- `go test -p 1 ./... -count=1` (KEEL_TEST_DSN set): exit **%s**; [go-tests.log](%s/go-tests.log)\n' "$go_status" "$raw_name"
-  printf -- '- `openspec validate keel-board-v1 --strict`: exit **%s**; [openspec-validate.log](%s/openspec-validate.log)\n\n' "$openspec_status" "$raw_name"
+  printf -- '- `openspec validate keel-board-sync-v2 --strict`: exit **%s**; [openspec-validate.log](%s/openspec-validate.log)\n\n' "$openspec_status" "$raw_name"
 
   printf '## File coverage\n\n'
   if [ -f "$coverage_md" ]; then cat "$coverage_md"; else printf 'Coverage map was not generated.\n'; fi
@@ -858,7 +858,7 @@ pin_tmp="$raw_dir/phase-2-pin.txt"
 } >"$report_tmp"
 
 {
-  printf '# keel-board-v1 Phase 2 gate pin\n'
+  printf '# keel-board-sync-v2 Phase 2 gate pin\n'
   printf 'generated_at: %s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
   printf 'gate: %s\n' "$gate_status_text"
   printf 'head: %s\n' "$head"

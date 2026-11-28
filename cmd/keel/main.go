@@ -20,7 +20,7 @@ import (
 // version is the keel product version. It is deliberately separate from the
 // HarnessAPI contract version (harnessapi.APIVersion): a UI pins /v1 and asks
 // /v1/capabilities, never a binary version.
-var version = "0.5.0"
+var version = "0.6.0"
 
 func main() {
 	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
